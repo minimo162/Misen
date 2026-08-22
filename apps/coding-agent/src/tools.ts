@@ -215,7 +215,7 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: 'run_command',
-    description: 'シェルコマンドを実行し標準出力と標準エラーを返す (タイムアウト 60秒)',
+    description: 'ユーザーのマシン上でシェルコマンドを実行し標準出力と標準エラーを返す (タイムアウト 60秒・あなたのサンドボックスとは別の環境です)',
     kind: 'command',
     parameters: {
       type: 'object',
