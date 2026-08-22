@@ -1,9 +1,10 @@
 {
   "name": "coding-agent",
-  "version": "0.6.3",
-  "type": "cli",
-  "entry": "dist/index.js",
+  "version": "0.7.0",
+  "type": "web",
+  "entry": "dist/server.js",
   "runtime": "node-v22.14.0-win-x64",
   "env": {},
-  "nodeArgs": []
+  "nodeArgs": [],
+  "url": "http://127.0.0.1:3948"
 }
