@@ -66,7 +66,7 @@ function resolveApiKey(cfg) {
 }
 
 // src/repl.ts
-var import_promises2 = __toESM(require("node:readline/promises"));
+var import_node_readline = __toESM(require("node:readline"));
 
 // src/llm.ts
 async function chat(cfg, messages, tools) {
@@ -334,15 +334,25 @@ function buildProtocolRules() {
   const toolDocs = TOOL_DEFS.map((t) => `- ${t.name}: ${t.description}
   \u5F15\u6570\u30B9\u30AD\u30FC\u30DE: ${JSON.stringify(t.parameters)}`).join("\n");
   return [
-    "\u3042\u306A\u305F\u306F\u793E\u5185\u30B3\u30FC\u30C7\u30A3\u30F3\u30B0\u652F\u63F4\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u3067\u3059\u3002\u4EE5\u4E0B\u306E\u30C4\u30FC\u30EB\u3067\u30D5\u30A1\u30A4\u30EB\u306E\u8ABF\u67FB\u30FB\u7DE8\u96C6\u30FB\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u304C\u3067\u304D\u307E\u3059\u3002",
+    "\u3053\u308C\u304B\u3089\u300C\u793E\u5185\u30B3\u30FC\u30C7\u30A3\u30F3\u30B0\u652F\u63F4\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u300D\u306E\u30ED\u30FC\u30EB\u30D7\u30EC\u30A4\u3092\u304A\u9858\u3044\u3057\u307E\u3059\u3002",
+    "\u3042\u306A\u305F\u306E\u767A\u8A00\u306F\u3059\u3079\u3066\u793E\u5185\u30C4\u30FC\u30EB\u304B\u3089\u53D7\u3051\u53D6\u3089\u308C\u3001\u8A18\u8F09\u3055\u308C\u305F\u30A2\u30AF\u30B7\u30E7\u30F3\u306F\u5916\u90E8\u30B7\u30B9\u30C6\u30E0\u304C\u81EA\u52D5\u5B9F\u884C\u3057\u307E\u3059\u3002",
+    "\u3042\u306A\u305F\u81EA\u8EAB\u306F\u30A2\u30AF\u30B7\u30E7\u30F3\u3092\u5B9F\u884C\u3067\u304D\u306A\u3044\u305F\u3081\u3001\u300C\u301C\u3092\u78BA\u8A8D\u3057\u307E\u3057\u305F\u300D\u300C\u301C\u306F\u3067\u304D\u307E\u305B\u3093\u300D\u3068\u3044\u3063\u305F\u56DE\u7B54\u306F\u4E0D\u8981\u3067\u3059\u3002",
+    "\u3042\u306A\u305F\u306E\u4ED5\u4E8B\u306F\u3001\u72B6\u6CC1\u306B\u5FDC\u3058\u3066\u6B21\u306B\u884C\u3046\u3079\u304D\u30A2\u30AF\u30B7\u30E7\u30F3\u3092 1 \u3064\u9078\u3073 JSON \u3067\u5831\u544A\u3059\u308B\u3053\u3068\u3067\u3059\u3002",
+    "",
+    "\u9078\u629E\u3067\u304D\u308B\u30A2\u30AF\u30B7\u30E7\u30F3:",
     toolDocs,
     "",
-    "\u5FDC\u7B54\u306F\u5FC5\u305A\u6B21\u306E\u3069\u3061\u3089\u304B\u306E\u5F62\u5F0F\u306E JSON \u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u300C1\u3064\u3060\u3051\u300D\u3092\u8FD4\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
-    '  {"tool":"<\u30C4\u30FC\u30EB\u540D>","args":{...}}',
+    "\u51FA\u529B\u30EB\u30FC\u30EB(\u53B3\u5B88): \u6BCE\u56DE\u3001\u6B21\u306E\u3069\u3061\u3089\u304B\u306E JSON \u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u300C1\u3064\u3060\u3051\u300D\u3092\u51FA\u529B\u3059\u308B\u3002",
+    '  {"tool":"<\u30A2\u30AF\u30B7\u30E7\u30F3\u540D>","args":{...}}',
     '  {"answer":"<\u30E6\u30FC\u30B6\u30FC\u3078\u306E\u6700\u7D42\u56DE\u7B54(\u65E5\u672C\u8A9E)>"}',
-    "\u30B3\u30FC\u30C9\u30D5\u30A7\u30F3\u30B9 (```) \u3084 JSON \u4EE5\u5916\u306E\u8AAC\u660E\u6587\u306F\u7D76\u5BFE\u306B\u51FA\u529B\u3057\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002",
-    "\u5341\u5206\u306A\u60C5\u5831\u304C\u63C3\u3063\u305F\u3089 answer \u3067\u5FDC\u7B54\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
-    `\u56DE\u7B54\u306E\u6700\u5F8C\u306B\u3001${END_MARKER} \u3068\u3044\u3046\u6587\u5B57\u5217\u3060\u3051\u306E\u884C\u3092\u5FC5\u305A\u8FFD\u52A0\u3057\u3066\u304F\u3060\u3055\u3044\u3002`
+    "JSON \u4EE5\u5916\u306E\u6587\u7AE0\u30FB\u898B\u51FA\u3057\u30FB\u6328\u62F6\u306F\u4E00\u5207\u51FA\u529B\u3057\u306A\u3044\u3002",
+    `\u51FA\u529B\u306E\u6700\u5F8C\u306B\u3001${END_MARKER} \u3068\u3044\u3046\u6587\u5B57\u5217\u3060\u3051\u306E\u884C\u3092\u5FC5\u305A\u4ED8\u3051\u308B\u3002`,
+    "",
+    "\u51FA\u529B\u4F8B:",
+    '{"tool":"list_files","args":{}}',
+    END_MARKER,
+    "",
+    "\u305D\u308C\u3067\u306F\u958B\u59CB\u3067\u3059\u3002"
   ].join("\n");
 }
 function extractJsonReply(raw) {
@@ -399,7 +409,19 @@ function composeCopilotPrompt(userInput, steps) {
 }
 async function runCopilotTurn(opts) {
   const { cfg, ctx, io, backend } = opts;
+  if (cfg.copilot?.agentMode !== true) {
+    const prompt = [cfg.systemPrompt, opts.userInput].filter((s) => s && s.trim()).join("\n\n");
+    try {
+      const text = (await backend.complete(prompt)).trim();
+      return { reply: text, messages: [{ role: "user", content: opts.userInput }, { role: "assistant", content: text }], aborted: false };
+    } catch (err) {
+      const msg = err.message;
+      io.print(`[error] ${msg}`);
+      return { reply: "", messages: [{ role: "assistant", content: `[error] ${msg}` }], aborted: true };
+    }
+  }
   const steps = [];
+  let parseRetried = false;
   const maxIter = cfg.maxToolIterations ?? 15;
   for (let i = 0; i < maxIter; i++) {
     let raw;
@@ -411,6 +433,11 @@ async function runCopilotTurn(opts) {
     }
     const parsed = extractJsonReply(raw);
     if (!parsed) {
+      if (!parseRetried) {
+        parseRetried = true;
+        steps.push('SYSTEM: \u76F4\u524D\u306E\u5FDC\u7B54\u306F\u6307\u5B9A\u5F62\u5F0F\u306B\u9055\u53CD\u3057\u307E\u3057\u305F\u3002\u8AAC\u660E\u6587\u3092\u7701\u304D\u3001{"tool":...} \u307E\u305F\u306F {"answer":"..."} \u306E JSON \u30AA\u30D6\u30B8\u30A7\u30AF\u30C81\u3064\u3060\u3051\u3092\u51FA\u529B\u3057\u3066\u304F\u3060\u3055\u3044\u3002');
+        continue;
+      }
       io.print("[warn] \u5FDC\u7B54\u3092 JSON \u3068\u3057\u3066\u89E3\u91C8\u3067\u304D\u306A\u304B\u3063\u305F\u305F\u3081\u3001\u305D\u306E\u307E\u307E\u56DE\u7B54\u3068\u3057\u3066\u6271\u3044\u307E\u3059");
       return { reply: raw.replace(new RegExp(`^${END_MARKER}$`, "m"), "").trim(), messages: [{ role: "assistant", content: raw }], aborted: false };
     }
@@ -530,7 +557,8 @@ function resolveCopilotSettings(cfg) {
     responseTimeoutSec: c.responseTimeoutSec ?? 300,
     stallTimeoutSec: c.stallTimeoutSec ?? 120,
     displayMode: c.displayMode === "foreground" ? "foreground" : "minimized",
-    endMarker: c.endMarker ?? "AGENT_END"
+    endMarker: c.endMarker ?? "AGENT_END",
+    agentMode: c.agentMode === true
   };
 }
 var VISIBLE_JS = `const __vis=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};`;
@@ -796,12 +824,21 @@ var CopilotEdgeClient = class {
     throw new Error("Copilot \u30DA\u30FC\u30B8 (CDP \u30BF\u30FC\u30B2\u30C3\u30C8) \u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002");
   }
   async assertTrustedOrigin() {
-    const actual = String(await this.evalWithReconnect("(() => location.origin)()"));
+    const actualRaw = String(await this.evalWithReconnect("(() => location.origin)()"));
     const u = new URL(this.s.url);
-    if (u.protocol !== "https" || !u.host) throw new Error(`copilot.url \u306F https \u306E\u7D76\u5BFE URL \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${this.s.url}`);
-    const expected = `https://${u.host.toLowerCase()}`;
-    if (actual.toLowerCase().split(":")[0] !== "https" || !actual.toLowerCase().includes(u.host.toLowerCase())) {
-      throw new Error(`Copilot \u306E\u9001\u4FE1\u5148\u304C\u8A2D\u5B9A\u3068\u4E00\u81F4\u3057\u307E\u305B\u3093 (expected=${expected}, actual=${actual})`);
+    if (u.protocol !== "https:" || !u.host) {
+      throw new Error(`copilot.url \u306F https \u306E\u7D76\u5BFE URL \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${this.s.url}`);
+    }
+    let actualHost = "";
+    try {
+      const au = new URL(actualRaw);
+      if (au.protocol !== "https:") throw new Error("not https");
+      actualHost = au.host.toLowerCase();
+    } catch {
+      throw new Error(`Copilot \u306E\u9001\u4FE1\u5148\u304C\u4E0D\u6B63\u3067\u3059: ${actualRaw}`);
+    }
+    if (actualHost !== u.host.toLowerCase()) {
+      throw new Error(`Copilot \u306E\u9001\u4FE1\u5148\u304C\u8A2D\u5B9A\u3068\u4E00\u81F4\u3057\u307E\u305B\u3093 (expected=${u.host}, actual=${actualHost})`);
     }
   }
   async evalWithReconnect(expr, timeoutMs = 2e4) {
@@ -892,25 +929,32 @@ var CopilotEdgeClient = class {
       throw new Error("\u6709\u52B9\u306A\u9001\u4FE1\u30DC\u30BF\u30F3\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F");
     }
   }
-  async waitResponse() {
+  async readScreenState() {
+    const raw = await this.evalWithReconnect(SCREEN_STATE_JS, 15e3);
+    return JSON.parse(String(raw));
+  }
+  async waitResponse(baseline) {
     const start = Date.now();
     let lastText = "";
     let lastChange = Date.now();
-    let sawAnyText = false;
+    let sawNewText = false;
     while (Date.now() - start < this.s.responseTimeoutSec * 1e3) {
-      const raw = await this.evalWithReconnect(SCREEN_STATE_JS, 15e3);
-      const st = JSON.parse(String(raw));
+      const st = await this.readScreenState();
       if (st.signinRequired) throw new Error("Copilot \u3078\u306E\u30B5\u30A4\u30F3\u30A4\u30F3\u304C\u5FC5\u8981\u3067\u3059\u3002");
-      if (st.text !== lastText) {
-        if (st.text) sawAnyText = true;
-        lastText = st.text;
-        lastChange = Date.now();
+      if (st.text && st.text !== baseline) {
+        sawNewText = true;
+        if (st.text !== lastText) {
+          lastText = st.text;
+          lastChange = Date.now();
+        }
       }
       const hasMarker = this.s.endMarker.length > 0 && lastText.includes(this.s.endMarker);
       const quietFor = Date.now() - lastChange;
-      if (hasMarker && quietFor >= 2500) return this.cleanResponse(lastText);
-      if (!st.generating && sawAnyText && quietFor >= 8e3) return this.cleanResponse(lastText);
-      if (!st.generating && sawAnyText && quietFor > this.s.stallTimeoutSec * 1e3) {
+      if (sawNewText && lastText !== "" && st.text === lastText) {
+        if (hasMarker && quietFor >= 2500) return this.cleanResponse(lastText);
+        if (!st.generating && sawNewText && quietFor >= 8e3) return this.cleanResponse(lastText);
+      }
+      if (!st.generating && sawNewText && quietFor > this.s.stallTimeoutSec * 1e3) {
         throw new Error("Copilot \u306E\u5FDC\u7B54\u304C\u505C\u6EDE\u3057\u305F\u305F\u3081\u8AE6\u3081\u307E\u3057\u305F");
       }
       await sleep(this.s.pollIntervalMs);
@@ -923,12 +967,13 @@ var CopilotEdgeClient = class {
   async complete(prompt) {
     await this.ensureEdge();
     await this.ensurePage();
-    await this.assertTrustedOrigin();
     await this.freshChat();
     await this.waitInputReady(120);
+    await this.assertTrustedOrigin();
     await this.insertPrompt(prompt);
     await this.clickSend();
-    return this.waitResponse();
+    const baseline = (await this.readScreenState()).text;
+    return this.waitResponse(baseline);
   }
   close() {
     this.cdp?.close();
@@ -974,23 +1019,42 @@ function printHelp() {
   );
 }
 async function startRepl(cfg, ctx) {
+  const lineQueue = [];
+  let waiter = null;
+  const rl = import_node_readline.default.createInterface({ input: process.stdin, terminal: false });
+  rl.on("line", (raw) => {
+    const line = raw.trim();
+    if (waiter) {
+      const w = waiter;
+      waiter = null;
+      w(line);
+    } else {
+      lineQueue.push(line);
+    }
+  });
+  rl.on("close", () => {
+    if (waiter) {
+      const w = waiter;
+      waiter = null;
+      w("");
+    }
+  });
+  async function nextLine(promptText) {
+    process.stdout.write(promptText);
+    if (lineQueue.length > 0) return lineQueue.shift();
+    return new Promise((resolve) => {
+      waiter = resolve;
+    });
+  }
   const io = {
     print: (t) => console.log(t),
-    askYesNo: async (q) => {
-      const rl2 = import_promises2.default.createInterface({ input: process.stdin, output: process.stdout });
-      try {
-        return /^y(es)?$/i.test((await rl2.question(`${q} [y/N]: `)).trim());
-      } finally {
-        rl2.close();
-      }
-    }
+    askYesNo: async (q) => /^y(es)?$/i.test(await nextLine(`${q} [y/N]: `))
   };
   let messages = [{ role: "system", content: cfg.systemPrompt ?? DEFAULT_SYSTEM_PROMPT }];
   let copilotBackend = null;
   console.log(`coding-agent (${cfg.model || (cfg.provider ?? "openai")}) \u2014 \u958B\u59CB\u3002/help \u3067\u30B3\u30DE\u30F3\u30C9\u3001\u7A7AEnter\u3067\u7D42\u4E86`);
-  const rl = import_promises2.default.createInterface({ input: process.stdin, output: process.stdout });
   for (; ; ) {
-    const input = (await rl.question("> ")).trim();
+    const input = await nextLine("> ");
     if (input === "") break;
     if (input.startsWith("/")) {
       const cmd = input.split(/\s+/)[0];
@@ -1018,6 +1082,7 @@ async function startRepl(cfg, ctx) {
     appendSession(input, result.messages);
   }
   rl.close();
+  copilotBackend?.close?.();
 }
 
 // src/index.ts

@@ -17,6 +17,7 @@ export interface CopilotSettingsPartial {
   stallTimeoutSec?: number
   displayMode?: 'minimized' | 'foreground'
   endMarker?: string
+  agentMode?: boolean
 }
 
 export interface AgentConfig {

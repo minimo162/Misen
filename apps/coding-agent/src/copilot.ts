@@ -25,6 +25,7 @@ export interface CopilotSettings {
   stallTimeoutSec: number
   displayMode: 'minimized' | 'foreground'
   endMarker: string
+  agentMode: boolean
 }
 
 export function resolveCopilotSettings(cfg: AgentConfig): CopilotSettings {
@@ -37,7 +38,8 @@ export function resolveCopilotSettings(cfg: AgentConfig): CopilotSettings {
     responseTimeoutSec: c.responseTimeoutSec ?? 300,
     stallTimeoutSec: c.stallTimeoutSec ?? 120,
     displayMode: c.displayMode === 'foreground' ? 'foreground' : 'minimized',
-    endMarker: c.endMarker ?? 'AGENT_END'
+    endMarker: c.endMarker ?? 'AGENT_END',
+    agentMode: c.agentMode === true
   }
 }
 
@@ -311,12 +313,21 @@ export class CopilotEdgeClient {
   }
 
   private async assertTrustedOrigin(): Promise<void> {
-    const actual = String(await this.evalWithReconnect('(() => location.origin)()'))
+    const actualRaw = String(await this.evalWithReconnect('(() => location.origin)()'))
     const u = new URL(this.s.url)
-    if (u.protocol !== 'https' || !u.host) throw new Error(`copilot.url は https の絶対 URL で指定してください: ${this.s.url}`)
-    const expected = `https://${u.host.toLowerCase()}`
-    if (actual.toLowerCase().split(':')[0] !== 'https' || !actual.toLowerCase().includes(u.host.toLowerCase())) {
-      throw new Error(`Copilot の送信先が設定と一致しません (expected=${expected}, actual=${actual})`)
+    if (u.protocol !== 'https:' || !u.host) {
+      throw new Error(`copilot.url は https の絶対 URL で指定してください: ${this.s.url}`)
+    }
+    let actualHost = ''
+    try {
+      const au = new URL(actualRaw)
+      if (au.protocol !== 'https:') throw new Error('not https')
+      actualHost = au.host.toLowerCase()
+    } catch {
+      throw new Error(`Copilot の送信先が不正です: ${actualRaw}`)
+    }
+    if (actualHost !== u.host.toLowerCase()) {
+      throw new Error(`Copilot の送信先が設定と一致しません (expected=${u.host}, actual=${actualHost})`)
     }
   }
 
@@ -417,25 +428,33 @@ export class CopilotEdgeClient {
     }
   }
 
-  private async waitResponse(): Promise<string> {
+  private async readScreenState(): Promise<{ text: string; generating: boolean; signinRequired: boolean }> {
+    const raw = await this.evalWithReconnect(SCREEN_STATE_JS, 15000)
+    return JSON.parse(String(raw)) as { text: string; generating: boolean; signinRequired: boolean }
+  }
+
+  private async waitResponse(baseline: string): Promise<string> {
     const start = Date.now()
     let lastText = ''
     let lastChange = Date.now()
-    let sawAnyText = false
+    let sawNewText = false
     while (Date.now() - start < this.s.responseTimeoutSec * 1000) {
-      const raw = await this.evalWithReconnect(SCREEN_STATE_JS, 15000)
-      const st = JSON.parse(String(raw)) as { text: string; generating: boolean; signinRequired: boolean }
+      const st = await this.readScreenState()
       if (st.signinRequired) throw new Error('Copilot へのサインインが必要です。')
-      if (st.text !== lastText) {
-        if (st.text) sawAnyText = true
-        lastText = st.text
-        lastChange = Date.now()
+      if (st.text && st.text !== baseline) {
+        sawNewText = true
+        if (st.text !== lastText) {
+          lastText = st.text
+          lastChange = Date.now()
+        }
       }
       const hasMarker = this.s.endMarker.length > 0 && lastText.includes(this.s.endMarker)
       const quietFor = Date.now() - lastChange
-      if (hasMarker && quietFor >= 2500) return this.cleanResponse(lastText)
-      if (!st.generating && sawAnyText && quietFor >= 8000) return this.cleanResponse(lastText)
-      if (!st.generating && sawAnyText && quietFor > this.s.stallTimeoutSec * 1000) {
+      if (sawNewText && lastText !== '' && st.text === lastText) {
+        if (hasMarker && quietFor >= 2500) return this.cleanResponse(lastText)
+        if (!st.generating && sawNewText && quietFor >= 8000) return this.cleanResponse(lastText)
+      }
+      if (!st.generating && sawNewText && quietFor > this.s.stallTimeoutSec * 1000) {
         throw new Error('Copilot の応答が停滞したため諦めました')
       }
       await sleep(this.s.pollIntervalMs)
@@ -450,12 +469,13 @@ export class CopilotEdgeClient {
   async complete(prompt: string): Promise<string> {
     await this.ensureEdge()
     await this.ensurePage()
-    await this.assertTrustedOrigin()
     await this.freshChat()
     await this.waitInputReady(120)
+    await this.assertTrustedOrigin()
     await this.insertPrompt(prompt)
     await this.clickSend()
-    return this.waitResponse()
+    const baseline = (await this.readScreenState()).text
+    return this.waitResponse(baseline)
   }
 
   close(): void {

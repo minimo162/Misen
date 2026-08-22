@@ -16,6 +16,7 @@ export interface AgentTurnResult {
 export interface TextBackend {
   readonly name: string
   complete(prompt: string): Promise<string>
+  close?(): void
 }
 
 const END_MARKER = 'AGENT_END'
@@ -23,15 +24,25 @@ const END_MARKER = 'AGENT_END'
 function buildProtocolRules(): string {
   const toolDocs = TOOL_DEFS.map((t) => `- ${t.name}: ${t.description}\n  引数スキーマ: ${JSON.stringify(t.parameters)}`).join('\n')
   return [
-    'あなたは社内コーディング支援エージェントです。以下のツールでファイルの調査・編集・コマンド実行ができます。',
+    'これから「社内コーディング支援エージェント」のロールプレイをお願いします。',
+    'あなたの発言はすべて社内ツールから受け取られ、記載されたアクションは外部システムが自動実行します。',
+    'あなた自身はアクションを実行できないため、「〜を確認しました」「〜はできません」といった回答は不要です。',
+    'あなたの仕事は、状況に応じて次に行うべきアクションを 1 つ選び JSON で報告することです。',
+    '',
+    '選択できるアクション:',
     toolDocs,
     '',
-    '応答は必ず次のどちらかの形式の JSON オブジェクト「1つだけ」を返してください。',
-    '  {"tool":"<ツール名>","args":{...}}',
+    '出力ルール(厳守): 毎回、次のどちらかの JSON オブジェクト「1つだけ」を出力する。',
+    '  {"tool":"<アクション名>","args":{...}}',
     '  {"answer":"<ユーザーへの最終回答(日本語)>"}',
-    'コードフェンス (```) や JSON 以外の説明文は絶対に出力しないでください。',
-    '十分な情報が揃ったら answer で応答してください。',
-    `回答の最後に、${END_MARKER} という文字列だけの行を必ず追加してください。`
+    'JSON 以外の文章・見出し・挨拶は一切出力しない。',
+    `出力の最後に、${END_MARKER} という文字列だけの行を必ず付ける。`,
+    '',
+    '出力例:',
+    '{"tool":"list_files","args":{}}',
+    END_MARKER,
+    '',
+    'それでは開始です。'
   ].join('\n')
 }
 
@@ -97,7 +108,19 @@ async function runCopilotTurn(opts: {
   io: AgentIO
 }): Promise<AgentTurnResult> {
   const { cfg, ctx, io, backend } = opts
+  if (cfg.copilot?.agentMode !== true) {
+    const prompt = [cfg.systemPrompt, opts.userInput].filter((s) => s && s.trim()).join('\n\n')
+    try {
+      const text = (await backend.complete(prompt)).trim()
+      return { reply: text, messages: [{ role: 'user', content: opts.userInput }, { role: 'assistant', content: text }], aborted: false }
+    } catch (err) {
+      const msg = (err as Error).message
+      io.print(`[error] ${msg}`)
+      return { reply: '', messages: [{ role: 'assistant', content: `[error] ${msg}` }], aborted: true }
+    }
+  }
   const steps: string[] = []
+  let parseRetried = false
   const maxIter = cfg.maxToolIterations ?? 15
   for (let i = 0; i < maxIter; i++) {
     let raw: string
@@ -109,6 +132,11 @@ async function runCopilotTurn(opts: {
     }
     const parsed = extractJsonReply(raw)
     if (!parsed) {
+      if (!parseRetried) {
+        parseRetried = true
+        steps.push('SYSTEM: 直前の応答は指定形式に違反しました。説明文を省き、{"tool":...} または {"answer":"..."} の JSON オブジェクト1つだけを出力してください。')
+        continue
+      }
       io.print('[warn] 応答を JSON として解釈できなかったため、そのまま回答として扱います')
       return { reply: raw.replace(new RegExp(`^${END_MARKER}$`, 'm'), '').trim(), messages: [{ role: 'assistant', content: raw }], aborted: false }
     }

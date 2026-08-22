@@ -1,4 +1,4 @@
-import readline from 'node:readline/promises'
+import readline from 'node:readline'
 import type { AgentConfig } from './config'
 import { runAgentTurn, type AgentIO, type TextBackend } from './agent'
 import { CopilotEdgeClient } from './copilot'
@@ -24,23 +24,46 @@ function printHelp(): void {
 }
 
 export async function startRepl(cfg: AgentConfig, ctx: ToolContext): Promise<void> {
+  const lineQueue: string[] = []
+  let waiter: ((line: string) => void) | null = null
+
+  const rl = readline.createInterface({ input: process.stdin, terminal: false })
+  rl.on('line', (raw) => {
+    const line = raw.trim()
+    if (waiter) {
+      const w = waiter
+      waiter = null
+      w(line)
+    } else {
+      lineQueue.push(line)
+    }
+  })
+  rl.on('close', () => {
+    if (waiter) {
+      const w = waiter
+      waiter = null
+      w('')
+    }
+  })
+
+  async function nextLine(promptText: string): Promise<string> {
+    process.stdout.write(promptText)
+    if (lineQueue.length > 0) return lineQueue.shift() as string
+    return new Promise<string>((resolve) => {
+      waiter = resolve
+    })
+  }
+
   const io: AgentIO = {
     print: (t) => console.log(t),
-    askYesNo: async (q) => {
-      const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
-      try {
-        return /^y(es)?$/i.test((await rl.question(`${q} [y/N]: `)).trim())
-      } finally {
-        rl.close()
-      }
-    }
+    askYesNo: async (q) => /^y(es)?$/i.test(await nextLine(`${q} [y/N]: `))
   }
+
   let messages: ChatMessage[] = [{ role: 'system', content: cfg.systemPrompt ?? DEFAULT_SYSTEM_PROMPT }]
   let copilotBackend: TextBackend | null = null
   console.log(`coding-agent (${cfg.model || (cfg.provider ?? 'openai')}) — 開始。/help でコマンド、空Enterで終了`)
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
   for (;;) {
-    const input = (await rl.question('> ')).trim()
+    const input = await nextLine('> ')
     if (input === '') break
     if (input.startsWith('/')) {
       const cmd = input.split(/\s+/)[0]
@@ -68,4 +91,5 @@ export async function startRepl(cfg: AgentConfig, ctx: ToolContext): Promise<voi
     appendSession(input, result.messages)
   }
   rl.close()
+  copilotBackend?.close?.()
 }

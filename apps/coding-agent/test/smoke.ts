@@ -198,7 +198,7 @@ async function testCopilotLoop(): Promise<void> {
     '```json\n{"tool":"write_file","args":{"path":"b.txt","content":"from copilot"}}\n```\nAGENT_END',
     '{"answer":"完了しました"}\nAGENT_END'
   ])
-  const cfg = { baseURL: '', model: '', provider: 'copilot-edge' as const, autoApprove: { write: true } }
+  const cfg = { baseURL: '', model: '', provider: 'copilot-edge' as const, autoApprove: { write: true }, copilot: { agentMode: true } }
   const result = await runAgentTurn({
     cfg,
     messages: [],
@@ -217,12 +217,30 @@ async function testCopilotLoop(): Promise<void> {
   console.log('PASS copilot-loop')
 }
 
+async function testCopilotPlainMode(): Promise<void> {
+  const backend = new FakeBackend(['これは平文の回答です'])
+  const cfg = { baseURL: '', model: '', provider: 'copilot-edge' as const, systemPrompt: 'SYS' }
+  const result = await runAgentTurn({
+    cfg,
+    messages: [],
+    userInput: '質問',
+    ctx: makeCtx(os.tmpdir(), false),
+    io: ioStub(true),
+    backend
+  })
+  assert.strictEqual(result.reply, 'これは平文の回答です')
+  assert.strictEqual(backend.calls, 1)
+  assert.ok(backend.prompts[0].includes('SYS') && backend.prompts[0].includes('質問'))
+  console.log('PASS copilot-plain')
+}
+
 (async () => {
   await testTools()
   await testAgentLoop()
   await testDenial()
   await testProtocolParsing()
   await testCopilotLoop()
+  await testCopilotPlainMode()
   console.log('ALL PASS')
 })().catch((err) => {
   console.error(err)
