@@ -123,6 +123,7 @@ export const TOOL_DEFS: ToolDef[] = [
     async run(args, ctx) {
       const abs = resolveInWorkspace(String(args.path), ctx)
       const content = String(args.content ?? '')
+      if (!content.trim()) throw new Error('content が空です。JSON 直後のコードフェンスに内容を記述してください')
       await fsp.mkdir(path.dirname(abs), { recursive: true })
       await fsp.writeFile(abs, content, 'utf8')
       return `書き込み完了: ${path.relative(ctx.workspace, abs)} (${Buffer.byteLength(content)} bytes)`

@@ -1,3 +1,112 @@
+export interface ParsedReply {
+  tool?: string
+  args?: Record<string, unknown>
+  answer?: string
+}
+
+interface Candidate {
+  text: string
+  end: number
+}
+
+function scanCandidates(text: string): Candidate[] {
+  const candidates: Candidate[] = []
+  let depth = 0
+  let start = -1
+  let inString = false
+  let escaped = false
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') inString = true
+    else if (ch === '{') {
+      if (depth === 0) start = i
+      depth++
+    } else if (ch === '}') {
+      if (depth > 0) {
+        depth--
+        if (depth === 0 && start >= 0) candidates.push({ text: text.slice(start, i + 1), end: i + 1 })
+      }
+    }
+  }
+  return candidates
+}
+
+function pickReply(candidates: Candidate[]): { parsed: ParsedReply; end: number } | null {
+  let found: { parsed: ParsedReply; end: number } | null = null
+  for (const cand of candidates) {
+    try {
+      const obj = JSON.parse(cand.text) as Record<string, unknown>
+      if (typeof obj.tool === 'string') {
+        found = { parsed: { tool: obj.tool, args: (obj.args ?? {}) as Record<string, unknown> }, end: cand.end }
+      } else if (typeof obj.answer === 'string') {
+        found = { parsed: { answer: obj.answer }, end: cand.end }
+      }
+    } catch {
+      const repaired = repairWriteFileCandidate(cand.text)
+      if (repaired) found = repaired
+    }
+  }
+  return found
+}
+
+function repairWriteFileCandidate(c: string): { parsed: ParsedReply; end: number } | null {
+  const m = c.match(/"tool"\s*:\s*"write_file"[\s\S]*?"path"\s*:\s*"((?:[^"\\]|\\.)*)"[\s\S]*?"content"\s*:\s*"([\s\S]*)/)
+  if (!m) return null
+  let content = m[2].replace(/\s*"?\s*\}\s*$/, '').split(END_MARKER)[0]
+  try {
+    content = JSON.parse(`"${content}"`)
+  } catch {
+    content = content.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"').replace(/\\\\/g, '\\')
+  }
+  return { parsed: { tool: 'write_file', args: { path: m[1], content } }, end: c.length }
+}
+
+export function extractReplyAndEnd(raw: string): { parsed: ParsedReply; end: number } | null {
+  const text = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
+  return pickReply(scanCandidates(text))
+}
+
+export function extractJsonReply(raw: string): ParsedReply | null {
+  return extractReplyAndEnd(raw)?.parsed ?? null
+}
+
+function attachFenceContent(raw: string, end: number, parsed: ParsedReply): void {
+  if (parsed.tool !== 'write_file' || typeof parsed.args?.content === 'string') return
+  const rest = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').slice(end)
+  const cm = rest.match(/^\s*(?:CONTENT|内容)\s*[:：]\s*\r?\n?([\s\S]+)$/i)
+  if (cm) {
+    const body = cm[1].split(END_MARKER)[0].replace(/\s+$/, '').replace(/＜/g, '<').replace(/＞/g, '>')
+    parsed.args = { ...(parsed.args ?? {}), content: body }
+    return
+  }
+  const fm = rest.match(/```[\w+-]*[ \t]*\r?\n?([\s\S]*?)```/)
+  if (fm) {
+    parsed.args = { ...(parsed.args ?? {}), content: fm[1].replace(/^\r?\n/, '').trim() }
+    return
+  }
+  const numbered = stripLineNumbered(rest)
+  if (numbered !== null) {
+    parsed.args = { ...(parsed.args ?? {}), content: numbered }
+    return
+  }
+  console.log('[debug-fence-miss] rest=' + JSON.stringify(rest.slice(0, 300)))
+}
+
+function stripLineNumbered(rest: string): string | null {
+  if (!/^\s*\d+\s*\r?\n/.test(rest) && !/^\s*\n?[A-Za-z][\w+#.-]*[ \t]*\r?\n\d+\s*\r?\n/.test(rest)) return null
+  const bodyMatch = rest.match(/^\s*\n?(?:[A-Za-z][\w+#.-]*[ \t]*\r?\n)?([\s\S]+)$/)
+  const body = bodyMatch ? bodyMatch[1] : rest
+  const markers = (body.match(/(?:^|\r?\n)\d+[ \t]*(?:\r?\n|$)/g) || []).length
+  if (markers < 2) return null
+  const out = body.replace(/(?:^|\r?\n)\d+[ \t]*(?:\r?\n)/g, '\n').replace(/\r?\n$/, '')
+  return out
+}
 import type { AgentConfig } from './config'
 import { chat, type ChatMessage, type ToolCall } from './llm'
 import { openAITools, TOOL_DEFS, type ToolContext } from './tools'
@@ -36,6 +145,13 @@ function buildProtocolRules(): string {
     '  {"tool":"<アクション名>","args":{...}}',
     '  {"answer":"<ユーザーへの最終回答(日本語)>"}',
     'JSON 以外の文章・見出し・挨拶は一切出力しない。',
+    'write_file でファイル内容を渡すときは、content を JSON 内に書かず、JSON の直後に「CONTENT:」の行と本文を続けてください:',
+    '  {"tool":"write_file","args":{"path":"index.html"}}',
+    '  CONTENT:',
+    '  <p>ここにファイル本文(生テキストそのまま)</p>',
+    '  AGENT_END',
+    '「CONTENT:」の次の行から AGENT_END の直前までがファイル本文になります。',
+    '⚠️ 本文に含まれる半角の < と > は、それぞれ全角の ＜ と ＞ に置き換えて書いてください(システム側で自動復元します)。コードフェンス(```)は使わないでください。ごく短い内容だけ JSON 内に書く場合は二重引用符を \\" とエスケープしてください。',
     `出力の最後に、${END_MARKER} という文字列だけの行を必ず付ける。`,
     '',
     '出力例:',
@@ -44,50 +160,6 @@ function buildProtocolRules(): string {
     '',
     'それでは開始です。'
   ].join('\n')
-}
-
-export function extractJsonReply(raw: string): { tool?: string; args?: Record<string, unknown>; answer?: string } | null {
-  let text = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
-  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/)
-  if (fence) text = fence[1].trim()
-  const candidates: string[] = []
-  let depth = 0
-  let start = -1
-  let inString = false
-  let escaped = false
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i]
-    if (inString) {
-      if (escaped) escaped = false
-      else if (ch === '\\') escaped = true
-      else if (ch === '"') inString = false
-      continue
-    }
-    if (ch === '"') inString = true
-    else if (ch === '{') {
-      if (depth === 0) start = i
-      depth++
-    } else if (ch === '}') {
-      if (depth > 0) {
-        depth--
-        if (depth === 0 && start >= 0) candidates.push(text.slice(start, i + 1))
-      }
-    }
-  }
-  let found: { tool?: string; args?: Record<string, unknown>; answer?: string } | null = null
-  for (const c of candidates) {
-    try {
-      const obj = JSON.parse(c) as Record<string, unknown>
-      if (typeof obj.tool === 'string') {
-        found = { tool: obj.tool, args: (obj.args ?? {}) as Record<string, unknown> }
-      } else if (typeof obj.answer === 'string') {
-        found = { answer: obj.answer }
-      }
-    } catch {
-      continue
-    }
-  }
-  return found
 }
 
 function unwrapAnswer(raw: string): string {
@@ -104,15 +176,22 @@ function unwrapAnswer(raw: string): string {
 }
 
 function composeCopilotPrompt(userInput: string, steps: string[]): string {
-  const parts = [buildProtocolRules(), '', '[依頼]', userInput]
-  for (const s of steps) parts.push('', s)
-  parts.push(
+  const head = [buildProtocolRules(), '', '[依頼]', userInput]
+  const tail = [
     '',
     '[指示]',
     '上記の状況を踏まえて、次に取るべきアクションを指定の JSON 形式のみで返してください。',
     `回答の最後には ${END_MARKER} だけの行を付けてください。`
-  )
-  return parts.join('\n')
+  ]
+  let keep = steps
+  const build = (list: string[], omitted: boolean): string =>
+    [...head, ...(omitted ? ['(※ 古い経過は省略しました)'] : []), ...list, ...tail].join('\n')
+  let text = build(keep, false)
+  while (text.length > 2600 && keep.length > 0) {
+    keep = keep.slice(1)
+    text = build(keep, true)
+  }
+  return text
 }
 
 async function runCopilotTurn(opts: {
@@ -145,7 +224,9 @@ async function runCopilotTurn(opts: {
       io.print(`[error] ${(err as Error).message}`)
       return { reply: '', messages: [{ role: 'assistant', content: `[error] ${(err as Error).message}` }], aborted: true }
     }
-    const parsed = extractJsonReply(raw)
+    const pe = extractReplyAndEnd(raw)
+    let parsed = pe?.parsed ?? null
+    if (parsed && parsed.tool === 'write_file') attachFenceContent(raw, pe!.end, parsed)
     if (!parsed) {
       if (!parseRetried) {
         parseRetried = true
@@ -182,7 +263,7 @@ async function runCopilotTurn(opts: {
     } catch (err) {
       output = `[tool error] ${(err as Error).message}`
     }
-    steps.push(`TOOL_RESULT(${def.name}): ${output.slice(0, 6000)}`)
+    steps.push(`TOOL_RESULT(${def.name}): ${output.slice(0, 800)}`)
   }
   io.print('[warn] 最大反復回数に達しました')
   return { reply: '', messages: [], aborted: true }

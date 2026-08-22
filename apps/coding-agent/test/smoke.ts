@@ -234,6 +234,27 @@ async function testCopilotPlainMode(): Promise<void> {
   console.log('PASS copilot-plain')
 }
 
+async function testCopilotFenceMode(): Promise<void> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-'))
+  const backend = new FakeBackend([
+    '{\"tool\":\"write_file\",\"args\":{\"path\":\"fence.html\"}}\n```html\n<p>fence ok</p>\n```\nAGENT_END',
+    '{"answer":"フェンス完了"}\nAGENT_END'
+  ])
+  const cfg = { baseURL: '', model: '', provider: 'copilot-edge' as const, autoApprove: { write: true }, copilot: { agentMode: true } }
+  const result = await runAgentTurn({
+    cfg,
+    messages: [],
+    userInput: '作って',
+    ctx: makeCtx(root),
+    io: ioStub(true),
+    backend
+  })
+  assert.strictEqual(result.reply, 'フェンス完了')
+  assert.ok(fs.readFileSync(path.join(root, 'fence.html'), 'utf8').includes('<p>fence ok</p>'))
+  fs.rmSync(root, { recursive: true, force: true })
+  console.log('PASS copilot-fence')
+}
+
 (async () => {
   await testTools()
   await testAgentLoop()
@@ -241,6 +262,7 @@ async function testCopilotPlainMode(): Promise<void> {
   await testProtocolParsing()
   await testCopilotLoop()
   await testCopilotPlainMode()
+  await testCopilotFenceMode()
   console.log('ALL PASS')
 })().catch((err) => {
   console.error(err)

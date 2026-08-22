@@ -195,6 +195,7 @@ var TOOL_DEFS = [
     async run(args, ctx) {
       const abs = resolveInWorkspace(String(args.path), ctx);
       const content = String(args.content ?? "");
+      if (!content.trim()) throw new Error("content \u304C\u7A7A\u3067\u3059\u3002JSON \u76F4\u5F8C\u306E\u30B3\u30FC\u30C9\u30D5\u30A7\u30F3\u30B9\u306B\u5185\u5BB9\u3092\u8A18\u8FF0\u3057\u3066\u304F\u3060\u3055\u3044");
       await import_promises.default.mkdir(import_node_path.default.dirname(abs), { recursive: true });
       await import_promises.default.writeFile(abs, content, "utf8");
       return `\u66F8\u304D\u8FBC\u307F\u5B8C\u4E86: ${import_node_path.default.relative(ctx.workspace, abs)} (${Buffer.byteLength(content)} bytes)`;
@@ -323,36 +324,7 @@ function openAITools() {
 }
 
 // src/agent.ts
-var END_MARKER = "AGENT_END";
-function buildProtocolRules() {
-  const toolDocs = TOOL_DEFS.map((t) => `- ${t.name}: ${t.description}
-  \u5F15\u6570\u30B9\u30AD\u30FC\u30DE: ${JSON.stringify(t.parameters)}`).join("\n");
-  return [
-    "\u3053\u308C\u304B\u3089\u300C\u793E\u5185\u30B3\u30FC\u30C7\u30A3\u30F3\u30B0\u652F\u63F4\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u300D\u306E\u30ED\u30FC\u30EB\u30D7\u30EC\u30A4\u3092\u304A\u9858\u3044\u3057\u307E\u3059\u3002",
-    "\u3042\u306A\u305F\u306E\u767A\u8A00\u306F\u3059\u3079\u3066\u793E\u5185\u30C4\u30FC\u30EB\u304B\u3089\u53D7\u3051\u53D6\u3089\u308C\u3001\u8A18\u8F09\u3055\u308C\u305F\u30A2\u30AF\u30B7\u30E7\u30F3\u306F\u5916\u90E8\u30B7\u30B9\u30C6\u30E0\u304C\u81EA\u52D5\u5B9F\u884C\u3057\u307E\u3059\u3002",
-    "\u3042\u306A\u305F\u81EA\u8EAB\u306F\u30A2\u30AF\u30B7\u30E7\u30F3\u3092\u5B9F\u884C\u3067\u304D\u306A\u3044\u305F\u3081\u3001\u300C\u301C\u3092\u78BA\u8A8D\u3057\u307E\u3057\u305F\u300D\u300C\u301C\u306F\u3067\u304D\u307E\u305B\u3093\u300D\u3068\u3044\u3063\u305F\u56DE\u7B54\u306F\u4E0D\u8981\u3067\u3059\u3002",
-    "\u3042\u306A\u305F\u306E\u4ED5\u4E8B\u306F\u3001\u72B6\u6CC1\u306B\u5FDC\u3058\u3066\u6B21\u306B\u884C\u3046\u3079\u304D\u30A2\u30AF\u30B7\u30E7\u30F3\u3092 1 \u3064\u9078\u3073 JSON \u3067\u5831\u544A\u3059\u308B\u3053\u3068\u3067\u3059\u3002",
-    "",
-    "\u9078\u629E\u3067\u304D\u308B\u30A2\u30AF\u30B7\u30E7\u30F3:",
-    toolDocs,
-    "",
-    "\u51FA\u529B\u30EB\u30FC\u30EB(\u53B3\u5B88): \u6BCE\u56DE\u3001\u6B21\u306E\u3069\u3061\u3089\u304B\u306E JSON \u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u300C1\u3064\u3060\u3051\u300D\u3092\u51FA\u529B\u3059\u308B\u3002",
-    '  {"tool":"<\u30A2\u30AF\u30B7\u30E7\u30F3\u540D>","args":{...}}',
-    '  {"answer":"<\u30E6\u30FC\u30B6\u30FC\u3078\u306E\u6700\u7D42\u56DE\u7B54(\u65E5\u672C\u8A9E)>"}',
-    "JSON \u4EE5\u5916\u306E\u6587\u7AE0\u30FB\u898B\u51FA\u3057\u30FB\u6328\u62F6\u306F\u4E00\u5207\u51FA\u529B\u3057\u306A\u3044\u3002",
-    `\u51FA\u529B\u306E\u6700\u5F8C\u306B\u3001${END_MARKER} \u3068\u3044\u3046\u6587\u5B57\u5217\u3060\u3051\u306E\u884C\u3092\u5FC5\u305A\u4ED8\u3051\u308B\u3002`,
-    "",
-    "\u51FA\u529B\u4F8B:",
-    '{"tool":"list_files","args":{}}',
-    END_MARKER,
-    "",
-    "\u305D\u308C\u3067\u306F\u958B\u59CB\u3067\u3059\u3002"
-  ].join("\n");
-}
-function extractJsonReply(raw) {
-  let text = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fence) text = fence[1].trim();
+function scanCandidates(text) {
   const candidates = [];
   let depth = 0;
   let start = -1;
@@ -373,24 +345,109 @@ function extractJsonReply(raw) {
     } else if (ch === "}") {
       if (depth > 0) {
         depth--;
-        if (depth === 0 && start >= 0) candidates.push(text.slice(start, i + 1));
+        if (depth === 0 && start >= 0) candidates.push({ text: text.slice(start, i + 1), end: i + 1 });
       }
     }
   }
+  return candidates;
+}
+function pickReply(candidates) {
   let found = null;
-  for (const c of candidates) {
+  for (const cand of candidates) {
     try {
-      const obj = JSON.parse(c);
+      const obj = JSON.parse(cand.text);
       if (typeof obj.tool === "string") {
-        found = { tool: obj.tool, args: obj.args ?? {} };
+        found = { parsed: { tool: obj.tool, args: obj.args ?? {} }, end: cand.end };
       } else if (typeof obj.answer === "string") {
-        found = { answer: obj.answer };
+        found = { parsed: { answer: obj.answer }, end: cand.end };
       }
     } catch {
-      continue;
+      const repaired = repairWriteFileCandidate(cand.text);
+      if (repaired) found = repaired;
     }
   }
   return found;
+}
+function repairWriteFileCandidate(c) {
+  const m = c.match(/"tool"\s*:\s*"write_file"[\s\S]*?"path"\s*:\s*"((?:[^"\\]|\\.)*)"[\s\S]*?"content"\s*:\s*"([\s\S]*)/);
+  if (!m) return null;
+  let content = m[2].replace(/\s*"?\s*\}\s*$/, "").split(END_MARKER)[0];
+  try {
+    content = JSON.parse(`"${content}"`);
+  } catch {
+    content = content.replace(/\\n/g, "\n").replace(/\\t/g, "	").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+  }
+  return { parsed: { tool: "write_file", args: { path: m[1], content } }, end: c.length };
+}
+function extractReplyAndEnd(raw) {
+  const text = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+  return pickReply(scanCandidates(text));
+}
+function extractJsonReply(raw) {
+  return extractReplyAndEnd(raw)?.parsed ?? null;
+}
+function attachFenceContent(raw, end, parsed) {
+  if (parsed.tool !== "write_file" || typeof parsed.args?.content === "string") return;
+  const rest = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").slice(end);
+  const cm = rest.match(/^\s*(?:CONTENT|内容)\s*[:：]\s*\r?\n?([\s\S]+)$/i);
+  if (cm) {
+    const body = cm[1].split(END_MARKER)[0].replace(/\s+$/, "").replace(/＜/g, "<").replace(/＞/g, ">");
+    parsed.args = { ...parsed.args ?? {}, content: body };
+    return;
+  }
+  const fm = rest.match(/```[\w+-]*[ \t]*\r?\n?([\s\S]*?)```/);
+  if (fm) {
+    parsed.args = { ...parsed.args ?? {}, content: fm[1].replace(/^\r?\n/, "").trim() };
+    return;
+  }
+  const numbered = stripLineNumbered(rest);
+  if (numbered !== null) {
+    parsed.args = { ...parsed.args ?? {}, content: numbered };
+    return;
+  }
+  console.log("[debug-fence-miss] rest=" + JSON.stringify(rest.slice(0, 300)));
+}
+function stripLineNumbered(rest) {
+  if (!/^\s*\d+\s*\r?\n/.test(rest) && !/^\s*\n?[A-Za-z][\w+#.-]*[ \t]*\r?\n\d+\s*\r?\n/.test(rest)) return null;
+  const bodyMatch = rest.match(/^\s*\n?(?:[A-Za-z][\w+#.-]*[ \t]*\r?\n)?([\s\S]+)$/);
+  const body = bodyMatch ? bodyMatch[1] : rest;
+  const markers = (body.match(/(?:^|\r?\n)\d+[ \t]*(?:\r?\n|$)/g) || []).length;
+  if (markers < 2) return null;
+  const out = body.replace(/(?:^|\r?\n)\d+[ \t]*(?:\r?\n)/g, "\n").replace(/\r?\n$/, "");
+  return out;
+}
+var END_MARKER = "AGENT_END";
+function buildProtocolRules() {
+  const toolDocs = TOOL_DEFS.map((t) => `- ${t.name}: ${t.description}
+  \u5F15\u6570\u30B9\u30AD\u30FC\u30DE: ${JSON.stringify(t.parameters)}`).join("\n");
+  return [
+    "\u3053\u308C\u304B\u3089\u300C\u793E\u5185\u30B3\u30FC\u30C7\u30A3\u30F3\u30B0\u652F\u63F4\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u300D\u306E\u30ED\u30FC\u30EB\u30D7\u30EC\u30A4\u3092\u304A\u9858\u3044\u3057\u307E\u3059\u3002",
+    "\u3042\u306A\u305F\u306E\u767A\u8A00\u306F\u3059\u3079\u3066\u793E\u5185\u30C4\u30FC\u30EB\u304B\u3089\u53D7\u3051\u53D6\u3089\u308C\u3001\u8A18\u8F09\u3055\u308C\u305F\u30A2\u30AF\u30B7\u30E7\u30F3\u306F\u5916\u90E8\u30B7\u30B9\u30C6\u30E0\u304C\u81EA\u52D5\u5B9F\u884C\u3057\u307E\u3059\u3002",
+    "\u3042\u306A\u305F\u81EA\u8EAB\u306F\u30A2\u30AF\u30B7\u30E7\u30F3\u3092\u5B9F\u884C\u3067\u304D\u306A\u3044\u305F\u3081\u3001\u300C\u301C\u3092\u78BA\u8A8D\u3057\u307E\u3057\u305F\u300D\u300C\u301C\u306F\u3067\u304D\u307E\u305B\u3093\u300D\u3068\u3044\u3063\u305F\u56DE\u7B54\u306F\u4E0D\u8981\u3067\u3059\u3002",
+    "\u3042\u306A\u305F\u306E\u4ED5\u4E8B\u306F\u3001\u72B6\u6CC1\u306B\u5FDC\u3058\u3066\u6B21\u306B\u884C\u3046\u3079\u304D\u30A2\u30AF\u30B7\u30E7\u30F3\u3092 1 \u3064\u9078\u3073 JSON \u3067\u5831\u544A\u3059\u308B\u3053\u3068\u3067\u3059\u3002",
+    "",
+    "\u9078\u629E\u3067\u304D\u308B\u30A2\u30AF\u30B7\u30E7\u30F3:",
+    toolDocs,
+    "",
+    "\u51FA\u529B\u30EB\u30FC\u30EB(\u53B3\u5B88): \u6BCE\u56DE\u3001\u6B21\u306E\u3069\u3061\u3089\u304B\u306E JSON \u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u300C1\u3064\u3060\u3051\u300D\u3092\u51FA\u529B\u3059\u308B\u3002",
+    '  {"tool":"<\u30A2\u30AF\u30B7\u30E7\u30F3\u540D>","args":{...}}',
+    '  {"answer":"<\u30E6\u30FC\u30B6\u30FC\u3078\u306E\u6700\u7D42\u56DE\u7B54(\u65E5\u672C\u8A9E)>"}',
+    "JSON \u4EE5\u5916\u306E\u6587\u7AE0\u30FB\u898B\u51FA\u3057\u30FB\u6328\u62F6\u306F\u4E00\u5207\u51FA\u529B\u3057\u306A\u3044\u3002",
+    "write_file \u3067\u30D5\u30A1\u30A4\u30EB\u5185\u5BB9\u3092\u6E21\u3059\u3068\u304D\u306F\u3001content \u3092 JSON \u5185\u306B\u66F8\u304B\u305A\u3001JSON \u306E\u76F4\u5F8C\u306B\u300CCONTENT:\u300D\u306E\u884C\u3068\u672C\u6587\u3092\u7D9A\u3051\u3066\u304F\u3060\u3055\u3044:",
+    '  {"tool":"write_file","args":{"path":"index.html"}}',
+    "  CONTENT:",
+    "  <p>\u3053\u3053\u306B\u30D5\u30A1\u30A4\u30EB\u672C\u6587(\u751F\u30C6\u30AD\u30B9\u30C8\u305D\u306E\u307E\u307E)</p>",
+    "  AGENT_END",
+    "\u300CCONTENT:\u300D\u306E\u6B21\u306E\u884C\u304B\u3089 AGENT_END \u306E\u76F4\u524D\u307E\u3067\u304C\u30D5\u30A1\u30A4\u30EB\u672C\u6587\u306B\u306A\u308A\u307E\u3059\u3002",
+    '\u26A0\uFE0F \u672C\u6587\u306B\u542B\u307E\u308C\u308B\u534A\u89D2\u306E < \u3068 > \u306F\u3001\u305D\u308C\u305E\u308C\u5168\u89D2\u306E \uFF1C \u3068 \uFF1E \u306B\u7F6E\u304D\u63DB\u3048\u3066\u66F8\u3044\u3066\u304F\u3060\u3055\u3044(\u30B7\u30B9\u30C6\u30E0\u5074\u3067\u81EA\u52D5\u5FA9\u5143\u3057\u307E\u3059)\u3002\u30B3\u30FC\u30C9\u30D5\u30A7\u30F3\u30B9(```)\u306F\u4F7F\u308F\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002\u3054\u304F\u77ED\u3044\u5185\u5BB9\u3060\u3051 JSON \u5185\u306B\u66F8\u304F\u5834\u5408\u306F\u4E8C\u91CD\u5F15\u7528\u7B26\u3092 \\" \u3068\u30A8\u30B9\u30B1\u30FC\u30D7\u3057\u3066\u304F\u3060\u3055\u3044\u3002',
+    `\u51FA\u529B\u306E\u6700\u5F8C\u306B\u3001${END_MARKER} \u3068\u3044\u3046\u6587\u5B57\u5217\u3060\u3051\u306E\u884C\u3092\u5FC5\u305A\u4ED8\u3051\u308B\u3002`,
+    "",
+    "\u51FA\u529B\u4F8B:",
+    '{"tool":"list_files","args":{}}',
+    END_MARKER,
+    "",
+    "\u305D\u308C\u3067\u306F\u958B\u59CB\u3067\u3059\u3002"
+  ].join("\n");
 }
 function unwrapAnswer(raw) {
   const cleaned = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
@@ -405,15 +462,21 @@ function unwrapAnswer(raw) {
   return cleaned.replace(new RegExp(`"?${END_MARKER}"?`, "g"), "").trim();
 }
 function composeCopilotPrompt(userInput, steps) {
-  const parts = [buildProtocolRules(), "", "[\u4F9D\u983C]", userInput];
-  for (const s of steps) parts.push("", s);
-  parts.push(
+  const head = [buildProtocolRules(), "", "[\u4F9D\u983C]", userInput];
+  const tail = [
     "",
     "[\u6307\u793A]",
     "\u4E0A\u8A18\u306E\u72B6\u6CC1\u3092\u8E0F\u307E\u3048\u3066\u3001\u6B21\u306B\u53D6\u308B\u3079\u304D\u30A2\u30AF\u30B7\u30E7\u30F3\u3092\u6307\u5B9A\u306E JSON \u5F62\u5F0F\u306E\u307F\u3067\u8FD4\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
     `\u56DE\u7B54\u306E\u6700\u5F8C\u306B\u306F ${END_MARKER} \u3060\u3051\u306E\u884C\u3092\u4ED8\u3051\u3066\u304F\u3060\u3055\u3044\u3002`
-  );
-  return parts.join("\n");
+  ];
+  let keep = steps;
+  const build = (list, omitted) => [...head, ...omitted ? ["(\u203B \u53E4\u3044\u7D4C\u904E\u306F\u7701\u7565\u3057\u307E\u3057\u305F)"] : [], ...list, ...tail].join("\n");
+  let text = build(keep, false);
+  while (text.length > 2600 && keep.length > 0) {
+    keep = keep.slice(1);
+    text = build(keep, true);
+  }
+  return text;
 }
 async function runCopilotTurn(opts) {
   const { cfg, ctx, io, backend } = opts;
@@ -439,7 +502,9 @@ async function runCopilotTurn(opts) {
       io.print(`[error] ${err.message}`);
       return { reply: "", messages: [{ role: "assistant", content: `[error] ${err.message}` }], aborted: true };
     }
-    const parsed = extractJsonReply(raw);
+    const pe = extractReplyAndEnd(raw);
+    let parsed = pe?.parsed ?? null;
+    if (parsed && parsed.tool === "write_file") attachFenceContent(raw, pe.end, parsed);
     if (!parsed) {
       if (!parseRetried) {
         parseRetried = true;
@@ -476,7 +541,7 @@ async function runCopilotTurn(opts) {
     } catch (err) {
       output = `[tool error] ${err.message}`;
     }
-    steps.push(`TOOL_RESULT(${def.name}): ${output.slice(0, 6e3)}`);
+    steps.push(`TOOL_RESULT(${def.name}): ${output.slice(0, 800)}`);
   }
   io.print("[warn] \u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F");
   return { reply: "", messages: [], aborted: true };
@@ -747,6 +812,26 @@ async function testCopilotPlainMode() {
   import_node_assert.default.ok(backend.prompts[0].includes("SYS") && backend.prompts[0].includes("\u8CEA\u554F"));
   console.log("PASS copilot-plain");
 }
+async function testCopilotFenceMode() {
+  const root = import_node_fs.default.mkdtempSync(import_node_path2.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
+  const backend = new FakeBackend([
+    '{"tool":"write_file","args":{"path":"fence.html"}}\n```html\n<p>fence ok</p>\n```\nAGENT_END',
+    '{"answer":"\u30D5\u30A7\u30F3\u30B9\u5B8C\u4E86"}\nAGENT_END'
+  ]);
+  const cfg = { baseURL: "", model: "", provider: "copilot-edge", autoApprove: { write: true }, copilot: { agentMode: true } };
+  const result = await runAgentTurn({
+    cfg,
+    messages: [],
+    userInput: "\u4F5C\u3063\u3066",
+    ctx: makeCtx(root),
+    io: ioStub(true),
+    backend
+  });
+  import_node_assert.default.strictEqual(result.reply, "\u30D5\u30A7\u30F3\u30B9\u5B8C\u4E86");
+  import_node_assert.default.ok(import_node_fs.default.readFileSync(import_node_path2.default.join(root, "fence.html"), "utf8").includes("<p>fence ok</p>"));
+  import_node_fs.default.rmSync(root, { recursive: true, force: true });
+  console.log("PASS copilot-fence");
+}
 (async () => {
   await testTools();
   await testAgentLoop();
@@ -754,6 +839,7 @@ async function testCopilotPlainMode() {
   await testProtocolParsing();
   await testCopilotLoop();
   await testCopilotPlainMode();
+  await testCopilotFenceMode();
   console.log("ALL PASS");
 })().catch((err) => {
   console.error(err);

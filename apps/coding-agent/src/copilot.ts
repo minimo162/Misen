@@ -442,9 +442,10 @@ export class CopilotEdgeClient {
     if ((await this.editorLength()) > 0) {
       await this.clearEditor()
     }
-    const chunkSize = 3000
-    for (let i = 0; i < prompt.length; i += chunkSize) {
-      const chunk = prompt.slice(i, i + chunkSize)
+    let pos = 0
+    let chunkSize = 3000
+    while (pos < prompt.length) {
+      const chunk = prompt.slice(pos, pos + chunkSize)
       const expectedGrowth = Math.floor(chunk.length * 0.9)
       let ok = false
       for (let attempt = 1; attempt <= 3 && !ok; attempt++) {
@@ -456,7 +457,14 @@ export class CopilotEdgeClient {
         if (after - before >= expectedGrowth) ok = true
         else await sleep(500)
       }
-      if (!ok) throw new Error(`依頼文の入力が位置 ${i} で反映されませんでした`)
+      if (!ok) {
+        if (chunkSize <= 500) {
+          throw new Error(`依頼文の入力が位置 ${pos} で反映されませんでした`)
+        }
+        chunkSize = Math.floor(chunkSize / 2)
+        continue
+      }
+      pos += chunk.length
     }
     const len = await this.editorLength()
     if (len < prompt.length * 0.9) throw new Error(`依頼文の入力を確認できませんでした (期待 ${prompt.length} / 実際 ${len})`)
