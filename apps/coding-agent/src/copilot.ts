@@ -34,7 +34,7 @@ export function resolveCopilotSettings(cfg: AgentConfig): CopilotSettings {
   return {
     url: c.url ?? 'https://m365.cloud.microsoft/chat/',
     cdpPort: c.cdpPort ?? 9444,
-    maxPromptChars: c.maxPromptChars ?? 60000,
+    maxPromptChars: c.maxPromptChars ?? 120000,
     pollIntervalMs: Math.max(500, c.pollIntervalMs ?? 2000),
     responseTimeoutSec: c.responseTimeoutSec ?? 300,
     stallTimeoutSec: c.stallTimeoutSec ?? 120,

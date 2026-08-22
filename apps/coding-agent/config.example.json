@@ -12,6 +12,7 @@
     "url": "https://m365.cloud.microsoft/chat/",
     "cdpPort": 9444,
     "displayMode": "minimized",
+    "maxPromptChars": 120000,
     "responseTimeoutSec": 300,
     "stallTimeoutSec": 120,
     "endMarker": "AGENT_END",

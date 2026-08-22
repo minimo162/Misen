@@ -1,6 +1,6 @@
 {
   "name": "coding-agent",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "type": "cli",
   "entry": "dist/index.js",
   "runtime": "node-v22.14.0-win-x64",

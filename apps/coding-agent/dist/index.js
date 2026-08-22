@@ -502,7 +502,7 @@ function unwrapAnswer(raw) {
   }
   return cleaned.replace(new RegExp(`"?${END_MARKER}"?`, "g"), "").trim();
 }
-function composeCopilotPrompt(userInput, steps, budget = 6e4) {
+function composeCopilotPrompt(userInput, steps, budget = 12e4) {
   const head = [buildProtocolRules(), "", "[\u4F9D\u983C]", userInput];
   const tail = [
     "",
@@ -544,7 +544,7 @@ async function runCopilotTurn(opts) {
   for (let i = 0; i < maxIter; i++) {
     let raw;
     try {
-      raw = await backend.complete(composeCopilotPrompt(opts.userInput, steps, opts.cfg.copilot?.maxPromptChars ?? 6e4));
+      raw = await backend.complete(composeCopilotPrompt(opts.userInput, steps, opts.cfg.copilot?.maxPromptChars ?? 12e4));
       raw = raw.replace(/＜/g, "<").replace(/＞/g, ">").replace(new RegExp(String.fromCharCode(65312) === "" ? "" : "\uFF40", "g"), String.fromCharCode(96));
     } catch (err) {
       io.print(`[error] ${err.message}`);
@@ -595,7 +595,7 @@ async function runCopilotTurn(opts) {
     } catch (err) {
       output = `[tool error] ${err.message}`;
     }
-    steps.push(`TOOL_RESULT(${def.name}): ${output.slice(0, 600)}`);
+    steps.push(`TOOL_RESULT(${def.name}): ${output.slice(0, 2e3)}`);
   }
   io.print("[warn] \u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F");
   return { reply: "", messages: [], aborted: true };
@@ -679,7 +679,7 @@ function resolveCopilotSettings(cfg) {
   return {
     url: c.url ?? "https://m365.cloud.microsoft/chat/",
     cdpPort: c.cdpPort ?? 9444,
-    maxPromptChars: c.maxPromptChars ?? 6e4,
+    maxPromptChars: c.maxPromptChars ?? 12e4,
     pollIntervalMs: Math.max(500, c.pollIntervalMs ?? 2e3),
     responseTimeoutSec: c.responseTimeoutSec ?? 300,
     stallTimeoutSec: c.stallTimeoutSec ?? 120,

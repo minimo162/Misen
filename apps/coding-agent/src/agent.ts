@@ -189,7 +189,7 @@ function unwrapAnswer(raw: string): string {
   return cleaned.replace(new RegExp(`"?${END_MARKER}"?`, 'g'), '').trim()
 }
 
-function composeCopilotPrompt(userInput: string, steps: string[], budget = 60000): string {
+function composeCopilotPrompt(userInput: string, steps: string[], budget = 120000): string {
   const head = [buildProtocolRules(), '', '[依頼]', userInput]
   const tail = [
     '',
@@ -238,7 +238,7 @@ async function runCopilotTurn(opts: {
   for (let i = 0; i < maxIter; i++) {
     let raw: string
     try {
-      raw = await backend.complete(composeCopilotPrompt(opts.userInput, steps, opts.cfg.copilot?.maxPromptChars ?? 60000))
+      raw = await backend.complete(composeCopilotPrompt(opts.userInput, steps, opts.cfg.copilot?.maxPromptChars ?? 120000))
       raw = raw.replace(/＜/g, '<').replace(/＞/g, '>').replace(new RegExp(String.fromCharCode(65312) === '' ? '' : '｀', 'g'), String.fromCharCode(96))
     } catch (err) {
       io.print(`[error] ${(err as Error).message}`)
@@ -289,7 +289,7 @@ async function runCopilotTurn(opts: {
     } catch (err) {
       output = `[tool error] ${(err as Error).message}`
     }
-    steps.push(`TOOL_RESULT(${def.name}): ${output.slice(0, 600)}`)
+    steps.push(`TOOL_RESULT(${def.name}): ${output.slice(0, 2000)}`)
   }
   io.print('[warn] 最大反復回数に達しました')
   return { reply: '', messages: [], aborted: true }
