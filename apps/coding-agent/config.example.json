@@ -10,7 +10,7 @@
   "systemPrompt": "あなたは社内コーディング支援エージェントです。提供されたツールでファイルの調査・編集・コマンド実行を行い、簡潔な日本語で回答してください。",
   "copilot": {
     "url": "https://m365.cloud.microsoft/chat/",
-    "cdpPort": 9444,
+    "cdpPort": 9445,
     "displayMode": "minimized",
     "maxPromptChars": 120000,
     "responseTimeoutSec": 300,

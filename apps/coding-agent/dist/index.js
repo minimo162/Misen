@@ -678,7 +678,7 @@ function resolveCopilotSettings(cfg) {
   const c = cfg.copilot ?? {};
   return {
     url: c.url ?? "https://m365.cloud.microsoft/chat/",
-    cdpPort: c.cdpPort ?? 9444,
+    cdpPort: c.cdpPort ?? 9445,
     maxPromptChars: c.maxPromptChars ?? 12e4,
     pollIntervalMs: Math.max(500, c.pollIntervalMs ?? 2e3),
     responseTimeoutSec: c.responseTimeoutSec ?? 300,
@@ -850,13 +850,18 @@ var MODEL_SELECT_JS = String.raw`(async () => {
 })()`;
 var CLICK_COPY_JS = `(() => {
   ${VISIBLE_JS}
-  const btns = Array.from(document.querySelectorAll('button')).filter(visible);
-  const cand = btns.filter((b) => /\u30B3\u30D4\u30FC|copy/i.test(b.getAttribute('aria-label') || b.title || ''));
-  if (cand.length === 0) return JSON.stringify({ clicked: false });
+  ${DOCS_JS}
+  const btns = __docs.flatMap((d) => Array.from(d.querySelectorAll('button, [role="button"], span[role="button"]'))).filter(__vis);
+  const cand = btns.filter((b) => /\u30B3\u30D4\u30FC|copy/i.test(b.getAttribute('aria-label') || b.title || b.getAttribute('data-testid') || ''));
+  const labels = cand.slice(-5).map((b) => (b.getAttribute('aria-label') || b.title || b.tagName).slice(0, 40));
+  if (cand.length === 0) {
+    const sample = btns.slice(-12).map((b) => ((b.getAttribute('aria-label') || b.title || b.textContent || '').trim().slice(0, 24)));
+    return JSON.stringify({ clicked: false, found: 0, sample });
+  }
   const last = cand[cand.length - 1];
   try { last.scrollIntoView({ block: 'center' }); } catch (e) {}
   last.click();
-  return JSON.stringify({ clicked: true, label: (last.getAttribute('aria-label') || '').slice(0, 40) });
+  return JSON.stringify({ clicked: true, found: cand.length, label: (last.getAttribute('aria-label') || '').slice(0, 40) });
 })()`;
 var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 var CdpConnection = class _CdpConnection {
@@ -989,32 +994,72 @@ var CopilotEdgeClient = class {
     if (m) s = m[1];
     return s.split("\n").filter((l) => l.trim() !== this.s.endMarker).join("\n").trim();
   }
-  async finalizeAnswer(fallbackText) {
+  async bringToFront() {
     try {
-      await this.grantClipboard();
-      const clicked = JSON.parse(String(await this.evalWithReconnect(CLICK_COPY_JS, 15e3)));
-      if (clicked.clicked) {
-        await sleep(500);
-        const clip = String(await this.evalWithReconnect("navigator.clipboard.readText()", 1e4));
-        const s = this.stripOuterFence(clip);
-        if (s.trim().length >= 10) return s;
-      }
+      await this.cdpMethod("Page.bringToFront", {}, 5e3);
+      await sleep(300);
     } catch {
     }
+  }
+  async finalizeAnswer(fallbackText) {
+    let baseline = "";
+    try {
+      await this.bringToFront();
+      await this.grantClipboard();
+      baseline = String(await this.evalWithReconnect("navigator.clipboard.readText()", 8e3)).trim();
+    } catch {
+    }
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await this.bringToFront();
+        await this.grantClipboard();
+        const clicked = JSON.parse(String(await this.evalWithReconnect(CLICK_COPY_JS, 15e3)));
+        console.log("[clip] candidates=" + JSON.stringify(clicked));
+        if (clicked.clicked) {
+          await sleep(500 + attempt * 300);
+          const clip = String(await this.evalWithReconnect("navigator.clipboard.readText()", 1e4));
+          const s = this.stripOuterFence(clip);
+          if (s.trim().length >= 10 && s.trim() !== baseline) return s;
+        }
+      } catch (err) {
+        console.log("[clip] attempt " + attempt + " error: " + err.message.slice(0, 80));
+      }
+      await sleep(700);
+    }
+    console.log("[clip] fallback to innerText");
     return this.cleanResponse(fallbackText);
+  }
+  hardenPreferences(profileDir) {
+    try {
+      const prefPath = import_node_path3.default.join(profileDir, "Default", "Preferences");
+      if (!import_node_fs2.default.existsSync(prefPath)) return;
+      const j = JSON.parse(import_node_fs2.default.readFileSync(prefPath, "utf8"));
+      if (!j.session) j.session = {};
+      j.session.restore_on_startup = 4;
+      j.session.startup_urls = [];
+      if (j.profile) j.profile.exit_type = "Normal";
+      import_node_fs2.default.writeFileSync(prefPath, JSON.stringify(j), "utf8");
+    } catch {
+    }
   }
   async ensureEdge() {
     if (await devToolsUp(this.s.cdpPort)) return;
+    const userDataDir = import_node_path3.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent", "edge-profile");
+    this.hardenPreferences(userDataDir);
     const args = [
       `--remote-debugging-port=${this.s.cdpPort}`,
       "--remote-debugging-address=127.0.0.1",
       "--remote-allow-origins=*",
-      `--user-data-dir=${import_node_path3.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent", "edge-profile")}`,
+      `--user-data-dir=${userDataDir}`,
       "--no-first-run",
       "--disable-background-timer-throttling",
       "--disable-backgrounding-occluded-windows",
       "--disable-renderer-backgrounding",
-      "--disable-features=CalculateNativeWinOcclusion,msEdgeTranslate"
+      "--disable-features=CalculateNativeWinOcclusion,msEdgeTranslate",
+      "--disable-sync",
+      "--no-default-browser-check",
+      "--disable-session-crashed-bubble",
+      "--hide-crash-restore-bubble"
     ];
     if (this.s.displayMode === "minimized") args.push("--window-position=-32000,-32000", "--window-size=1280,900");
     args.push(this.s.url);
@@ -1133,6 +1178,7 @@ var CopilotEdgeClient = class {
     await this.insertByChunks(prompt);
   }
   async pasteViaClipboard(prompt) {
+    await this.bringToFront();
     await this.grantClipboard();
     await this.evalWithReconnect(`navigator.clipboard.writeText(${JSON.stringify(prompt)})`, 15e3);
     for (let i = 0; i < 6; i++) {
