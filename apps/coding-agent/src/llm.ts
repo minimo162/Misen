@@ -1,3 +1,5 @@
+import http from 'node:http'
+import https from 'node:https'
 import { resolveApiKey, type AgentConfig } from './config'
 
 export interface FunctionSpec {
@@ -35,26 +37,50 @@ interface CompletionResponse {
   }>
 }
 
+function postJson(url: string, body: string, headers: Record<string, string>): Promise<{ status: number; text: string }> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url)
+    const mod = u.protocol === 'https:' ? https : http
+    const req = mod.request(
+      u,
+      { method: 'POST', headers: { ...headers, 'content-length': Buffer.byteLength(body).toString() } },
+      (res) => {
+        let data = ''
+        res.setEncoding('utf8')
+        res.on('data', (c) => {
+          data += c
+        })
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, text: data }))
+      }
+    )
+    req.setTimeout(0)
+    req.on('error', reject)
+    req.end(body)
+  })
+}
+
 export async function chat(cfg: AgentConfig, messages: ChatMessage[], tools: OpenAIToolSchema[]): Promise<ChatMessage> {
   const url = cfg.baseURL.replace(/\/+$/, '') + '/chat/completions'
   const headers: Record<string, string> = { 'content-type': 'application/json' }
   const key = resolveApiKey(cfg)
   if (key) headers.authorization = `Bearer ${key}`
-  const res = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      model: cfg.model,
-      temperature: cfg.temperature ?? 0.2,
-      messages,
-      ...(tools.length > 0 ? { tools } : {})
-    })
+  const payload = JSON.stringify({
+    model: cfg.model,
+    temperature: cfg.temperature ?? 0.2,
+    messages,
+    ...(cfg.chatTemplateKwargs ? { chat_template_kwargs: cfg.chatTemplateKwargs } : {}),
+    ...(tools.length > 0 ? { tools } : {})
   })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`LLM API エラー ${res.status}: ${text.slice(0, 400)}`)
+  const res = await postJson(url, payload, headers)
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(`LLM API エラー ${res.status}: ${res.text.slice(0, 400)}`)
   }
-  const data = (await res.json()) as CompletionResponse
+  let data: CompletionResponse
+  try {
+    data = JSON.parse(res.text) as CompletionResponse
+  } catch {
+    throw new Error('LLM API の応答が JSON ではありません')
+  }
   const raw = data.choices?.[0]?.message
   if (!raw) throw new Error('LLM API の応答形式が不正です')
   return {

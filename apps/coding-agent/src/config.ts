@@ -18,6 +18,7 @@ export interface CopilotSettingsPartial {
   displayMode?: 'minimized' | 'foreground'
   endMarker?: string
   agentMode?: boolean
+  modelPriority?: string[]
 }
 
 export interface AgentConfig {
@@ -32,6 +33,7 @@ export interface AgentConfig {
   systemPrompt?: string
   provider?: LlmProvider
   copilot?: CopilotSettingsPartial
+  chatTemplateKwargs?: Record<string, unknown>
 }
 
 const DEFAULT_CONFIG: AgentConfig = {

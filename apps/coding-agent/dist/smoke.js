@@ -24,10 +24,14 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 
 // test/smoke.ts
 var import_node_assert = __toESM(require("node:assert"));
-var import_node_http = __toESM(require("node:http"));
+var import_node_http2 = __toESM(require("node:http"));
 var import_node_fs = __toESM(require("node:fs"));
 var import_node_os = __toESM(require("node:os"));
 var import_node_path2 = __toESM(require("node:path"));
+
+// src/llm.ts
+var import_node_http = __toESM(require("node:http"));
+var import_node_https = __toESM(require("node:https"));
 
 // src/config.ts
 function resolveApiKey(cfg) {
@@ -36,26 +40,49 @@ function resolveApiKey(cfg) {
 }
 
 // src/llm.ts
+function postJson(url, body, headers) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const mod = u.protocol === "https:" ? import_node_https.default : import_node_http.default;
+    const req = mod.request(
+      u,
+      { method: "POST", headers: { ...headers, "content-length": Buffer.byteLength(body).toString() } },
+      (res) => {
+        let data = "";
+        res.setEncoding("utf8");
+        res.on("data", (c) => {
+          data += c;
+        });
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, text: data }));
+      }
+    );
+    req.setTimeout(0);
+    req.on("error", reject);
+    req.end(body);
+  });
+}
 async function chat(cfg, messages, tools) {
   const url = cfg.baseURL.replace(/\/+$/, "") + "/chat/completions";
   const headers = { "content-type": "application/json" };
   const key = resolveApiKey(cfg);
   if (key) headers.authorization = `Bearer ${key}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      model: cfg.model,
-      temperature: cfg.temperature ?? 0.2,
-      messages,
-      ...tools.length > 0 ? { tools } : {}
-    })
+  const payload = JSON.stringify({
+    model: cfg.model,
+    temperature: cfg.temperature ?? 0.2,
+    messages,
+    ...cfg.chatTemplateKwargs ? { chat_template_kwargs: cfg.chatTemplateKwargs } : {},
+    ...tools.length > 0 ? { tools } : {}
   });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`LLM API \u30A8\u30E9\u30FC ${res.status}: ${text.slice(0, 400)}`);
+  const res = await postJson(url, payload, headers);
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(`LLM API \u30A8\u30E9\u30FC ${res.status}: ${res.text.slice(0, 400)}`);
   }
-  const data = await res.json();
+  let data;
+  try {
+    data = JSON.parse(res.text);
+  } catch {
+    throw new Error("LLM API \u306E\u5FDC\u7B54\u304C JSON \u3067\u306F\u3042\u308A\u307E\u305B\u3093");
+  }
   const raw = data.choices?.[0]?.message;
   if (!raw) throw new Error("LLM API \u306E\u5FDC\u7B54\u5F62\u5F0F\u304C\u4E0D\u6B63\u3067\u3059");
   return {
@@ -323,7 +350,7 @@ function buildProtocolRules() {
   ].join("\n");
 }
 function extractJsonReply(raw) {
-  let text = raw.trim();
+  let text = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
   const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (fence) text = fence[1].trim();
   const candidates = [];
@@ -350,18 +377,32 @@ function extractJsonReply(raw) {
       }
     }
   }
+  let found = null;
   for (const c of candidates) {
     try {
       const obj = JSON.parse(c);
       if (typeof obj.tool === "string") {
-        return { tool: obj.tool, args: obj.args ?? {} };
+        found = { tool: obj.tool, args: obj.args ?? {} };
+      } else if (typeof obj.answer === "string") {
+        found = { answer: obj.answer };
       }
-      if (typeof obj.answer === "string") return { answer: obj.answer };
     } catch {
       continue;
     }
   }
-  return null;
+  return found;
+}
+function unwrapAnswer(raw) {
+  const cleaned = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+  const m = cleaned.match(/"answer"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  if (m) {
+    try {
+      return JSON.parse(`"${m[1]}"`);
+    } catch {
+      return m[1];
+    }
+  }
+  return cleaned.replace(new RegExp(`"?${END_MARKER}"?`, "g"), "").trim();
 }
 function composeCopilotPrompt(userInput, steps) {
   const parts = [buildProtocolRules(), "", "[\u4F9D\u983C]", userInput];
@@ -405,8 +446,8 @@ async function runCopilotTurn(opts) {
         steps.push('SYSTEM: \u76F4\u524D\u306E\u5FDC\u7B54\u306F\u6307\u5B9A\u5F62\u5F0F\u306B\u9055\u53CD\u3057\u307E\u3057\u305F\u3002\u8AAC\u660E\u6587\u3092\u7701\u304D\u3001{"tool":...} \u307E\u305F\u306F {"answer":"..."} \u306E JSON \u30AA\u30D6\u30B8\u30A7\u30AF\u30C81\u3064\u3060\u3051\u3092\u51FA\u529B\u3057\u3066\u304F\u3060\u3055\u3044\u3002');
         continue;
       }
-      io.print("[warn] \u5FDC\u7B54\u3092 JSON \u3068\u3057\u3066\u89E3\u91C8\u3067\u304D\u306A\u304B\u3063\u305F\u305F\u3081\u3001\u305D\u306E\u307E\u307E\u56DE\u7B54\u3068\u3057\u3066\u6271\u3044\u307E\u3059");
-      return { reply: raw.replace(new RegExp(`^${END_MARKER}$`, "m"), "").trim(), messages: [{ role: "assistant", content: raw }], aborted: false };
+      io.print("[warn] \u5FDC\u7B54\u3092 JSON \u3068\u3057\u3066\u89E3\u91C8\u3067\u304D\u306A\u304B\u3063\u305F\u305F\u3081\u3001\u5185\u5BB9\u3092\u53D6\u308A\u51FA\u3057\u3066\u56DE\u7B54\u3068\u3057\u307E\u3059");
+      return { reply: unwrapAnswer(raw), messages: [{ role: "assistant", content: raw }], aborted: false };
     }
     if (parsed.answer !== void 0) {
       const reply = parsed.answer.trim();
@@ -558,7 +599,7 @@ async function testTools() {
 }
 function mockServer(steps) {
   const state = { requests: 0 };
-  const server = import_node_http.default.createServer((req, res) => {
+  const server = import_node_http2.default.createServer((req, res) => {
     let body = "";
     req.on("data", (c) => {
       body += c;

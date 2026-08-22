@@ -26,6 +26,7 @@ export interface CopilotSettings {
   displayMode: 'minimized' | 'foreground'
   endMarker: string
   agentMode: boolean
+  modelPriority: string[]
 }
 
 export function resolveCopilotSettings(cfg: AgentConfig): CopilotSettings {
@@ -39,7 +40,10 @@ export function resolveCopilotSettings(cfg: AgentConfig): CopilotSettings {
     stallTimeoutSec: c.stallTimeoutSec ?? 120,
     displayMode: c.displayMode === 'foreground' ? 'foreground' : 'minimized',
     endMarker: c.endMarker ?? 'AGENT_END',
-    agentMode: c.agentMode === true
+    agentMode: c.agentMode === true,
+    modelPriority: Array.isArray(c.modelPriority)
+      ? c.modelPriority.filter((s) => s && s.trim())
+      : ['GPT 5.6 Think Deeper', 'Opus', 'Think Deeper']
   }
 }
 
@@ -137,6 +141,66 @@ const EDITOR_LENGTH_JS = `(() => {
     if (__vis(el)) return String((el.textContent || '').length);
   }
   return '-1';
+})()`
+
+const MODEL_SELECT_JS = String.raw`(async () => {
+  const candidates = __CANDIDATES__;
+  const switcherSelector = __SWITCHER__;
+  const docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}}
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const norm = s => (s || '').replace(/\s+/g, ' ').trim();
+  const stripTail = s => norm(s).replace(/[…‥]|\.{3}$/g, '');
+  const eq = (a,b) => a.toLowerCase() === b.toLowerCase();
+  const has = (a,b) => a.toLowerCase().indexOf(b.toLowerCase()) !== -1;
+  const matchesModel = (shown,cand,picked) => {
+    const a = stripTail(shown); if (!a) return false;
+    if (eq(a,cand) || has(a,cand)) return true;
+    if (picked && (eq(a,picked) || has(a,picked))) return true;
+    return a.length >= 6 && (has(cand,a) || (picked && has(picked,a)));
+  };
+  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
+  const primaryLabel = el => { const p=el.querySelector('.fai-CapabilityPickerMenuItem__primaryContentWrapper'); if(p)return norm(p.innerText); const c=el.querySelector('.fui-MenuItem__content > span:first-child'); if(c)return norm(c.innerText); return norm((el.innerText||'').split('\n')[0]); };
+  const subTextOf = el => { const s=el.querySelector('.fai-CapabilityPickerMenuItem__subText'); return s?norm(s.innerText):''; };
+  const itemSelector='[role="menuitem"],[role="menuitemradio"],[role="menuitemcheckbox"],[role="option"]';
+  const menuRoot=()=>{for(const d of docs){const r=d.querySelector('.fui-MenuPopover')||d.querySelector('[data-portal-node] [role="menu"]');if(r)return r;}return null;};
+  const collectItems=()=>{const r=menuRoot();return r?Array.from(r.querySelectorAll(itemSelector)).filter(visible):[];};
+  const collectItemsAll=()=>{const roots=docs.flatMap(d=>Array.from(d.querySelectorAll('.fui-MenuPopover, [data-portal-node] [role="menu"]'))).filter(visible);return Array.from(new Set(roots.flatMap(r=>Array.from(r.querySelectorAll(itemSelector)).filter(visible))));};
+  const pressEscape=()=>{try{const o={key:'Escape',code:'Escape',keyCode:27,which:27,bubbles:true,cancelable:true};const t=document.activeElement||document.body;t.dispatchEvent(new KeyboardEvent('keydown',o));t.dispatchEvent(new KeyboardEvent('keyup',o));}catch(e){}};
+  const fireEnter=el=>{try{el.focus();const o={key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true,cancelable:true};el.dispatchEvent(new KeyboardEvent('keydown',o));el.dispatchEvent(new KeyboardEvent('keyup',o));return true;}catch(e){return false;}};
+  const fireMenuClick=async el=>{try{const r=el.getBoundingClientRect(),cx=r.x+r.width/2,cy=r.y+r.height/2,base={bubbles:true,cancelable:true,view:window,clientX:cx,clientY:cy};el.dispatchEvent(new PointerEvent('pointerover',{...base,pointerType:'mouse'}));el.dispatchEvent(new MouseEvent('mouseover',base));el.dispatchEvent(new PointerEvent('pointermove',{...base,pointerType:'mouse'}));el.dispatchEvent(new MouseEvent('mousemove',base));try{el.focus();}catch(e){}await sleep(60);el.dispatchEvent(new PointerEvent('pointerdown',{...base,pointerType:'mouse',button:0}));el.dispatchEvent(new MouseEvent('mousedown',{...base,button:0}));el.dispatchEvent(new PointerEvent('pointerup',{...base,pointerType:'mouse',button:0}));el.dispatchEvent(new MouseEvent('mouseup',{...base,button:0}));el.dispatchEvent(new MouseEvent('click',{...base,button:0}));try{el.click();}catch(e){}return true;}catch(e){return false;}};
+  const findSwitcher=()=>{for(const d of docs){let b=d.querySelector(switcherSelector);if(b&&visible(b))return b;b=Array.from(d.querySelectorAll('button[aria-haspopup="menu"]')).find(x=>visible(x)&&(/モデル/.test(x.getAttribute('aria-label')||'')||/model/i.test(x.getAttribute('aria-label')||'')));if(b)return b;}return null;};
+  const labelItems=xs=>xs.map(el=>({el,label:primaryLabel(el),submenu:el.getAttribute('aria-haspopup')==='menu',testId:el.getAttribute('data-test-id')||'',checked:el.getAttribute('aria-checked')==='true'})).filter(x=>x.label);
+  const isGptTrigger=x=>/^gptSubMenuModelTrigger/i.test(x.testId)||(x.submenu&&/^gpt/i.test(x.label))||(x.submenu&&has(subTextOf(x.el),'OpenAI'));
+  const findHit=(xs,c)=>xs.find(x=>eq(x.label,c))||xs.find(x=>has(x.label,c))||(/^gpt/i.test(c)?xs.find(isGptTrigger):null);
+  const btn=findSwitcher();
+  if(!btn)return JSON.stringify({ok:true,changed:false,reason:'switcher_not_found'});
+  const current=norm(btn.innerText);
+  if(candidates.length&&matchesModel(current,candidates[0],''))return JSON.stringify({ok:true,changed:false,reason:'already_selected',current,picked:candidates[0]});
+  await fireMenuClick(btn);
+  let items=[];for(let i=0;i<30;i++){items=collectItems();if(items.length)break;await sleep(100);}if(items.length){await sleep(150);const a=collectItems();if(a.length)items=a;}
+  if(!items.length){pressEscape();return JSON.stringify({ok:true,changed:false,reason:'menu_not_found',current});}
+  let labeled=labelItems(items),skipped=[],observedSubMenuItems=[];
+  const clickAndConfirm=async(hit,cand)=>{
+    const before=new Set(collectItemsAll());await fireMenuClick(hit.el);let picked=hit.label,clicked=hit.el;
+    if(hit.submenu){let fresh=[];for(let i=0;i<20;i++){fresh=collectItemsAll().filter(x=>!before.has(x));if(fresh.length)break;await sleep(100);}if(fresh.length){const sub=fresh.map(el=>({el,label:primaryLabel(el)})).filter(x=>x.label);observedSubMenuItems=sub.map(x=>x.label).slice(0,16);const suffix=cand.replace(/^GPT[\s-]*[\d.]*\s*/i,'');const h=sub.find(x=>eq(x.label,cand))||sub.find(x=>has(x.label,cand))||sub.find(x=>eq(x.label,suffix))||sub.find(x=>suffix&&has(x.label,suffix))||sub.find(x=>has(cand,x.label)&&x.label.length>=4);if(!h)return{applied:false,reason:'submenu_no_match'};picked=h.label;clicked=h.el;await fireMenuClick(clicked);}}
+    const timeout=hit.submenu?5000:2000,t0=Date.now();let keyboard=false;
+    while(Date.now()-t0<timeout){await sleep(hit.submenu?50:100);after_loop:{}
+      const after=norm((findSwitcher()||{innerText:''}).innerText);
+      if(matchesModel(after,cand,picked))return{applied:true,after,picked};
+      const still=menuRoot()!==null;
+      if(hit.submenu&&still&&!keyboard&&(Date.now()-t0)>=800){keyboard=true;fireEnter(clicked);}
+    }
+    return{applied:false,reason:'confirm_failed'};
+  };
+  for(let pi=0;pi<candidates.length;pi++){const cand=candidates[pi],hit=findHit(labeled,cand);if(!hit){skipped.push(cand);continue;}
+    if(hit.checked){pressEscape();return JSON.stringify({ok:true,changed:false,reason:'already_selected',current,picked:hit.label});}
+    const r=await clickAndConfirm(hit,cand);
+    if(r.applied)return JSON.stringify({ok:true,changed:true,reason:'selected',before:current,after:r.after,picked:r.picked});
+    pressEscape();await sleep(150);pressEscape();await sleep(700);
+    const after2=norm((findSwitcher()||{innerText:''}).innerText);
+    if(matchesModel(after2,cand,r.picked||''))return JSON.stringify({ok:true,changed:true,reason:'selected_late',before:current,after:after2,picked:r.picked});
+  }
+  pressEscape();return JSON.stringify({ok:true,changed:false,reason:'model_not_in_menu',current,tried:candidates,skipped});
 })()`
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
@@ -385,6 +449,7 @@ export class CopilotEdgeClient {
       let ok = false
       for (let attempt = 1; attempt <= 3 && !ok; attempt++) {
         const before = Math.max(0, await this.editorLength())
+        await this.focusEditor()
         await this.cdpMethod('Input.insertText', { text: chunk })
         await sleep(300)
         const after = await this.editorLength()
@@ -466,11 +531,27 @@ export class CopilotEdgeClient {
     return text.split('\n').filter((l) => l.trim() !== this.s.endMarker).join('\n').trim()
   }
 
+  private async selectModel(): Promise<void> {
+    if (!this.s.modelPriority || this.s.modelPriority.length === 0) return
+    const js = MODEL_SELECT_JS
+      .replace('__CANDIDATES__', JSON.stringify(this.s.modelPriority))
+      .replace('__SWITCHER__', JSON.stringify('#gptModeSwitcher'))
+    try {
+      const raw = await this.evalWithReconnect(js, 30000)
+      const r = JSON.parse(String(raw)) as { changed?: boolean; reason?: string; before?: string; after?: string; picked?: string }
+      if (r.changed) console.log(`[model] ${r.before ?? '?'} -> ${r.after ?? r.picked ?? '?'}`)
+    } catch (err) {
+      console.log(`[model] 切替スキップ(継続): ${(err as Error).message}`)
+    }
+  }
+
   async complete(prompt: string): Promise<string> {
     await this.ensureEdge()
     await this.ensurePage()
     await this.freshChat()
     await this.waitInputReady(120)
+    await this.selectModel()
+    await this.waitInputReady(30)
     await this.assertTrustedOrigin()
     await this.insertPrompt(prompt)
     await this.clickSend()

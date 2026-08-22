@@ -14,6 +14,8 @@
     "displayMode": "minimized",
     "responseTimeoutSec": 300,
     "stallTimeoutSec": 120,
-    "endMarker": "AGENT_END"
+    "endMarker": "AGENT_END",
+    "agentMode": true,
+    "modelPriority": ["GPT 5.6 Think Deeper", "Opus", "Think Deeper"]
   }
 }

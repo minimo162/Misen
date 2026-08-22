@@ -47,7 +47,7 @@ function buildProtocolRules(): string {
 }
 
 export function extractJsonReply(raw: string): { tool?: string; args?: Record<string, unknown>; answer?: string } | null {
-  let text = raw.trim()
+  let text = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
   const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/)
   if (fence) text = fence[1].trim()
   const candidates: string[] = []
@@ -74,18 +74,33 @@ export function extractJsonReply(raw: string): { tool?: string; args?: Record<st
       }
     }
   }
+  let found: { tool?: string; args?: Record<string, unknown>; answer?: string } | null = null
   for (const c of candidates) {
     try {
       const obj = JSON.parse(c) as Record<string, unknown>
       if (typeof obj.tool === 'string') {
-        return { tool: obj.tool, args: (obj.args ?? {}) as Record<string, unknown> }
+        found = { tool: obj.tool, args: (obj.args ?? {}) as Record<string, unknown> }
+      } else if (typeof obj.answer === 'string') {
+        found = { answer: obj.answer }
       }
-      if (typeof obj.answer === 'string') return { answer: obj.answer }
     } catch {
       continue
     }
   }
-  return null
+  return found
+}
+
+function unwrapAnswer(raw: string): string {
+  const cleaned = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
+  const m = cleaned.match(/"answer"\s*:\s*"((?:[^"\\]|\\.)*)"/)
+  if (m) {
+    try {
+      return JSON.parse(`"${m[1]}"`) as string
+    } catch {
+      return m[1]
+    }
+  }
+  return cleaned.replace(new RegExp(`"?${END_MARKER}"?`, 'g'), '').trim()
 }
 
 function composeCopilotPrompt(userInput: string, steps: string[]): string {
@@ -137,8 +152,8 @@ async function runCopilotTurn(opts: {
         steps.push('SYSTEM: 直前の応答は指定形式に違反しました。説明文を省き、{"tool":...} または {"answer":"..."} の JSON オブジェクト1つだけを出力してください。')
         continue
       }
-      io.print('[warn] 応答を JSON として解釈できなかったため、そのまま回答として扱います')
-      return { reply: raw.replace(new RegExp(`^${END_MARKER}$`, 'm'), '').trim(), messages: [{ role: 'assistant', content: raw }], aborted: false }
+      io.print('[warn] 応答を JSON として解釈できなかったため、内容を取り出して回答とします')
+      return { reply: unwrapAnswer(raw), messages: [{ role: 'assistant', content: raw }], aborted: false }
     }
     if (parsed.answer !== undefined) {
       const reply = parsed.answer.trim()
