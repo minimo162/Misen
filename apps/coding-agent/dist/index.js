@@ -554,7 +554,7 @@ async function runCopilotTurn(opts) {
     }
     io.print(`[tool] ${summarize(def.name, parsed.args ?? {})}`);
     if (def.kind !== "read") {
-      const auto = def.kind === "write" ? cfg.autoApprove?.write : cfg.autoApprove?.command;
+      const auto = def.kind === "write" ? cfg.autoApprove?.write ?? true : cfg.autoApprove?.command ?? false;
       if (!auto) {
         const ok = await io.askYesNo(`  \u2191 \u5B9F\u884C\u3057\u307E\u3059\u304B\uFF1F (${def.kind})`);
         if (!ok) {
@@ -619,7 +619,7 @@ async function executeCall(call, cfg, ctx, io) {
   }
   io.print(`[tool] ${summarize(def.name, args)}`);
   if (def.kind !== "read") {
-    const auto = def.kind === "write" ? cfg.autoApprove?.write : cfg.autoApprove?.command;
+    const auto = def.kind === "write" ? cfg.autoApprove?.write ?? true : cfg.autoApprove?.command ?? false;
     if (!auto) {
       const ok = await io.askYesNo(`  \u2191 \u5B9F\u884C\u3057\u307E\u3059\u304B\uFF1F (${def.kind})`);
       if (!ok) return "(\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)";
@@ -1197,7 +1197,7 @@ function printHelp() {
       "  /cwd    \u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u3092\u8868\u793A",
       "  /exit   \u7D42\u4E86 (\u7A7AEnter\u3067\u3082\u7D42\u4E86)",
       "",
-      "\u30D5\u30A1\u30A4\u30EB\u66F8\u304D\u8FBC\u307F\u30FB\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306E\u524D\u306B\u78BA\u8A8D\u30D7\u30ED\u30F3\u30D7\u30C8\u304C\u8868\u793A\u3055\u308C\u307E\u3059"
+      "\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306E\u524D\u306B\u78BA\u8A8D\u30D7\u30ED\u30F3\u30D7\u30C8\u304C\u8868\u793A\u3055\u308C\u307E\u3059(\u30D5\u30A1\u30A4\u30EB\u66F8\u304D\u8FBC\u307F\u306F\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5185\u306A\u3089\u81EA\u52D5\u627F\u8A8D)"
     ].join("\n")
   );
 }

@@ -1,4 +1,4 @@
-import readline from 'node:readline'
+﻿import readline from 'node:readline'
 import type { AgentConfig } from './config'
 import { runAgentTurn, type AgentIO, type TextBackend } from './agent'
 import { CopilotEdgeClient } from './copilot'
@@ -18,7 +18,7 @@ function printHelp(): void {
       '  /cwd    ワークスペースを表示',
       '  /exit   終了 (空Enterでも終了)',
       '',
-      'ファイル書き込み・コマンド実行の前に確認プロンプトが表示されます'
+      'コマンド実行の前に確認プロンプトが表示されます(ファイル書き込みはワークスペース内なら自動承認)'
     ].join('\n')
   )
 }

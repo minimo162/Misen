@@ -526,7 +526,7 @@ async function runCopilotTurn(opts) {
     }
     io.print(`[tool] ${summarize(def.name, parsed.args ?? {})}`);
     if (def.kind !== "read") {
-      const auto = def.kind === "write" ? cfg.autoApprove?.write : cfg.autoApprove?.command;
+      const auto = def.kind === "write" ? cfg.autoApprove?.write ?? true : cfg.autoApprove?.command ?? false;
       if (!auto) {
         const ok = await io.askYesNo(`  \u2191 \u5B9F\u884C\u3057\u307E\u3059\u304B\uFF1F (${def.kind})`);
         if (!ok) {
@@ -591,7 +591,7 @@ async function executeCall(call, cfg, ctx, io) {
   }
   io.print(`[tool] ${summarize(def.name, args)}`);
   if (def.kind !== "read") {
-    const auto = def.kind === "write" ? cfg.autoApprove?.write : cfg.autoApprove?.command;
+    const auto = def.kind === "write" ? cfg.autoApprove?.write ?? true : cfg.autoApprove?.command ?? false;
     if (!auto) {
       const ok = await io.askYesNo(`  \u2191 \u5B9F\u884C\u3057\u307E\u3059\u304B\uFF1F (${def.kind})`);
       if (!ok) return "(\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)";

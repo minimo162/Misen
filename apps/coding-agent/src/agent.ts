@@ -248,7 +248,7 @@ async function runCopilotTurn(opts: {
     }
     io.print(`[tool] ${summarize(def.name, parsed.args ?? {})}`)
     if (def.kind !== 'read') {
-      const auto = def.kind === 'write' ? cfg.autoApprove?.write : cfg.autoApprove?.command
+      const auto = def.kind === 'write' ? (cfg.autoApprove?.write ?? true) : (cfg.autoApprove?.command ?? false)
       if (!auto) {
         const ok = await io.askYesNo(`  ↑ 実行しますか？ (${def.kind})`)
         if (!ok) {
@@ -335,7 +335,7 @@ async function executeCall(
   }
   io.print(`[tool] ${summarize(def.name, args)}`)
   if (def.kind !== 'read') {
-    const auto = def.kind === 'write' ? cfg.autoApprove?.write : cfg.autoApprove?.command
+    const auto = def.kind === 'write' ? (cfg.autoApprove?.write ?? true) : (cfg.autoApprove?.command ?? false)
     if (!auto) {
       const ok = await io.askYesNo(`  ↑ 実行しますか？ (${def.kind})`)
       if (!ok) return '(ユーザーが拒否しました)'
