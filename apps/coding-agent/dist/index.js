@@ -478,11 +478,9 @@ function buildProtocolRules() {
     "write_file \u3067\u30D5\u30A1\u30A4\u30EB\u5185\u5BB9\u3092\u6E21\u3059\u3068\u304D\u306F\u3001content \u3092 JSON \u5185\u306B\u66F8\u304B\u305A\u3001JSON \u306E\u76F4\u5F8C\u306B\u300CCONTENT:\u300D\u306E\u884C\u3068\u672C\u6587\u3092\u7D9A\u3051\u3066\u304F\u3060\u3055\u3044:",
     '  {"tool":"write_file","args":{"path":"index.html"}}',
     "  CONTENT:",
-    "  <p>\u3053\u3053\u306B\u30D5\u30A1\u30A4\u30EB\u672C\u6587(\u751F\u30C6\u30AD\u30B9\u30C8\u305D\u306E\u307E\u307E)</p>",
+    "  <p>\u3053\u3053\u306B\u30D5\u30A1\u30A4\u30EB\u672C\u6587</p>",
     "  AGENT_END",
-    "\u300CCONTENT:\u300D\u306E\u6B21\u306E\u884C\u304B\u3089 AGENT_END \u306E\u76F4\u524D\u307E\u3067\u304C\u30D5\u30A1\u30A4\u30EB\u672C\u6587\u306B\u306A\u308A\u307E\u3059\u3002\u672C\u6587\u4E2D\u3067\u306E\u30D0\u30C3\u30AF\u30AF\u30A9\u30FC\u30C8(`)\u306E\u4F7F\u7528\u306F\u7981\u6B62\u3067\u3059\u3002JavaScript \u306E\u6587\u5B57\u5217\u306F\u5FC5\u305A + \u6F14\u7B97\u5B50\u3067\u306E\u9023\u7D50\u3068\u901A\u5E38\u306E\u5F15\u7528\u7B26\u3067\u66F8\u3044\u3066\u304F\u3060\u3055\u3044\u3002",
-    "\u26A0\uFE0F \u6539\u884C\u306F\u8EE2\u9001\u4E2D\u306B\u5931\u308F\u308C\u308B\u305F\u3081\u3001\u672C\u6587\u306E\u5404\u300C\u884C\u300D\u306E\u672B\u5C3E\u306B\u306F\u5FC5\u305A \xB6 \u3092 1 \u3064\u7F6E\u3044\u3066\u304F\u3060\u3055\u3044(\u4F8B: 1\u884C\u76EE\xB62\u884C\u76EE\xB63\u884C\u76EE\xB6)\u3002\u30B7\u30B9\u30C6\u30E0\u304C \xB6 \u3092\u6539\u884C\u306B\u5FA9\u5143\u3057\u307E\u3059\u3002",
-    "\u26A0\uFE0F \u5C71\u62EC\u5F27 < > \u3092\u51FA\u529B\u3059\u308B\u5834\u5408\u306F\u5168\u89D2\u306E \uFF1C \uFF1E \u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044(JSON \u5185\u30FBCONTENT \u5185\u306E\u4E21\u65B9)\u3002\u30B7\u30B9\u30C6\u30E0\u304C\u81EA\u52D5\u3067\u534A\u89D2\u306B\u5FA9\u5143\u3057\u307E\u3059\u3002",
+    "\u26A0\uFE0F \u5FDC\u7B54\u306F\u5FC5\u305A\u300C\u4E00\u3064\u306E\u30B3\u30FC\u30C9\u30D5\u30A7\u30F3\u30B9\u30D6\u30ED\u30C3\u30AF ``` \u301C ``` \u300D\u306E\u4E2D\u306B\u3001JSON\u30FBCONTENT \u672C\u6587\u30FBAGENT_END \u306E\u3059\u3079\u3066\u3092\u542B\u3081\u3066\u304F\u3060\u3055\u3044\u3002\u30D6\u30ED\u30C3\u30AF\u5185\u3067\u306F\u30BF\u30B0 < > \u3084\u30D0\u30C3\u30AF\u30AF\u30A9\u30FC\u30C8 ` \u3082\u305D\u306E\u307E\u307E\u66F8\u3044\u3066\u69CB\u3044\u307E\u305B\u3093(\u30B7\u30B9\u30C6\u30E0\u304C\u30D6\u30ED\u30C3\u30AF\u5358\u4F4D\u3067\u539F\u6587\u3092\u53D7\u3051\u53D6\u308A\u307E\u3059)\u3002\u30D6\u30ED\u30C3\u30AF\u306E\u5916\u306B\u306F\u4F55\u3082\u66F8\u304B\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002",
     `\u51FA\u529B\u306E\u6700\u5F8C\u306B\u3001${END_MARKER} \u3068\u3044\u3046\u6587\u5B57\u5217\u3060\u3051\u306E\u884C\u3092\u5FC5\u305A\u4ED8\u3051\u308B\u3002`,
     "",
     "\u51FA\u529B\u4F8B:",
@@ -840,6 +838,16 @@ var MODEL_SELECT_JS = String.raw`(async () => {
   }
   pressEscape();return JSON.stringify({ok:true,changed:false,reason:'model_not_in_menu',current,tried:candidates,skipped});
 })()`;
+var CLICK_COPY_JS = `(() => {
+  ${VISIBLE_JS}
+  const btns = Array.from(document.querySelectorAll('button')).filter(visible);
+  const cand = btns.filter((b) => /\u30B3\u30D4\u30FC|copy/i.test(b.getAttribute('aria-label') || b.title || ''));
+  if (cand.length === 0) return JSON.stringify({ clicked: false });
+  const last = cand[cand.length - 1];
+  try { last.scrollIntoView({ block: 'center' }); } catch (e) {}
+  last.click();
+  return JSON.stringify({ clicked: true, label: (last.getAttribute('aria-label') || '').slice(0, 40) });
+})()`;
 var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 var CdpConnection = class _CdpConnection {
   ws;
@@ -945,8 +953,45 @@ var CopilotEdgeClient = class {
   name = "copilot-edge";
   s;
   cdp = null;
+  clipGranted = false;
   constructor(cfg) {
     this.s = resolveCopilotSettings(cfg);
+  }
+  async grantClipboard() {
+    if (this.clipGranted) return;
+    const ver = await (await fetch(`http://127.0.0.1:${this.s.cdpPort}/json/version`, { signal: AbortSignal.timeout(5e3) })).json();
+    const browserWs = String(ver.webSocketDebuggerUrl ?? "");
+    if (!browserWs) throw new Error("browser WebSocket \u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093");
+    const bws = await CdpConnection.connect(browserWs, 1e4);
+    try {
+      await bws.method("Browser.grantPermissions", {
+        permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"],
+        origin: new URL(this.s.url).origin
+      }, 1e4);
+    } finally {
+      bws.close();
+    }
+    this.clipGranted = true;
+  }
+  stripOuterFence(t) {
+    let s = t.trim();
+    const m = s.match(/^```[\w-]*[ \t]*\r?\n([\s\S]*)\r?\n?```\s*$/);
+    if (m) s = m[1];
+    return s.split("\n").filter((l) => l.trim() !== this.s.endMarker).join("\n").trim();
+  }
+  async finalizeAnswer(fallbackText) {
+    try {
+      await this.grantClipboard();
+      const clicked = JSON.parse(String(await this.evalWithReconnect(CLICK_COPY_JS, 15e3)));
+      if (clicked.clicked) {
+        await sleep(500);
+        const clip = String(await this.evalWithReconnect("navigator.clipboard.readText()", 1e4));
+        const s = this.stripOuterFence(clip);
+        if (s.trim().length >= 10) return s;
+      }
+    } catch {
+    }
+    return this.cleanResponse(fallbackText);
   }
   async ensureEdge() {
     if (await devToolsUp(this.s.cdpPort)) return;
@@ -1149,8 +1194,8 @@ var CopilotEdgeClient = class {
       const hasMarker = this.s.endMarker.length > 0 && lastText.includes(this.s.endMarker);
       const quietFor = Date.now() - lastChange;
       if (sawNewText && lastText !== "" && st.text === lastText) {
-        if (hasMarker && quietFor >= 2500) return this.cleanResponse(lastText);
-        if (!st.generating && sawNewText && quietFor >= 8e3) return this.cleanResponse(lastText);
+        if (hasMarker && quietFor >= 2500) return await this.finalizeAnswer(lastText);
+        if (!st.generating && sawNewText && quietFor >= 8e3) return await this.finalizeAnswer(lastText);
       }
       if (!st.generating && sawNewText && quietFor > this.s.stallTimeoutSec * 1e3) {
         throw new Error("Copilot \u306E\u5FDC\u7B54\u304C\u505C\u6EDE\u3057\u305F\u305F\u3081\u8AE6\u3081\u307E\u3057\u305F");

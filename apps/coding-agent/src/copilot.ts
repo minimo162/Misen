@@ -203,6 +203,17 @@ const MODEL_SELECT_JS = String.raw`(async () => {
   pressEscape();return JSON.stringify({ok:true,changed:false,reason:'model_not_in_menu',current,tried:candidates,skipped});
 })()`
 
+const CLICK_COPY_JS = `(() => {
+  ${VISIBLE_JS}
+  const btns = Array.from(document.querySelectorAll('button')).filter(visible);
+  const cand = btns.filter((b) => /コピー|copy/i.test(b.getAttribute('aria-label') || b.title || ''));
+  if (cand.length === 0) return JSON.stringify({ clicked: false });
+  const last = cand[cand.length - 1];
+  try { last.scrollIntoView({ block: 'center' }); } catch (e) {}
+  last.click();
+  return JSON.stringify({ clicked: true, label: (last.getAttribute('aria-label') || '').slice(0, 40) });
+})()`
+
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 class CdpConnection {
@@ -310,9 +321,48 @@ export class CopilotEdgeClient {
   readonly name = 'copilot-edge'
   private s: CopilotSettings
   private cdp: CdpConnection | null = null
+  private clipGranted = false
 
   constructor(cfg: AgentConfig) {
     this.s = resolveCopilotSettings(cfg)
+  }
+
+  private async grantClipboard(): Promise<void> {
+    if (this.clipGranted) return
+    const ver = await (await fetch(`http://127.0.0.1:${this.s.cdpPort}/json/version`, { signal: AbortSignal.timeout(5000) })).json()
+    const browserWs = String((ver as { webSocketDebuggerUrl?: string }).webSocketDebuggerUrl ?? '')
+    if (!browserWs) throw new Error('browser WebSocket を取得できません')
+    const bws = await CdpConnection.connect(browserWs, 10000)
+    try {
+      await bws.method('Browser.grantPermissions', {
+        permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'],
+        origin: new URL(this.s.url).origin
+      }, 10000)
+    } finally {
+      bws.close()
+    }
+    this.clipGranted = true
+  }
+
+  private stripOuterFence(t: string): string {
+    let s = t.trim()
+    const m = s.match(/^```[\w-]*[ \t]*\r?\n([\s\S]*)\r?\n?```\s*$/)
+    if (m) s = m[1]
+    return s.split('\n').filter((l) => l.trim() !== this.s.endMarker).join('\n').trim()
+  }
+
+  private async finalizeAnswer(fallbackText: string): Promise<string> {
+    try {
+      await this.grantClipboard()
+      const clicked = JSON.parse(String(await this.evalWithReconnect(CLICK_COPY_JS, 15000))) as { clicked: boolean }
+      if (clicked.clicked) {
+        await sleep(500)
+        const clip = String(await this.evalWithReconnect('navigator.clipboard.readText()', 10000))
+        const s = this.stripOuterFence(clip)
+        if (s.trim().length >= 10) return s
+      }
+    } catch {}
+    return this.cleanResponse(fallbackText)
   }
 
   private async ensureEdge(): Promise<void> {
@@ -524,8 +574,8 @@ export class CopilotEdgeClient {
       const hasMarker = this.s.endMarker.length > 0 && lastText.includes(this.s.endMarker)
       const quietFor = Date.now() - lastChange
       if (sawNewText && lastText !== '' && st.text === lastText) {
-        if (hasMarker && quietFor >= 2500) return this.cleanResponse(lastText)
-        if (!st.generating && sawNewText && quietFor >= 8000) return this.cleanResponse(lastText)
+        if (hasMarker && quietFor >= 2500) return await this.finalizeAnswer(lastText)
+        if (!st.generating && sawNewText && quietFor >= 8000) return await this.finalizeAnswer(lastText)
       }
       if (!st.generating && sawNewText && quietFor > this.s.stallTimeoutSec * 1000) {
         throw new Error('Copilot の応答が停滞したため諦めました')
