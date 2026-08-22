@@ -1,0 +1,19 @@
+{
+  "provider": "copilot-edge",
+  "baseURL": "https://your-internal-endpoint/v1",
+  "apiKeyEnv": "COMPANY_LLM_API_KEY",
+  "model": "gpt-4o-mini",
+  "temperature": 0.2,
+  "maxToolIterations": 15,
+  "autoApprove": { "write": false, "command": false },
+  "restrictToWorkspace": true,
+  "systemPrompt": "あなたは社内コーディング支援エージェントです。提供されたツールでファイルの調査・編集・コマンド実行を行い、簡潔な日本語で回答してください。",
+  "copilot": {
+    "url": "https://m365.cloud.microsoft/chat/",
+    "cdpPort": 9444,
+    "displayMode": "minimized",
+    "responseTimeoutSec": 300,
+    "stallTimeoutSec": 120,
+    "endMarker": "AGENT_END"
+  }
+}

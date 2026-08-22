@@ -1,0 +1,9 @@
+{
+  "name": "coding-agent",
+  "version": "0.2.0",
+  "type": "cli",
+  "entry": "dist/index.js",
+  "runtime": "node-v22.14.0-win-x64",
+  "env": {},
+  "nodeArgs": []
+}

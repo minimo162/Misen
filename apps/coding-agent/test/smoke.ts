@@ -1,0 +1,230 @@
+import assert from 'node:assert'
+import http from 'node:http'
+import net from 'node:net'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { extractJsonReply, runAgentTurn, type AgentIO, type TextBackend } from '../src/agent'
+import type { AgentConfig } from '../src/config'
+import type { ChatMessage } from '../src/llm'
+import { TOOL_DEFS, type ToolContext } from '../src/tools'
+
+function makeCtx(root: string, restrict = true): ToolContext {
+  return { workspace: root, restrictToWorkspace: restrict }
+}
+
+function ioStub(approve: boolean): AgentIO {
+  return {
+    print: () => {},
+    askYesNo: async () => approve
+  }
+}
+
+async function testTools(): Promise<void> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-'))
+  const ctx = makeCtx(root)
+  const get = (n: string) => TOOL_DEFS.find((t) => t.name === n)!
+
+  await get('write_file').run({ path: 'a/hello.txt', content: 'line1\nline2 unique\n' }, ctx)
+  const read = await get('read_file').run({ path: 'a/hello.txt' }, ctx)
+  assert.ok(read.includes('unique'))
+
+  const edited = await get('edit_file').run({ path: 'a/hello.txt', old_string: 'unique', new_string: 'edited' }, ctx)
+  assert.ok(edited.includes('1 箇所'))
+  const after = await get('read_file').run({ path: 'a/hello.txt' }, ctx)
+  assert.ok(after.includes('edited'))
+  assert.ok(!after.includes('unique'))
+
+  const search = await get('search_files').run({ query: 'edited' }, ctx)
+  assert.ok(search.includes('hello.txt'))
+
+  const list = await get('list_files').run({ glob: '*.txt' }, ctx)
+  assert.ok(list.includes('hello.txt'))
+
+  const cmd = await get('run_command').run({ command: 'echo smoke-ok' }, ctx)
+  assert.ok(cmd.includes('smoke-ok'))
+
+  let outsideThrew = false
+  try {
+    await get('read_file').run({ path: '..\\outside.txt' }, ctx)
+  } catch {
+    outsideThrew = true
+  }
+  assert.ok(outsideThrew, 'restrict guard should throw')
+
+  let dupThrew = false
+  try {
+    await get('edit_file').run({ path: 'a/hello.txt', old_string: 'e', new_string: 'X' }, ctx)
+  } catch (err) {
+    dupThrew = String((err as Error).message).includes('件一致')
+  }
+  assert.ok(dupThrew, 'multi-match should throw without replace_all')
+
+  fs.rmSync(root, { recursive: true, force: true })
+  console.log('PASS tools')
+}
+
+interface ScriptStep {
+  content?: string
+  tool_call?: { name: string; args: Record<string, unknown> }
+}
+
+function mockServer(steps: ScriptStep[]): Promise<{ server: http.Server; url: string; requests: number }> {
+  const state = { requests: 0 }
+  const server = http.createServer((req, res) => {
+    let body = ''
+    req.on('data', (c) => {
+      body += c
+    })
+    req.on('end', () => {
+      JSON.parse(body)
+      state.requests++
+      const step = steps[state.requests - 1] ?? steps[steps.length - 1]
+      const message: Record<string, unknown> = step.tool_call
+        ? {
+            role: 'assistant',
+            content: '',
+            tool_calls: [
+              {
+                id: `call_${state.requests}`,
+                type: 'function',
+                function: { name: step.tool_call.name, arguments: JSON.stringify(step.tool_call.args) }
+              }
+            ]
+          }
+        : { role: 'assistant', content: step.content ?? 'ok' }
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify({ choices: [{ message }] }))
+    })
+  })
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address() as net.AddressInfo
+      resolve({ server, url: `http://127.0.0.1:${addr.port}/v1`, requests: state.requests })
+    })
+  })
+}
+
+async function withServer(
+  steps: ScriptStep[],
+  fn: (cfg: AgentConfig) => Promise<void>
+): Promise<void> {
+  const { server, url } = await mockServer(steps)
+  try {
+    await fn({ baseURL: url, model: 'mock' })
+  } finally {
+    server.close()
+  }
+}
+
+async function testAgentLoop(): Promise<void> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-'))
+  await withServer(
+    [
+      { tool_call: { name: 'write_file', args: { path: 'hello.txt', content: 'hi from mock' } } },
+      { content: '書き込みました' }
+    ],
+    async (cfg) => {
+      const result = await runAgentTurn({
+        cfg,
+        messages: [],
+        userInput: '作って',
+        ctx: makeCtx(root),
+        io: ioStub(true)
+      })
+      assert.strictEqual(result.reply, '書き込みました')
+      assert.strictEqual(result.aborted, false)
+      const toolMsg = result.messages.find((m) => m.role === 'tool')
+      assert.ok(toolMsg && toolMsg.content && toolMsg.content.includes('書き込み完了'))
+      assert.ok(fs.readFileSync(path.join(root, 'hello.txt'), 'utf8').includes('hi from mock'))
+    }
+  )
+  fs.rmSync(root, { recursive: true, force: true })
+  console.log('PASS agent-loop')
+}
+
+async function testDenial(): Promise<void> {
+  await withServer(
+    [{ tool_call: { name: 'run_command', args: { command: 'echo x' } } }, { content: '中止しました' }],
+    async (cfg) => {
+      const result = await runAgentTurn({
+        cfg,
+        messages: [],
+        userInput: '走って',
+        ctx: makeCtx(os.tmpdir(), false),
+        io: ioStub(false)
+      })
+      assert.strictEqual(result.reply, '中止しました')
+      assert.ok(
+        result.messages.some((m) => m.role === 'tool' && m.content === '(ユーザーが拒否しました)')
+      )
+    }
+  )
+  console.log('PASS denial')
+}
+
+async function testProtocolParsing(): Promise<void> {
+  assert.strictEqual(extractJsonReply('{"answer":"hi"}')?.answer, 'hi')
+
+  const fenced = extractJsonReply('説明文\n```json\n{"tool":"read_file","args":{"path":"a.txt"}}\n```\nAGENT_END')
+  assert.ok(fenced && fenced.tool === 'read_file' && fenced.args && fenced.args.path === 'a.txt')
+
+  const prose = extractJsonReply('前置き\n{"answer":"波括弧 } を含む回答"}\nAGENT_END')
+  assert.strictEqual(prose?.answer, '波括弧 } を含む回答')
+
+  const toolNoArgs = extractJsonReply('{"tool":"list_files"}')
+  assert.ok(toolNoArgs && toolNoArgs.tool === 'list_files' && toolNoArgs.args)
+
+  assert.strictEqual(extractJsonReply('これはJSONではありません'), null)
+  console.log('PASS protocol-parsing')
+}
+
+class FakeBackend implements TextBackend {
+  readonly name = 'fake'
+  calls = 0
+  prompts: string[] = []
+  constructor(private replies: string[]) {}
+  async complete(prompt: string): Promise<string> {
+    this.prompts.push(prompt)
+    const r = this.replies[this.calls]
+    this.calls++
+    return r ?? '{"answer":"no script"}'
+  }
+}
+
+async function testCopilotLoop(): Promise<void> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-'))
+  const backend = new FakeBackend([
+    '```json\n{"tool":"write_file","args":{"path":"b.txt","content":"from copilot"}}\n```\nAGENT_END',
+    '{"answer":"完了しました"}\nAGENT_END'
+  ])
+  const cfg = { baseURL: '', model: '', provider: 'copilot-edge' as const, autoApprove: { write: true } }
+  const result = await runAgentTurn({
+    cfg,
+    messages: [],
+    userInput: '作って',
+    ctx: makeCtx(root),
+    io: ioStub(true),
+    backend
+  })
+  assert.strictEqual(result.reply, '完了しました')
+  assert.strictEqual(result.aborted, false)
+  assert.ok(fs.readFileSync(path.join(root, 'b.txt'), 'utf8').includes('from copilot'))
+  assert.strictEqual(backend.calls, 2)
+  assert.ok(backend.prompts[1].includes('TOOL_RESULT(write_file)'))
+  assert.ok(backend.prompts[0].includes('AGENT_END'))
+  fs.rmSync(root, { recursive: true, force: true })
+  console.log('PASS copilot-loop')
+}
+
+(async () => {
+  await testTools()
+  await testAgentLoop()
+  await testDenial()
+  await testProtocolParsing()
+  await testCopilotLoop()
+  console.log('ALL PASS')
+})().catch((err) => {
+  console.error(err)
+  process.exit(1)
+})
