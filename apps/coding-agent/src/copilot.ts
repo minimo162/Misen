@@ -143,6 +143,17 @@ const EDITOR_LENGTH_JS = `(() => {
   return '-1';
 })()`
 
+const CLEAR_EDITOR_JS = `(() => {
+  ${VISIBLE_JS}
+  ${DOCS_JS}
+  const sels = ${JSON.stringify(['#m365-chat-editor-target-element', '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
+  for (const d of __docs) for (const s of sels) {
+    const el = d.querySelector(s);
+    if (__vis(el)) { el.focus(); document.execCommand('selectAll'); document.execCommand('delete'); return 'ok'; }
+  }
+  return 'ng';
+})()`
+
 const MODEL_SELECT_JS = String.raw`(async () => {
   const candidates = __CANDIDATES__;
   const switcherSelector = __SWITCHER__;
@@ -489,6 +500,33 @@ export class CopilotEdgeClient {
     if (prompt.length > this.s.maxPromptChars) {
       throw new Error(`依頼文が上限 ${this.s.maxPromptChars} 文字を超えています (${prompt.length} 文字)`)
     }
+    try {
+      await this.pasteViaClipboard(prompt)
+      return
+    } catch (err) {
+      console.log(`[paste] クリップボード貼り付けに失敗、チャンク方式へフォールバック: ${(err as Error).message}`)
+    }
+    await this.insertByChunks(prompt)
+  }
+
+  private async pasteViaClipboard(prompt: string): Promise<void> {
+    await this.grantClipboard()
+    await this.evalWithReconnect(`navigator.clipboard.writeText(${JSON.stringify(prompt)})`, 15000)
+    for (let i = 0; i < 6; i++) {
+      await this.evalWithReconnect(CLEAR_EDITOR_JS)
+      await sleep(300)
+      if ((await this.editorLength()) === 0) break
+    }
+    await this.focusEditor()
+    await this.evalWithReconnect('(() => { const s = getSelection(); if (!s || !document.activeElement) return; s.selectAllChildren(document.activeElement); s.collapseToEnd() })()', 10000)
+    await this.cdpMethod('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'v', code: 'KeyV', windowsVirtualKeyCode: 86, modifiers: 2 })
+    await this.cdpMethod('Input.dispatchKeyEvent', { type: 'keyUp', key: 'v', code: 'KeyV', windowsVirtualKeyCode: 86, modifiers: 2 })
+    await sleep(1200)
+    const len = Number(await this.editorLength())
+    if (len < prompt.length * 0.9) throw new Error(`貼り付け後の長さ不足 (期待 ~${prompt.length}, 実際 ${len})`)
+  }
+
+  private async insertByChunks(prompt: string): Promise<void> {
     if ((await this.editorLength()) > 0) {
       await this.clearEditor()
     }
@@ -498,14 +536,14 @@ export class CopilotEdgeClient {
       const chunk = prompt.slice(pos, pos + chunkSize)
       const expectedGrowth = Math.floor(chunk.length * 0.9)
       let ok = false
-      for (let attempt = 1; attempt <= 3 && !ok; attempt++) {
+      for (let attempt = 1; attempt <= 4 && !ok; attempt++) {
         const before = Math.max(0, await this.editorLength())
         await this.focusEditor()
         await this.cdpMethod('Input.insertText', { text: chunk })
         await sleep(300)
         const after = await this.editorLength()
         if (after - before >= expectedGrowth) ok = true
-        else await sleep(500)
+        else await sleep(900)
       }
       if (!ok) {
         if (chunkSize <= 500) {
@@ -516,10 +554,7 @@ export class CopilotEdgeClient {
       }
       pos += chunk.length
     }
-    const len = await this.editorLength()
-    if (len < prompt.length * 0.9) throw new Error(`依頼文の入力を確認できませんでした (期待 ${prompt.length} / 実際 ${len})`)
   }
-
   private async clearEditor(): Promise<void> {
     await this.focusEditor()
     await this.cdpMethod('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, modifiers: 2 })

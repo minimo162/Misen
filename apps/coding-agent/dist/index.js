@@ -502,7 +502,7 @@ function unwrapAnswer(raw) {
   }
   return cleaned.replace(new RegExp(`"?${END_MARKER}"?`, "g"), "").trim();
 }
-function composeCopilotPrompt(userInput, steps) {
+function composeCopilotPrompt(userInput, steps, budget = 6e4) {
   const head = [buildProtocolRules(), "", "[\u4F9D\u983C]", userInput];
   const tail = [
     "",
@@ -513,7 +513,7 @@ function composeCopilotPrompt(userInput, steps) {
   let keep = steps;
   const build = (list, omitted) => [...head, ...omitted ? ["(\u203B \u53E4\u3044\u7D4C\u904E\u306F\u7701\u7565\u3057\u307E\u3057\u305F)"] : [], ...list, ...tail].join("\n");
   let text = build(keep, false);
-  while (text.length > 2700 && keep.length > 1) {
+  while (text.length > budget && keep.length > 1) {
     keep = keep.slice(1);
     text = build(keep, true);
   }
@@ -544,7 +544,7 @@ async function runCopilotTurn(opts) {
   for (let i = 0; i < maxIter; i++) {
     let raw;
     try {
-      raw = await backend.complete(composeCopilotPrompt(opts.userInput, steps));
+      raw = await backend.complete(composeCopilotPrompt(opts.userInput, steps, opts.cfg.copilot?.maxPromptChars ?? 6e4));
       raw = raw.replace(/＜/g, "<").replace(/＞/g, ">").replace(new RegExp(String.fromCharCode(65312) === "" ? "" : "\uFF40", "g"), String.fromCharCode(96));
     } catch (err) {
       io.print(`[error] ${err.message}`);
@@ -778,6 +778,16 @@ var EDITOR_LENGTH_JS = `(() => {
     if (__vis(el)) return String((el.textContent || '').length);
   }
   return '-1';
+})()`;
+var CLEAR_EDITOR_JS = `(() => {
+  ${VISIBLE_JS}
+  ${DOCS_JS}
+  const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
+  for (const d of __docs) for (const s of sels) {
+    const el = d.querySelector(s);
+    if (__vis(el)) { el.focus(); document.execCommand('selectAll'); document.execCommand('delete'); return 'ok'; }
+  }
+  return 'ng';
 })()`;
 var MODEL_SELECT_JS = String.raw`(async () => {
   const candidates = __CANDIDATES__;
@@ -1114,6 +1124,31 @@ var CopilotEdgeClient = class {
     if (prompt.length > this.s.maxPromptChars) {
       throw new Error(`\u4F9D\u983C\u6587\u304C\u4E0A\u9650 ${this.s.maxPromptChars} \u6587\u5B57\u3092\u8D85\u3048\u3066\u3044\u307E\u3059 (${prompt.length} \u6587\u5B57)`);
     }
+    try {
+      await this.pasteViaClipboard(prompt);
+      return;
+    } catch (err) {
+      console.log(`[paste] \u30AF\u30EA\u30C3\u30D7\u30DC\u30FC\u30C9\u8CBC\u308A\u4ED8\u3051\u306B\u5931\u6557\u3001\u30C1\u30E3\u30F3\u30AF\u65B9\u5F0F\u3078\u30D5\u30A9\u30FC\u30EB\u30D0\u30C3\u30AF: ${err.message}`);
+    }
+    await this.insertByChunks(prompt);
+  }
+  async pasteViaClipboard(prompt) {
+    await this.grantClipboard();
+    await this.evalWithReconnect(`navigator.clipboard.writeText(${JSON.stringify(prompt)})`, 15e3);
+    for (let i = 0; i < 6; i++) {
+      await this.evalWithReconnect(CLEAR_EDITOR_JS);
+      await sleep(300);
+      if (await this.editorLength() === 0) break;
+    }
+    await this.focusEditor();
+    await this.evalWithReconnect("(() => { const s = getSelection(); if (!s || !document.activeElement) return; s.selectAllChildren(document.activeElement); s.collapseToEnd() })()", 1e4);
+    await this.cdpMethod("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "v", code: "KeyV", windowsVirtualKeyCode: 86, modifiers: 2 });
+    await this.cdpMethod("Input.dispatchKeyEvent", { type: "keyUp", key: "v", code: "KeyV", windowsVirtualKeyCode: 86, modifiers: 2 });
+    await sleep(1200);
+    const len = Number(await this.editorLength());
+    if (len < prompt.length * 0.9) throw new Error(`\u8CBC\u308A\u4ED8\u3051\u5F8C\u306E\u9577\u3055\u4E0D\u8DB3 (\u671F\u5F85 ~${prompt.length}, \u5B9F\u969B ${len})`);
+  }
+  async insertByChunks(prompt) {
     if (await this.editorLength() > 0) {
       await this.clearEditor();
     }
@@ -1123,14 +1158,14 @@ var CopilotEdgeClient = class {
       const chunk = prompt.slice(pos, pos + chunkSize);
       const expectedGrowth = Math.floor(chunk.length * 0.9);
       let ok = false;
-      for (let attempt = 1; attempt <= 3 && !ok; attempt++) {
+      for (let attempt = 1; attempt <= 4 && !ok; attempt++) {
         const before = Math.max(0, await this.editorLength());
         await this.focusEditor();
         await this.cdpMethod("Input.insertText", { text: chunk });
         await sleep(300);
         const after = await this.editorLength();
         if (after - before >= expectedGrowth) ok = true;
-        else await sleep(500);
+        else await sleep(900);
       }
       if (!ok) {
         if (chunkSize <= 500) {
@@ -1141,8 +1176,6 @@ var CopilotEdgeClient = class {
       }
       pos += chunk.length;
     }
-    const len = await this.editorLength();
-    if (len < prompt.length * 0.9) throw new Error(`\u4F9D\u983C\u6587\u306E\u5165\u529B\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F (\u671F\u5F85 ${prompt.length} / \u5B9F\u969B ${len})`);
   }
   async clearEditor() {
     await this.focusEditor();

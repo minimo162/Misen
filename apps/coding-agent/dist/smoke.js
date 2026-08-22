@@ -474,7 +474,7 @@ function unwrapAnswer(raw) {
   }
   return cleaned.replace(new RegExp(`"?${END_MARKER}"?`, "g"), "").trim();
 }
-function composeCopilotPrompt(userInput, steps) {
+function composeCopilotPrompt(userInput, steps, budget = 6e4) {
   const head = [buildProtocolRules(), "", "[\u4F9D\u983C]", userInput];
   const tail = [
     "",
@@ -485,7 +485,7 @@ function composeCopilotPrompt(userInput, steps) {
   let keep = steps;
   const build = (list, omitted) => [...head, ...omitted ? ["(\u203B \u53E4\u3044\u7D4C\u904E\u306F\u7701\u7565\u3057\u307E\u3057\u305F)"] : [], ...list, ...tail].join("\n");
   let text = build(keep, false);
-  while (text.length > 2700 && keep.length > 1) {
+  while (text.length > budget && keep.length > 1) {
     keep = keep.slice(1);
     text = build(keep, true);
   }
@@ -516,7 +516,7 @@ async function runCopilotTurn(opts) {
   for (let i = 0; i < maxIter; i++) {
     let raw;
     try {
-      raw = await backend.complete(composeCopilotPrompt(opts.userInput, steps));
+      raw = await backend.complete(composeCopilotPrompt(opts.userInput, steps, opts.cfg.copilot?.maxPromptChars ?? 6e4));
       raw = raw.replace(/＜/g, "<").replace(/＞/g, ">").replace(new RegExp(String.fromCharCode(65312) === "" ? "" : "\uFF40", "g"), String.fromCharCode(96));
     } catch (err) {
       io.print(`[error] ${err.message}`);

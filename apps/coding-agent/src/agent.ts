@@ -189,7 +189,7 @@ function unwrapAnswer(raw: string): string {
   return cleaned.replace(new RegExp(`"?${END_MARKER}"?`, 'g'), '').trim()
 }
 
-function composeCopilotPrompt(userInput: string, steps: string[]): string {
+function composeCopilotPrompt(userInput: string, steps: string[], budget = 60000): string {
   const head = [buildProtocolRules(), '', '[依頼]', userInput]
   const tail = [
     '',
@@ -201,7 +201,7 @@ function composeCopilotPrompt(userInput: string, steps: string[]): string {
   const build = (list: string[], omitted: boolean): string =>
     [...head, ...(omitted ? ['(※ 古い経過は省略しました)'] : []), ...list, ...tail].join('\n')
   let text = build(keep, false)
-  while (text.length > 2700 && keep.length > 1) {
+  while (text.length > budget && keep.length > 1) {
     keep = keep.slice(1)
     text = build(keep, true)
   }
@@ -238,7 +238,7 @@ async function runCopilotTurn(opts: {
   for (let i = 0; i < maxIter; i++) {
     let raw: string
     try {
-      raw = await backend.complete(composeCopilotPrompt(opts.userInput, steps))
+      raw = await backend.complete(composeCopilotPrompt(opts.userInput, steps, opts.cfg.copilot?.maxPromptChars ?? 60000))
       raw = raw.replace(/＜/g, '<').replace(/＞/g, '>').replace(new RegExp(String.fromCharCode(65312) === '' ? '' : '｀', 'g'), String.fromCharCode(96))
     } catch (err) {
       io.print(`[error] ${(err as Error).message}`)
