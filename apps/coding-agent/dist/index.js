@@ -768,6 +768,11 @@ function stripLineNumbered(rest) {
   return out;
 }
 var END_MARKER = "AGENT_END";
+var CONVERSATIONAL_ONLY = /^(?:こんにちは|こんばんは|おはよう(?:ございます)?|お疲れ(?:さま|様)(?:です)?|ありがとう(?:ございます)?|どうも|よろしく(?:お願いします)?|やあ|ハロー|hello|hi|hey|thanks?)[\s!！。、，,.?？]*$/iu;
+function isConversationalRequest(input) {
+  const text = input.trim().replace(/\s+/g, " ");
+  return text.length > 0 && text.length <= 80 && CONVERSATIONAL_ONLY.test(text);
+}
 function shouldCancel(io) {
   return io.signal?.aborted === true || io.isCanceled?.() === true;
 }
@@ -858,6 +863,18 @@ function composeCopilotPrompt(userInput, steps, budget = 12e4, history = []) {
   }
   return text;
 }
+function composeConversationalPrompt(cfg, userInput, history) {
+  const histBlock = history.length > 0 ? ["", "[\u3053\u308C\u307E\u3067\u306E\u3084\u308A\u3068\u308A]", ...history.map((h) => `${h.role}: ${h.content.replace(/\r?\n+/g, " ")}`)] : [];
+  return [
+    cfg.systemPrompt,
+    "\u4ECA\u56DE\u306F\u6328\u62F6\u30FB\u304A\u793C\u30FB\u77ED\u3044\u96D1\u8AC7\u3060\u3051\u3067\u3059\u3002\u30ED\u30FC\u30AB\u30EB\u30D5\u30A1\u30A4\u30EB\u3084\u30B3\u30DE\u30F3\u30C9\u306E\u64CD\u4F5C\u3001\u30C4\u30FC\u30EB\u547C\u3073\u51FA\u3057\u306F\u4E0D\u8981\u3067\u3059\u3002",
+    "\u30E6\u30FC\u30B6\u30FC\u306B\u65E5\u672C\u8A9E\u3067\u81EA\u7136\u304B\u3064\u7C21\u6F54\u306B\u8FD4\u7B54\u3057\u3066\u304F\u3060\u3055\u3044\u3002JSON\u3001\u30B3\u30FC\u30C9\u30D5\u30A7\u30F3\u30B9\u3001\u30C4\u30FC\u30EB\u540D\u3001AGENT_END\u306F\u51FA\u529B\u3057\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002",
+    ...histBlock,
+    "",
+    "[\u30E6\u30FC\u30B6\u30FC]",
+    userInput
+  ].filter((part) => Boolean(part && part.trim())).join("\n");
+}
 async function runCopilotTurn(opts) {
   const { cfg, ctx, io, backend } = opts;
   const history = opts.messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role === "assistant" ? "\u30A2\u30B7\u30B9\u30BF\u30F3\u30C8" : "\u30E6\u30FC\u30B6\u30FC", content: String(m.content ?? "").slice(0, 400) })).slice(-12);
@@ -878,6 +895,17 @@ async function runCopilotTurn(opts) {
     try {
       const text = (await backend.complete(prompt, io.signal)).trim();
       return { reply: text, messages: [...opts.messages, { role: "user", content: opts.userInput }, { role: "assistant", content: text }], aborted: false };
+    } catch (err) {
+      const msg = err.message;
+      io.print(`[error] ${msg}`);
+      return { reply: "", messages: turnMessages(`[error] ${msg}`), aborted: true };
+    }
+  }
+  if (isConversationalRequest(opts.userInput)) {
+    const prompt = composeConversationalPrompt(cfg, opts.userInput, history);
+    try {
+      const text = (await backend.complete(prompt, io.signal)).trim();
+      return { reply: text, messages: turnMessages(text), aborted: false };
     } catch (err) {
       const msg = err.message;
       io.print(`[error] ${msg}`);

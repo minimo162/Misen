@@ -5,7 +5,7 @@ import util from 'node:util'
 import fs from 'node:fs'
 import path from 'node:path'
 import { loadConfig, type AgentConfig } from './config'
-import { isConversationalRequest, runAgentTurn, type AgentEvent, type AgentIO, type TextBackend } from './agent'
+import { runAgentTurn, type AgentEvent, type AgentIO, type TextBackend } from './agent'
 import { CopilotEdgeClient } from './copilot'
 import type { ChatMessage } from './llm'
 import { getFileSnapshot, rollbackFileChange, type ToolContext } from './tools'
@@ -227,7 +227,6 @@ const DEFAULT_PLAN: PlanStep[] = [
 ]
 
 function createRun(session: SessionData, request: string, mode: 'chat' | 'work', parentRunId?: string): RunData {
-  const effectiveMode: 'chat' | 'work' = mode === 'work' && isConversationalRequest(request) ? 'chat' : mode
   const now = Date.now()
   const run: RunData = {
     id: makeRunId(),
@@ -235,7 +234,7 @@ function createRun(session: SessionData, request: string, mode: 'chat' | 'work',
     ...(parentRunId ? { parentRunId } : {}),
     title: request.slice(0, 40) || '新しい実行',
     request,
-    mode: effectiveMode,
+    mode,
     status: 'queued',
     phase: 'request',
     currentStep: '依頼を受け付けました',
@@ -715,7 +714,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/info') {
-    json(res, 200, { model: cfg.model || (cfg.provider ?? ''), provider: cfg.provider ?? 'openai', workspace, project: path.basename(workspace), version: '0.10.3', distribution: readDistributionState() })
+    json(res, 200, { model: cfg.model || (cfg.provider ?? ''), provider: cfg.provider ?? 'openai', workspace, project: path.basename(workspace), version: '0.10.4', distribution: readDistributionState() })
     return
   }
 
@@ -1196,7 +1195,7 @@ function diagnosticForRun(run: RunData): Record<string, unknown> {
   const replaceWorkspace = (value: string): string => value.replaceAll(workspace, '<workspace>')
   return {
     generatedAt: new Date().toISOString(),
-    version: '0.10.3',
+    version: '0.10.4',
     workspace: '<workspace>',
     distribution: readDistributionState(),
     run: {

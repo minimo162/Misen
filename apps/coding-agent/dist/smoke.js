@@ -835,6 +835,18 @@ function composeCopilotPrompt(userInput, steps, budget = 12e4, history = []) {
   }
   return text;
 }
+function composeConversationalPrompt(cfg, userInput, history) {
+  const histBlock = history.length > 0 ? ["", "[\u3053\u308C\u307E\u3067\u306E\u3084\u308A\u3068\u308A]", ...history.map((h) => `${h.role}: ${h.content.replace(/\r?\n+/g, " ")}`)] : [];
+  return [
+    cfg.systemPrompt,
+    "\u4ECA\u56DE\u306F\u6328\u62F6\u30FB\u304A\u793C\u30FB\u77ED\u3044\u96D1\u8AC7\u3060\u3051\u3067\u3059\u3002\u30ED\u30FC\u30AB\u30EB\u30D5\u30A1\u30A4\u30EB\u3084\u30B3\u30DE\u30F3\u30C9\u306E\u64CD\u4F5C\u3001\u30C4\u30FC\u30EB\u547C\u3073\u51FA\u3057\u306F\u4E0D\u8981\u3067\u3059\u3002",
+    "\u30E6\u30FC\u30B6\u30FC\u306B\u65E5\u672C\u8A9E\u3067\u81EA\u7136\u304B\u3064\u7C21\u6F54\u306B\u8FD4\u7B54\u3057\u3066\u304F\u3060\u3055\u3044\u3002JSON\u3001\u30B3\u30FC\u30C9\u30D5\u30A7\u30F3\u30B9\u3001\u30C4\u30FC\u30EB\u540D\u3001AGENT_END\u306F\u51FA\u529B\u3057\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002",
+    ...histBlock,
+    "",
+    "[\u30E6\u30FC\u30B6\u30FC]",
+    userInput
+  ].filter((part) => Boolean(part && part.trim())).join("\n");
+}
 async function runCopilotTurn(opts) {
   const { cfg, ctx, io, backend } = opts;
   const history = opts.messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role === "assistant" ? "\u30A2\u30B7\u30B9\u30BF\u30F3\u30C8" : "\u30E6\u30FC\u30B6\u30FC", content: String(m.content ?? "").slice(0, 400) })).slice(-12);
@@ -855,6 +867,17 @@ async function runCopilotTurn(opts) {
     try {
       const text = (await backend.complete(prompt, io.signal)).trim();
       return { reply: text, messages: [...opts.messages, { role: "user", content: opts.userInput }, { role: "assistant", content: text }], aborted: false };
+    } catch (err) {
+      const msg = err.message;
+      io.print(`[error] ${msg}`);
+      return { reply: "", messages: turnMessages(`[error] ${msg}`), aborted: true };
+    }
+  }
+  if (isConversationalRequest(opts.userInput)) {
+    const prompt = composeConversationalPrompt(cfg, opts.userInput, history);
+    try {
+      const text = (await backend.complete(prompt, io.signal)).trim();
+      return { reply: text, messages: turnMessages(text), aborted: false };
     } catch (err) {
       const msg = err.message;
       io.print(`[error] ${msg}`);
@@ -1990,6 +2013,35 @@ async function testConversationalIntent() {
   import_node_assert.default.strictEqual(isConversationalRequest("\u30D5\u30A1\u30A4\u30EB\u3092\u78BA\u8A8D\u3057\u3066"), false);
   console.log("PASS conversational-intent");
 }
+async function testConversationalWorkMode() {
+  const root = import_node_fs2.default.mkdtempSync(import_node_path3.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
+  let backendCalls = 0;
+  const toolEvents = [];
+  const backend = {
+    name: "smoke",
+    complete: async () => {
+      backendCalls++;
+      return "\u3053\u3093\u306B\u3061\u306F\uFF01";
+    }
+  };
+  const result = await runAgentTurn({
+    cfg: { baseURL: "", model: "", copilot: { agentMode: true } },
+    messages: [],
+    userInput: "\u3053\u3093\u306B\u3061\u306F",
+    ctx: makeCtx(root),
+    io: { ...ioStub(true), event: (event) => {
+      if (event.type.startsWith("tool.")) toolEvents.push(event.type);
+    } },
+    backend
+  });
+  import_node_assert.default.strictEqual(result.reply, "\u3053\u3093\u306B\u3061\u306F\uFF01");
+  import_node_assert.default.strictEqual(result.aborted, false);
+  import_node_assert.default.strictEqual(backendCalls, 1);
+  import_node_assert.default.deepStrictEqual(toolEvents, []);
+  import_node_assert.default.deepStrictEqual(import_node_fs2.default.readdirSync(root), []);
+  import_node_fs2.default.rmSync(root, { recursive: true, force: true });
+  console.log("PASS conversational-work-mode");
+}
 async function testProtocolParsing() {
   import_node_assert.default.strictEqual(extractJsonReply('{"answer":"hi"}')?.answer, "hi");
   const fenced = extractJsonReply('\u8AAC\u660E\u6587\n```json\n{"tool":"read_file","args":{"path":"a.txt"}}\n```\nAGENT_END');
@@ -2127,6 +2179,7 @@ async function testUiContract() {
   await testDenial();
   await testProtocolParsing();
   await testConversationalIntent();
+  await testConversationalWorkMode();
   await testCopilotChunkFallback();
   await testCopilotLoop();
   await testMaxIterationHistory();
