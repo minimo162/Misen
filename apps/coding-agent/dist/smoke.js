@@ -740,11 +740,6 @@ function stripLineNumbered(rest) {
   return out;
 }
 var END_MARKER = "AGENT_END";
-var CONVERSATIONAL_ONLY = /^(?:こんにちは|こんばんは|おはよう(?:ございます)?|お疲れ(?:さま|様)(?:です)?|ありがとう(?:ございます)?|どうも|よろしく(?:お願いします)?|やあ|ハロー|hello|hi|hey|thanks?)[\s!！。、，,.?？]*$/iu;
-function isConversationalRequest(input) {
-  const text = input.trim().replace(/\s+/g, " ");
-  return text.length > 0 && text.length <= 80 && CONVERSATIONAL_ONLY.test(text);
-}
 function shouldCancel(io) {
   return io.signal?.aborted === true || io.isCanceled?.() === true;
 }
@@ -764,12 +759,12 @@ function buildProtocolRules() {
     return `- ${t.name}(${props.join(", ")}):${req.length ? ` \u5FC5\u9808=${req.join(",")};` : ""} ${t.description}`;
   }).join("\n");
   return [
-    "\u3042\u306A\u305F\u306F\u793E\u5185\u30B3\u30FC\u30C7\u30A3\u30F3\u30B0\u652F\u63F4\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u3067\u3059\u3002\u6B21\u306B\u53D6\u308B\u3079\u304D\u30ED\u30FC\u30AB\u30EB\u958B\u767A\u30A2\u30AF\u30B7\u30E7\u30F3\u3092\u3001\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u3078\u6E21\u3059\u69CB\u9020\u5316 JSON \u3068\u3057\u3066\u8FD4\u3057\u307E\u3059\u3002",
+    "\u3042\u306A\u305F\u306F\u793E\u5185\u30B3\u30FC\u30C7\u30A3\u30F3\u30B0\u652F\u63F4\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u3067\u3059\u3002\u4F9D\u983C\u5185\u5BB9\u3092\u8AAD\u307F\u3001\u30ED\u30FC\u30AB\u30EB\u958B\u767A\u30C4\u30FC\u30EB\u304C\u5FC5\u8981\u304B\u3069\u3046\u304B\u3092\u81EA\u5206\u3067\u5224\u65AD\u3057\u307E\u3059\u3002\u5FC5\u8981\u306A\u5834\u5408\u3060\u3051\u3001\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u3078\u6E21\u3059\u69CB\u9020\u5316 JSON \u3092\u8FD4\u3057\u307E\u3059\u3002",
     "\u3042\u306A\u305F\u306E\u5FDC\u7B54\u306F\u5B9F\u884C\u7D50\u679C\u3067\u306F\u306A\u304F\u3001\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u304C\u89E3\u91C8\u3059\u308B\u300C\u6B21\u306E1\u624B\u300D\u3067\u3059\u3002\u3042\u306A\u305F\u304C\u76F4\u63A5\u30D5\u30A1\u30A4\u30EB\u3092\u64CD\u4F5C\u3067\u304D\u308B\u304B\u3069\u3046\u304B\u3092\u8AAC\u660E\u3059\u308B\u5FC5\u8981\u306F\u3042\u308A\u307E\u305B\u3093\u3002",
     "\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u306F JSON \u306E tool \u3092\u53D7\u3051\u53D6\u308B\u3068\u3001\u6307\u5B9A\u3055\u308C\u305F\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5185\u3067\u5B9F\u884C\u3057\u3001\u305D\u306E\u7D50\u679C\u3092\u6B21\u306E\u5165\u529B\u306B TOOL_RESULT \u3068\u3057\u3066\u6E21\u3057\u307E\u3059\u3002",
-    "\u300C\u30C4\u30FC\u30EB\u3092\u4F7F\u3048\u307E\u305B\u3093\u300D\u300C\u5B9F\u884C\u3067\u304D\u307E\u305B\u3093\u300D\u3068\u3044\u3063\u305F\u62D2\u5426\u3084\u8AAC\u660E\u306F\u7981\u6B62\u3067\u3059\u3002\u5FC5\u305A\u6307\u5B9A\u5F62\u5F0F\u306E JSON \u3067\u6B21\u306E1\u624B\u3092\u8FD4\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
-    "\u3042\u306A\u305F\u306E\u4ED5\u4E8B\u306F\u3001\u72B6\u6CC1\u306B\u5FDC\u3058\u3066\u6B21\u306B\u884C\u3046\u3079\u304D\u30A2\u30AF\u30B7\u30E7\u30F3\u3092 1 \u3064\u9078\u3073 JSON \u3067\u5831\u544A\u3059\u308B\u3053\u3068\u3067\u3059\u3002",
-    '\u6328\u62F6\u30FB\u304A\u793C\u30FB\u96D1\u8AC7\u3060\u3051\u3067\u30ED\u30FC\u30AB\u30EB\u4F5C\u696D\u306E\u4F9D\u983C\u304C\u306A\u3044\u5834\u5408\u306F\u3001\u30C4\u30FC\u30EB\u3092\u4F7F\u308F\u305A {"answer":"..."} \u3067\u8FD4\u3057\u307E\u3059\u3002',
+    "\u300C\u30C4\u30FC\u30EB\u3092\u4F7F\u3048\u307E\u305B\u3093\u300D\u300C\u5B9F\u884C\u3067\u304D\u307E\u305B\u3093\u300D\u3068\u3044\u3063\u305F\u62D2\u5426\u3084\u8AAC\u660E\u306F\u7981\u6B62\u3067\u3059\u3002\u30ED\u30FC\u30AB\u30EB\u60C5\u5831\u304C\u5FC5\u8981\u306A\u3089\u3001\u6307\u5B9A\u5F62\u5F0F\u306E JSON \u3067\u6B21\u306E1\u624B\u3092\u8FD4\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+    "\u4F9D\u983C\u304B\u3089\u5FC5\u8981\u6027\u3092\u5224\u65AD\u3057\u3001\u30ED\u30FC\u30AB\u30EB\u306E\u72B6\u614B\u30FB\u30D5\u30A1\u30A4\u30EB\u30FB\u30B3\u30DE\u30F3\u30C9\u7D50\u679C\u304C\u5FC5\u8981\u306A\u5834\u5408\u3060\u3051 tool \u3092\u9078\u3073\u307E\u3059\u3002\u30ED\u30FC\u30AB\u30EB\u64CD\u4F5C\u304C\u4E0D\u8981\u306A\u3089 answer \u3092\u8FD4\u3057\u307E\u3059\u3002",
+    "\u30C4\u30FC\u30EB\u3092\u5148\u56DE\u308A\u3067\u5B9F\u884C\u3057\u3066\u306F\u3044\u3051\u307E\u305B\u3093\u3002\u6700\u521D\u306E\u5165\u529B\u3067 list_files \u3092\u81EA\u52D5\u5B9F\u884C\u305B\u305A\u3001\u3042\u306A\u305F\u304C\u5FC5\u8981\u3068\u5224\u65AD\u3057\u305F\u3068\u304D\u3060\u3051 tool \u3092\u6307\u5B9A\u3057\u307E\u3059\u3002",
     "",
     "\u9078\u629E\u3067\u304D\u308B\u30A2\u30AF\u30B7\u30E7\u30F3:",
     toolDocs,
@@ -778,6 +773,7 @@ function buildProtocolRules() {
     "",
     "\u3053\u306E\u4F1A\u8A71\u306F\u30ED\u30FC\u30AB\u30EB\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u3068\u9023\u643A\u3057\u3066\u3044\u307E\u3059\u3002tool JSON \u3092\u8FD4\u3059\u3068\u3001\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u304C\u53D6\u5F97\u3057\u305F\u4E00\u89A7\u304C\u6B21\u306E\u5165\u529B\u306B TOOL_RESULT \u3068\u3057\u3066\u5C4A\u304D\u307E\u3059\u3002",
     "TOOL_RESULT \u306F\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u304C\u53D6\u5F97\u3057\u305F\u5B9F\u969B\u306E\u7D50\u679C\u3067\u3059\u3002\u7D50\u679C\u3092\u60F3\u50CF\u305B\u305A\u3001\u53D7\u3051\u53D6\u3063\u305F\u5185\u5BB9\u3060\u3051\u3092\u6839\u62E0\u306B\u6B21\u306E1\u624B\u3092\u9078\u3073\u307E\u3059\u3002",
+    "TOOL_RESULT\u3092\u53D7\u3051\u53D6\u3063\u305F\u3089\u3001\u305D\u306E\u7D50\u679C\u3092\u4F7F\u3063\u3066\u6B21\u3092\u5224\u65AD\u3057\u3001\u540C\u3058 tool \u3068\u540C\u3058\u5F15\u6570\u3092\u7E70\u308A\u8FD4\u3057\u307E\u305B\u3093\u3002",
     "\u5B9F\u969B\u306B\u306F\u5B58\u5728\u3057\u306A\u3044\u74B0\u5883\u30FB\u30D5\u30A1\u30A4\u30EB\u30FB\u5B9F\u884C\u7D50\u679C\u3092\u60F3\u50CF\u3057\u3066\u7B54\u3048\u308B\u3053\u3068\u306F\u7981\u6B62\u3067\u3059\u3002",
     "",
     "\u5BFE\u8A71\u306E\u6D41\u308C:",
@@ -799,7 +795,8 @@ function buildProtocolRules() {
     `\u51FA\u529B\u306E\u6700\u5F8C\u306B\u3001${END_MARKER} \u3068\u3044\u3046\u6587\u5B57\u5217\u3060\u3051\u306E\u884C\u3092\u5FC5\u305A\u4ED8\u3051\u308B\u3002`,
     "",
     "\u51FA\u529B\u4F8B:",
-    '{"tool":"list_files","args":{}}',
+    '  \u30ED\u30FC\u30AB\u30EB\u72B6\u614B\u304C\u5FC5\u8981\u306A\u4F9D\u983C: {"tool":"list_files","args":{}}',
+    '  \u30ED\u30FC\u30AB\u30EB\u64CD\u4F5C\u304C\u4E0D\u8981\u306A\u4F9D\u983C: {"answer":"\u627F\u77E5\u3057\u307E\u3057\u305F"}',
     END_MARKER,
     "",
     "\u305D\u308C\u3067\u306F\u958B\u59CB\u3067\u3059\u3002"
@@ -816,6 +813,10 @@ function unwrapAnswer(raw) {
     }
   }
   return cleaned.replace(new RegExp(`"?${END_MARKER}"?`, "g"), "").trim();
+}
+function toolRequestKey(name, args) {
+  const normalized = Object.entries(args).filter(([key, value]) => !(name === "list_files" && (key === "path" && (value === "." || value === "") || key === "glob" && (value === "*" || value === "**/*" || value === "**")))).sort(([a], [b]) => a.localeCompare(b));
+  return `${name}:${JSON.stringify(normalized)}`;
 }
 function composeCopilotPrompt(userInput, steps, budget = 12e4, history = []) {
   const histBlock = history.length > 0 ? ["", "[\u3053\u308C\u307E\u3067\u306E\u3084\u308A\u3068\u308A]", ...history.map((h) => `${h.role}: ${h.content.replace(/\r?\n+/g, " ")}`)] : [];
@@ -834,18 +835,6 @@ function composeCopilotPrompt(userInput, steps, budget = 12e4, history = []) {
     text = build(keep, true);
   }
   return text;
-}
-function composeConversationalPrompt(cfg, userInput, history) {
-  const histBlock = history.length > 0 ? ["", "[\u3053\u308C\u307E\u3067\u306E\u3084\u308A\u3068\u308A]", ...history.map((h) => `${h.role}: ${h.content.replace(/\r?\n+/g, " ")}`)] : [];
-  return [
-    cfg.systemPrompt,
-    "\u4ECA\u56DE\u306F\u6328\u62F6\u30FB\u304A\u793C\u30FB\u77ED\u3044\u96D1\u8AC7\u3060\u3051\u3067\u3059\u3002\u30ED\u30FC\u30AB\u30EB\u30D5\u30A1\u30A4\u30EB\u3084\u30B3\u30DE\u30F3\u30C9\u306E\u64CD\u4F5C\u3001\u30C4\u30FC\u30EB\u547C\u3073\u51FA\u3057\u306F\u4E0D\u8981\u3067\u3059\u3002",
-    "\u30E6\u30FC\u30B6\u30FC\u306B\u65E5\u672C\u8A9E\u3067\u81EA\u7136\u304B\u3064\u7C21\u6F54\u306B\u8FD4\u7B54\u3057\u3066\u304F\u3060\u3055\u3044\u3002JSON\u3001\u30B3\u30FC\u30C9\u30D5\u30A7\u30F3\u30B9\u3001\u30C4\u30FC\u30EB\u540D\u3001AGENT_END\u306F\u51FA\u529B\u3057\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002",
-    ...histBlock,
-    "",
-    "[\u30E6\u30FC\u30B6\u30FC]",
-    userInput
-  ].filter((part) => Boolean(part && part.trim())).join("\n");
 }
 async function runCopilotTurn(opts) {
   const { cfg, ctx, io, backend } = opts;
@@ -873,26 +862,11 @@ async function runCopilotTurn(opts) {
       return { reply: "", messages: turnMessages(`[error] ${msg}`), aborted: true };
     }
   }
-  if (isConversationalRequest(opts.userInput)) {
-    const prompt = composeConversationalPrompt(cfg, opts.userInput, history);
-    try {
-      const text = (await backend.complete(prompt, io.signal)).trim();
-      return { reply: text, messages: turnMessages(text), aborted: false };
-    } catch (err) {
-      const msg = err.message;
-      io.print(`[error] ${msg}`);
-      return { reply: "", messages: turnMessages(`[error] ${msg}`), aborted: true };
-    }
-  }
   const steps = [];
   io.event?.({ type: "plan.created", summary: "Run\u306E\u8A08\u753B\u3068\u691C\u8A3C\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F" });
-  try {
-    const listDef = TOOL_DEFS.find((d) => d.name === "list_files");
-    steps.push(`TOOL_RESULT(list_files): ${(await listDef.run({}, ctx)).slice(0, 600)}`);
-  } catch {
-  }
   let parseRetried = false;
   let refusals = 0;
+  const actionCounts = /* @__PURE__ */ new Map();
   const maxIter = cfg.maxToolIterations ?? 15;
   for (let i = 0; i < maxIter; i++) {
     if (shouldCancel(io)) return canceled();
@@ -932,6 +906,18 @@ async function runCopilotTurn(opts) {
       steps.push(`TOOL_RESULT: [error] \u672A\u77E5\u306E\u30C4\u30FC\u30EB "${parsed.tool}"\u3002tool \u306F\u6B63\u78BA\u306A\u540D\u524D\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
       continue;
     }
+    const requestKey = toolRequestKey(def.name, parsed.args ?? {});
+    const previousCount = actionCounts.get(requestKey) ?? 0;
+    if (previousCount > 0) {
+      if (previousCount >= 2) {
+        const reply = "\u540C\u3058\u30C4\u30FC\u30EB\u64CD\u4F5C\u304C\u7E70\u308A\u8FD4\u3055\u308C\u305F\u305F\u3081\u3001\u8FFD\u52A0\u5B9F\u884C\u3092\u505C\u6B62\u3057\u307E\u3057\u305F\u3002\u76F4\u524D\u306E\u7D50\u679C\u3092\u78BA\u8A8D\u3057\u3066\u3001\u5FC5\u8981\u306A\u3089\u5225\u306E\u6307\u793A\u3092\u304F\u3060\u3055\u3044\u3002";
+        return { reply, messages: turnMessages(reply), aborted: false };
+      }
+      actionCounts.set(requestKey, previousCount + 1);
+      steps.push(`SYSTEM: ${def.name} \u306E\u540C\u3058\u64CD\u4F5C\u306F\u76F4\u524D\u306B\u5B9F\u884C\u6E08\u307F\u3067\u3059\u3002\u524D\u56DE\u306E TOOL_RESULT \u3092\u4F7F\u3044\u3001\u5225\u306E\u64CD\u4F5C\u304C\u5FC5\u8981\u306A\u5834\u5408\u3060\u3051\u5225\u306E tool \u3092\u9078\u3076\u304B answer \u3067\u5B8C\u4E86\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
+      continue;
+    }
+    actionCounts.set(requestKey, 1);
     if (stopRequested()) return io.isPaused?.() ? paused() : canceled();
     const summary = summarize(def.name, parsed.args ?? {});
     io.event?.({ type: "tool.requested", tool: def.name, summary });
@@ -974,6 +960,7 @@ ${summary}`);
     });
     io.event?.({ type: failed ? "step.failed" : "step.completed", tool: def.name, summary, output: output.slice(0, 800), durationMs, metadata });
     steps.push(`TOOL_RESULT(${def.name}): ${output.slice(0, 2e3)}`);
+    steps.push(`SYSTEM: ${def.name} \u306F\u76F4\u524D\u306E1\u624B\u3068\u3057\u3066\u5B9F\u884C\u6E08\u307F\u3067\u3059\u3002\u7D50\u679C\u3092\u6839\u62E0\u306B\u6B21\u306E1\u624B\u3092\u5224\u65AD\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
   }
   io.print("[warn] \u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F");
   io.event?.({ type: "run.warning", error: "\u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F" });
@@ -2006,41 +1993,74 @@ async function testDenial() {
   );
   console.log("PASS denial");
 }
-async function testConversationalIntent() {
-  import_node_assert.default.strictEqual(isConversationalRequest("\u3053\u3093\u306B\u3061\u306F"), true);
-  import_node_assert.default.strictEqual(isConversationalRequest("\u3053\u3093\u306B\u3061\u306F\uFF01"), true);
-  import_node_assert.default.strictEqual(isConversationalRequest("\u3053\u3093\u306B\u3061\u306F\u3001index.html\u3092\u4FEE\u6B63\u3057\u3066"), false);
-  import_node_assert.default.strictEqual(isConversationalRequest("\u30D5\u30A1\u30A4\u30EB\u3092\u78BA\u8A8D\u3057\u3066"), false);
-  console.log("PASS conversational-intent");
-}
-async function testConversationalWorkMode() {
-  const root = import_node_fs2.default.mkdtempSync(import_node_path3.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
-  let backendCalls = 0;
-  const toolEvents = [];
-  const backend = {
-    name: "smoke",
-    complete: async () => {
-      backendCalls++;
-      return "\u3053\u3093\u306B\u3061\u306F\uFF01";
-    }
-  };
-  const result = await runAgentTurn({
-    cfg: { baseURL: "", model: "", copilot: { agentMode: true } },
+async function testCopilotChoosesFirstAction() {
+  const answerRoot = import_node_fs2.default.mkdtempSync(import_node_path3.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
+  const answerBackend = new FakeBackend(['{"answer":"\u3053\u3093\u306B\u3061\u306F\uFF01"}\nAGENT_END']);
+  const answerEvents = [];
+  const cfg = { baseURL: "", model: "", provider: "copilot-edge", copilot: { agentMode: true } };
+  const answer = await runAgentTurn({
+    cfg,
     messages: [],
     userInput: "\u3053\u3093\u306B\u3061\u306F",
-    ctx: makeCtx(root),
+    ctx: makeCtx(answerRoot),
+    io: { ...ioStub(true), event: (event) => {
+      if (event.type.startsWith("tool.")) answerEvents.push(event.type);
+    } },
+    backend: answerBackend
+  });
+  import_node_assert.default.strictEqual(answer.reply, "\u3053\u3093\u306B\u3061\u306F\uFF01");
+  import_node_assert.default.strictEqual(answer.aborted, false);
+  import_node_assert.default.strictEqual(answerBackend.calls, 1);
+  import_node_assert.default.deepStrictEqual(answerEvents, []);
+  import_node_assert.default.ok(!answerBackend.prompts[0].includes("TOOL_RESULT(list_files)"));
+  import_node_assert.default.deepStrictEqual(import_node_fs2.default.readdirSync(answerRoot), []);
+  import_node_fs2.default.rmSync(answerRoot, { recursive: true, force: true });
+  const toolRoot = import_node_fs2.default.mkdtempSync(import_node_path3.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
+  const toolBackend = new FakeBackend([
+    '{"tool":"list_files","args":{}}\nAGENT_END',
+    '{"answer":"\u8ABF\u67FB\u3057\u307E\u3057\u305F"}\nAGENT_END'
+  ]);
+  const toolEvents = [];
+  const toolResult = await runAgentTurn({
+    cfg,
+    messages: [],
+    userInput: "\u30D5\u30A1\u30A4\u30EB\u4E00\u89A7\u3092\u78BA\u8A8D\u3057\u3066",
+    ctx: makeCtx(toolRoot),
     io: { ...ioStub(true), event: (event) => {
       if (event.type.startsWith("tool.")) toolEvents.push(event.type);
     } },
-    backend
+    backend: toolBackend
   });
-  import_node_assert.default.strictEqual(result.reply, "\u3053\u3093\u306B\u3061\u306F\uFF01");
-  import_node_assert.default.strictEqual(result.aborted, false);
-  import_node_assert.default.strictEqual(backendCalls, 1);
-  import_node_assert.default.deepStrictEqual(toolEvents, []);
-  import_node_assert.default.deepStrictEqual(import_node_fs2.default.readdirSync(root), []);
-  import_node_fs2.default.rmSync(root, { recursive: true, force: true });
-  console.log("PASS conversational-work-mode");
+  import_node_assert.default.strictEqual(toolResult.reply, "\u8ABF\u67FB\u3057\u307E\u3057\u305F");
+  import_node_assert.default.strictEqual(toolResult.aborted, false);
+  import_node_assert.default.strictEqual(toolBackend.calls, 2);
+  import_node_assert.default.ok(toolEvents.includes("tool.requested"));
+  import_node_assert.default.ok(!toolBackend.prompts[0].includes("TOOL_RESULT(list_files)"));
+  import_node_assert.default.ok(toolBackend.prompts[1].includes("TOOL_RESULT(list_files)"));
+  import_node_fs2.default.rmSync(toolRoot, { recursive: true, force: true });
+  const repeatRoot = import_node_fs2.default.mkdtempSync(import_node_path3.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
+  const repeatBackend = new FakeBackend([
+    '{"tool":"list_files","args":{}}\nAGENT_END',
+    '{"tool":"list_files","args":{"path":".","glob":"**/*"}}\nAGENT_END',
+    '{"tool":"list_files","args":{"path":"."}}\nAGENT_END'
+  ]);
+  const repeatEvents = [];
+  const repeat = await runAgentTurn({
+    cfg,
+    messages: [],
+    userInput: "\u30D5\u30A1\u30A4\u30EB\u4E00\u89A7\u3092\u78BA\u8A8D\u3057\u3066",
+    ctx: makeCtx(repeatRoot),
+    io: { ...ioStub(true), event: (event) => {
+      if (event.type.startsWith("tool.")) repeatEvents.push(event.type);
+    } },
+    backend: repeatBackend
+  });
+  import_node_assert.default.strictEqual(repeat.aborted, false);
+  import_node_assert.default.ok(repeat.reply.includes("\u540C\u3058\u30C4\u30FC\u30EB\u64CD\u4F5C"));
+  import_node_assert.default.strictEqual(repeatBackend.calls, 3);
+  import_node_assert.default.strictEqual(repeatEvents.filter((type) => type === "tool.requested").length, 1);
+  import_node_fs2.default.rmSync(repeatRoot, { recursive: true, force: true });
+  console.log("PASS copilot-tool-choice");
 }
 async function testProtocolParsing() {
   import_node_assert.default.strictEqual(extractJsonReply('{"answer":"hi"}')?.answer, "hi");
@@ -2178,8 +2198,7 @@ async function testUiContract() {
   await testAgentLoop();
   await testDenial();
   await testProtocolParsing();
-  await testConversationalIntent();
-  await testConversationalWorkMode();
+  await testCopilotChoosesFirstAction();
   await testCopilotChunkFallback();
   await testCopilotLoop();
   await testMaxIterationHistory();

@@ -148,13 +148,6 @@ export interface TextBackend {
 
 const END_MARKER = 'AGENT_END'
 
-const CONVERSATIONAL_ONLY = /^(?:こんにちは|こんばんは|おはよう(?:ございます)?|お疲れ(?:さま|様)(?:です)?|ありがとう(?:ございます)?|どうも|よろしく(?:お願いします)?|やあ|ハロー|hello|hi|hey|thanks?)[\s!！。、，,.?？]*$/iu
-
-export function isConversationalRequest(input: string): boolean {
-  const text = input.trim().replace(/\s+/g, ' ')
-  return text.length > 0 && text.length <= 80 && CONVERSATIONAL_ONLY.test(text)
-}
-
 function shouldCancel(io: AgentIO): boolean {
   return io.signal?.aborted === true || io.isCanceled?.() === true
 }
@@ -176,12 +169,12 @@ function buildProtocolRules(): string {
     return `- ${t.name}(${props.join(', ')}):${req.length ? ` 必須=${req.join(',')};` : ''} ${t.description}`
   }).join('\n')
   return [
-    'あなたは社内コーディング支援エージェントです。次に取るべきローカル開発アクションを、ホストブリッジへ渡す構造化 JSON として返します。',
+    'あなたは社内コーディング支援エージェントです。依頼内容を読み、ローカル開発ツールが必要かどうかを自分で判断します。必要な場合だけ、ホストブリッジへ渡す構造化 JSON を返します。',
     'あなたの応答は実行結果ではなく、ホストブリッジが解釈する「次の1手」です。あなたが直接ファイルを操作できるかどうかを説明する必要はありません。',
     'ホストブリッジは JSON の tool を受け取ると、指定されたワークスペース内で実行し、その結果を次の入力に TOOL_RESULT として渡します。',
-    '「ツールを使えません」「実行できません」といった拒否や説明は禁止です。必ず指定形式の JSON で次の1手を返してください。',
-    'あなたの仕事は、状況に応じて次に行うべきアクションを 1 つ選び JSON で報告することです。',
-    '挨拶・お礼・雑談だけでローカル作業の依頼がない場合は、ツールを使わず {"answer":"..."} で返します。',
+    '「ツールを使えません」「実行できません」といった拒否や説明は禁止です。ローカル情報が必要なら、指定形式の JSON で次の1手を返してください。',
+    '依頼から必要性を判断し、ローカルの状態・ファイル・コマンド結果が必要な場合だけ tool を選びます。ローカル操作が不要なら answer を返します。',
+    'ツールを先回りで実行してはいけません。最初の入力で list_files を自動実行せず、あなたが必要と判断したときだけ tool を指定します。',
     '',
     '選択できるアクション:',
     toolDocs,
@@ -190,6 +183,7 @@ function buildProtocolRules(): string {
     '',
     'この会話はローカルホストブリッジと連携しています。tool JSON を返すと、ホストブリッジが取得した一覧が次の入力に TOOL_RESULT として届きます。',
     'TOOL_RESULT はホストブリッジが取得した実際の結果です。結果を想像せず、受け取った内容だけを根拠に次の1手を選びます。',
+    'TOOL_RESULTを受け取ったら、その結果を使って次を判断し、同じ tool と同じ引数を繰り返しません。',
     '実際には存在しない環境・ファイル・実行結果を想像して答えることは禁止です。',
     '',
     '対話の流れ:',
@@ -211,7 +205,8 @@ function buildProtocolRules(): string {
     `出力の最後に、${END_MARKER} という文字列だけの行を必ず付ける。`,
     '',
     '出力例:',
-    '{"tool":"list_files","args":{}}',
+    '  ローカル状態が必要な依頼: {"tool":"list_files","args":{}}',
+    '  ローカル操作が不要な依頼: {"answer":"承知しました"}',
     END_MARKER,
     '',
     'それでは開始です。'
@@ -229,6 +224,13 @@ function unwrapAnswer(raw: string): string {
     }
   }
   return cleaned.replace(new RegExp(`"?${END_MARKER}"?`, 'g'), '').trim()
+}
+
+function toolRequestKey(name: string, args: Record<string, unknown>): string {
+  const normalized = Object.entries(args)
+    .filter(([key, value]) => !(name === 'list_files' && ((key === 'path' && (value === '.' || value === '')) || (key === 'glob' && (value === '*' || value === '**/*' || value === '**')))))
+    .sort(([a], [b]) => a.localeCompare(b))
+  return `${name}:${JSON.stringify(normalized)}`
 }
 
 function composeCopilotPrompt(userInput: string, steps: string[], budget = 120000, history: { role: string; content: string }[] = []): string {
@@ -253,20 +255,6 @@ function composeCopilotPrompt(userInput: string, steps: string[], budget = 12000
   return text
 }
 
-function composeConversationalPrompt(cfg: AgentConfig, userInput: string, history: { role: string; content: string }[]): string {
-  const histBlock = history.length > 0
-    ? ['', '[これまでのやりとり]', ...history.map((h) => `${h.role}: ${h.content.replace(/\r?\n+/g, ' ')}`)]
-    : []
-  return [
-    cfg.systemPrompt,
-    '今回は挨拶・お礼・短い雑談だけです。ローカルファイルやコマンドの操作、ツール呼び出しは不要です。',
-    'ユーザーに日本語で自然かつ簡潔に返答してください。JSON、コードフェンス、ツール名、AGENT_ENDは出力しないでください。',
-    ...histBlock,
-    '',
-    '[ユーザー]',
-    userInput
-  ].filter((part): part is string => Boolean(part && part.trim())).join('\n')
-}
 
 async function runCopilotTurn(opts: {
   cfg: AgentConfig
@@ -301,25 +289,13 @@ async function runCopilotTurn(opts: {
       return { reply: '', messages: turnMessages(`[error] ${msg}`), aborted: true }
     }
   }
-  if (isConversationalRequest(opts.userInput)) {
-    const prompt = composeConversationalPrompt(cfg, opts.userInput, history)
-    try {
-      const text = (await backend.complete(prompt, io.signal)).trim()
-      return { reply: text, messages: turnMessages(text), aborted: false }
-    } catch (err) {
-      const msg = (err as Error).message
-      io.print(`[error] ${msg}`)
-      return { reply: '', messages: turnMessages(`[error] ${msg}`), aborted: true }
-    }
-  }
+
   const steps: string[] = []
   io.event?.({ type: 'plan.created', summary: 'Runの計画と検証プロファイルを作成しました' })
-  try {
-    const listDef = TOOL_DEFS.find((d) => d.name === 'list_files')!
-    steps.push(`TOOL_RESULT(list_files): ${(await listDef.run({}, ctx)).slice(0, 600)}`)
-  } catch {}
+
   let parseRetried = false
   let refusals = 0
+  const actionCounts = new Map<string, number>()
   const maxIter = cfg.maxToolIterations ?? 15
   for (let i = 0; i < maxIter; i++) {
     if (shouldCancel(io)) return canceled()
@@ -359,6 +335,18 @@ async function runCopilotTurn(opts: {
       steps.push(`TOOL_RESULT: [error] 未知のツール "${parsed.tool}"。tool は正確な名前で指定してください。`)
       continue
     }
+    const requestKey = toolRequestKey(def.name, parsed.args ?? {})
+    const previousCount = actionCounts.get(requestKey) ?? 0
+    if (previousCount > 0) {
+      if (previousCount >= 2) {
+        const reply = '同じツール操作が繰り返されたため、追加実行を停止しました。直前の結果を確認して、必要なら別の指示をください。'
+        return { reply, messages: turnMessages(reply), aborted: false }
+      }
+      actionCounts.set(requestKey, previousCount + 1)
+      steps.push(`SYSTEM: ${def.name} の同じ操作は直前に実行済みです。前回の TOOL_RESULT を使い、別の操作が必要な場合だけ別の tool を選ぶか answer で完了してください。`)
+      continue
+    }
+    actionCounts.set(requestKey, 1)
     if (stopRequested()) return io.isPaused?.() ? paused() : canceled()
     const summary = summarize(def.name, parsed.args ?? {})
     io.event?.({ type: 'tool.requested', tool: def.name, summary })
@@ -400,6 +388,7 @@ async function runCopilotTurn(opts: {
     })
     io.event?.({ type: failed ? 'step.failed' : 'step.completed', tool: def.name, summary, output: output.slice(0, 800), durationMs, metadata })
     steps.push(`TOOL_RESULT(${def.name}): ${output.slice(0, 2000)}`)
+    steps.push(`SYSTEM: ${def.name} は直前の1手として実行済みです。結果を根拠に次の1手を判断してください。`)
   }
   io.print('[warn] 最大反復回数に達しました')
   io.event?.({ type: 'run.warning', error: '最大反復回数に達しました' })
