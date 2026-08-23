@@ -1066,13 +1066,19 @@ function summarize(name, args) {
 
 // src/copilot.ts
 var import_node_child_process3 = require("node:child_process");
+var import_node_net = __toESM(require("node:net"));
 var import_node_fs = __toESM(require("node:fs"));
 var import_node_path2 = __toESM(require("node:path"));
 function resolveCopilotSettings(cfg) {
   const c = cfg.copilot ?? {};
+  const reuseExistingEdge = c.reuseExistingEdge === true;
+  const configuredPort = typeof c.cdpPort === "number" && Number.isInteger(c.cdpPort) && c.cdpPort > 0 ? c.cdpPort : 9445;
   return {
     url: c.url ?? "https://m365.cloud.microsoft/chat/",
-    cdpPort: c.cdpPort ?? 9445,
+    // A fixed port is only honored when the user explicitly opts into attaching to an existing Edge.
+    // The normal path allocates a loopback port for an Edge process owned by this client.
+    cdpPort: reuseExistingEdge ? configuredPort : 0,
+    reuseExistingEdge,
     maxPromptChars: c.maxPromptChars ?? 12e4,
     pollIntervalMs: Math.max(500, c.pollIntervalMs ?? 900),
     responseTimeoutSec: c.responseTimeoutSec ?? 300,
@@ -1363,6 +1369,42 @@ async function devToolsUp(port) {
     return false;
   }
 }
+async function findFreePort() {
+  return new Promise((resolve, reject) => {
+    const server = import_node_net.default.createServer();
+    server.once("error", reject);
+    server.listen({ host: "127.0.0.1", port: 0 }, () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      server.close((error) => {
+        if (error) reject(error);
+        else if (port > 0) resolve(port);
+        else reject(new Error("Edge\u7528\u306E\u7A7A\u304D\u30DD\u30FC\u30C8\u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F"));
+      });
+    });
+  });
+}
+function profileIsInUse(profileDir) {
+  if (["SingletonLock", "SingletonCookie", "SingletonSocket"].some((name) => import_node_fs.default.existsSync(import_node_path2.default.join(profileDir, name)))) return true;
+  if (process.platform !== "win32") return false;
+  try {
+    const needle = import_node_path2.default.resolve(profileDir).replace(/[\\/]+$/, "").toLowerCase();
+    const marker = `--user-data-dir=${needle}`;
+    const output = (0, import_node_child_process3.execFileSync)("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      `Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Select-Object -ExpandProperty CommandLine`
+    ], { encoding: "utf8", timeout: 3e3, windowsHide: true });
+    return output.split(/\r?\n/).some((line) => {
+      const normalized = line.toLowerCase().replaceAll('"', "");
+      const index = normalized.indexOf(marker);
+      return index >= 0 && (index + marker.length === normalized.length || /\s/.test(normalized[index + marker.length]));
+    });
+  } catch {
+    return true;
+  }
+}
 function findEdgePath() {
   const roots = [process.env["ProgramFiles(x86)"], process.env.ProgramFiles, process.env.LOCALAPPDATA].filter(Boolean);
   for (const root of roots) {
@@ -1376,6 +1418,8 @@ var CopilotEdgeClient = class {
   s;
   cdp = null;
   clipGranted = false;
+  ownedEdgePid = null;
+  edgeProfileDir = null;
   constructor(cfg) {
     this.s = resolveCopilotSettings(cfg);
   }
@@ -1449,9 +1493,23 @@ var CopilotEdgeClient = class {
     } catch {
     }
   }
+  chooseEdgeProfile() {
+    const root = import_node_path2.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent");
+    import_node_fs.default.mkdirSync(root, { recursive: true });
+    const stable = import_node_path2.default.join(root, "edge-profile");
+    if (!profileIsInUse(stable)) return stable;
+    return import_node_fs.default.mkdtempSync(import_node_path2.default.join(root, "edge-profile-session-"));
+  }
   async ensureEdge() {
-    if (await devToolsUp(this.s.cdpPort)) return;
-    const userDataDir = import_node_path2.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent", "edge-profile");
+    if (this.s.reuseExistingEdge) {
+      if (this.s.cdpPort > 0 && await devToolsUp(this.s.cdpPort)) return;
+      if (this.s.cdpPort <= 0) throw new Error("\u65E2\u5B58Edge\u63A5\u7D9A\u3092\u518D\u5229\u7528\u3059\u308B\u306B\u306F copilot.cdpPort \u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
+    } else {
+      if (this.ownedEdgePid !== null && await devToolsUp(this.s.cdpPort)) return;
+      this.s.cdpPort = await findFreePort();
+    }
+    const userDataDir = this.edgeProfileDir ?? this.chooseEdgeProfile();
+    this.edgeProfileDir = userDataDir;
     this.hardenPreferences(userDataDir);
     const args = [
       `--remote-debugging-port=${this.s.cdpPort}`,
@@ -1470,13 +1528,16 @@ var CopilotEdgeClient = class {
     ];
     if (this.s.displayMode === "minimized") args.push("--window-position=-32000,-32000", "--window-size=1280,900");
     args.push(this.s.url);
-    (0, import_node_child_process3.spawn)(findEdgePath(), args, { detached: true, stdio: "ignore" }).unref();
+    const child = (0, import_node_child_process3.spawn)(findEdgePath(), args, { detached: true, stdio: "ignore" });
+    this.ownedEdgePid = child.pid ?? null;
+    child.unref();
     const deadline = Date.now() + 3e4;
     while (Date.now() < deadline) {
       if (await devToolsUp(this.s.cdpPort)) return;
       await sleep(500);
     }
-    throw new Error(`Edge DevTools Protocol \u304C\u8D77\u52D5\u3057\u307E\u305B\u3093\u3067\u3057\u305F (port=${this.s.cdpPort})\u3002\u5C02\u7528\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB\u306E Edge \u30A6\u30A3\u30F3\u30C9\u30A6\u3092\u3059\u3079\u3066\u9589\u3058\u3066\u304B\u3089\u518D\u5B9F\u884C\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
+    const mode = this.s.reuseExistingEdge ? "\u6307\u5B9A\u3055\u308C\u305FEdge" : "\u5C02\u7528Edge";
+    throw new Error(`${mode}\u306EDevTools Protocol\u304C\u8D77\u52D5\u3057\u307E\u305B\u3093\u3067\u3057\u305F (port=${this.s.cdpPort})\u3002\u4ED6\u30A2\u30D7\u30EA\u306EEdge\u306B\u306F\u63A5\u7D9A\u305B\u305A\u3001\u5C02\u7528\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB\u3067\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
   }
   async listTargets() {
     try {
@@ -1499,7 +1560,7 @@ var CopilotEdgeClient = class {
       const targets = await this.listTargets();
       const pages = targets.filter((t) => t.type === "page" && t.webSocketDebuggerUrl && !isLocalUrl(t.url));
       const preferred = pages.find((t) => host && t.url?.includes(host) || t.url?.toLowerCase().includes("copilot"));
-      const fallback = pages.find((t) => /^https?:/i.test(t.url ?? ""));
+      const fallback = this.s.reuseExistingEdge ? pages.find((t) => /^https?:/i.test(t.url ?? "")) : void 0;
       const picked = preferred ?? fallback;
       if (picked) {
         this.cdp?.close();
@@ -2087,6 +2148,16 @@ var FakeBackend = class {
     return r ?? '{"answer":"no script"}';
   }
 };
+async function testCopilotEdgeIsolation() {
+  const base = { baseURL: "", model: "", provider: "copilot-edge" };
+  const isolated = resolveCopilotSettings({ ...base, copilot: { cdpPort: 9444 } });
+  import_node_assert.default.strictEqual(isolated.reuseExistingEdge, false);
+  import_node_assert.default.strictEqual(isolated.cdpPort, 0);
+  const attached = resolveCopilotSettings({ ...base, copilot: { cdpPort: 9444, reuseExistingEdge: true } });
+  import_node_assert.default.strictEqual(attached.reuseExistingEdge, true);
+  import_node_assert.default.strictEqual(attached.cdpPort, 9444);
+  console.log("PASS copilot-edge-isolation");
+}
 async function testCopilotChunkFallback() {
   const client = new CopilotEdgeClient({ baseURL: "", model: "", provider: "copilot-edge", copilot: { maxPromptChars: 5e3 } });
   const internal = client;
@@ -2189,7 +2260,7 @@ async function testUiContract() {
   const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
   import_node_assert.default.ok(script, "UI script missing");
   new Function(script);
-  for (const required of ["run-plan", "run-pause", "run-resume", "run-retry", "run-complete", "\u5B9F\u969B\u306E\u5DEE\u5206\u3092\u8868\u793A", "\u5DEE\u5206\u306E\u7D9A\u304D", "preview-frame", "verification-list", "\u8A3A\u65ADJSON", "approval-meta", "parentRunId", "/api/runs/", "/api/changes/", "compositionstart", "aria-live", "@media (max-width: 720px)"]) import_node_assert.default.ok(html.includes(required), `UI contract missing: ${required}`);
+  for (const required of ["run-plan", "run-eyebrow", "run-pause", "run-resume", "run-retry", "run-complete", "\u56DE\u7B54\u5B8C\u4E86", "activity-details", "\u5B9F\u969B\u306E\u5DEE\u5206\u3092\u8868\u793A", "\u5DEE\u5206\u306E\u7D9A\u304D", "preview-frame", "verification-list", "\u8A3A\u65ADJSON", "approval-meta", "parentRunId", "/api/runs/", "/api/changes/", "compositionstart", "aria-live", "@media (max-width: 720px)"]) import_node_assert.default.ok(html.includes(required), `UI contract missing: ${required}`);
   console.log("PASS ui-contract");
 }
 (async () => {
@@ -2199,6 +2270,7 @@ async function testUiContract() {
   await testDenial();
   await testProtocolParsing();
   await testCopilotChoosesFirstAction();
+  await testCopilotEdgeIsolation();
   await testCopilotChunkFallback();
   await testCopilotLoop();
   await testMaxIterationHistory();

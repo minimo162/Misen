@@ -11,6 +11,7 @@ export type LlmProvider = 'openai' | 'copilot-edge'
 export interface CopilotSettingsPartial {
   url?: string
   cdpPort?: number
+  reuseExistingEdge?: boolean
   maxPromptChars?: number
   pollIntervalMs?: number
   responseTimeoutSec?: number
