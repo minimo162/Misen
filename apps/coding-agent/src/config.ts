@@ -22,6 +22,10 @@ export interface CopilotSettingsPartial {
   modelPriority?: string[]
 }
 
+export interface WeatherSettings {
+  defaultLocation?: string
+}
+
 export interface AgentConfig {
   baseURL: string
   model: string
@@ -34,6 +38,7 @@ export interface AgentConfig {
   systemPrompt?: string
   provider?: LlmProvider
   copilot?: CopilotSettingsPartial
+  weather?: WeatherSettings
   chatTemplateKwargs?: Record<string, unknown>
 }
 

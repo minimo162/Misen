@@ -7,6 +7,7 @@
   "maxToolIterations": 15,
   "autoApprove": { "write": true, "command": false },
   "restrictToWorkspace": true,
+  "weather": { "defaultLocation": "広島市" },
   "systemPrompt": "あなたは社内コーディング支援エージェントです。提供されたツールでファイルの調査・編集・コマンド実行を行い、簡潔な日本語で回答してください。",
   "copilot": {
     "url": "https://m365.cloud.microsoft/chat/",

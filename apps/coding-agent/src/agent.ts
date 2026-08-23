@@ -174,6 +174,8 @@ function buildProtocolRules(): string {
     'ホストブリッジは JSON の tool を受け取ると、指定されたワークスペース内で実行し、その結果を次の入力に TOOL_RESULT として渡します。',
     '「ツールを使えません」「実行できません」といった拒否や説明は禁止です。ローカル情報が必要なら、指定形式の JSON で次の1手を返してください。',
     '依頼から必要性を判断し、ローカルの状態・ファイル・コマンド結果が必要な場合だけ tool を選びます。ローカル操作が不要なら answer を返します。',
+    '天気・気温・降水量を尋ねられた場合は get_weather を使います。run_command で wttr.in などの外部天気サイトを直接呼んではいけません。',
+    'get_weather の location を省略すると設定された既定地域を使います。既定地域がない場合だけ、地域名を確認してください。',
     'ツールを先回りで実行してはいけません。最初の入力で list_files を自動実行せず、あなたが必要と判断したときだけ tool を指定します。',
     '',
     '選択できるアクション:',
@@ -505,6 +507,8 @@ function summarize(name: string, args: Record<string, unknown>): string {
   switch (name) {
     case 'run_command':
       return `run_command: ${args.command}`
+    case 'get_weather':
+      return `get_weather: ${args.location ?? '設定の既定地域'}`
     case 'write_file':
       return `write_file: ${args.path}`
     case 'edit_file':

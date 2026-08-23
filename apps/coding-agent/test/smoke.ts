@@ -11,6 +11,7 @@ import { CopilotEdgeClient, resolveCopilotSettings } from '../src/copilot'
 
 import { getFileSnapshot, parseToolResultMeta, rollbackFileChange, TOOL_DEFS, type ToolContext } from '../src/tools'
 import { listApprovals, requestApproval, resolveApproval } from '../src/approvals'
+import { getWeather, weatherCodeLabel, type WeatherFetcher } from '../src/weather'
 
 function makeCtx(root: string, restrict = true): ToolContext {
   return { workspace: root, restrictToWorkspace: restrict }
@@ -23,6 +24,43 @@ function ioStub(approve: boolean): AgentIO {
   }
 }
 
+async function testWeather(): Promise<void> {
+  assert.strictEqual(weatherCodeLabel(0).emoji, '☀️')
+  assert.strictEqual(weatherCodeLabel(2).emoji, '⛅')
+  assert.strictEqual(weatherCodeLabel(3).label, '曇り')
+  assert.strictEqual(weatherCodeLabel(45).emoji, '🌫️')
+  assert.strictEqual(weatherCodeLabel(61).emoji, '🌧️')
+
+  const calls: string[] = []
+  const fetcher: WeatherFetcher = async (input) => {
+    calls.push(input)
+    if (input.includes('geocoding-api')) {
+      return new Response(JSON.stringify({ results: [{ name: '広島市', latitude: 34.3853, longitude: 132.4553, country: '日本', admin1: '広島県' }] }), { status: 200 })
+    }
+    return new Response(JSON.stringify({
+      timezone: 'Asia/Tokyo',
+      current: { time: '2026-08-24T08:30', temperature_2m: 27.8, apparent_temperature: 33.2, weather_code: 0 },
+      daily: { time: ['2026-08-24'], temperature_2m_max: [33.0], temperature_2m_min: [24.8], weather_code: [1] }
+    }), { status: 200 })
+  }
+  const result = await getWeather('広島市', undefined, fetcher)
+  assert.strictEqual(calls.length, 2)
+  assert.ok(calls[0].includes('name=%E5%BA%83%E5%B3%B6%E5%B8%82'))
+  assert.ok(result.includes('広島市（広島県・日本）'))
+  assert.ok(result.includes('27.8°C'))
+  assert.ok(result.includes('☀️ 快晴'))
+  assert.ok(result.includes('最高 33.0°C / 最低 24.8°C'))
+  assert.ok(result.includes('Open-Meteo'))
+
+  let missing = false
+  try {
+    await getWeather('', undefined, fetcher)
+  } catch (err) {
+    missing = String((err as Error).message).includes('地域名が必要')
+  }
+  assert.ok(missing, 'weather should reject missing location')
+  console.log('PASS weather')
+}
 async function testApprovals(): Promise<void> {
   const pending = requestApproval('approve smoke')
   const listed = listApprovals()
@@ -62,6 +100,14 @@ async function testTools(): Promise<void> {
 
   const cmd = await get('run_command').run({ command: 'echo smoke-ok' }, ctx)
   assert.ok(cmd.includes('smoke-ok'))
+
+  let wttrBlocked = false
+  try {
+    await get('run_command').run({ command: 'curl https://wttr.in/?format=3' }, ctx)
+  } catch (err) {
+    wttrBlocked = String((err as Error).message).includes('get_weather')
+  }
+  assert.ok(wttrBlocked, 'wttr.in should be routed to get_weather')
 
   const started = JSON.parse(await get('start_process').run({
     command: `node -e "console.log('process-smoke'); setTimeout(() => {}, 10000)"`,
@@ -216,6 +262,7 @@ async function testCopilotChoosesFirstAction(): Promise<void> {
   assert.strictEqual(answerBackend.calls, 1)
   assert.deepStrictEqual(answerEvents, [])
   assert.ok(!answerBackend.prompts[0].includes('TOOL_RESULT(list_files)'))
+  assert.ok(answerBackend.prompts[0].includes('get_weather') && answerBackend.prompts[0].includes('wttr.in'))
   assert.deepStrictEqual(fs.readdirSync(answerRoot), [])
   fs.rmSync(answerRoot, { recursive: true, force: true })
 
@@ -418,6 +465,7 @@ async function testUiContract(): Promise<void> {
 }
 
 (async () => {
+  await testWeather()
   await testApprovals()
   await testTools()
   await testAgentLoop()
