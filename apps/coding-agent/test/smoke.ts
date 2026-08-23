@@ -204,6 +204,34 @@ async function testConversationalIntent(): Promise<void> {
   assert.strictEqual(isConversationalRequest('ファイルを確認して'), false)
   console.log('PASS conversational-intent')
 }
+
+async function testConversationalWorkMode(): Promise<void> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-'))
+  let backendCalls = 0
+  const toolEvents: string[] = []
+  const backend: TextBackend = {
+    name: 'smoke',
+    complete: async () => {
+      backendCalls++
+      return 'こんにちは！'
+    }
+  }
+  const result = await runAgentTurn({
+    cfg: { baseURL: '', model: '', copilot: { agentMode: true } },
+    messages: [],
+    userInput: 'こんにちは',
+    ctx: makeCtx(root),
+    io: { ...ioStub(true), event: (event) => { if (event.type.startsWith('tool.')) toolEvents.push(event.type) } },
+    backend
+  })
+  assert.strictEqual(result.reply, 'こんにちは！')
+  assert.strictEqual(result.aborted, false)
+  assert.strictEqual(backendCalls, 1)
+  assert.deepStrictEqual(toolEvents, [])
+  assert.deepStrictEqual(fs.readdirSync(root), [])
+  fs.rmSync(root, { recursive: true, force: true })
+  console.log('PASS conversational-work-mode')
+}
 async function testProtocolParsing(): Promise<void> {
   assert.strictEqual(extractJsonReply('{"answer":"hi"}')?.answer, 'hi')
 
@@ -355,6 +383,7 @@ async function testUiContract(): Promise<void> {
   await testDenial()
   await testProtocolParsing()
   await testConversationalIntent()
+  await testConversationalWorkMode()
   await testCopilotChunkFallback()
   await testCopilotLoop()
   await testMaxIterationHistory()

@@ -253,6 +253,21 @@ function composeCopilotPrompt(userInput: string, steps: string[], budget = 12000
   return text
 }
 
+function composeConversationalPrompt(cfg: AgentConfig, userInput: string, history: { role: string; content: string }[]): string {
+  const histBlock = history.length > 0
+    ? ['', '[これまでのやりとり]', ...history.map((h) => `${h.role}: ${h.content.replace(/\r?\n+/g, ' ')}`)]
+    : []
+  return [
+    cfg.systemPrompt,
+    '今回は挨拶・お礼・短い雑談だけです。ローカルファイルやコマンドの操作、ツール呼び出しは不要です。',
+    'ユーザーに日本語で自然かつ簡潔に返答してください。JSON、コードフェンス、ツール名、AGENT_ENDは出力しないでください。',
+    ...histBlock,
+    '',
+    '[ユーザー]',
+    userInput
+  ].filter((part): part is string => Boolean(part && part.trim())).join('\n')
+}
+
 async function runCopilotTurn(opts: {
   cfg: AgentConfig
   messages: ChatMessage[]
@@ -280,6 +295,17 @@ async function runCopilotTurn(opts: {
     try {
       const text = (await backend.complete(prompt, io.signal)).trim()
       return { reply: text, messages: [...opts.messages, { role: 'user', content: opts.userInput }, { role: 'assistant', content: text }], aborted: false }
+    } catch (err) {
+      const msg = (err as Error).message
+      io.print(`[error] ${msg}`)
+      return { reply: '', messages: turnMessages(`[error] ${msg}`), aborted: true }
+    }
+  }
+  if (isConversationalRequest(opts.userInput)) {
+    const prompt = composeConversationalPrompt(cfg, opts.userInput, history)
+    try {
+      const text = (await backend.complete(prompt, io.signal)).trim()
+      return { reply: text, messages: turnMessages(text), aborted: false }
     } catch (err) {
       const msg = (err as Error).message
       io.print(`[error] ${msg}`)
