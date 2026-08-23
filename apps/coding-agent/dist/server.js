@@ -24,6 +24,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 
 // src/server.ts
 var import_node_http2 = __toESM(require("node:http"));
+var import_node_fs3 = __toESM(require("node:fs"));
 var import_node_path4 = __toESM(require("node:path"));
 
 // src/config.ts
@@ -90,7 +91,7 @@ function postJson(url, body, headers) {
     req.end(body);
   });
 }
-async function chat(cfg2, messages2, tools) {
+async function chat(cfg2, messages, tools) {
   const url = cfg2.baseURL.replace(/\/+$/, "") + "/chat/completions";
   const headers = { "content-type": "application/json" };
   const key = resolveApiKey(cfg2);
@@ -98,7 +99,7 @@ async function chat(cfg2, messages2, tools) {
   const payload = JSON.stringify({
     model: cfg2.model,
     temperature: cfg2.temperature ?? 0.2,
-    messages: messages2,
+    messages,
     ...cfg2.chatTemplateKwargs ? { chat_template_kwargs: cfg2.chatTemplateKwargs } : {},
     ...tools.length > 0 ? { tools } : {}
   });
@@ -608,29 +609,29 @@ async function runAgentTurn(opts) {
 }
 async function runOpenAITurn(opts) {
   const { cfg: cfg2, ctx: ctx2, io: io2 } = opts;
-  const messages2 = [...opts.messages, { role: "user", content: opts.userInput }];
+  const messages = [...opts.messages, { role: "user", content: opts.userInput }];
   const maxIter = cfg2.maxToolIterations ?? 15;
   for (let i = 0; i < maxIter; i++) {
     let assistant;
     try {
-      assistant = await chat(cfg2, messages2, openAITools());
+      assistant = await chat(cfg2, messages, openAITools());
     } catch (err) {
       const msg = err.message;
       io2.print(`[error] ${msg}`);
-      return { reply: "", messages: messages2, aborted: true };
+      return { reply: "", messages, aborted: true };
     }
-    messages2.push(assistant);
+    messages.push(assistant);
     const calls = assistant.tool_calls ?? [];
     if (calls.length === 0) {
-      return { reply: assistant.content ?? "", messages: messages2, aborted: false };
+      return { reply: assistant.content ?? "", messages, aborted: false };
     }
     for (const call of calls) {
       const output = await executeCall(call, cfg2, ctx2, io2);
-      messages2.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: output });
+      messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: output });
     }
   }
   io2.print("[warn] \u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F");
-  return { reply: "", messages: messages2, aborted: true };
+  return { reply: "", messages, aborted: true };
 }
 async function executeCall(call, cfg2, ctx2, io2) {
   const def = TOOL_DEFS.find((d) => d.name === call.function.name);
@@ -1324,11 +1325,32 @@ var cfg = loadConfig(argValue("--config"));
 var workspaceArg = argValue("--workspace");
 var workspace = workspaceArg ? import_node_path4.default.resolve(workspaceArg) : process.cwd();
 var ctx = { workspace, restrictToWorkspace: cfg.restrictToWorkspace ?? true };
+var here = typeof __dirname !== "undefined" ? __dirname : import_node_path4.default.dirname(process.argv[1] ?? ".");
+var indexCandidates = [
+  process.env.INDEX_HTML,
+  import_node_path4.default.join(here, "..", "public", "index.html"),
+  import_node_path4.default.join(process.cwd(), "public", "index.html")
+];
+var indexHtmlPath = indexCandidates.find((p) => typeof p === "string" && import_node_fs3.default.existsSync(p));
 var DEFAULT_SYSTEM_PROMPT = "\u3042\u306A\u305F\u306F\u793E\u5185\u30B3\u30FC\u30C7\u30A3\u30F3\u30B0\u652F\u63F4\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u3067\u3059\u3002\u63D0\u4F9B\u3055\u308C\u305F\u30C4\u30FC\u30EB\u3067\u30D5\u30A1\u30A4\u30EB\u306E\u8ABF\u67FB\u30FB\u7DE8\u96C6\u30FB\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u3092\u884C\u3044\u3001\u7C21\u6F54\u306A\u65E5\u672C\u8A9E\u3067\u56DE\u7B54\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
-var messages = [{ role: "system", content: cfg.systemPrompt ?? DEFAULT_SYSTEM_PROMPT }];
+var systemMsg = () => ({ role: "system", content: cfg.systemPrompt ?? DEFAULT_SYSTEM_PROMPT });
+var sessions = /* @__PURE__ */ new Map();
+var activeId = "";
 var copilotBackend = null;
 var busy = false;
+var lastLogSeen = 0;
 var logLines = [];
+function newSession() {
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const s = { id, title: "\u65B0\u3057\u3044\u30BB\u30C3\u30B7\u30E7\u30F3", messages: [systemMsg()], created: Date.now() };
+  sessions.set(id, s);
+  activeId = id;
+  return s;
+}
+function activeSession() {
+  return sessions.get(activeId) ?? newSession();
+}
+newSession();
 function getBackend() {
   if (cfg.provider !== "copilot-edge") return void 0;
   if (!copilotBackend) copilotBackend = new CopilotEdgeClient(cfg);
@@ -1341,67 +1363,6 @@ var io = {
   },
   askYesNo: async () => false
 };
-var PAGE = `<!DOCTYPE html>
-<html lang="ja">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>\u793E\u5185\u30B3\u30FC\u30C7\u30A3\u30F3\u30B0\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#0d1117;color:#e6edf3;font-family:"Segoe UI","Hiragino Sans",sans-serif;height:100vh;display:flex;flex-direction:column}
-header{display:flex;align-items:center;gap:12px;padding:12px 20px;background:#161b22;border-bottom:1px solid #30363d}
-header h1{font-size:15px;font-weight:600}
-.chip{font-size:11px;color:#8b949e;background:#21262d;border:1px solid #30363d;border-radius:999px;padding:3px 10px}
-#reset{margin-left:auto;background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer}
-#reset:hover{background:#30363d}
-#chat{flex:1;overflow-y:auto;padding:24px;display:flex;flex-direction:column;gap:16px}
-.msg{max-width:78%;padding:10px 14px;border-radius:12px;line-height:1.6;font-size:14px;white-space:pre-wrap;word-break:break-word}
-.user{align-self:flex-end;background:#1f6feb;color:#fff;border-bottom-right-radius:4px}
-.assistant{align-self:flex-start;background:#161b22;border:1px solid #30363d;border-bottom-left-radius:4px}
-.status{align-self:flex-start;color:#8b949e;font-size:13px;display:flex;gap:8px;align-items:center}
-.dot{width:8px;height:8px;border-radius:50%;background:#2f81f7;animation:pulse 1.2s infinite}
-@keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}
-#logbox{margin-top:6px;background:#0a0d12;border:1px solid #21262d;border-radius:8px;padding:8px 10px;font-family:Consolas,monospace;font-size:11.5px;color:#7ee787;white-space:pre-wrap;max-height:180px;overflow-y:auto}
-#inputbar{display:flex;gap:10px;padding:14px 20px;background:#161b22;border-top:1px solid #30363d}
-textarea{flex:1;background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:10px;padding:12px;font-size:14px;font-family:inherit;resize:none;height:64px}
-textarea:focus{outline:none;border-color:#2f81f7}
-button.send{background:#238636;color:#fff;border:none;border-radius:10px;padding:0 26px;font-size:14px;font-weight:600;cursor:pointer}
-button.send:hover{background:#2ea043}
-button.send:disabled{opacity:.45;cursor:not-allowed}
-footer{padding:6px 20px 10px;font-size:11px;color:#484f58;text-align:right}
-</style>
-</head>
-<body>
-<header><h1>\u2328 \u793E\u5185\u30B3\u30FC\u30C7\u30A3\u30F3\u30B0\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8</h1><span class="chip" id="chip-model"></span><span class="chip" id="chip-cwd"></span><button id="reset">\u65B0\u3057\u3044\u30BB\u30C3\u30B7\u30E7\u30F3</button></header>
-<div id="chat"></div>
-<div id="inputbar"><textarea id="q" placeholder="\u4F9D\u983C\u3092\u5165\u529B(Ctrl+Enter\u3067\u9001\u4FE1)"></textarea><button class="send" id="send">\u9001\u4FE1</button></div>
-<footer>\u30D5\u30A1\u30A4\u30EB\u66F8\u304D\u8FBC\u307F\u306F\u81EA\u52D5\u627F\u8A8D / \u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u8A2D\u5B9A\u306B\u5F93\u3046</footer>
-<script>
-const chat=document.getElementById('chat'),q=document.getElementById('q'),send=document.getElementById('send');
-let polling=null;
-function add(cls,text){const d=document.createElement('div');d.className='msg '+cls;d.textContent=text;chat.appendChild(d);chat.scrollTop=chat.scrollHeight;return d}
-async function post(url,body){const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:body?JSON.stringify(body):undefined});if(!r.ok){const e=await r.json().catch(()=>({error:r.statusText}));throw new Error(e.error||r.statusText)}return r.json()}
-function startPoll(){if(polling)return;let seen=0;polling=setInterval(async()=>{try{const r=await fetch('/api/log?offset='+seen);if(!r.ok)return;const j=await r.json();for(const l of j.lines.slice(seen-seen+j.lines.length-j.lines.length)||[]){}seen=j.total;j.lines.forEach(l=>{logEl(l)})}catch(e){}},1200)}
-let logBox=null;
-function logEl(text){if(!logBox||!document.body.contains(logBox)){logBox=document.createElement('div');logBox.className='status';logBox.innerHTML='<span class="dot"></span>\u4F5C\u696D\u4E2D<div id="logbox"></div>';chat.appendChild(logBox);chat.scrollTop=chat.scrollHeight}const lb=logBox.querySelector('#logbox');lb.textContent+=text+'\\n';lb.scrollTop=lb.scrollHeight;chat.scrollTop=chat.scrollHeight}
-function stopPoll(){if(polling){clearInterval(polling);polling=null}}
-send.onclick=run;
-q.addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey))run()});
-async function run(){
- const text=q.value.trim();if(!text)return;
- q.value='';add('user',text);send.disabled=true;q.disabled=true;startPoll();
- try{const r=await post('/api/turn',{message:text});stopPoll();
-  if(r.logs&&r.logs.length)logEl('[\u5B8C\u4E86]');
-  add('assistant',r.reply||'(\u5FDC\u7B54\u306A\u3057)');
- }catch(e){stopPoll();add('assistant','[error] '+e.message)}
- send.disabled=false;q.disabled=false;q.focus();
-}
-document.getElementById('reset').onclick=async()=>{await fetch('/api/reset',{method:'POST'});chat.innerHTML='';};
-(async()=>{try{const i=await(await fetch('/api/info')).json();document.getElementById('chip-model').textContent=i.model;i.workspace&&((document.getElementById('chip-cwd').textContent=i.workspace))}catch(e){}})();
-</script>
-</body>
-</html>`;
 function json(res, status, obj) {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(obj));
@@ -1417,12 +1378,17 @@ function readBody(req) {
 var server = import_node_http2.default.createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   if (req.method === "GET" && url.pathname === "/") {
-    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    res.end(PAGE);
+    if (indexHtmlPath) {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(import_node_fs3.default.readFileSync(indexHtmlPath));
+    } else {
+      res.writeHead(500);
+      res.end("public/index.html \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
+    }
     return;
   }
   if (req.method === "GET" && url.pathname === "/api/info") {
-    json(res, 200, { model: cfg.model || (cfg.provider ?? ""), provider: cfg.provider ?? "openai", workspace });
+    json(res, 200, { model: cfg.model || (cfg.provider ?? ""), provider: cfg.provider ?? "openai", workspace, project: import_node_path4.default.basename(workspace), version: "0.8.0" });
     return;
   }
   if (req.method === "GET" && url.pathname === "/api/log") {
@@ -1430,10 +1396,39 @@ var server = import_node_http2.default.createServer(async (req, res) => {
     json(res, 200, { total: logLines.length, lines: logLines.slice(offset) });
     return;
   }
-  if (req.method === "POST" && url.pathname === "/api/reset") {
-    messages = messages.slice(0, 1);
-    logLines.length = 0;
+  if (req.method === "GET" && url.pathname === "/api/sessions") {
+    const list = [...sessions.values()].sort((a, b) => b.created - a.created).map((s) => ({ id: s.id, title: s.title, created: s.created }));
+    json(res, 200, { active: activeId, sessions: list });
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/sessions") {
+    const s = newSession();
+    json(res, 200, { id: s.id, title: s.title });
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/sessions/select") {
+    const b = JSON.parse(await readBody(req));
+    const s = b.id ? sessions.get(b.id) : void 0;
+    if (!s) {
+      json(res, 404, { error: "session not found" });
+      return;
+    }
+    activeId = s.id;
     json(res, 200, { ok: true });
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/api/session") {
+    const s = sessions.get(url.searchParams.get("id") ?? "");
+    if (!s) {
+      json(res, 404, { error: "session not found" });
+      return;
+    }
+    activeId = s.id;
+    json(res, 200, {
+      id: s.id,
+      title: s.title,
+      messages: s.messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: m.content ?? "" }))
+    });
     return;
   }
   if (req.method === "POST" && url.pathname === "/api/turn") {
@@ -1442,8 +1437,11 @@ var server = import_node_http2.default.createServer(async (req, res) => {
       return;
     }
     let input = "";
+    let mode = "work";
     try {
-      input = String(JSON.parse(await readBody(req)).message ?? "").trim();
+      const b = JSON.parse(await readBody(req));
+      input = String(b.message ?? "").trim();
+      if (b.mode === "chat") mode = "chat";
     } catch {
     }
     if (!input) {
@@ -1452,11 +1450,14 @@ var server = import_node_http2.default.createServer(async (req, res) => {
     }
     busy = true;
     const startIdx = logLines.length;
+    const s = activeSession();
+    if (s.title === "\u65B0\u3057\u3044\u30BB\u30C3\u30B7\u30E7\u30F3") s.title = input.slice(0, 30);
+    const effCfg = mode === "chat" ? { ...cfg, copilot: { ...cfg.copilot ?? {}, agentMode: false } } : cfg;
     try {
       const backend = getBackend();
-      const result = await runAgentTurn({ cfg, messages, userInput: input, ctx, io, backend });
-      messages = result.messages;
-      json(res, 200, { reply: result.reply || (result.aborted ? "(\u4E2D\u65AD)" : ""), aborted: result.aborted, logs: logLines.slice(startIdx) });
+      const result = await runAgentTurn({ cfg: effCfg, messages: s.messages, userInput: input, ctx, io, backend });
+      s.messages = result.messages;
+      json(res, 200, { reply: result.reply || (result.aborted ? "(\u4E2D\u65AD\u3057\u307E\u3057\u305F)" : ""), aborted: result.aborted, logs: logLines.slice(startIdx), sessionId: s.id });
     } catch (err) {
       json(res, 500, { error: err.message });
     } finally {
@@ -1467,6 +1468,7 @@ var server = import_node_http2.default.createServer(async (req, res) => {
   res.writeHead(404);
   res.end("not found");
 });
+lastLogSeen = logLines.length;
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`coding-agent web UI: http://127.0.0.1:${PORT}  (workspace=${workspace})`);
 });

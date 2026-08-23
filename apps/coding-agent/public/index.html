@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>社内コーディングエージェント</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:"Segoe UI","Hiragino Sans","Noto Sans JP",sans-serif;background:#fff;color:#1a1a1a;display:flex;overflow:hidden}
+#sidebar{width:264px;min-width:264px;background:#f9f9f9;border-right:1px solid #ececec;display:flex;flex-direction:column}
+#sidebar .brand{padding:14px 16px 10px;font-size:13px;font-weight:600;color:#444;display:flex;align-items:center;gap:8px}
+#sidebar .brand .logo{width:20px;height:20px;border-radius:6px;background:#1a1a1a;color:#fff;font-size:11px;display:flex;align-items:center;justify-content:center}
+#newchat{margin:4px 12px 10px;padding:10px 12px;border:1px solid #e0e0e0;border-radius:10px;background:#fff;cursor:pointer;font-size:13.5px;text-align:left;display:flex;align-items:center;gap:8px}
+#newchat:hover{background:#f0f0f0}
+#grouplabel{padding:10px 18px 4px;font-size:11px;color:#9a9a9a}
+#sessions{flex:1;overflow-y:auto;padding:0 8px 8px}
+.sess{padding:8px 10px;border-radius:8px;font-size:13px;color:#333;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px}
+.sess:hover{background:#efefef}
+.sess.active{background:#e7e7e7;font-weight:600}
+#sidebar .foot{padding:10px 16px;border-top:1px solid #ececec;font-size:11px;color:#8a8a8a}
+#main{flex:1;display:flex;flex-direction:column;position:relative}
+#topbar{height:52px;display:flex;align-items:center;justify-content:center;border-bottom:1px solid #f0f0f0}
+.toggle{display:flex;background:#f1f1f1;border-radius:999px;padding:3px}
+.toggle div{padding:6px 22px;border-radius:999px;font-size:13px;cursor:pointer;color:#666}
+.toggle div.on{background:#fff;color:#111;box-shadow:0 1px 3px rgba(0,0,0,.12);font-weight:600}
+#chat{flex:1;overflow-y:auto;display:flex;flex-direction:column}
+body.empty #chat{justify-content:center;align-items:center}
+#hero{display:none;text-align:center;padding-bottom:26px}
+body.empty #hero{display:block}
+#hero h1{font-size:30px;font-weight:600;color:#222;margin-bottom:34px}
+#composer{transition:none}
+body.empty #composerdock{position:absolute;left:50%;transform:translateX(-50%);top:56%;width:min(680px,86%);}
+body:not(.empty) #composerdock{margin-top:auto}
+#composerdock .pill{display:flex;align-items:flex-end;gap:8px;border:1px solid #dcdcdc;border-radius:24px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.06);padding:10px 10px 10px 18px}
+#q{flex:1;border:none;outline:none;resize:none;font-size:15px;font-family:inherit;line-height:1.5;max-height:160px;background:transparent}
+#sendbtn{width:36px;height:36px;border-radius:50%;background:#1a1a1a;color:#fff;border:none;cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center}
+#sendbtn:disabled{opacity:.35;cursor:not-allowed}
+.msgwrap{max-width:760px;width:100%;margin:0 auto;padding:14px 24px;display:flex}
+.msgwrap.user{justify-content:flex-end}
+.bubble-user{background:#f1f1f3;border-radius:18px;padding:10px 16px;font-size:14.5px;line-height:1.6;max-width:78%;white-space:pre-wrap;word-break:break-word}
+.assistant-text{font-size:14.5px;line-height:1.75;white-space:pre-wrap;word-break:break-word;padding-top:4px}
+.statusline{max-width:760px;width:100%;margin:0 auto;padding:2px 24px 10px;font-family:Consolas,monospace;font-size:12px;color:#7a7a7a;white-space:pre-wrap}
+.think{display:inline-flex;gap:5px;align-items:center;color:#888;font-size:13px}
+.think i{width:6px;height:6px;border-radius:50%;background:#999;animation:pulse 1.1s infinite}
+.think i:nth-child(2){animation-delay:.18s}.think i:nth-child(3){animation-delay:.36s}
+@keyframes pulse{0%,100%{opacity:.25}50%{opacity:1}}
+</style>
+</head>
+<body class="empty">
+<div id="sidebar">
+  <div class="brand"><span class="logo">⌘</span>社内エージェント</div>
+  <button id="newchat">✚ 新しいチャット</button>
+  <div id="grouplabel">プロジェクト</div>
+  <div id="sessions"></div>
+  <div class="foot"><span id="footmodel"></span></div>
+</div>
+<div id="main">
+  <div id="topbar"><div class="toggle"><div id="tg-chat">Chat</div><div id="tg-work" class="on">Work</div></div></div>
+  <div id="chat">
+    <div id="hero"><h1>今日は何をしますか？</h1></div>
+  </div>
+  <div id="composerdock">
+    <div class="pill">
+      <textarea id="q" rows="1" placeholder="メッセージを入力（Enterで送信）"></textarea>
+      <button id="sendbtn" title="送信">↑</button>
+    </div>
+  </div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const chat=$('chat'),q=$('q'),send=$('sendbtn'),sessEl=$('sessions');
+let mode='work',busy=false,sessions=[],activeId=null,polling=null;
+function setEmpty(e){document.body.classList.toggle('empty',e)}
+async function jget(u){return (await fetch(u)).json()}
+async function jpost(u,b){return (await fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:b?JSON.stringify(b):undefined})).json()}
+function addMsg(role,content){
+ if(role==='system')return;
+ const w=document.createElement('div');w.className='msgwrap '+(role==='user'?'user':'assistant');
+ const b=document.createElement('div');b.className=role==='user'?'bubble-user':'assistant-text';b.textContent=content;
+ w.appendChild(b);chat.appendChild(w);scrollEnd();
+}
+function thinkLine(){const d=document.createElement('div');d.className='msgwrap assistant';d.innerHTML='<span class="think"><i></i><i></i><i></i></span>';chat.appendChild(d);scrollEnd();return d}
+function logLine(el,text){let lb=el.querySelector('.log');if(!lb){lb=document.createElement('div');lb.className='statusline';el.appendChild(lb)}lb.textContent+=text+'\n';lb.scrollTop=lb.scrollHeight;scrollEnd()}
+function scrollEnd(){chat.scrollTop=chat.scrollHeight}
+function setEmptyState(){setEmpty(chat.querySelectorAll('.msgwrap').length===0)}
+async function loadSessions(){try{const r=await jget('/api/sessions');sessions=r.sessions;if(!r.sessions.find(s=>s.id===activeId)&&r.sessions.length)selectSession(r.sessions[0].id);renderSessions(r.active)}catch(e){}}
+function renderSessions(active){sessEl.innerHTML='';for(const s of sessions){const d=document.createElement('div');d.className='sess'+(s.id===active?' active':'');d.textContent=s.title;d.onclick=()=>selectSession(s.id);sessEl.appendChild(d)}}
+async function selectSession(id){if(busy)return;activeId=id;const s=await jget('/api/session?id='+id);chat.innerHTML='<div id="hero"><h1>今日は何をしますか？</h1></div>';
+ for(const m of s.messages)addMsg(m.role,m.content);
+ setEmptyState();renderSessions(activeId);
+ if(!sessions.length||true)loadSessionsSilent();}
+function loadSessionsSilent(){jget('/api/sessions').then(r=>{sessions=r.sessions;renderSessions(r.active)}).catch(()=>{})}
+$('newchat').onclick=async()=>{if(busy)return;await jpost('/api/sessions');activeId=null;chat.innerHTML='<div id="hero"><h1>今日は何をしますか？</h1></div>';setEmpty(true);loadSessionsSilent();q.focus()};
+$('tg-chat').onclick=()=>{mode='chat';$('tg-chat').classList.add('on');$('tg-work').classList.remove('on')};
+$('tg-work').onclick=()=>{mode='work';$('tg-work').classList.add('on');$('tg-chat').classList.remove('on')};
+function autosize(){q.style.height='auto';q.style.height=Math.min(q.scrollHeight,160)+'px'}
+q.addEventListener('input',autosize);
+q.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();run()}});
+send.onclick=run;
+async function run(){
+ const text=q.value.trim();if(!text||busy)return;
+ q.value='';autosize();
+ addMsg('user',text);setEmptyState();
+ busy=true;send.disabled=true;
+ const st=document.createElement('div');st.className='msgwrap assistant';st.innerHTML='<span class="think"><i></i><i></i><i></i></span>';chat.appendChild(st);scrollEnd();
+ startPoll(st);
+ try{
+  const r=await jpost('/api/turn',{message:text,mode});
+  st.remove();
+  addMsg('assistant',r.reply||'(応答なし)');
+  loadSessionsSilent();
+ }catch(e){st.remove();addMsg('assistant','[error] '+e.message)}
+ busy=false;send.disabled=false;setEmptyState();q.focus();
+}
+function startPoll(el){
+ let seen=0;
+ polling=setInterval(async()=>{
+  try{const r=await jget('/api/log?offset='+seen);seen=r.total;for(const l of r.lines)logLine(el,l)}catch(e){}
+ },1200);
+}
+(async()=>{
+ try{
+  const i=await jget('/api/info');
+  $('grouplabel').textContent='プロジェクト / '+(i.project||'workspace');
+  $('footmodel').textContent=i.provider+' ・ '+i.model+' ・ workspace: '+(i.workspace||'');
+ }catch(e){}
+ await loadSessions();
+ const first=sessions[0];
+ if(first)selectSession(first.id);
+ q.focus();
+})();
+</script>
+</body>
+</html>
