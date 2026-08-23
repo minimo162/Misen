@@ -148,6 +148,13 @@ export interface TextBackend {
 
 const END_MARKER = 'AGENT_END'
 
+const CONVERSATIONAL_ONLY = /^(?:こんにちは|こんばんは|おはよう(?:ございます)?|お疲れ(?:さま|様)(?:です)?|ありがとう(?:ございます)?|どうも|よろしく(?:お願いします)?|やあ|ハロー|hello|hi|hey|thanks?)[\s!！。、，,.?？]*$/iu
+
+export function isConversationalRequest(input: string): boolean {
+  const text = input.trim().replace(/\s+/g, ' ')
+  return text.length > 0 && text.length <= 80 && CONVERSATIONAL_ONLY.test(text)
+}
+
 function shouldCancel(io: AgentIO): boolean {
   return io.signal?.aborted === true || io.isCanceled?.() === true
 }
@@ -174,6 +181,7 @@ function buildProtocolRules(): string {
     'ホストブリッジは JSON の tool を受け取ると、指定されたワークスペース内で実行し、その結果を次の入力に TOOL_RESULT として渡します。',
     '「ツールを使えません」「実行できません」といった拒否や説明は禁止です。必ず指定形式の JSON で次の1手を返してください。',
     'あなたの仕事は、状況に応じて次に行うべきアクションを 1 つ選び JSON で報告することです。',
+    '挨拶・お礼・雑談だけでローカル作業の依頼がない場合は、ツールを使わず {"answer":"..."} で返します。',
     '',
     '選択できるアクション:',
     toolDocs,
