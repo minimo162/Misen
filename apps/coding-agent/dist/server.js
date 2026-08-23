@@ -1224,6 +1224,16 @@ var EDITOR_LENGTH_JS = `(() => {
   }
   return '-1';
 })()`;
+var EDITOR_STATE_JS = `(() => {
+  ${VISIBLE_JS}
+  ${DOCS_JS}
+  const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
+  for (const d of __docs) for (const s of sels) {
+    const el = d.querySelector(s);
+    if (__vis(el)) return JSON.stringify({ found: true, text: String(el.textContent || ''), active: d.activeElement === el });
+  }
+  return JSON.stringify({ found: false, text: '', active: false });
+})()`;
 var CLEAR_EDITOR_JS = `(() => {
   ${VISIBLE_JS}
   ${DOCS_JS}
@@ -1615,6 +1625,15 @@ var CopilotEdgeClient = class {
     const n = Number(raw);
     return Number.isFinite(n) ? n : -1;
   }
+  async editorState() {
+    const raw = await this.evalWithReconnect(EDITOR_STATE_JS);
+    try {
+      const state = JSON.parse(String(raw));
+      return { found: state.found === true, text: typeof state.text === "string" ? state.text : "", active: state.active === true };
+    } catch {
+      return { found: false, text: "", active: false };
+    }
+  }
   async insertPrompt(prompt) {
     if (prompt.length > this.s.maxPromptChars) {
       throw new Error(`\u4F9D\u983C\u6587\u304C\u4E0A\u9650 ${this.s.maxPromptChars} \u6587\u5B57\u3092\u8D85\u3048\u3066\u3044\u307E\u3059 (${prompt.length} \u6587\u5B57)`);
@@ -1651,29 +1670,58 @@ var CopilotEdgeClient = class {
       await this.clearEditor();
     }
     let pos = 0;
-    let chunkSize = 900;
+    let chunkSize = 450;
+    let rebuilds = 0;
     while (pos < prompt.length) {
       const chunk = prompt.slice(pos, pos + chunkSize);
-      const expectedGrowth = Math.floor(chunk.length * 0.9);
       let ok = false;
-      for (let attempt = 1; attempt <= 4 && !ok; attempt++) {
-        const before = Math.max(0, await this.editorLength());
+      for (let attempt = 1; attempt <= 6 && !ok; attempt++) {
+        const before = await this.editorState();
+        if (!before.found) throw new Error("\u5165\u529B\u6B04\u304C\u518D\u63CF\u753B\u4E2D\u3067\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F");
+        if (!prompt.startsWith(before.text)) {
+          if (rebuilds >= 2) throw new Error(`\u4F9D\u983C\u6587\u306E\u5165\u529B\u5185\u5BB9\u304C\u4F4D\u7F6E ${before.text.length} \u3067\u4E0D\u4E00\u81F4\u306B\u306A\u308A\u307E\u3057\u305F`);
+          await this.clearEditor();
+          pos = 0;
+          rebuilds++;
+          break;
+        }
+        if (before.text.length > pos) {
+          pos = before.text.length;
+          ok = true;
+          break;
+        }
         await this.bringToFront();
         await this.focusEditor();
-        await this.cdpMethod("Input.insertText", { text: chunk });
-        await sleep(300);
-        const after = await this.editorLength();
-        if (after - before >= expectedGrowth) ok = true;
-        else await sleep(600);
+        await this.cdpMethod("Input.insertText", { text: prompt.slice(pos, pos + chunk.length) });
+        for (let poll = 0; poll < 8; poll++) {
+          await sleep(180);
+          const after = await this.editorState();
+          if (!after.found || !prompt.startsWith(after.text)) break;
+          if (after.text.length > pos) {
+            pos = after.text.length;
+            ok = true;
+            break;
+          }
+        }
+        if (!ok) await sleep(250 * attempt);
       }
       if (!ok) {
-        if (chunkSize <= 500) {
+        if (pos >= prompt.length) break;
+        if (chunkSize > 180) {
+          chunkSize = Math.floor(chunkSize / 2);
+          continue;
+        }
+        if (rebuilds >= 2) {
           throw new Error(`\u4F9D\u983C\u6587\u306E\u5165\u529B\u304C\u4F4D\u7F6E ${pos} \u3067\u53CD\u6620\u3055\u308C\u307E\u305B\u3093\u3067\u3057\u305F`);
         }
-        chunkSize = Math.floor(chunkSize / 2);
-        continue;
+        await this.clearEditor();
+        pos = 0;
+        rebuilds++;
       }
-      pos += chunk.length;
+    }
+    const final = await this.editorState();
+    if (!final.found || !final.text.startsWith(prompt)) {
+      throw new Error(`\u4F9D\u983C\u6587\u306E\u5165\u529B\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F (\u671F\u5F85 ${prompt.length} / \u5B9F\u969B ${final.text.length})`);
     }
   }
   async clearEditor() {
@@ -1692,7 +1740,17 @@ var CopilotEdgeClient = class {
       const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
       for (const d of __docs) for (const s of sels) {
         const el = d.querySelector(s);
-        if (__vis(el)) { el.focus(); return 'ok'; }
+        if (__vis(el)) {
+          try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); }
+          try {
+            const range = d.createRange();
+            range.selectNodeContents(el);
+            range.collapse(false);
+            const sel = d.getSelection();
+            if (sel) { sel.removeAllRanges(); sel.addRange(range); }
+          } catch (e) {}
+          return 'ok';
+        }
       }
       return 'ng';
     })()`;

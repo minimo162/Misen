@@ -7,6 +7,7 @@ import path from 'node:path'
 import { extractJsonReply, runAgentTurn, type AgentIO, type TextBackend } from '../src/agent'
 import type { AgentConfig } from '../src/config'
 import type { ChatMessage } from '../src/llm'
+import { CopilotEdgeClient } from '../src/copilot'
 import { getFileSnapshot, parseToolResultMeta, rollbackFileChange, TOOL_DEFS, type ToolContext } from '../src/tools'
 import { listApprovals, requestApproval, resolveApproval } from '../src/approvals'
 
@@ -225,6 +226,37 @@ class FakeBackend implements TextBackend {
   }
 }
 
+async function testCopilotChunkFallback(): Promise<void> {
+  const client = new CopilotEdgeClient({ baseURL: '', model: '', provider: 'copilot-edge', copilot: { maxPromptChars: 5000 } })
+  type Internals = {
+    editorLength: () => Promise<number>
+    editorState: () => Promise<{ found: boolean; text: string; active: boolean }>
+    clearEditor: () => Promise<void>
+    focusEditor: () => Promise<void>
+    bringToFront: () => Promise<void>
+    cdpMethod: (name: string, params: Record<string, unknown>) => Promise<void>
+    insertByChunks: (prompt: string) => Promise<void>
+  }
+  const internal = client as unknown as Internals
+  const prompt = ('0123456789abcdef'.repeat(140)) + '\n末尾'
+  let editor = ''
+  let insertCalls = 0
+  internal.editorLength = async () => editor.length
+  internal.editorState = async () => ({ found: true, text: editor, active: true })
+  internal.clearEditor = async () => { editor = '' }
+  internal.focusEditor = async () => {}
+  internal.bringToFront = async () => {}
+  internal.cdpMethod = async (name, params) => {
+    if (name !== 'Input.insertText') return
+    const chunk = String(params.text ?? '')
+    insertCalls++
+    editor += insertCalls === 2 ? chunk.slice(0, 120) : chunk
+  }
+  await internal.insertByChunks(prompt)
+  assert.strictEqual(editor, prompt)
+  assert.ok(insertCalls > Math.ceil(prompt.length / 450))
+  console.log('PASS copilot-chunk-fallback')
+}
 async function testCopilotLoop(): Promise<void> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-'))
   const backend = new FakeBackend([
@@ -315,6 +347,7 @@ async function testUiContract(): Promise<void> {
   await testAgentLoop()
   await testDenial()
   await testProtocolParsing()
+  await testCopilotChunkFallback()
   await testCopilotLoop()
   await testMaxIterationHistory()
   await testCopilotPlainMode()

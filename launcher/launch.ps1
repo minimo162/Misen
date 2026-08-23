@@ -116,7 +116,10 @@ try {
         $stage = Join-Path $versionsDir ".staging-$([guid]::NewGuid().ToString('N'))"
         New-Item -ItemType Directory -Force -Path $stage | Out-Null
         Write-DistributionState 'syncing' '共有版を版別ステージングへ取得しています' $remoteVersion $localVersion $remotePublishId $localPublishId $previousVersion $previousPublishId
-        & robocopy $remoteAppDir $stage /MIR /XD node_modules .git /NFL /NDL /NJH /NJS /NP | Out-Null
+        # The default robocopy retry policy is effectively unbounded. A file held
+        # open by another user must fail this activation and roll back instead of
+        # leaving the launcher stuck forever in the syncing phase.
+        & robocopy $remoteAppDir $stage /MIR /XD node_modules .git /NFL /NDL /NJH /NJS /NP /R:2 /W:1 | Out-Null
         if ($LASTEXITCODE -ge 8) { throw "robocopy失敗 (exit=$LASTEXITCODE)" }
         $stagedManifest = Assert-StagedApp $stage $remoteManifest
         Write-DistributionState 'integrity_passed' 'ステージングの必須ファイルと公開IDを確認しました' $remoteVersion $localVersion $remotePublishId $localPublishId $previousVersion $previousPublishId $true

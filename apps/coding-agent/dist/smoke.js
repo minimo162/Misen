@@ -25,9 +25,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 // test/smoke.ts
 var import_node_assert = __toESM(require("node:assert"));
 var import_node_http2 = __toESM(require("node:http"));
-var import_node_fs = __toESM(require("node:fs"));
+var import_node_fs2 = __toESM(require("node:fs"));
 var import_node_os = __toESM(require("node:os"));
-var import_node_path2 = __toESM(require("node:path"));
+var import_node_path3 = __toESM(require("node:path"));
 
 // src/llm.ts
 var import_node_http = __toESM(require("node:http"));
@@ -1048,6 +1048,727 @@ function summarize(name, args) {
   }
 }
 
+// src/copilot.ts
+var import_node_child_process3 = require("node:child_process");
+var import_node_fs = __toESM(require("node:fs"));
+var import_node_path2 = __toESM(require("node:path"));
+function resolveCopilotSettings(cfg) {
+  const c = cfg.copilot ?? {};
+  return {
+    url: c.url ?? "https://m365.cloud.microsoft/chat/",
+    cdpPort: c.cdpPort ?? 9445,
+    maxPromptChars: c.maxPromptChars ?? 12e4,
+    pollIntervalMs: Math.max(500, c.pollIntervalMs ?? 900),
+    responseTimeoutSec: c.responseTimeoutSec ?? 300,
+    stallTimeoutSec: c.stallTimeoutSec ?? 120,
+    displayMode: c.displayMode === "foreground" ? "foreground" : "minimized",
+    endMarker: c.endMarker ?? "AGENT_END",
+    agentMode: c.agentMode === true,
+    modelPriority: Array.isArray(c.modelPriority) ? c.modelPriority.filter((s) => s && s.trim()) : ["GPT 5.6 Think Deeper", "Opus", "Think Deeper"]
+  };
+}
+var VISIBLE_JS = `const __vis=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};`;
+var DOCS_JS = `const __docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)__docs.push(f.contentDocument);}catch(e){}}`;
+var INPUT_READY_JS = `(() => {
+  ${VISIBLE_JS}
+  ${DOCS_JS}
+  const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
+  for (const d of __docs) for (const s of sels) {
+    const el = d.querySelector(s);
+    if (__vis(el)) return JSON.stringify({ ready: true, url: location.href });
+  }
+  return JSON.stringify({ ready: false, url: location.href });
+})()`;
+var SCREEN_STATE_JS = `(() => {
+  ${VISIBLE_JS}
+  ${DOCS_JS}
+  const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
+  let input = null;
+  for (const d of __docs) { input = sels.map(s => ({ s, el: d.querySelector(s) })).find(x => __vis(x.el)); if (input) break; }
+  const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button,[role="button"],a')));
+  const stopButton = buttons.find(el => /^(\u505C\u6B62|stop)$/i.test((el.getAttribute('aria-label') || el.title || '').trim()) && !el.disabled && __vis(el));
+  const signIn = buttons.find(el => __vis(el) && /sign\\s*in|log\\s*in|\u30B5\u30A4\u30F3\u30A4\u30F3|\u30ED\u30B0\u30A4\u30F3/i.test((el.innerText || el.textContent || el.getAttribute('aria-label') || el.title || '').trim()));
+  const url = String(location.href || '');
+  const signinRequired = /(?:login|signin|sign-in|auth)/i.test(url) || (!input && !!signIn);
+  const selectors = ['[data-testid="markdown-reply"]','[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][data-author="assistant"],[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
+  let text = '';
+  for (let i = 0; i < selectors.length; i++) {
+    const nodes = document.querySelectorAll(selectors[i]);
+    for (let k = nodes.length - 1; k >= 0; k--) {
+      const t = ((nodes[k].innerText || '') || (nodes[k].textContent || '')).trim();
+      if (t) { text = t; break; }
+    }
+    if (text) break;
+  }
+  return JSON.stringify({ inputReady: !!input, generating: !!stopButton, signinRequired, url, text });
+})()`;
+var FRESH_CHAT_JS = `(() => {
+  ${VISIBLE_JS}
+  ${DOCS_JS}
+  const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button, [role="button"], a, [tabindex]')));
+  const candidates = [];
+  for (const b of buttons) {
+    const label = (b.getAttribute('aria-label') || b.title || b.textContent || '').trim();
+    if (!label) continue;
+    let score = 0;
+    if (/^(\u65B0\u3057\u3044\u30C1\u30E3\u30C3\u30C8|New chat)$/i.test(label)) score += 1000;
+    else if (/\u65B0\u3057\u3044\u30C1\u30E3\u30C3\u30C8|New chat/i.test(label)) score += 400;
+    else if (/\u30C1\u30E3\u30C3\u30C8|chat/i.test(label)) score += 80;
+    if (/\u305D\u306E\u4ED6|\u5C65\u6B74|\u691C\u7D22|\u30E9\u30A4\u30D6\u30E9\u30EA|more|history|search|library/i.test(label)) score -= 300;
+    if (score <= 0) continue;
+    if (b.disabled || b.getAttribute('aria-disabled') === 'true') continue;
+    if (!__vis(b)) continue;
+    candidates.push({ el: b, label, score });
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  if (candidates[0]) { candidates[0].el.click(); return JSON.stringify({ clicked: true }); }
+  return JSON.stringify({ clicked: false });
+})()`;
+var CLICK_SEND_JS = `(() => {
+  ${VISIBLE_JS}
+  ${DOCS_JS}
+  const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button, [role="button"]')));
+  const exclude = /stop|cancel|\u505C\u6B62|\u30AD\u30E3\u30F3\u30BB\u30EB|regenerate|\u518D\u751F\u6210|attach|\u6DFB\u4ED8|microphone|voice|\u30DC\u30A4\u30B9|\u97F3\u58F0|new chat|\u65B0\u3057\u3044\u30C1\u30E3\u30C3\u30C8|clear|\u30AF\u30EA\u30A2|close|\u9589\u3058\u308B|search|\u691C\u7D22|library|\u30E9\u30A4\u30D6\u30E9\u30EA|file|\u30D5\u30A1\u30A4\u30EB/;
+  const clickable = [];
+  for (const b of buttons) {
+    const label = (b.getAttribute('aria-label') || b.title || b.textContent || '').trim();
+    if (!label) continue;
+    const lower = label.toLowerCase();
+    let score = 0;
+    if (/^(\u9001\u4FE1|send)$/i.test(label)) score += 1000;
+    else if (/\u9001\u4FE1|send/i.test(lower)) score += 400;
+    if (score <= 0) continue;
+    if (exclude.test(lower)) continue;
+    if (b.disabled || b.getAttribute('aria-disabled') === 'true') continue;
+    if (!__vis(b)) continue;
+    clickable.push({ el: b, score });
+  }
+  clickable.sort((a, b) => b.score - a.score);
+  if (clickable[0]) { clickable[0].el.click(); return JSON.stringify({ clicked: true }); }
+  return JSON.stringify({ clicked: false });
+})()`;
+var EDITOR_LENGTH_JS = `(() => {
+  ${VISIBLE_JS}
+  ${DOCS_JS}
+  const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
+  for (const d of __docs) for (const s of sels) {
+    const el = d.querySelector(s);
+    if (__vis(el)) return String((el.textContent || '').length);
+  }
+  return '-1';
+})()`;
+var EDITOR_STATE_JS = `(() => {
+  ${VISIBLE_JS}
+  ${DOCS_JS}
+  const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
+  for (const d of __docs) for (const s of sels) {
+    const el = d.querySelector(s);
+    if (__vis(el)) return JSON.stringify({ found: true, text: String(el.textContent || ''), active: d.activeElement === el });
+  }
+  return JSON.stringify({ found: false, text: '', active: false });
+})()`;
+var CLEAR_EDITOR_JS = `(() => {
+  ${VISIBLE_JS}
+  ${DOCS_JS}
+  const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
+  for (const d of __docs) for (const s of sels) {
+    const el = d.querySelector(s);
+    if (__vis(el)) { el.focus(); document.execCommand('selectAll'); document.execCommand('delete'); return 'ok'; }
+  }
+  return 'ng';
+})()`;
+var MODEL_SELECT_JS = String.raw`(async () => {
+  const candidates = __CANDIDATES__;
+  const switcherSelector = __SWITCHER__;
+  const docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}}
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const norm = s => (s || '').replace(/\s+/g, ' ').trim();
+  const stripTail = s => norm(s).replace(/[…‥]|\.{3}$/g, '');
+  const eq = (a,b) => a.toLowerCase() === b.toLowerCase();
+  const has = (a,b) => a.toLowerCase().indexOf(b.toLowerCase()) !== -1;
+  const matchesModel = (shown,cand,picked) => {
+    const a = stripTail(shown); if (!a) return false;
+    if (eq(a,cand) || has(a,cand)) return true;
+    if (picked && (eq(a,picked) || has(a,picked))) return true;
+    return a.length >= 6 && (has(cand,a) || (picked && has(picked,a)));
+  };
+  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
+  const primaryLabel = el => { const p=el.querySelector('.fai-CapabilityPickerMenuItem__primaryContentWrapper'); if(p)return norm(p.innerText); const c=el.querySelector('.fui-MenuItem__content > span:first-child'); if(c)return norm(c.innerText); return norm((el.innerText||'').split('\n')[0]); };
+  const subTextOf = el => { const s=el.querySelector('.fai-CapabilityPickerMenuItem__subText'); return s?norm(s.innerText):''; };
+  const itemSelector='[role="menuitem"],[role="menuitemradio"],[role="menuitemcheckbox"],[role="option"]';
+  const menuRoot=()=>{for(const d of docs){const r=d.querySelector('.fui-MenuPopover')||d.querySelector('[data-portal-node] [role="menu"]');if(r)return r;}return null;};
+  const collectItems=()=>{const r=menuRoot();return r?Array.from(r.querySelectorAll(itemSelector)).filter(visible):[];};
+  const collectItemsAll=()=>{const roots=docs.flatMap(d=>Array.from(d.querySelectorAll('.fui-MenuPopover, [data-portal-node] [role="menu"]'))).filter(visible);return Array.from(new Set(roots.flatMap(r=>Array.from(r.querySelectorAll(itemSelector)).filter(visible))));};
+  const pressEscape=()=>{try{const o={key:'Escape',code:'Escape',keyCode:27,which:27,bubbles:true,cancelable:true};const t=document.activeElement||document.body;t.dispatchEvent(new KeyboardEvent('keydown',o));t.dispatchEvent(new KeyboardEvent('keyup',o));}catch(e){}};
+  const fireEnter=el=>{try{el.focus();const o={key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true,cancelable:true};el.dispatchEvent(new KeyboardEvent('keydown',o));el.dispatchEvent(new KeyboardEvent('keyup',o));return true;}catch(e){return false;}};
+  const fireMenuClick=async el=>{try{const r=el.getBoundingClientRect(),cx=r.x+r.width/2,cy=r.y+r.height/2,base={bubbles:true,cancelable:true,view:window,clientX:cx,clientY:cy};el.dispatchEvent(new PointerEvent('pointerover',{...base,pointerType:'mouse'}));el.dispatchEvent(new MouseEvent('mouseover',base));el.dispatchEvent(new PointerEvent('pointermove',{...base,pointerType:'mouse'}));el.dispatchEvent(new MouseEvent('mousemove',base));try{el.focus();}catch(e){}await sleep(60);el.dispatchEvent(new PointerEvent('pointerdown',{...base,pointerType:'mouse',button:0}));el.dispatchEvent(new MouseEvent('mousedown',{...base,button:0}));el.dispatchEvent(new PointerEvent('pointerup',{...base,pointerType:'mouse',button:0}));el.dispatchEvent(new MouseEvent('mouseup',{...base,button:0}));el.dispatchEvent(new MouseEvent('click',{...base,button:0}));try{el.click();}catch(e){}return true;}catch(e){return false;}};
+  const findSwitcher=()=>{for(const d of docs){let b=d.querySelector(switcherSelector);if(b&&visible(b))return b;b=Array.from(d.querySelectorAll('button[aria-haspopup="menu"]')).find(x=>visible(x)&&(/モデル/.test(x.getAttribute('aria-label')||'')||/model/i.test(x.getAttribute('aria-label')||'')));if(b)return b;}return null;};
+  const labelItems=xs=>xs.map(el=>({el,label:primaryLabel(el),submenu:el.getAttribute('aria-haspopup')==='menu',testId:el.getAttribute('data-test-id')||'',checked:el.getAttribute('aria-checked')==='true'})).filter(x=>x.label);
+  const isGptTrigger=x=>/^gptSubMenuModelTrigger/i.test(x.testId)||(x.submenu&&/^gpt/i.test(x.label))||(x.submenu&&has(subTextOf(x.el),'OpenAI'));
+  const findHit=(xs,c)=>xs.find(x=>eq(x.label,c))||xs.find(x=>has(x.label,c))||(/^gpt/i.test(c)?xs.find(isGptTrigger):null);
+  const btn=findSwitcher();
+  if(!btn)return JSON.stringify({ok:true,changed:false,reason:'switcher_not_found'});
+  const current=norm(btn.innerText);
+  if(candidates.length&&matchesModel(current,candidates[0],''))return JSON.stringify({ok:true,changed:false,reason:'already_selected',current,picked:candidates[0]});
+  await fireMenuClick(btn);
+  let items=[];for(let i=0;i<30;i++){items=collectItems();if(items.length)break;await sleep(100);}if(items.length){await sleep(150);const a=collectItems();if(a.length)items=a;}
+  if(!items.length){pressEscape();return JSON.stringify({ok:true,changed:false,reason:'menu_not_found',current});}
+  let labeled=labelItems(items),skipped=[],observedSubMenuItems=[];
+  const clickAndConfirm=async(hit,cand)=>{
+    const before=new Set(collectItemsAll());await fireMenuClick(hit.el);let picked=hit.label,clicked=hit.el;
+    if(hit.submenu){let fresh=[];for(let i=0;i<20;i++){fresh=collectItemsAll().filter(x=>!before.has(x));if(fresh.length)break;await sleep(100);}if(fresh.length){const sub=fresh.map(el=>({el,label:primaryLabel(el)})).filter(x=>x.label);observedSubMenuItems=sub.map(x=>x.label).slice(0,16);const suffix=cand.replace(/^GPT[\s-]*[\d.]*\s*/i,'');const h=sub.find(x=>eq(x.label,cand))||sub.find(x=>has(x.label,cand))||sub.find(x=>eq(x.label,suffix))||sub.find(x=>suffix&&has(x.label,suffix))||sub.find(x=>has(cand,x.label)&&x.label.length>=4);if(!h)return{applied:false,reason:'submenu_no_match'};picked=h.label;clicked=h.el;await fireMenuClick(clicked);}}
+    const timeout=hit.submenu?5000:2000,t0=Date.now();let keyboard=false;
+    while(Date.now()-t0<timeout){await sleep(hit.submenu?50:100);after_loop:{}
+      const after=norm((findSwitcher()||{innerText:''}).innerText);
+      if(matchesModel(after,cand,picked))return{applied:true,after,picked};
+      const still=menuRoot()!==null;
+      if(hit.submenu&&still&&!keyboard&&(Date.now()-t0)>=800){keyboard=true;fireEnter(clicked);}
+    }
+    return{applied:false,reason:'confirm_failed'};
+  };
+  for(let pi=0;pi<candidates.length;pi++){const cand=candidates[pi],hit=findHit(labeled,cand);if(!hit){skipped.push(cand);continue;}
+    if(hit.checked){pressEscape();return JSON.stringify({ok:true,changed:false,reason:'already_selected',current,picked:hit.label});}
+    const r=await clickAndConfirm(hit,cand);
+    if(r.applied)return JSON.stringify({ok:true,changed:true,reason:'selected',before:current,after:r.after,picked:r.picked});
+    pressEscape();await sleep(150);pressEscape();await sleep(700);
+    const after2=norm((findSwitcher()||{innerText:''}).innerText);
+    if(matchesModel(after2,cand,r.picked||''))return JSON.stringify({ok:true,changed:true,reason:'selected_late',before:current,after:after2,picked:r.picked});
+  }
+  pressEscape();return JSON.stringify({ok:true,changed:false,reason:'model_not_in_menu',current,tried:candidates,skipped});
+})()`;
+var CLICK_COPY_JS = `(() => {
+  ${VISIBLE_JS}
+  ${DOCS_JS}
+  const btns = __docs.flatMap((d) => Array.from(d.querySelectorAll('button, [role="button"], span[role="button"]'))).filter(__vis);
+  const cand = btns.filter((b) => /\u30B3\u30D4\u30FC|copy/i.test(b.getAttribute('aria-label') || b.title || b.getAttribute('data-testid') || ''));
+  const labels = cand.slice(-5).map((b) => (b.getAttribute('aria-label') || b.title || b.tagName).slice(0, 40));
+  if (cand.length === 0) {
+    const sample = btns.slice(-12).map((b) => ((b.getAttribute('aria-label') || b.title || b.textContent || '').trim().slice(0, 24)));
+    return JSON.stringify({ clicked: false, found: 0, sample });
+  }
+  const last = cand[cand.length - 1];
+  try { last.scrollIntoView({ block: 'center' }); } catch (e) {}
+  last.click();
+  return JSON.stringify({ clicked: true, found: cand.length, label: (last.getAttribute('aria-label') || '').slice(0, 40) });
+})()`;
+var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+var throwIfAborted = (signal) => {
+  if (signal?.aborted) throw new Error("Copilot\u5B9F\u884C\u306F\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F");
+};
+var CdpConnection = class _CdpConnection {
+  ws;
+  nextId = 1;
+  pending = /* @__PURE__ */ new Map();
+  constructor(ws) {
+    this.ws = ws;
+    ws.addEventListener("message", (ev) => this.onMessage(String(ev.data)));
+  }
+  static async connect(url, timeoutMs = 15e3) {
+    const ctor = globalThis.WebSocket;
+    if (!ctor) throw new Error("\u3053\u306E Node.js \u306B\u306F\u6A19\u6E96 WebSocket \u304C\u3042\u308A\u307E\u305B\u3093 (v22+ \u3092\u4F7F\u7528\u3057\u3066\u304F\u3060\u3055\u3044)");
+    const ws = new ctor(url);
+    await new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error("CDP WebSocket \u63A5\u7D9A\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8")), timeoutMs);
+      ws.addEventListener("open", () => {
+        clearTimeout(t);
+        resolve();
+      }, { once: true });
+      ws.addEventListener("error", () => {
+        clearTimeout(t);
+        reject(new Error("CDP WebSocket \u63A5\u7D9A\u306B\u5931\u6557\u3057\u307E\u3057\u305F"));
+      }, { once: true });
+    });
+    return new _CdpConnection(ws);
+  }
+  onMessage(raw) {
+    let obj;
+    try {
+      obj = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    if (typeof obj.id !== "number") return;
+    const p = this.pending.get(obj.id);
+    if (!p) return;
+    this.pending.delete(obj.id);
+    clearTimeout(p.timer);
+    if (obj.error !== void 0) p.reject(new Error(`CDP \u30A8\u30E9\u30FC: ${JSON.stringify(obj.error).slice(0, 300)}`));
+    else p.resolve(obj.result);
+  }
+  async method(name, params = {}, timeoutMs = 3e4) {
+    const id = this.nextId++;
+    const p = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`CDP \u5FDC\u7B54\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8: ${name}`));
+      }, timeoutMs);
+      this.pending.set(id, { resolve, reject, timer });
+    });
+    this.ws.send(JSON.stringify({ id, method: name, params }));
+    return p;
+  }
+  async evalJs(expression, timeoutMs = 3e4) {
+    const r = await this.method(
+      "Runtime.evaluate",
+      { expression, awaitPromise: true, returnByValue: true, userGesture: true },
+      timeoutMs
+    );
+    if (r && typeof r === "object" && "exceptionDetails" in r && r.exceptionDetails) {
+      throw new Error("JavaScript evaluation failed: " + JSON.stringify(r.exceptionDetails).slice(0, 400));
+    }
+    const rr = r;
+    return rr?.result?.value;
+  }
+  close() {
+    try {
+      this.ws.close();
+    } catch {
+    }
+    for (const [, p] of this.pending) {
+      clearTimeout(p.timer);
+      p.reject(new Error("CDP \u63A5\u7D9A\u3092\u5207\u65AD\u3057\u307E\u3057\u305F"));
+    }
+    this.pending.clear();
+  }
+};
+function isLocalUrl(url) {
+  if (!url) return true;
+  try {
+    return ["127.0.0.1", "localhost", "::1"].includes(new URL(url).host.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+async function devToolsUp(port) {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(2e3) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+function findEdgePath() {
+  const roots = [process.env["ProgramFiles(x86)"], process.env.ProgramFiles, process.env.LOCALAPPDATA].filter(Boolean);
+  for (const root of roots) {
+    const p = import_node_path2.default.join(root, "Microsoft", "Edge", "Application", "msedge.exe");
+    if (import_node_fs.default.existsSync(p)) return p;
+  }
+  throw new Error("Microsoft Edge \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3002Edge \u3092\u30A4\u30F3\u30B9\u30C8\u30FC\u30EB\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
+}
+var CopilotEdgeClient = class {
+  name = "copilot-edge";
+  s;
+  cdp = null;
+  clipGranted = false;
+  constructor(cfg) {
+    this.s = resolveCopilotSettings(cfg);
+  }
+  async grantClipboard() {
+    if (this.clipGranted) return;
+    const ver = await (await fetch(`http://127.0.0.1:${this.s.cdpPort}/json/version`, { signal: AbortSignal.timeout(5e3) })).json();
+    const browserWs = String(ver.webSocketDebuggerUrl ?? "");
+    if (!browserWs) throw new Error("browser WebSocket \u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093");
+    const bws = await CdpConnection.connect(browserWs, 1e4);
+    try {
+      await bws.method("Browser.grantPermissions", {
+        permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"],
+        origin: new URL(this.s.url).origin
+      }, 1e4);
+    } finally {
+      bws.close();
+    }
+    this.clipGranted = true;
+  }
+  stripOuterFence(t) {
+    let s = t.trim();
+    const m = s.match(/^```[\w-]*[ \t]*\r?\n([\s\S]*)\r?\n?```\s*$/);
+    if (m) s = m[1];
+    return s.split("\n").filter((l) => l.trim() !== this.s.endMarker).join("\n").trim();
+  }
+  async bringToFront() {
+    try {
+      await this.cdpMethod("Page.bringToFront", {}, 5e3);
+      await sleep(300);
+    } catch {
+    }
+  }
+  async finalizeAnswer(fallbackText) {
+    let baseline = "";
+    try {
+      await this.bringToFront();
+      await this.grantClipboard();
+      baseline = String(await this.evalWithReconnect("navigator.clipboard.readText()", 8e3)).trim();
+    } catch {
+    }
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await this.bringToFront();
+        await this.grantClipboard();
+        const clicked = JSON.parse(String(await this.evalWithReconnect(CLICK_COPY_JS, 15e3)));
+        console.log("[clip] candidates=" + JSON.stringify(clicked));
+        if (clicked.clicked) {
+          await sleep(400 + attempt * 200);
+          const clip = String(await this.evalWithReconnect("navigator.clipboard.readText()", 1e4));
+          const s = this.stripOuterFence(clip);
+          if (s.trim().length >= 10 && s.trim() !== baseline) return s;
+        }
+      } catch (err) {
+        console.log("[clip] attempt " + attempt + " error: " + err.message.slice(0, 80));
+      }
+      await sleep(700);
+    }
+    console.log("[clip] fallback to innerText");
+    return this.cleanResponse(fallbackText);
+  }
+  hardenPreferences(profileDir) {
+    try {
+      const prefPath = import_node_path2.default.join(profileDir, "Default", "Preferences");
+      if (!import_node_fs.default.existsSync(prefPath)) return;
+      const j = JSON.parse(import_node_fs.default.readFileSync(prefPath, "utf8"));
+      if (!j.session) j.session = {};
+      j.session.restore_on_startup = 4;
+      j.session.startup_urls = [];
+      if (j.profile) j.profile.exit_type = "Normal";
+      import_node_fs.default.writeFileSync(prefPath, JSON.stringify(j), "utf8");
+    } catch {
+    }
+  }
+  async ensureEdge() {
+    if (await devToolsUp(this.s.cdpPort)) return;
+    const userDataDir = import_node_path2.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent", "edge-profile");
+    this.hardenPreferences(userDataDir);
+    const args = [
+      `--remote-debugging-port=${this.s.cdpPort}`,
+      "--remote-debugging-address=127.0.0.1",
+      "--remote-allow-origins=*",
+      `--user-data-dir=${userDataDir}`,
+      "--no-first-run",
+      "--disable-background-timer-throttling",
+      "--disable-backgrounding-occluded-windows",
+      "--disable-renderer-backgrounding",
+      "--disable-features=CalculateNativeWinOcclusion,msEdgeTranslate",
+      "--disable-sync",
+      "--no-default-browser-check",
+      "--disable-session-crashed-bubble",
+      "--hide-crash-restore-bubble"
+    ];
+    if (this.s.displayMode === "minimized") args.push("--window-position=-32000,-32000", "--window-size=1280,900");
+    args.push(this.s.url);
+    (0, import_node_child_process3.spawn)(findEdgePath(), args, { detached: true, stdio: "ignore" }).unref();
+    const deadline = Date.now() + 3e4;
+    while (Date.now() < deadline) {
+      if (await devToolsUp(this.s.cdpPort)) return;
+      await sleep(500);
+    }
+    throw new Error(`Edge DevTools Protocol \u304C\u8D77\u52D5\u3057\u307E\u305B\u3093\u3067\u3057\u305F (port=${this.s.cdpPort})\u3002\u5C02\u7528\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB\u306E Edge \u30A6\u30A3\u30F3\u30C9\u30A6\u3092\u3059\u3079\u3066\u9589\u3058\u3066\u304B\u3089\u518D\u5B9F\u884C\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
+  }
+  async listTargets() {
+    try {
+      const res = await fetch(`http://127.0.0.1:${this.s.cdpPort}/json`, { signal: AbortSignal.timeout(5e3) });
+      const raw = await res.json();
+      return Array.isArray(raw) ? raw : [];
+    } catch {
+      return [];
+    }
+  }
+  async ensurePage() {
+    const host = (() => {
+      try {
+        return new URL(this.s.url).host;
+      } catch {
+        return "";
+      }
+    })();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const targets = await this.listTargets();
+      const pages = targets.filter((t) => t.type === "page" && t.webSocketDebuggerUrl && !isLocalUrl(t.url));
+      const preferred = pages.find((t) => host && t.url?.includes(host) || t.url?.toLowerCase().includes("copilot"));
+      const fallback = pages.find((t) => /^https?:/i.test(t.url ?? ""));
+      const picked = preferred ?? fallback;
+      if (picked) {
+        this.cdp?.close();
+        this.cdp = await CdpConnection.connect(picked.webSocketDebuggerUrl);
+        return;
+      }
+      const created = await fetch(`http://127.0.0.1:${this.s.cdpPort}/json/new?${encodeURIComponent(this.s.url)}`, {
+        method: "PUT",
+        signal: AbortSignal.timeout(5e3)
+      }).catch(() => null);
+      if (!created?.ok) {
+        await fetch(`http://127.0.0.1:${this.s.cdpPort}/json/new?${encodeURIComponent(this.s.url)}`, {
+          signal: AbortSignal.timeout(5e3)
+        }).catch(() => null);
+      }
+      await sleep(2e3);
+    }
+    throw new Error("Copilot \u30DA\u30FC\u30B8 (CDP \u30BF\u30FC\u30B2\u30C3\u30C8) \u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002");
+  }
+  async assertTrustedOrigin() {
+    const actualRaw = String(await this.evalWithReconnect("(() => location.origin)()"));
+    const u = new URL(this.s.url);
+    if (u.protocol !== "https:" || !u.host) {
+      throw new Error(`copilot.url \u306F https \u306E\u7D76\u5BFE URL \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${this.s.url}`);
+    }
+    let actualHost = "";
+    try {
+      const au = new URL(actualRaw);
+      if (au.protocol !== "https:") throw new Error("not https");
+      actualHost = au.host.toLowerCase();
+    } catch {
+      throw new Error(`Copilot \u306E\u9001\u4FE1\u5148\u304C\u4E0D\u6B63\u3067\u3059: ${actualRaw}`);
+    }
+    if (actualHost !== u.host.toLowerCase()) {
+      throw new Error(`Copilot \u306E\u9001\u4FE1\u5148\u304C\u8A2D\u5B9A\u3068\u4E00\u81F4\u3057\u307E\u305B\u3093 (expected=${u.host}, actual=${actualHost})`);
+    }
+  }
+  async evalWithReconnect(expr, timeoutMs = 2e4) {
+    if (!this.cdp) throw new Error("Copilot \u30DA\u30FC\u30B8\u672A\u63A5\u7D9A\u3067\u3059");
+    return this.cdp.evalJs(expr, timeoutMs);
+  }
+  async waitInputReady(timeoutSec, signal) {
+    const deadline = Date.now() + timeoutSec * 1e3;
+    while (Date.now() < deadline) {
+      throwIfAborted(signal);
+      const raw = await this.evalWithReconnect(INPUT_READY_JS, 15e3);
+      const state = JSON.parse(String(raw));
+      if (/login|signin|sign-in|auth/i.test(state.url)) {
+        throw new Error("Copilot \u3078\u306E\u30B5\u30A4\u30F3\u30A4\u30F3\u304C\u5FC5\u8981\u3067\u3059\u3002Edge \u30A6\u30A3\u30F3\u30C9\u30A6\u3067\u30B5\u30A4\u30F3\u30A4\u30F3\u3057\u3066\u304B\u3089\u518D\u5B9F\u884C\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
+      }
+      if (state.ready) return;
+      await sleep(350);
+      throwIfAborted(signal);
+    }
+    throw new Error("Copilot \u306E\u5165\u529B\u6B04\u304C\u6E96\u5099\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F (\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8)\u3002");
+  }
+  async freshChat() {
+    const raw = await this.evalWithReconnect(FRESH_CHAT_JS);
+    if (!JSON.parse(String(raw)).clicked) {
+      await this.cdpMethod("Page.navigate", { url: this.s.url });
+      await sleep(3e3);
+    } else {
+      await sleep(450);
+    }
+  }
+  async cdpMethod(name, params, timeoutMs = 3e4) {
+    if (!this.cdp) throw new Error("Copilot \u30DA\u30FC\u30B8\u672A\u63A5\u7D9A\u3067\u3059");
+    await this.cdp.method(name, params, timeoutMs);
+  }
+  async editorLength() {
+    const raw = await this.evalWithReconnect(EDITOR_LENGTH_JS);
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : -1;
+  }
+  async editorState() {
+    const raw = await this.evalWithReconnect(EDITOR_STATE_JS);
+    try {
+      const state = JSON.parse(String(raw));
+      return { found: state.found === true, text: typeof state.text === "string" ? state.text : "", active: state.active === true };
+    } catch {
+      return { found: false, text: "", active: false };
+    }
+  }
+  async insertPrompt(prompt) {
+    if (prompt.length > this.s.maxPromptChars) {
+      throw new Error(`\u4F9D\u983C\u6587\u304C\u4E0A\u9650 ${this.s.maxPromptChars} \u6587\u5B57\u3092\u8D85\u3048\u3066\u3044\u307E\u3059 (${prompt.length} \u6587\u5B57)`);
+    }
+    try {
+      await this.pasteViaClipboard(prompt);
+      return;
+    } catch (err) {
+      console.log(`[paste] \u30AF\u30EA\u30C3\u30D7\u30DC\u30FC\u30C9\u8CBC\u308A\u4ED8\u3051\u306B\u5931\u6557\u3001\u30C1\u30E3\u30F3\u30AF\u65B9\u5F0F\u3078\u30D5\u30A9\u30FC\u30EB\u30D0\u30C3\u30AF: ${err.message}`);
+    }
+    await this.insertByChunks(prompt);
+  }
+  async pasteViaClipboard(prompt) {
+    await this.bringToFront();
+    await this.grantClipboard();
+    await this.focusEditor();
+    await this.evalWithReconnect("window.focus(); true", 5e3);
+    await this.evalWithReconnect(`navigator.clipboard.writeText(${JSON.stringify(prompt)})`, 15e3);
+    for (let i = 0; i < 6; i++) {
+      await this.evalWithReconnect(CLEAR_EDITOR_JS);
+      await sleep(150);
+      if (await this.editorLength() === 0) break;
+    }
+    await this.focusEditor();
+    await this.evalWithReconnect("(() => { const s = getSelection(); if (!s || !document.activeElement) return; s.selectAllChildren(document.activeElement); s.collapseToEnd() })()", 1e4);
+    await this.cdpMethod("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "v", code: "KeyV", windowsVirtualKeyCode: 86, modifiers: 2 });
+    await this.cdpMethod("Input.dispatchKeyEvent", { type: "keyUp", key: "v", code: "KeyV", windowsVirtualKeyCode: 86, modifiers: 2 });
+    await sleep(700);
+    const len = Number(await this.editorLength());
+    if (len < prompt.length * 0.9) throw new Error(`\u8CBC\u308A\u4ED8\u3051\u5F8C\u306E\u9577\u3055\u4E0D\u8DB3 (\u671F\u5F85 ~${prompt.length}, \u5B9F\u969B ${len})`);
+  }
+  async insertByChunks(prompt) {
+    if (await this.editorLength() > 0) {
+      await this.clearEditor();
+    }
+    let pos = 0;
+    let chunkSize = 450;
+    let rebuilds = 0;
+    while (pos < prompt.length) {
+      const chunk = prompt.slice(pos, pos + chunkSize);
+      let ok = false;
+      for (let attempt = 1; attempt <= 6 && !ok; attempt++) {
+        const before = await this.editorState();
+        if (!before.found) throw new Error("\u5165\u529B\u6B04\u304C\u518D\u63CF\u753B\u4E2D\u3067\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F");
+        if (!prompt.startsWith(before.text)) {
+          if (rebuilds >= 2) throw new Error(`\u4F9D\u983C\u6587\u306E\u5165\u529B\u5185\u5BB9\u304C\u4F4D\u7F6E ${before.text.length} \u3067\u4E0D\u4E00\u81F4\u306B\u306A\u308A\u307E\u3057\u305F`);
+          await this.clearEditor();
+          pos = 0;
+          rebuilds++;
+          break;
+        }
+        if (before.text.length > pos) {
+          pos = before.text.length;
+          ok = true;
+          break;
+        }
+        await this.bringToFront();
+        await this.focusEditor();
+        await this.cdpMethod("Input.insertText", { text: prompt.slice(pos, pos + chunk.length) });
+        for (let poll = 0; poll < 8; poll++) {
+          await sleep(180);
+          const after = await this.editorState();
+          if (!after.found || !prompt.startsWith(after.text)) break;
+          if (after.text.length > pos) {
+            pos = after.text.length;
+            ok = true;
+            break;
+          }
+        }
+        if (!ok) await sleep(250 * attempt);
+      }
+      if (!ok) {
+        if (pos >= prompt.length) break;
+        if (chunkSize > 180) {
+          chunkSize = Math.floor(chunkSize / 2);
+          continue;
+        }
+        if (rebuilds >= 2) {
+          throw new Error(`\u4F9D\u983C\u6587\u306E\u5165\u529B\u304C\u4F4D\u7F6E ${pos} \u3067\u53CD\u6620\u3055\u308C\u307E\u305B\u3093\u3067\u3057\u305F`);
+        }
+        await this.clearEditor();
+        pos = 0;
+        rebuilds++;
+      }
+    }
+    const final = await this.editorState();
+    if (!final.found || !final.text.startsWith(prompt)) {
+      throw new Error(`\u4F9D\u983C\u6587\u306E\u5165\u529B\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F (\u671F\u5F85 ${prompt.length} / \u5B9F\u969B ${final.text.length})`);
+    }
+  }
+  async clearEditor() {
+    await this.focusEditor();
+    await this.cdpMethod("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: 2 });
+    await this.cdpMethod("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: 2 });
+    await sleep(120);
+    await this.cdpMethod("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 });
+    await this.cdpMethod("Input.dispatchKeyEvent", { type: "keyUp", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 });
+    await sleep(200);
+  }
+  async focusEditor() {
+    const js = `(() => {
+      ${VISIBLE_JS}
+      ${DOCS_JS}
+      const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
+      for (const d of __docs) for (const s of sels) {
+        const el = d.querySelector(s);
+        if (__vis(el)) {
+          try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); }
+          try {
+            const range = d.createRange();
+            range.selectNodeContents(el);
+            range.collapse(false);
+            const sel = d.getSelection();
+            if (sel) { sel.removeAllRanges(); sel.addRange(range); }
+          } catch (e) {}
+          return 'ok';
+        }
+      }
+      return 'ng';
+    })()`;
+    if (await this.evalWithReconnect(js) !== "ok") throw new Error("\u5165\u529B\u6B04\u306B\u30D5\u30A9\u30FC\u30AB\u30B9\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
+  }
+  async clickSend() {
+    const raw = await this.evalWithReconnect(CLICK_SEND_JS);
+    if (!JSON.parse(String(raw)).clicked) {
+      throw new Error("\u6709\u52B9\u306A\u9001\u4FE1\u30DC\u30BF\u30F3\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F");
+    }
+  }
+  async readScreenState() {
+    const raw = await this.evalWithReconnect(SCREEN_STATE_JS, 15e3);
+    return JSON.parse(String(raw));
+  }
+  async waitResponse(baseline, signal) {
+    const start = Date.now();
+    let lastText = "";
+    let lastChange = Date.now();
+    let sawNewText = false;
+    let stable = 0;
+    while (Date.now() - start < this.s.responseTimeoutSec * 1e3) {
+      throwIfAborted(signal);
+      const st = await this.readScreenState();
+      if (st.signinRequired) throw new Error("Copilot \u3078\u306E\u30B5\u30A4\u30F3\u30A4\u30F3\u304C\u5FC5\u8981\u3067\u3059\u3002");
+      if (st.text && st.text !== baseline) {
+        sawNewText = true;
+        if (st.text !== lastText) {
+          lastText = st.text;
+          lastChange = Date.now();
+          stable = 0;
+        } else if (lastText !== "") {
+          stable++;
+        }
+      }
+      const hasMarker = this.s.endMarker.length > 0 && lastText.includes(this.s.endMarker);
+      const quietFor = Date.now() - lastChange;
+      if (sawNewText && lastText !== "" && st.text === lastText) {
+        if (hasMarker && stable >= 1 && quietFor >= 1100) return await this.finalizeAnswer(lastText);
+        if (!st.generating && stable >= 2 && quietFor >= 1700) return await this.finalizeAnswer(lastText);
+      }
+      if (!st.generating && sawNewText && quietFor > this.s.stallTimeoutSec * 1e3) {
+        throw new Error("Copilot \u306E\u5FDC\u7B54\u304C\u505C\u6EDE\u3057\u305F\u305F\u3081\u8AE6\u3081\u307E\u3057\u305F");
+      }
+      await sleep(this.s.pollIntervalMs);
+      throwIfAborted(signal);
+    }
+    throw new Error(`Copilot \u306E\u5FDC\u7B54\u304C\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8\u3057\u307E\u3057\u305F (${this.s.responseTimeoutSec}\u79D2)`);
+  }
+  cleanResponse(text) {
+    return text.split("\n").filter((l) => l.trim() !== this.s.endMarker).join("\n").trim();
+  }
+  async selectModel() {
+    if (!this.s.modelPriority || this.s.modelPriority.length === 0) return;
+    const js = MODEL_SELECT_JS.replace("__CANDIDATES__", JSON.stringify(this.s.modelPriority)).replace("__SWITCHER__", JSON.stringify("#gptModeSwitcher"));
+    try {
+      const raw = await this.evalWithReconnect(js, 3e4);
+      const r = JSON.parse(String(raw));
+      if (r.changed) console.log(`[model] ${r.before ?? "?"} -> ${r.after ?? r.picked ?? "?"}`);
+    } catch (err) {
+      console.log(`[model] \u5207\u66FF\u30B9\u30AD\u30C3\u30D7(\u7D99\u7D9A): ${err.message}`);
+    }
+  }
+  async complete(prompt, signal) {
+    throwIfAborted(signal);
+    await this.ensureEdge();
+    await this.ensurePage();
+    await this.freshChat();
+    await this.waitInputReady(120, signal);
+    await this.selectModel();
+    throwIfAborted(signal);
+    await this.waitInputReady(30, signal);
+    await this.assertTrustedOrigin();
+    await this.insertPrompt(prompt);
+    await this.clickSend();
+    throwIfAborted(signal);
+    const baseline = (await this.readScreenState()).text;
+    return this.waitResponse(baseline, signal);
+  }
+  close() {
+    this.cdp?.close();
+    this.cdp = null;
+  }
+};
+
 // src/approvals.ts
 var pending = /* @__PURE__ */ new Map();
 var resolutions = /* @__PURE__ */ new Map();
@@ -1114,7 +1835,7 @@ async function testApprovals() {
   console.log("PASS approvals");
 }
 async function testTools() {
-  const root = import_node_fs.default.mkdtempSync(import_node_path2.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
+  const root = import_node_fs2.default.mkdtempSync(import_node_path3.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
   const ctx = makeCtx(root);
   const get = (n) => TOOL_DEFS.find((t) => t.name === n);
   await get("write_file").run({ path: "a/hello.txt", content: "line1\nline2 unique\n" }, ctx);
@@ -1168,7 +1889,7 @@ async function testTools() {
     dupThrew = String(err.message).includes("\u4EF6\u4E00\u81F4");
   }
   import_node_assert.default.ok(dupThrew, "multi-match should throw without replace_all");
-  import_node_fs.default.rmSync(root, { recursive: true, force: true });
+  import_node_fs2.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS tools");
 }
 function mockServer(steps) {
@@ -1213,7 +1934,7 @@ async function withServer(steps, fn) {
   }
 }
 async function testAgentLoop() {
-  const root = import_node_fs.default.mkdtempSync(import_node_path2.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
+  const root = import_node_fs2.default.mkdtempSync(import_node_path3.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
   await withServer(
     [
       { tool_call: { name: "write_file", args: { path: "hello.txt", content: "hi from mock" } } },
@@ -1231,10 +1952,10 @@ async function testAgentLoop() {
       import_node_assert.default.strictEqual(result.aborted, false);
       const toolMsg = result.messages.find((m) => m.role === "tool");
       import_node_assert.default.ok(toolMsg && toolMsg.content && toolMsg.content.includes("\u66F8\u304D\u8FBC\u307F\u5B8C\u4E86"));
-      import_node_assert.default.ok(import_node_fs.default.readFileSync(import_node_path2.default.join(root, "hello.txt"), "utf8").includes("hi from mock"));
+      import_node_assert.default.ok(import_node_fs2.default.readFileSync(import_node_path3.default.join(root, "hello.txt"), "utf8").includes("hi from mock"));
     }
   );
-  import_node_fs.default.rmSync(root, { recursive: true, force: true });
+  import_node_fs2.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS agent-loop");
 }
 async function testDenial() {
@@ -1281,8 +2002,34 @@ var FakeBackend = class {
     return r ?? '{"answer":"no script"}';
   }
 };
+async function testCopilotChunkFallback() {
+  const client = new CopilotEdgeClient({ baseURL: "", model: "", provider: "copilot-edge", copilot: { maxPromptChars: 5e3 } });
+  const internal = client;
+  const prompt = "0123456789abcdef".repeat(140) + "\n\u672B\u5C3E";
+  let editor = "";
+  let insertCalls = 0;
+  internal.editorLength = async () => editor.length;
+  internal.editorState = async () => ({ found: true, text: editor, active: true });
+  internal.clearEditor = async () => {
+    editor = "";
+  };
+  internal.focusEditor = async () => {
+  };
+  internal.bringToFront = async () => {
+  };
+  internal.cdpMethod = async (name, params) => {
+    if (name !== "Input.insertText") return;
+    const chunk = String(params.text ?? "");
+    insertCalls++;
+    editor += insertCalls === 2 ? chunk.slice(0, 120) : chunk;
+  };
+  await internal.insertByChunks(prompt);
+  import_node_assert.default.strictEqual(editor, prompt);
+  import_node_assert.default.ok(insertCalls > Math.ceil(prompt.length / 450));
+  console.log("PASS copilot-chunk-fallback");
+}
 async function testCopilotLoop() {
-  const root = import_node_fs.default.mkdtempSync(import_node_path2.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
+  const root = import_node_fs2.default.mkdtempSync(import_node_path3.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
   const backend = new FakeBackend([
     '```json\n{"tool":"write_file","args":{"path":"b.txt","content":"from copilot"}}\n```\nAGENT_END',
     '{"answer":"\u5B8C\u4E86\u3057\u307E\u3057\u305F"}\nAGENT_END'
@@ -1298,22 +2045,22 @@ async function testCopilotLoop() {
   });
   import_node_assert.default.strictEqual(result.reply, "\u5B8C\u4E86\u3057\u307E\u3057\u305F");
   import_node_assert.default.strictEqual(result.aborted, false);
-  import_node_assert.default.ok(import_node_fs.default.readFileSync(import_node_path2.default.join(root, "b.txt"), "utf8").includes("from copilot"));
+  import_node_assert.default.ok(import_node_fs2.default.readFileSync(import_node_path3.default.join(root, "b.txt"), "utf8").includes("from copilot"));
   import_node_assert.default.strictEqual(backend.calls, 2);
   import_node_assert.default.ok(backend.prompts[1].includes("TOOL_RESULT(write_file)"));
   import_node_assert.default.ok(backend.prompts[0].includes("AGENT_END"));
-  import_node_fs.default.rmSync(root, { recursive: true, force: true });
+  import_node_fs2.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS copilot-loop");
 }
 async function testMaxIterationHistory() {
-  const root = import_node_fs.default.mkdtempSync(import_node_path2.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
+  const root = import_node_fs2.default.mkdtempSync(import_node_path3.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
   const backend = new FakeBackend(['{"tool":"list_files","args":{}}']);
   const cfg = { baseURL: "", model: "", provider: "copilot-edge", maxToolIterations: 1, copilot: { agentMode: true } };
   const result = await runAgentTurn({ cfg, messages: [], userInput: "\u5C65\u6B74\u3092\u6B8B\u3057\u3066", ctx: makeCtx(root), io: ioStub(true), backend });
   import_node_assert.default.strictEqual(result.aborted, true);
   import_node_assert.default.ok(result.messages.some((message) => message.role === "user" && message.content === "\u5C65\u6B74\u3092\u6B8B\u3057\u3066"));
   import_node_assert.default.ok(result.messages.some((message) => message.role === "assistant" && String(message.content).includes("\u6700\u5927\u53CD\u5FA9\u56DE\u6570")));
-  import_node_fs.default.rmSync(root, { recursive: true, force: true });
+  import_node_fs2.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS max-iteration-history");
 }
 async function testCopilotPlainMode() {
@@ -1333,7 +2080,7 @@ async function testCopilotPlainMode() {
   console.log("PASS copilot-plain");
 }
 async function testCopilotFenceMode() {
-  const root = import_node_fs.default.mkdtempSync(import_node_path2.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
+  const root = import_node_fs2.default.mkdtempSync(import_node_path3.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
   const backend = new FakeBackend([
     '{"tool":"write_file","args":{"path":"fence.html"}}\n```html\n<p>fence ok</p>\n```\nAGENT_END',
     '{"answer":"\u30D5\u30A7\u30F3\u30B9\u5B8C\u4E86"}\nAGENT_END'
@@ -1348,12 +2095,12 @@ async function testCopilotFenceMode() {
     backend
   });
   import_node_assert.default.strictEqual(result.reply, "\u30D5\u30A7\u30F3\u30B9\u5B8C\u4E86");
-  import_node_assert.default.ok(import_node_fs.default.readFileSync(import_node_path2.default.join(root, "fence.html"), "utf8").includes("<p>fence ok</p>"));
-  import_node_fs.default.rmSync(root, { recursive: true, force: true });
+  import_node_assert.default.ok(import_node_fs2.default.readFileSync(import_node_path3.default.join(root, "fence.html"), "utf8").includes("<p>fence ok</p>"));
+  import_node_fs2.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS copilot-fence");
 }
 async function testUiContract() {
-  const html = import_node_fs.default.readFileSync(import_node_path2.default.join(process.cwd(), "public", "index.html"), "utf8");
+  const html = import_node_fs2.default.readFileSync(import_node_path3.default.join(process.cwd(), "public", "index.html"), "utf8");
   const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
   import_node_assert.default.ok(script, "UI script missing");
   new Function(script);
@@ -1366,6 +2113,7 @@ async function testUiContract() {
   await testAgentLoop();
   await testDenial();
   await testProtocolParsing();
+  await testCopilotChunkFallback();
   await testCopilotLoop();
   await testMaxIterationHistory();
   await testCopilotPlainMode();
