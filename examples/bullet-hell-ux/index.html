@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bullet Hell UX Prototype</title>
+<style>
+:root{color-scheme:dark}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:#0b1020;color:#fff;font:16px system-ui,sans-serif}
+.wrap{width:100%;max-width:1000px;margin:0 auto;padding:12px}
+.game-shell{display:grid;gap:12px}
+canvas{display:block;width:100%;max-width:100%;height:auto;background:#000;border:2px solid #6cf;outline:none}
+.status{display:grid;gap:4px;padding:8px;border:1px solid #345;border-radius:8px}
+.info{line-height:1.6}
+kbd{background:#333;padding:2px 6px;border-radius:4px}
+.sr-live{min-height:1.5em}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>弾幕シューティング UX テスト</h1>
+<div class="game-shell">
+<div class="status" aria-live="polite">
+<div>スコア: <span id="score">0</span></div>
+<div>残機: <span id="lives">3</span></div>
+<div>状態: <span id="state">開始待ち</span></div>
+<div id="liveMessage" class="sr-live">ゲーム開始待ち。ゲーム画面をクリックし、Space または Enter で開始</div>
+</div>
+<p class="info">移動: WASD/矢印・低速: Shift・射撃: Space・ポーズ: P・リスタート: R</p>
+<canvas id="game" width="960" height="640" tabindex="0" aria-label="ゲーム画面"></canvas>
+</div>
+</div>
+<script>
+const c=document.getElementById('game'),x=c.getContext('2d');
+const scoreEl=document.getElementById('score');
+const livesEl=document.getElementById('lives');
+const stateEl=document.getElementById('state');
+const liveEl=document.getElementById('liveMessage');
+let started=false;
+let s=null,lastState="";
+const k={};let hasFocus=false;
+function handleKeyDown(e){
+ if(!hasFocus)return;
+ const g=["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","w","a","s","d","W","A","S","D","Shift"," ","Enter","p","P","r","R"];
+ if(g.includes(e.key))e.preventDefault();
+ if(!started&&(e.key===" "||e.key==="Enter")){started=true;if(s)updateUi();return;}
+ k[e.key]=1;
+}
+function handleKeyUp(e){if(hasFocus)k[e.key]=0;}
+onkeydown=handleKeyDown;onkeyup=handleKeyUp;
+c.addEventListener("focus",()=>{hasFocus=true;if(s)updateUi();});
+c.addEventListener("blur",()=>{hasFocus=false;if(s)updateUi();});
+c.addEventListener("click",()=>c.focus());
+c.focus();
+function updateUi(){
+ scoreEl.textContent=s.sc;
+ livesEl.textContent=s.p.l;
+ const state=!started?"開始待ち":(s.go?"ゲームオーバー":(s.pause?"ポーズ中":"プレイ中"));
+ stateEl.textContent=state;
+ const msg=!started?"開始待ち。ゲーム画面をクリックし、Space または Enter で開始":`スコア ${s.sc}、残機 ${s.p.l}、${state}`;
+ if(msg!==lastState){liveEl.textContent=msg;lastState=msg;}
+}
+function reset(){started=false;s={p:{x:480,y:560,l:3},bul:[],eb:[],en:[],sc:0,t:0,go:false,pause:false};updateUi();}
+reset();
+function spawn(){
+ let tt=s.t;
+ if(tt%120===0)s.en.push({x:480,y:80,h:40});
+ s.en.forEach(e=>{
+  if(tt%30===0)for(let a=0;a<360;a+=20)s.eb.push({x:e.x,y:e.y,vx:Math.cos(a*Math.PI/180)*2,vy:Math.sin(a*Math.PI/180)*2});
+  if(tt%90===0)for(let i=-4;i<=4;i++)s.eb.push({x:e.x,y:e.y,vx:i*.7,vy:3});
+ });
+}
+function hit(a,b,r){let dx=a.x-b.x,dy=a.y-b.y;return dx*dx+dy*dy<r*r}
+function loop(){
+ requestAnimationFrame(loop);
+ if(!started){draw();return;}
+ if(k.p||k.P){s.pause=!s.pause;k.p=k.P=0;updateUi();}
+ if(k.r||k.R){if(s.go)reset()}
+ if(s.pause){draw();return}
+ if(s.go){draw();return}
+ s.t++;
+ let sp=(k.Shift?2:4);
+ if(k.a||k.ArrowLeft)s.p.x-=sp;
+ if(k.d||k.ArrowRight)s.p.x+=sp;
+ if(k.w||k.ArrowUp)s.p.y-=sp;
+ if(k.s||k.ArrowDown)s.p.y+=sp;
+ s.p.x=Math.max(8,Math.min(952,s.p.x));
+ s.p.y=Math.max(8,Math.min(632,s.p.y));
+ if(k[" "]&&s.t%5===0)s.bul.push({x:s.p.x,y:s.p.y});
+ spawn();
+ s.bul.forEach(b=>b.y-=8);
+ s.eb.forEach(b=>{b.x+=b.vx;b.y+=b.vy});
+ s.en.forEach(e=>s.bul.forEach(b=>{if(hit(b,e,25)){e.h--;b.y=-99;if(e.h<=0)s.sc+=100}}));
+ s.en=s.en.filter(e=>e.h>0);
+ s.bul=s.bul.filter(b=>b.y>-20);
+ s.eb=s.eb.filter(b=>b.y<700&&b.x>-50&&b.x<1010);
+ for(const b of s.eb){
+  if(hit(b,s.p,10)){s.p.l--;s.eb=[];if(s.p.l<=0)s.go=true;break;}
+ }
+ updateUi();
+ draw();
+}
+function draw(){
+ x.fillStyle="#000";x.fillRect(0,0,960,640);
+ x.fillStyle="#0ff";x.beginPath();x.arc(s.p.x,s.p.y,8,0,7);x.fill();
+ x.fillStyle="#ff0";s.bul.forEach(b=>x.fillRect(b.x-2,b.y-8,4,8));
+ x.fillStyle="#f55";s.eb.forEach(b=>{x.beginPath();x.arc(b.x,b.y,4,0,7);x.fill()});
+ x.fillStyle="#f0f";s.en.forEach(e=>{x.beginPath();x.arc(e.x,e.y,18,0,7);x.fill()});if(!started){x.fillStyle="rgba(0,0,0,.72)";x.fillRect(0,0,960,640);x.fillStyle="#fff";x.textAlign="center";x.font="bold 28px system-ui";x.fillText("Space または Enter で開始",480,300);x.font="16px system-ui";x.fillText("ゲーム画面をクリックしてフォーカス",480,340);x.textAlign="start";}
+ if(s.pause)x.fillText("PAUSED",450,320);
+ if(s.go)x.fillText("GAME OVER - Rで再開",390,320);
+}
+loop();
+</script>
+</body>
+</html>

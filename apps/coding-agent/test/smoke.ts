@@ -8,6 +8,7 @@ import { extractJsonReply, runAgentTurn, type AgentIO, type TextBackend } from '
 import type { AgentConfig } from '../src/config'
 import type { ChatMessage } from '../src/llm'
 import { TOOL_DEFS, type ToolContext } from '../src/tools'
+import { listApprovals, requestApproval, resolveApproval } from '../src/approvals'
 
 function makeCtx(root: string, restrict = true): ToolContext {
   return { workspace: root, restrictToWorkspace: restrict }
@@ -20,6 +21,17 @@ function ioStub(approve: boolean): AgentIO {
   }
 }
 
+async function testApprovals(): Promise<void> {
+  const pending = requestApproval('approve smoke')
+  const listed = listApprovals()
+  assert.strictEqual(listed.length, 1)
+  assert.strictEqual(listed[0].question, 'approve smoke')
+  assert.strictEqual(resolveApproval(listed[0].id, true), true)
+  assert.strictEqual(await pending, true)
+  assert.strictEqual(listApprovals().length, 0)
+  assert.strictEqual(resolveApproval('missing-approval', false), false)
+  console.log('PASS approvals')
+}
 async function testTools(): Promise<void> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-'))
   const ctx = makeCtx(root)
@@ -43,6 +55,22 @@ async function testTools(): Promise<void> {
 
   const cmd = await get('run_command').run({ command: 'echo smoke-ok' }, ctx)
   assert.ok(cmd.includes('smoke-ok'))
+
+  const started = JSON.parse(await get('start_process').run({
+    command: `node -e "console.log('process-smoke'); setTimeout(() => {}, 10000)"`,
+    label: 'smoke preview'
+  }, ctx)) as { id: string; status: string }
+  assert.ok(started.id && started.status === 'running')
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    const processLog = JSON.parse(await get('read_process_log').run({ process_id: started.id }, ctx)) as { lines: string[]; nextOffset: number }
+    assert.ok(processLog.lines.join('\n').includes('process-smoke'))
+    assert.ok(processLog.nextOffset >= processLog.lines.length)
+    const stopped = JSON.parse(await get('stop_process').run({ process_id: started.id }, ctx)) as { status: string }
+    assert.ok(['stopped', 'exited'].includes(stopped.status))
+  } finally {
+    try { await get('stop_process').run({ process_id: started.id }, ctx) } catch {}
+  }
 
   let outsideThrew = false
   try {
@@ -256,6 +284,7 @@ async function testCopilotFenceMode(): Promise<void> {
 }
 
 (async () => {
+  await testApprovals()
   await testTools()
   await testAgentLoop()
   await testDenial()

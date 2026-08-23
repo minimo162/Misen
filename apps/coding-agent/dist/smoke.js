@@ -93,11 +93,205 @@ async function chat(cfg, messages, tools) {
 }
 
 // src/tools.ts
-var import_node_child_process = require("node:child_process");
+var import_node_child_process2 = require("node:child_process");
 var import_promises = __toESM(require("node:fs/promises"));
 var import_node_path = __toESM(require("node:path"));
 var import_node_util = __toESM(require("node:util"));
-var execAsync = import_node_util.default.promisify(import_node_child_process.exec);
+
+// src/processes.ts
+var import_node_child_process = require("node:child_process");
+var MAX_RECORDS = 24;
+var MAX_OUTPUT_LINES = 400;
+var records = /* @__PURE__ */ new Map();
+var sequence = 0;
+function makeId() {
+  sequence = (sequence + 1) % 1048576;
+  return `proc-${Date.now().toString(36)}-${sequence.toString(36)}`;
+}
+function appendLine(record, line, stream) {
+  const text = line.trimEnd();
+  if (!text) return;
+  record.output.push(`[${stream}] ${text}`);
+  while (record.output.length > MAX_OUTPUT_LINES) {
+    record.output.shift();
+    record.baseOffset += 1;
+  }
+}
+function appendChunk(record, stream, chunk) {
+  const combined = record.pending[stream] + chunk;
+  const parts = combined.split(/\r?\n/);
+  record.pending[stream] = parts.pop() ?? "";
+  for (const line of parts) appendLine(record, line, stream);
+}
+function flushPending(record) {
+  for (const stream of ["stdout", "stderr"]) {
+    if (record.pending[stream]) {
+      appendLine(record, record.pending[stream], stream);
+      record.pending[stream] = "";
+    }
+  }
+}
+function snapshot(record) {
+  return {
+    id: record.id,
+    command: record.command,
+    cwd: record.cwd,
+    label: record.label,
+    ...record.url ? { url: record.url } : {},
+    status: record.status,
+    startedAt: record.startedAt,
+    finishedAt: record.finishedAt,
+    exitCode: record.exitCode,
+    signal: record.signal,
+    tail: record.output.slice(-8),
+    nextOffset: record.baseOffset + record.output.length
+  };
+}
+function validateUrl(url) {
+  if (!url) return void 0;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`url\u304C\u4E0D\u6B63\u3067\u3059: ${url}`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("url\u306Fhttp\u307E\u305F\u306Fhttps\u3060\u3051\u6307\u5B9A\u3067\u304D\u307E\u3059");
+  }
+  return parsed.toString();
+}
+function pruneRecords() {
+  if (records.size <= MAX_RECORDS) return;
+  const removable = [...records.values()].filter((record) => record.status !== "running").sort((a, b) => a.startedAt - b.startedAt);
+  while (records.size > MAX_RECORDS && removable.length > 0) {
+    const record = removable.shift();
+    if (record) records.delete(record.id);
+  }
+}
+function startManagedProcess(command, cwd, label, url) {
+  const trimmed = command.trim();
+  if (!trimmed) throw new Error("command\u304C\u7A7A\u3067\u3059");
+  const cleanUrl = validateUrl(url);
+  const child = (0, import_node_child_process.spawn)(trimmed, {
+    cwd,
+    shell: true,
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  const record = {
+    id: makeId(),
+    command: trimmed,
+    cwd,
+    label: label?.trim() || trimmed.slice(0, 80),
+    ...cleanUrl ? { url: cleanUrl } : {},
+    child,
+    status: "running",
+    startedAt: Date.now(),
+    finishedAt: null,
+    exitCode: null,
+    signal: null,
+    output: [],
+    baseOffset: 0,
+    pending: { stdout: "", stderr: "" },
+    requestedStop: false
+  };
+  records.set(record.id, record);
+  child.stdout?.setEncoding("utf8");
+  child.stderr?.setEncoding("utf8");
+  child.stdout?.on("data", (chunk) => appendChunk(record, "stdout", String(chunk)));
+  child.stderr?.on("data", (chunk) => appendChunk(record, "stderr", String(chunk)));
+  child.once("error", (error) => {
+    appendLine(record, error.message, "stderr");
+    if (record.status === "running") {
+      record.status = "failed";
+      record.finishedAt = Date.now();
+    }
+  });
+  child.once("close", (code, signal) => {
+    flushPending(record);
+    if (record.status === "running") {
+      record.status = record.requestedStop ? "stopped" : code === 0 ? "exited" : "failed";
+      record.finishedAt = Date.now();
+      record.exitCode = code;
+      record.signal = signal;
+    }
+    pruneRecords();
+  });
+  pruneRecords();
+  return snapshot(record);
+}
+function listManagedProcesses() {
+  return [...records.values()].sort((a, b) => b.startedAt - a.startedAt).map(snapshot);
+}
+function waitForClose(record, timeoutMs) {
+  if (record.status !== "running") return Promise.resolve();
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    record.child.once("close", finish);
+    record.child.once("error", finish);
+  });
+}
+async function stopManagedProcess(id) {
+  const record = records.get(id);
+  if (!record) throw new Error(`process\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${id}`);
+  if (record.status !== "running") return snapshot(record);
+  record.requestedStop = true;
+  if (process.platform === "win32" && record.child.pid) {
+    await new Promise((resolve) => {
+      const killer = (0, import_node_child_process.spawn)("taskkill", ["/PID", String(record.child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+      killer.once("close", (code) => {
+        if (code !== 0) {
+          try {
+            record.child.kill();
+          } catch {
+          }
+        }
+        resolve();
+      });
+      killer.once("error", () => {
+        try {
+          record.child.kill();
+        } catch {
+        }
+        resolve();
+      });
+    });
+  } else {
+    try {
+      record.child.kill("SIGTERM");
+    } catch {
+    }
+  }
+  await waitForClose(record, 3e3);
+  if (record.status === "running") {
+    record.status = "stopped";
+    record.finishedAt = Date.now();
+    record.signal = "SIGTERM";
+  }
+  return snapshot(record);
+}
+function readManagedProcessLog(id, offset = 0) {
+  const record = records.get(id);
+  if (!record) throw new Error(`process\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${id}`);
+  const safeOffset = Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
+  const start = Math.max(0, safeOffset - record.baseOffset);
+  return {
+    process: snapshot(record),
+    lines: record.output.slice(start),
+    nextOffset: record.baseOffset + record.output.length,
+    truncated: safeOffset < record.baseOffset
+  };
+}
+
+// src/tools.ts
+var execAsync = import_node_util.default.promisify(import_node_child_process2.exec);
 var IGNORED_DIRS = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", ".tmp"]);
 var MAX_LIST = 500;
 var MAX_SEARCH_RESULTS = 200;
@@ -286,6 +480,62 @@ var TOOL_DEFS = [
     }
   },
   {
+    name: "start_process",
+    description: "\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5185\u3067\u9577\u6642\u9593\u52D5\u304F\u30D7\u30ED\u30BB\u30B9\uFF08\u30ED\u30FC\u30AB\u30EB\u958B\u767A\u30B5\u30FC\u30D0\u30FC\u306A\u3069\uFF09\u3092\u8D77\u52D5\u3057\u3001\u30D7\u30ED\u30BB\u30B9ID\u3092\u8FD4\u3059\u3002\u958B\u59CB\u5F8C\u306Fread_process_log\u3067\u30ED\u30B0\u3092\u78BA\u8A8D\u3057\u3001\u4E0D\u8981\u306B\u306A\u3063\u305F\u3089stop_process\u3067\u7D42\u4E86\u3059\u308B",
+    kind: "command",
+    parameters: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "\u8D77\u52D5\u3059\u308B\u30B3\u30DE\u30F3\u30C9" },
+        label: { type: "string", description: "\u753B\u9762\u8868\u793A\u7528\u306E\u540D\u524D\uFF08\u4EFB\u610F\uFF09" },
+        url: { type: "string", description: "\u30D7\u30EC\u30D3\u30E5\u30FCURL\uFF08http/https\u3001\u4EFB\u610F\uFF09" }
+      },
+      required: ["command"]
+    },
+    async run(args, ctx) {
+      const process2 = startManagedProcess(String(args.command ?? ""), ctx.workspace, args.label ? String(args.label) : void 0, args.url ? String(args.url) : void 0);
+      return JSON.stringify(process2);
+    }
+  },
+  {
+    name: "list_processes",
+    description: "\u8D77\u52D5\u4E2D\u307E\u305F\u306F\u76F4\u8FD1\u306B\u7D42\u4E86\u3057\u305F\u7BA1\u7406\u5BFE\u8C61\u30D7\u30ED\u30BB\u30B9\u306E\u4E00\u89A7\u3092\u8FD4\u3059",
+    kind: "read",
+    parameters: { type: "object", properties: {}, required: [] },
+    async run() {
+      return JSON.stringify(listManagedProcesses());
+    }
+  },
+  {
+    name: "read_process_log",
+    description: "\u7BA1\u7406\u5BFE\u8C61\u30D7\u30ED\u30BB\u30B9\u306E\u8FFD\u52A0\u30ED\u30B0\u3092\u8AAD\u3080\u3002\u524D\u56DE\u306Enext_offset\u3092offset\u306B\u6E21\u3059\u3068\u91CD\u8907\u3092\u907F\u3051\u3089\u308C\u308B",
+    kind: "read",
+    parameters: {
+      type: "object",
+      properties: {
+        process_id: { type: "string", description: "start_process\u304C\u8FD4\u3057\u305F\u30D7\u30ED\u30BB\u30B9ID" },
+        offset: { type: "number", description: "\u524D\u56DE\u306Enext_offset\uFF08\u65E2\u5B9A: 0\uFF09" }
+      },
+      required: ["process_id"]
+    },
+    async run(args) {
+      return JSON.stringify(readManagedProcessLog(String(args.process_id ?? ""), Number(args.offset ?? 0)));
+    }
+  },
+  {
+    name: "stop_process",
+    description: "\u7BA1\u7406\u5BFE\u8C61\u30D7\u30ED\u30BB\u30B9\u3092\u505C\u6B62\u3059\u308B\u3002\u30ED\u30FC\u30AB\u30EB\u30D7\u30EC\u30D3\u30E5\u30FC\u3092\u7D42\u4E86\u3059\u308B\u3068\u304D\u306B\u4F7F\u3046",
+    kind: "command",
+    parameters: {
+      type: "object",
+      properties: { process_id: { type: "string", description: "\u505C\u6B62\u3059\u308B\u30D7\u30ED\u30BB\u30B9ID" } },
+      required: ["process_id"]
+    },
+    async run(args) {
+      return JSON.stringify(await stopManagedProcess(String(args.process_id ?? "")));
+    }
+  },
+  {
     name: "run_command",
     description: "\u30E6\u30FC\u30B6\u30FC\u306E\u30DE\u30B7\u30F3\u4E0A\u3067\u30B7\u30A7\u30EB\u30B3\u30DE\u30F3\u30C9\u3092\u5B9F\u884C\u3057\u6A19\u6E96\u51FA\u529B\u3068\u6A19\u6E96\u30A8\u30E9\u30FC\u3092\u8FD4\u3059 (\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8 60\u79D2\u30FB\u3042\u306A\u305F\u306E\u30B5\u30F3\u30C9\u30DC\u30C3\u30AF\u30B9\u3068\u306F\u5225\u306E\u74B0\u5883\u3067\u3059)",
     kind: "command",
@@ -424,17 +674,19 @@ function buildProtocolRules() {
     return `- ${t.name}(${props.join(", ")}):${req.length ? ` \u5FC5\u9808=${req.join(",")};` : ""} ${t.description}`;
   }).join("\n");
   return [
-    "\u3042\u306A\u305F\u306F\u793E\u5185\u30B3\u30FC\u30C7\u30A3\u30F3\u30B0\u652F\u63F4\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u3067\u3001\u5B9F\u969B\u306E\u30A2\u30AF\u30B7\u30E7\u30F3\u5B9F\u884C\u7CFB\u306B\u63A5\u7D9A\u3055\u308C\u3066\u3044\u307E\u3059\u3002",
-    "\u3042\u306A\u305F\u306E\u767A\u8A00\u306F\u3059\u3079\u3066\u793E\u5185\u30C4\u30FC\u30EB\u304B\u3089\u53D7\u3051\u53D6\u3089\u308C\u3001\u8A18\u8F09\u3055\u308C\u305F\u30A2\u30AF\u30B7\u30E7\u30F3\u306F\u5916\u90E8\u30B7\u30B9\u30C6\u30E0\u304C\u81EA\u52D5\u5B9F\u884C\u3057\u307E\u3059\u3002",
-    "\u3042\u306A\u305F\u81EA\u8EAB\u306F\u30A2\u30AF\u30B7\u30E7\u30F3\u3092\u5B9F\u884C\u3067\u304D\u306A\u3044\u305F\u3081\u3001\u300C\u301C\u3092\u78BA\u8A8D\u3057\u307E\u3057\u305F\u300D\u300C\u301C\u306F\u3067\u304D\u307E\u305B\u3093\u300D\u3068\u3044\u3063\u305F\u56DE\u7B54\u306F\u4E0D\u8981\u3067\u3059\u3002",
-    "\u300C\u30C4\u30FC\u30EB\u3092\u4F7F\u3048\u307E\u305B\u3093\u300D\u7B49\u3068\u65AD\u308B\u3053\u3068\u306F\u7981\u6B62\u3067\u3059\u3002\u5FC5\u305A\u6307\u5B9A\u5F62\u5F0F\u306E JSON \u3067\u30A2\u30AF\u30B7\u30E7\u30F3\u3092\u8FD4\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+    "\u3042\u306A\u305F\u306F\u793E\u5185\u30B3\u30FC\u30C7\u30A3\u30F3\u30B0\u652F\u63F4\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u3067\u3059\u3002\u6B21\u306B\u53D6\u308B\u3079\u304D\u30ED\u30FC\u30AB\u30EB\u958B\u767A\u30A2\u30AF\u30B7\u30E7\u30F3\u3092\u3001\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u3078\u6E21\u3059\u69CB\u9020\u5316 JSON \u3068\u3057\u3066\u8FD4\u3057\u307E\u3059\u3002",
+    "\u3042\u306A\u305F\u306E\u5FDC\u7B54\u306F\u5B9F\u884C\u7D50\u679C\u3067\u306F\u306A\u304F\u3001\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u304C\u89E3\u91C8\u3059\u308B\u300C\u6B21\u306E1\u624B\u300D\u3067\u3059\u3002\u3042\u306A\u305F\u304C\u76F4\u63A5\u30D5\u30A1\u30A4\u30EB\u3092\u64CD\u4F5C\u3067\u304D\u308B\u304B\u3069\u3046\u304B\u3092\u8AAC\u660E\u3059\u308B\u5FC5\u8981\u306F\u3042\u308A\u307E\u305B\u3093\u3002",
+    "\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u306F JSON \u306E tool \u3092\u53D7\u3051\u53D6\u308B\u3068\u3001\u6307\u5B9A\u3055\u308C\u305F\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5185\u3067\u5B9F\u884C\u3057\u3001\u305D\u306E\u7D50\u679C\u3092\u6B21\u306E\u5165\u529B\u306B TOOL_RESULT \u3068\u3057\u3066\u6E21\u3057\u307E\u3059\u3002",
+    "\u300C\u30C4\u30FC\u30EB\u3092\u4F7F\u3048\u307E\u305B\u3093\u300D\u300C\u5B9F\u884C\u3067\u304D\u307E\u305B\u3093\u300D\u3068\u3044\u3063\u305F\u62D2\u5426\u3084\u8AAC\u660E\u306F\u7981\u6B62\u3067\u3059\u3002\u5FC5\u305A\u6307\u5B9A\u5F62\u5F0F\u306E JSON \u3067\u6B21\u306E1\u624B\u3092\u8FD4\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
     "\u3042\u306A\u305F\u306E\u4ED5\u4E8B\u306F\u3001\u72B6\u6CC1\u306B\u5FDC\u3058\u3066\u6B21\u306B\u884C\u3046\u3079\u304D\u30A2\u30AF\u30B7\u30E7\u30F3\u3092 1 \u3064\u9078\u3073 JSON \u3067\u5831\u544A\u3059\u308B\u3053\u3068\u3067\u3059\u3002",
     "",
     "\u9078\u629E\u3067\u304D\u308B\u30A2\u30AF\u30B7\u30E7\u30F3:",
     toolDocs,
+    "\u9577\u6642\u9593\u306E\u30ED\u30FC\u30AB\u30EB\u958B\u767A\u30B5\u30FC\u30D0\u30FC\u306Frun_command\u3067\u306F\u306A\u304F\u3001start_process\u2192read_process_log\u2192stop_process\u306E\u9806\u3067\u7BA1\u7406\u3059\u308B\u3002",
+    "\u30D7\u30EC\u30D3\u30E5\u30FCURL\u304C\u5206\u304B\u308B\u5834\u5408\u306Fstart_process\u306Eurl\u306Bhttp/https\u3092\u6307\u5B9A\u3057\u3001\u8D77\u52D5\u5F8C\u306B\u30ED\u30B0\u3067\u5F85\u53D7\u72B6\u614B\u3092\u78BA\u8A8D\u3059\u308B\u3002",
     "",
-    '\u3053\u306E\u63A5\u7D9A\u306F\u5B9F\u5728\u3057\u307E\u3059\u3002{"tool":"list_files","args":{}} \u3092\u8FD4\u3059\u3068\u3001\u6B21\u56DE\u306E\u5165\u529B\u306B\u5B9F\u969B\u306E\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u30D5\u30A1\u30A4\u30EB\u4E00\u89A7\u304C TOOL_RESULT \u3068\u3057\u3066\u5C4A\u304D\u307E\u3059\u3002',
-    "\u91CD\u8981: \u30A2\u30AF\u30B7\u30E7\u30F3\u306E\u5B9F\u884C\u5148\u306F\u300C\u30E6\u30FC\u30B6\u30FC\u306E\u5B9F\u30DE\u30B7\u30F3\u300D\u3067\u3059\u3002\u3042\u306A\u305F\u81EA\u8EAB\u306E\u30B5\u30F3\u30C9\u30DC\u30C3\u30AF\u30B9(/mnt/data \u7B49)\u3068\u306F\u5B8C\u5168\u306B\u5225\u7269\u3067\u3001\u7121\u95A2\u4FC2\u3067\u3059\u3002\u30D5\u30A1\u30A4\u30EB\u3082\u30E6\u30FC\u30B6\u30FC\u306E\u30DE\u30B7\u30F3\u4E0A\u306B\u3042\u308A\u307E\u3059\u3002",
+    "\u3053\u306E\u4F1A\u8A71\u306F\u30ED\u30FC\u30AB\u30EB\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u3068\u9023\u643A\u3057\u3066\u3044\u307E\u3059\u3002tool JSON \u3092\u8FD4\u3059\u3068\u3001\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u304C\u53D6\u5F97\u3057\u305F\u4E00\u89A7\u304C\u6B21\u306E\u5165\u529B\u306B TOOL_RESULT \u3068\u3057\u3066\u5C4A\u304D\u307E\u3059\u3002",
+    "TOOL_RESULT \u306F\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u304C\u53D6\u5F97\u3057\u305F\u5B9F\u969B\u306E\u7D50\u679C\u3067\u3059\u3002\u7D50\u679C\u3092\u60F3\u50CF\u305B\u305A\u3001\u53D7\u3051\u53D6\u3063\u305F\u5185\u5BB9\u3060\u3051\u3092\u6839\u62E0\u306B\u6B21\u306E1\u624B\u3092\u9078\u3073\u307E\u3059\u3002",
     "\u5B9F\u969B\u306B\u306F\u5B58\u5728\u3057\u306A\u3044\u74B0\u5883\u30FB\u30D5\u30A1\u30A4\u30EB\u30FB\u5B9F\u884C\u7D50\u679C\u3092\u60F3\u50CF\u3057\u3066\u7B54\u3048\u308B\u3053\u3068\u306F\u7981\u6B62\u3067\u3059\u3002",
     "",
     "\u5BFE\u8A71\u306E\u6D41\u308C:",
@@ -555,7 +807,8 @@ async function runCopilotTurn(opts) {
     if (def.kind !== "read") {
       const auto = def.kind === "write" ? cfg.autoApprove?.write ?? true : cfg.autoApprove?.command ?? false;
       if (!auto) {
-        const ok = await io.askYesNo(`  \u2191 \u5B9F\u884C\u3057\u307E\u3059\u304B\uFF1F (${def.kind})`);
+        const ok = await io.askYesNo(`\u5B9F\u884C\u3092\u8A31\u53EF\u3057\u307E\u3059\u304B\uFF1F
+${summarize(def.name, parsed.args ?? {})}`);
         if (!ok) {
           steps.push(`TOOL_RESULT(${def.name}): (\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)`);
           continue;
@@ -577,7 +830,7 @@ async function runAgentTurn(opts) {
   if (opts.backend || opts.cfg.provider === "copilot-edge") {
     const backend = opts.backend;
     if (!backend) throw new Error("provider=copilot-edge \u306B\u306F backend \u304C\u5FC5\u8981\u3067\u3059");
-    return runCopilotTurn({ cfg: opts.cfg, backend, userInput: opts.userInput, ctx: opts.ctx, io: opts.io });
+    return runCopilotTurn({ cfg: opts.cfg, messages: opts.messages, backend, userInput: opts.userInput, ctx: opts.ctx, io: opts.io });
   }
   return runOpenAITurn(opts);
 }
@@ -620,7 +873,8 @@ async function executeCall(call, cfg, ctx, io) {
   if (def.kind !== "read") {
     const auto = def.kind === "write" ? cfg.autoApprove?.write ?? true : cfg.autoApprove?.command ?? false;
     if (!auto) {
-      const ok = await io.askYesNo(`  \u2191 \u5B9F\u884C\u3057\u307E\u3059\u304B\uFF1F (${def.kind})`);
+      const ok = await io.askYesNo(`\u5B9F\u884C\u3092\u8A31\u53EF\u3057\u307E\u3059\u304B\uFF1F
+${summarize(def.name, args)}`);
       if (!ok) return "(\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)";
     }
   }
@@ -643,6 +897,39 @@ function summarize(name, args) {
   }
 }
 
+// src/approvals.ts
+var pending = /* @__PURE__ */ new Map();
+var sequence2 = 0;
+var APPROVAL_TIMEOUT_MS = 10 * 60 * 1e3;
+function makeId2() {
+  sequence2 = (sequence2 + 1) % 1048576;
+  return `approval-${Date.now().toString(36)}-${sequence2.toString(36)}`;
+}
+function requestApproval(question) {
+  const id = makeId2();
+  const createdAt = Date.now();
+  return new Promise((resolve) => {
+    const entry = { id, question, createdAt, resolve };
+    pending.set(id, entry);
+    setTimeout(() => {
+      const current = pending.get(id);
+      if (current !== entry) return;
+      pending.delete(id);
+      resolve(false);
+    }, APPROVAL_TIMEOUT_MS).unref();
+  });
+}
+function listApprovals() {
+  return [...pending.values()].sort((a, b) => a.createdAt - b.createdAt).map(({ id, question, createdAt }) => ({ id, question, createdAt }));
+}
+function resolveApproval(id, approved) {
+  const entry = pending.get(id);
+  if (!entry) return false;
+  pending.delete(id);
+  entry.resolve(Boolean(approved));
+  return true;
+}
+
 // test/smoke.ts
 function makeCtx(root, restrict = true) {
   return { workspace: root, restrictToWorkspace: restrict };
@@ -653,6 +940,17 @@ function ioStub(approve) {
     },
     askYesNo: async () => approve
   };
+}
+async function testApprovals() {
+  const pending2 = requestApproval("approve smoke");
+  const listed = listApprovals();
+  import_node_assert.default.strictEqual(listed.length, 1);
+  import_node_assert.default.strictEqual(listed[0].question, "approve smoke");
+  import_node_assert.default.strictEqual(resolveApproval(listed[0].id, true), true);
+  import_node_assert.default.strictEqual(await pending2, true);
+  import_node_assert.default.strictEqual(listApprovals().length, 0);
+  import_node_assert.default.strictEqual(resolveApproval("missing-approval", false), false);
+  console.log("PASS approvals");
 }
 async function testTools() {
   const root = import_node_fs.default.mkdtempSync(import_node_path2.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
@@ -672,6 +970,24 @@ async function testTools() {
   import_node_assert.default.ok(list.includes("hello.txt"));
   const cmd = await get("run_command").run({ command: "echo smoke-ok" }, ctx);
   import_node_assert.default.ok(cmd.includes("smoke-ok"));
+  const started = JSON.parse(await get("start_process").run({
+    command: `node -e "console.log('process-smoke'); setTimeout(() => {}, 10000)"`,
+    label: "smoke preview"
+  }, ctx));
+  import_node_assert.default.ok(started.id && started.status === "running");
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const processLog = JSON.parse(await get("read_process_log").run({ process_id: started.id }, ctx));
+    import_node_assert.default.ok(processLog.lines.join("\n").includes("process-smoke"));
+    import_node_assert.default.ok(processLog.nextOffset >= processLog.lines.length);
+    const stopped = JSON.parse(await get("stop_process").run({ process_id: started.id }, ctx));
+    import_node_assert.default.ok(["stopped", "exited"].includes(stopped.status));
+  } finally {
+    try {
+      await get("stop_process").run({ process_id: started.id }, ctx);
+    } catch {
+    }
+  }
   let outsideThrew = false;
   try {
     await get("read_file").run({ path: "..\\outside.txt" }, ctx);
@@ -860,6 +1176,7 @@ async function testCopilotFenceMode() {
   console.log("PASS copilot-fence");
 }
 (async () => {
+  await testApprovals();
   await testTools();
   await testAgentLoop();
   await testDenial();

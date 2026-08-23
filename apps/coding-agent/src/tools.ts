@@ -3,6 +3,7 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import util from 'node:util'
 import type { OpenAIToolSchema } from './llm'
+import { listManagedProcesses, readManagedProcessLog, startManagedProcess, stopManagedProcess } from './processes'
 
 const execAsync = util.promisify(exec)
 
@@ -211,6 +212,62 @@ export const TOOL_DEFS: ToolDef[] = [
         }
       }
       return results.length === 0 ? '(該当なし)' : truncate(results.join('\n'))
+    }
+  },
+  {
+    name: 'start_process',
+    description: 'ワークスペース内で長時間動くプロセス（ローカル開発サーバーなど）を起動し、プロセスIDを返す。開始後はread_process_logでログを確認し、不要になったらstop_processで終了する',
+    kind: 'command',
+    parameters: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: '起動するコマンド' },
+        label: { type: 'string', description: '画面表示用の名前（任意）' },
+        url: { type: 'string', description: 'プレビューURL（http/https、任意）' }
+      },
+      required: ['command']
+    },
+    async run(args, ctx) {
+      const process = startManagedProcess(String(args.command ?? ''), ctx.workspace, args.label ? String(args.label) : undefined, args.url ? String(args.url) : undefined)
+      return JSON.stringify(process)
+    }
+  },
+  {
+    name: 'list_processes',
+    description: '起動中または直近に終了した管理対象プロセスの一覧を返す',
+    kind: 'read',
+    parameters: { type: 'object', properties: {}, required: [] },
+    async run() {
+      return JSON.stringify(listManagedProcesses())
+    }
+  },
+  {
+    name: 'read_process_log',
+    description: '管理対象プロセスの追加ログを読む。前回のnext_offsetをoffsetに渡すと重複を避けられる',
+    kind: 'read',
+    parameters: {
+      type: 'object',
+      properties: {
+        process_id: { type: 'string', description: 'start_processが返したプロセスID' },
+        offset: { type: 'number', description: '前回のnext_offset（既定: 0）' }
+      },
+      required: ['process_id']
+    },
+    async run(args) {
+      return JSON.stringify(readManagedProcessLog(String(args.process_id ?? ''), Number(args.offset ?? 0)))
+    }
+  },
+  {
+    name: 'stop_process',
+    description: '管理対象プロセスを停止する。ローカルプレビューを終了するときに使う',
+    kind: 'command',
+    parameters: {
+      type: 'object',
+      properties: { process_id: { type: 'string', description: '停止するプロセスID' } },
+      required: ['process_id']
+    },
+    async run(args) {
+      return JSON.stringify(await stopManagedProcess(String(args.process_id ?? '')))
     }
   },
   {
