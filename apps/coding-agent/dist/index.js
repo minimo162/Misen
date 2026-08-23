@@ -680,7 +680,7 @@ function resolveCopilotSettings(cfg) {
     url: c.url ?? "https://m365.cloud.microsoft/chat/",
     cdpPort: c.cdpPort ?? 9445,
     maxPromptChars: c.maxPromptChars ?? 12e4,
-    pollIntervalMs: Math.max(500, c.pollIntervalMs ?? 2e3),
+    pollIntervalMs: Math.max(500, c.pollIntervalMs ?? 900),
     responseTimeoutSec: c.responseTimeoutSec ?? 300,
     stallTimeoutSec: c.stallTimeoutSec ?? 120,
     displayMode: c.displayMode === "foreground" ? "foreground" : "minimized",
@@ -1016,7 +1016,7 @@ var CopilotEdgeClient = class {
         const clicked = JSON.parse(String(await this.evalWithReconnect(CLICK_COPY_JS, 15e3)));
         console.log("[clip] candidates=" + JSON.stringify(clicked));
         if (clicked.clicked) {
-          await sleep(500 + attempt * 300);
+          await sleep(400 + attempt * 200);
           const clip = String(await this.evalWithReconnect("navigator.clipboard.readText()", 1e4));
           const s = this.stripOuterFence(clip);
           if (s.trim().length >= 10 && s.trim() !== baseline) return s;
@@ -1143,7 +1143,7 @@ var CopilotEdgeClient = class {
         throw new Error("Copilot \u3078\u306E\u30B5\u30A4\u30F3\u30A4\u30F3\u304C\u5FC5\u8981\u3067\u3059\u3002Edge \u30A6\u30A3\u30F3\u30C9\u30A6\u3067\u30B5\u30A4\u30F3\u30A4\u30F3\u3057\u3066\u304B\u3089\u518D\u5B9F\u884C\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
       }
       if (state.ready) return;
-      await sleep(2e3);
+      await sleep(350);
     }
     throw new Error("Copilot \u306E\u5165\u529B\u6B04\u304C\u6E96\u5099\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F (\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8)\u3002");
   }
@@ -1153,7 +1153,7 @@ var CopilotEdgeClient = class {
       await this.cdpMethod("Page.navigate", { url: this.s.url });
       await sleep(3e3);
     } else {
-      await sleep(800);
+      await sleep(450);
     }
   }
   async cdpMethod(name, params, timeoutMs = 3e4) {
@@ -1183,14 +1183,14 @@ var CopilotEdgeClient = class {
     await this.evalWithReconnect(`navigator.clipboard.writeText(${JSON.stringify(prompt)})`, 15e3);
     for (let i = 0; i < 6; i++) {
       await this.evalWithReconnect(CLEAR_EDITOR_JS);
-      await sleep(300);
+      await sleep(150);
       if (await this.editorLength() === 0) break;
     }
     await this.focusEditor();
     await this.evalWithReconnect("(() => { const s = getSelection(); if (!s || !document.activeElement) return; s.selectAllChildren(document.activeElement); s.collapseToEnd() })()", 1e4);
     await this.cdpMethod("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "v", code: "KeyV", windowsVirtualKeyCode: 86, modifiers: 2 });
     await this.cdpMethod("Input.dispatchKeyEvent", { type: "keyUp", key: "v", code: "KeyV", windowsVirtualKeyCode: 86, modifiers: 2 });
-    await sleep(1200);
+    await sleep(700);
     const len = Number(await this.editorLength());
     if (len < prompt.length * 0.9) throw new Error(`\u8CBC\u308A\u4ED8\u3051\u5F8C\u306E\u9577\u3055\u4E0D\u8DB3 (\u671F\u5F85 ~${prompt.length}, \u5B9F\u969B ${len})`);
   }
@@ -1211,7 +1211,7 @@ var CopilotEdgeClient = class {
         await sleep(300);
         const after = await this.editorLength();
         if (after - before >= expectedGrowth) ok = true;
-        else await sleep(900);
+        else await sleep(600);
       }
       if (!ok) {
         if (chunkSize <= 500) {
@@ -1260,6 +1260,7 @@ var CopilotEdgeClient = class {
     let lastText = "";
     let lastChange = Date.now();
     let sawNewText = false;
+    let stable = 0;
     while (Date.now() - start < this.s.responseTimeoutSec * 1e3) {
       const st = await this.readScreenState();
       if (st.signinRequired) throw new Error("Copilot \u3078\u306E\u30B5\u30A4\u30F3\u30A4\u30F3\u304C\u5FC5\u8981\u3067\u3059\u3002");
@@ -1268,13 +1269,16 @@ var CopilotEdgeClient = class {
         if (st.text !== lastText) {
           lastText = st.text;
           lastChange = Date.now();
+          stable = 0;
+        } else if (lastText !== "") {
+          stable++;
         }
       }
       const hasMarker = this.s.endMarker.length > 0 && lastText.includes(this.s.endMarker);
       const quietFor = Date.now() - lastChange;
       if (sawNewText && lastText !== "" && st.text === lastText) {
-        if (hasMarker && quietFor >= 2500) return await this.finalizeAnswer(lastText);
-        if (!st.generating && sawNewText && quietFor >= 8e3) return await this.finalizeAnswer(lastText);
+        if (hasMarker && stable >= 1 && quietFor >= 1100) return await this.finalizeAnswer(lastText);
+        if (!st.generating && stable >= 2 && quietFor >= 1700) return await this.finalizeAnswer(lastText);
       }
       if (!st.generating && sawNewText && quietFor > this.s.stallTimeoutSec * 1e3) {
         throw new Error("Copilot \u306E\u5FDC\u7B54\u304C\u505C\u6EDE\u3057\u305F\u305F\u3081\u8AE6\u3081\u307E\u3057\u305F");

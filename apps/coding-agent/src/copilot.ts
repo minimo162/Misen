@@ -35,7 +35,7 @@ export function resolveCopilotSettings(cfg: AgentConfig): CopilotSettings {
     url: c.url ?? 'https://m365.cloud.microsoft/chat/',
     cdpPort: c.cdpPort ?? 9445,
     maxPromptChars: c.maxPromptChars ?? 120000,
-    pollIntervalMs: Math.max(500, c.pollIntervalMs ?? 2000),
+    pollIntervalMs: Math.max(500, c.pollIntervalMs ?? 900),
     responseTimeoutSec: c.responseTimeoutSec ?? 300,
     stallTimeoutSec: c.stallTimeoutSec ?? 120,
     displayMode: c.displayMode === 'foreground' ? 'foreground' : 'minimized',
@@ -385,7 +385,7 @@ export class CopilotEdgeClient {
         const clicked = JSON.parse(String(await this.evalWithReconnect(CLICK_COPY_JS, 15000))) as { clicked: boolean }
         console.log('[clip] candidates=' + JSON.stringify(clicked))
         if (clicked.clicked) {
-          await sleep(500 + attempt * 300)
+          await sleep(400 + attempt * 200)
           const clip = String(await this.evalWithReconnect('navigator.clipboard.readText()', 10000))
           const s = this.stripOuterFence(clip)
           if (s.trim().length >= 10 && s.trim() !== baseline) return s
@@ -511,7 +511,7 @@ export class CopilotEdgeClient {
         throw new Error('Copilot へのサインインが必要です。Edge ウィンドウでサインインしてから再実行してください。')
       }
       if (state.ready) return
-      await sleep(2000)
+      await sleep(350)
     }
     throw new Error('Copilot の入力欄が準備できませんでした (タイムアウト)。')
   }
@@ -522,7 +522,7 @@ export class CopilotEdgeClient {
       await this.cdpMethod('Page.navigate', { url: this.s.url })
       await sleep(3000)
     } else {
-      await sleep(800)
+      await sleep(450)
     }
   }
 
@@ -556,14 +556,14 @@ export class CopilotEdgeClient {
     await this.evalWithReconnect(`navigator.clipboard.writeText(${JSON.stringify(prompt)})`, 15000)
     for (let i = 0; i < 6; i++) {
       await this.evalWithReconnect(CLEAR_EDITOR_JS)
-      await sleep(300)
+      await sleep(150)
       if ((await this.editorLength()) === 0) break
     }
     await this.focusEditor()
     await this.evalWithReconnect('(() => { const s = getSelection(); if (!s || !document.activeElement) return; s.selectAllChildren(document.activeElement); s.collapseToEnd() })()', 10000)
     await this.cdpMethod('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'v', code: 'KeyV', windowsVirtualKeyCode: 86, modifiers: 2 })
     await this.cdpMethod('Input.dispatchKeyEvent', { type: 'keyUp', key: 'v', code: 'KeyV', windowsVirtualKeyCode: 86, modifiers: 2 })
-    await sleep(1200)
+    await sleep(700)
     const len = Number(await this.editorLength())
     if (len < prompt.length * 0.9) throw new Error(`貼り付け後の長さ不足 (期待 ~${prompt.length}, 実際 ${len})`)
   }
@@ -585,7 +585,7 @@ export class CopilotEdgeClient {
         await sleep(300)
         const after = await this.editorLength()
         if (after - before >= expectedGrowth) ok = true
-        else await sleep(900)
+        else await sleep(600)
       }
       if (!ok) {
         if (chunkSize <= 500) {
@@ -638,6 +638,7 @@ export class CopilotEdgeClient {
     let lastText = ''
     let lastChange = Date.now()
     let sawNewText = false
+    let stable = 0
     while (Date.now() - start < this.s.responseTimeoutSec * 1000) {
       const st = await this.readScreenState()
       if (st.signinRequired) throw new Error('Copilot へのサインインが必要です。')
@@ -646,13 +647,16 @@ export class CopilotEdgeClient {
         if (st.text !== lastText) {
           lastText = st.text
           lastChange = Date.now()
+          stable = 0
+        } else if (lastText !== '') {
+          stable++
         }
       }
       const hasMarker = this.s.endMarker.length > 0 && lastText.includes(this.s.endMarker)
       const quietFor = Date.now() - lastChange
       if (sawNewText && lastText !== '' && st.text === lastText) {
-        if (hasMarker && quietFor >= 2500) return await this.finalizeAnswer(lastText)
-        if (!st.generating && sawNewText && quietFor >= 8000) return await this.finalizeAnswer(lastText)
+        if (hasMarker && stable >= 1 && quietFor >= 1100) return await this.finalizeAnswer(lastText)
+        if (!st.generating && stable >= 2 && quietFor >= 1700) return await this.finalizeAnswer(lastText)
       }
       if (!st.generating && sawNewText && quietFor > this.s.stallTimeoutSec * 1000) {
         throw new Error('Copilot の応答が停滞したため諦めました')
