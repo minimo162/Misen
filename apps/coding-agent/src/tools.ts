@@ -15,6 +15,7 @@ const MAX_SEARCH_RESULTS = 200
 export interface ToolContext {
   workspace: string
   restrictToWorkspace: boolean
+  signal?: AbortSignal
 }
 
 export interface ToolDef {
@@ -102,11 +103,26 @@ export function parseToolResultMeta(output: string): ToolResultMeta | null {
 
 interface FileSnapshot {
   before: string
+  after: string
+  afterHash: string
+  createdAt: number
+}
+
+export interface FileSnapshotInfo {
+  path: string
+  before: string
+  after: string
   afterHash: string
   createdAt: number
 }
 
 const fileSnapshots = new Map<string, FileSnapshot>()
+
+export function getFileSnapshot(p: string, ctx: ToolContext): FileSnapshotInfo | null {
+  const abs = resolveInWorkspace(p, ctx)
+  const snapshot = fileSnapshots.get(abs)
+  return snapshot ? { path: p, ...snapshot } : null
+}
 
 export async function rollbackFileChange(
   change: Pick<ToolResultMeta, 'path' | 'afterHash'>,
@@ -115,10 +131,12 @@ export async function rollbackFileChange(
   if (!change.path || !change.afterHash) throw new Error('ロールバック対象のハッシュがありません')
   const abs = resolveInWorkspace(change.path, ctx)
   const snapshot = fileSnapshots.get(abs)
-  if (!snapshot || snapshot.afterHash !== change.afterHash) throw new Error('このプロセスに変更前スナップショットがありません')
+  const before = snapshot?.before ?? (typeof (change as { beforeContent?: unknown }).beforeContent === 'string' ? String((change as { beforeContent?: unknown }).beforeContent) : null)
+  const expected = snapshot?.afterHash ?? change.afterHash
+  if (before === null || expected !== change.afterHash) throw new Error('このRunに変更前スナップショットがありません')
   const current = await fsp.readFile(abs, 'utf8')
   if (sha256(current) !== change.afterHash) throw new Error('変更後の内容からファイルが変更されています。競合を確認してください')
-  await fsp.writeFile(abs, snapshot.before, 'utf8')
+  await fsp.writeFile(abs, before, 'utf8')
   const restored = await fsp.readFile(abs, 'utf8')
   const hash = sha256(restored)
   fileSnapshots.delete(abs)
@@ -236,7 +254,7 @@ export const TOOL_DEFS: ToolDef[] = [
       await fsp.mkdir(path.dirname(abs), { recursive: true })
       await fsp.writeFile(abs, content, 'utf8')
       const readBack = await fsp.readFile(abs, 'utf8')
-      fileSnapshots.set(abs, { before, afterHash: sha256(readBack), createdAt: Date.now() })
+      fileSnapshots.set(abs, { before, after: readBack, afterHash: sha256(readBack), createdAt: Date.now() })
       const result = formatFileChangeResult('書き込み', path.relative(ctx.workspace, abs), before, readBack, 1)
       return `${result}\nサイズ: ${Buffer.byteLength(readBack)} bytes`
     }
@@ -266,11 +284,11 @@ export const TOOL_DEFS: ToolDef[] = [
       if (count === 0) throw new Error('old_string が見つかりません')
       if (count > 1 && !replaceAll) throw new Error(`${count} 件一致しました。replace_all=true を指定するか対象範囲を狭めてください`)
       const next = replaceAll ? src.split(oldStr).join(newStr) : src.replace(oldStr, newStr)
-      if (next === src) return formatFileChangeResult('編集', path.relative(ctx.workspace, abs), src, src, count)
+      if (next === src) { fileSnapshots.set(abs, { before: src, after: src, afterHash: sha256(src), createdAt: Date.now() }); return formatFileChangeResult('編集', path.relative(ctx.workspace, abs), src, src, count) }
       await fsp.writeFile(abs, next, 'utf8')
       const readBack = await fsp.readFile(abs, 'utf8')
       if (readBack !== next) throw new Error('編集後の再読込内容が一致しません')
-      fileSnapshots.set(abs, { before: src, afterHash: sha256(readBack), createdAt: Date.now() })
+      fileSnapshots.set(abs, { before: src, after: readBack, afterHash: sha256(readBack), createdAt: Date.now() })
       return formatFileChangeResult('編集', path.relative(ctx.workspace, abs), src, readBack, count)
     }
   },
@@ -399,12 +417,14 @@ export const TOOL_DEFS: ToolDef[] = [
     async run(args, ctx) {
       const command = String(args.command ?? '')
       if (!command.trim()) throw new Error('command が必要です')
+      if (ctx.signal?.aborted) throw new Error('コマンド実行はキャンセルされました')
       try {
         const { stdout, stderr } = await execAsync(command, {
           cwd: ctx.workspace,
           timeout: 60_000,
           maxBuffer: 1024 * 1024,
-          windowsHide: true
+          windowsHide: true,
+          signal: ctx.signal
         })
         const parts = [stdout, stderr].filter((s) => s.trim().length > 0).map((s) => truncate(s))
         return parts.length > 0 ? parts.join('\n---stderr---\n') : '(出力なし)'

@@ -231,6 +231,9 @@ const CLICK_COPY_JS = `(() => {
 })()`
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+const throwIfAborted = (signal?: AbortSignal): void => {
+  if (signal?.aborted) throw new Error('Copilot実行はキャンセルされました')
+}
 
 class CdpConnection {
   private ws: WsLike
@@ -502,9 +505,10 @@ export class CopilotEdgeClient {
     return this.cdp.evalJs(expr, timeoutMs)
   }
 
-  private async waitInputReady(timeoutSec: number): Promise<void> {
+  private async waitInputReady(timeoutSec: number, signal?: AbortSignal): Promise<void> {
     const deadline = Date.now() + timeoutSec * 1000
     while (Date.now() < deadline) {
+      throwIfAborted(signal)
       const raw = await this.evalWithReconnect(INPUT_READY_JS, 15000)
       const state = JSON.parse(String(raw)) as { ready: boolean; url: string }
       if (/login|signin|sign-in|auth/i.test(state.url)) {
@@ -512,6 +516,7 @@ export class CopilotEdgeClient {
       }
       if (state.ready) return
       await sleep(350)
+      throwIfAborted(signal)
     }
     throw new Error('Copilot の入力欄が準備できませんでした (タイムアウト)。')
   }
@@ -636,13 +641,14 @@ export class CopilotEdgeClient {
     return JSON.parse(String(raw)) as { text: string; generating: boolean; signinRequired: boolean }
   }
 
-  private async waitResponse(baseline: string): Promise<string> {
+  private async waitResponse(baseline: string, signal?: AbortSignal): Promise<string> {
     const start = Date.now()
     let lastText = ''
     let lastChange = Date.now()
     let sawNewText = false
     let stable = 0
     while (Date.now() - start < this.s.responseTimeoutSec * 1000) {
+      throwIfAborted(signal)
       const st = await this.readScreenState()
       if (st.signinRequired) throw new Error('Copilot へのサインインが必要です。')
       if (st.text && st.text !== baseline) {
@@ -665,6 +671,7 @@ export class CopilotEdgeClient {
         throw new Error('Copilot の応答が停滞したため諦めました')
       }
       await sleep(this.s.pollIntervalMs)
+      throwIfAborted(signal)
     }
     throw new Error(`Copilot の応答がタイムアウトしました (${this.s.responseTimeoutSec}秒)`)
   }
@@ -687,18 +694,21 @@ export class CopilotEdgeClient {
     }
   }
 
-  async complete(prompt: string): Promise<string> {
+  async complete(prompt: string, signal?: AbortSignal): Promise<string> {
+    throwIfAborted(signal)
     await this.ensureEdge()
     await this.ensurePage()
     await this.freshChat()
-    await this.waitInputReady(120)
+    await this.waitInputReady(120, signal)
     await this.selectModel()
-    await this.waitInputReady(30)
+    throwIfAborted(signal)
+    await this.waitInputReady(30, signal)
     await this.assertTrustedOrigin()
     await this.insertPrompt(prompt)
     await this.clickSend()
+    throwIfAborted(signal)
     const baseline = (await this.readScreenState()).text
-    return this.waitResponse(baseline)
+    return this.waitResponse(baseline, signal)
   }
 
   close(): void {

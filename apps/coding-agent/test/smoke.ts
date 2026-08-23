@@ -7,7 +7,7 @@ import path from 'node:path'
 import { extractJsonReply, runAgentTurn, type AgentIO, type TextBackend } from '../src/agent'
 import type { AgentConfig } from '../src/config'
 import type { ChatMessage } from '../src/llm'
-import { parseToolResultMeta, TOOL_DEFS, type ToolContext } from '../src/tools'
+import { getFileSnapshot, parseToolResultMeta, rollbackFileChange, TOOL_DEFS, type ToolContext } from '../src/tools'
 import { listApprovals, requestApproval, resolveApproval } from '../src/approvals'
 
 function makeCtx(root: string, restrict = true): ToolContext {
@@ -300,6 +300,15 @@ async function testCopilotFenceMode(): Promise<void> {
   console.log('PASS copilot-fence')
 }
 
+async function testUiContract(): Promise<void> {
+  const html = fs.readFileSync(path.join(process.cwd(), 'public', 'index.html'), 'utf8')
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1]
+  assert.ok(script, 'UI script missing')
+  new Function(script)
+  for (const required of ['run-plan', 'run-pause', 'run-resume', 'run-retry', 'run-complete', '実際の差分を表示', '差分の続き', 'preview-frame', 'verification-list', '診断JSON', 'approval-meta', 'parentRunId', '/api/runs/', '/api/changes/', 'compositionstart', 'aria-live', '@media (max-width: 720px)']) assert.ok(html.includes(required), `UI contract missing: ${required}`)
+  console.log('PASS ui-contract')
+}
+
 (async () => {
   await testApprovals()
   await testTools()
@@ -310,6 +319,7 @@ async function testCopilotFenceMode(): Promise<void> {
   await testMaxIterationHistory()
   await testCopilotPlainMode()
   await testCopilotFenceMode()
+  await testUiContract()
   console.log('ALL PASS')
 })().catch((err) => {
   console.error(err)

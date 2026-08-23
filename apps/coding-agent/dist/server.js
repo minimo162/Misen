@@ -25,6 +25,8 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 // src/server.ts
 var import_node_http2 = __toESM(require("node:http"));
 var import_node_crypto2 = __toESM(require("node:crypto"));
+var import_node_child_process4 = require("node:child_process");
+var import_node_util2 = __toESM(require("node:util"));
 var import_node_fs3 = __toESM(require("node:fs"));
 var import_node_path4 = __toESM(require("node:path"));
 
@@ -71,7 +73,7 @@ function resolveApiKey(cfg2) {
 // src/llm.ts
 var import_node_http = __toESM(require("node:http"));
 var import_node_https = __toESM(require("node:https"));
-function postJson(url, body, headers) {
+function postJson(url, body, headers, signal) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     const mod = u.protocol === "https:" ? import_node_https.default : import_node_http.default;
@@ -88,11 +90,15 @@ function postJson(url, body, headers) {
       }
     );
     req.setTimeout(0);
+    const abort = () => req.destroy(new Error("LLM request aborted"));
+    if (signal?.aborted) abort();
+    signal?.addEventListener("abort", abort, { once: true });
     req.on("error", reject);
+    req.on("close", () => signal?.removeEventListener("abort", abort));
     req.end(body);
   });
 }
-async function chat(cfg2, messages, tools) {
+async function chat(cfg2, messages, tools, signal) {
   const url = cfg2.baseURL.replace(/\/+$/, "") + "/chat/completions";
   const headers = { "content-type": "application/json" };
   const key = resolveApiKey(cfg2);
@@ -104,7 +110,7 @@ async function chat(cfg2, messages, tools) {
     ...cfg2.chatTemplateKwargs ? { chat_template_kwargs: cfg2.chatTemplateKwargs } : {},
     ...tools.length > 0 ? { tools } : {}
   });
-  const res = await postJson(url, payload, headers);
+  const res = await postJson(url, payload, headers, signal);
   if (res.status < 200 || res.status >= 300) {
     throw new Error(`LLM API \u30A8\u30E9\u30FC ${res.status}: ${res.text.slice(0, 400)}`);
   }
@@ -392,14 +398,21 @@ function parseToolResultMeta(output) {
   }
 }
 var fileSnapshots = /* @__PURE__ */ new Map();
+function getFileSnapshot(p, ctx2) {
+  const abs = resolveInWorkspace(p, ctx2);
+  const snapshot2 = fileSnapshots.get(abs);
+  return snapshot2 ? { path: p, ...snapshot2 } : null;
+}
 async function rollbackFileChange(change, ctx2) {
   if (!change.path || !change.afterHash) throw new Error("\u30ED\u30FC\u30EB\u30D0\u30C3\u30AF\u5BFE\u8C61\u306E\u30CF\u30C3\u30B7\u30E5\u304C\u3042\u308A\u307E\u305B\u3093");
   const abs = resolveInWorkspace(change.path, ctx2);
   const snapshot2 = fileSnapshots.get(abs);
-  if (!snapshot2 || snapshot2.afterHash !== change.afterHash) throw new Error("\u3053\u306E\u30D7\u30ED\u30BB\u30B9\u306B\u5909\u66F4\u524D\u30B9\u30CA\u30C3\u30D7\u30B7\u30E7\u30C3\u30C8\u304C\u3042\u308A\u307E\u305B\u3093");
+  const before = snapshot2?.before ?? (typeof change.beforeContent === "string" ? String(change.beforeContent) : null);
+  const expected = snapshot2?.afterHash ?? change.afterHash;
+  if (before === null || expected !== change.afterHash) throw new Error("\u3053\u306ERun\u306B\u5909\u66F4\u524D\u30B9\u30CA\u30C3\u30D7\u30B7\u30E7\u30C3\u30C8\u304C\u3042\u308A\u307E\u305B\u3093");
   const current = await import_promises.default.readFile(abs, "utf8");
   if (sha256(current) !== change.afterHash) throw new Error("\u5909\u66F4\u5F8C\u306E\u5185\u5BB9\u304B\u3089\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u3066\u3044\u307E\u3059\u3002\u7AF6\u5408\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044");
-  await import_promises.default.writeFile(abs, snapshot2.before, "utf8");
+  await import_promises.default.writeFile(abs, before, "utf8");
   const restored = await import_promises.default.readFile(abs, "utf8");
   const hash = sha256(restored);
   fileSnapshots.delete(abs);
@@ -510,7 +523,7 @@ var TOOL_DEFS = [
       await import_promises.default.mkdir(import_node_path2.default.dirname(abs), { recursive: true });
       await import_promises.default.writeFile(abs, content, "utf8");
       const readBack = await import_promises.default.readFile(abs, "utf8");
-      fileSnapshots.set(abs, { before, afterHash: sha256(readBack), createdAt: Date.now() });
+      fileSnapshots.set(abs, { before, after: readBack, afterHash: sha256(readBack), createdAt: Date.now() });
       const result = formatFileChangeResult("\u66F8\u304D\u8FBC\u307F", import_node_path2.default.relative(ctx2.workspace, abs), before, readBack, 1);
       return `${result}
 \u30B5\u30A4\u30BA: ${Buffer.byteLength(readBack)} bytes`;
@@ -541,11 +554,14 @@ var TOOL_DEFS = [
       if (count === 0) throw new Error("old_string \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
       if (count > 1 && !replaceAll) throw new Error(`${count} \u4EF6\u4E00\u81F4\u3057\u307E\u3057\u305F\u3002replace_all=true \u3092\u6307\u5B9A\u3059\u308B\u304B\u5BFE\u8C61\u7BC4\u56F2\u3092\u72ED\u3081\u3066\u304F\u3060\u3055\u3044`);
       const next = replaceAll ? src.split(oldStr).join(newStr) : src.replace(oldStr, newStr);
-      if (next === src) return formatFileChangeResult("\u7DE8\u96C6", import_node_path2.default.relative(ctx2.workspace, abs), src, src, count);
+      if (next === src) {
+        fileSnapshots.set(abs, { before: src, after: src, afterHash: sha256(src), createdAt: Date.now() });
+        return formatFileChangeResult("\u7DE8\u96C6", import_node_path2.default.relative(ctx2.workspace, abs), src, src, count);
+      }
       await import_promises.default.writeFile(abs, next, "utf8");
       const readBack = await import_promises.default.readFile(abs, "utf8");
       if (readBack !== next) throw new Error("\u7DE8\u96C6\u5F8C\u306E\u518D\u8AAD\u8FBC\u5185\u5BB9\u304C\u4E00\u81F4\u3057\u307E\u305B\u3093");
-      fileSnapshots.set(abs, { before: src, afterHash: sha256(readBack), createdAt: Date.now() });
+      fileSnapshots.set(abs, { before: src, after: readBack, afterHash: sha256(readBack), createdAt: Date.now() });
       return formatFileChangeResult("\u7DE8\u96C6", import_node_path2.default.relative(ctx2.workspace, abs), src, readBack, count);
     }
   },
@@ -674,12 +690,14 @@ var TOOL_DEFS = [
     async run(args, ctx2) {
       const command = String(args.command ?? "");
       if (!command.trim()) throw new Error("command \u304C\u5FC5\u8981\u3067\u3059");
+      if (ctx2.signal?.aborted) throw new Error("\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F");
       try {
         const { stdout, stderr } = await execAsync(command, {
           cwd: ctx2.workspace,
           timeout: 6e4,
           maxBuffer: 1024 * 1024,
-          windowsHide: true
+          windowsHide: true,
+          signal: ctx2.signal
         });
         const parts = [stdout, stderr].filter((s) => s.trim().length > 0).map((s) => truncate(s));
         return parts.length > 0 ? parts.join("\n---stderr---\n") : "(\u51FA\u529B\u306A\u3057)";
@@ -789,6 +807,18 @@ function stripLineNumbered(rest) {
   return out;
 }
 var END_MARKER = "AGENT_END";
+function shouldCancel(io) {
+  return io.signal?.aborted === true || io.isCanceled?.() === true;
+}
+function pausedResult(messages, userInput, steps) {
+  return {
+    reply: "",
+    messages: [...messages, { role: "user", content: userInput }, { role: "assistant", content: "[\u4E00\u6642\u505C\u6B62] \u30C1\u30A7\u30C3\u30AF\u30DD\u30A4\u30F3\u30C8\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F\u3002\u518D\u958B\u3059\u308B\u3068\u7D9A\u304D\u304B\u3089\u78BA\u8A8D\u3057\u307E\u3059\u3002" }],
+    aborted: true,
+    paused: true,
+    checkpoint: steps.slice(-20)
+  };
+}
 function buildProtocolRules() {
   const toolDocs = TOOL_DEFS.map((t) => {
     const req = t.parameters.required ?? [];
@@ -879,10 +909,12 @@ async function runCopilotTurn(opts) {
     messages: turnMessages("[\u4E2D\u65AD] \u30E6\u30FC\u30B6\u30FC\u304C\u30AD\u30E3\u30F3\u30BB\u30EB\u3057\u307E\u3057\u305F"),
     aborted: true
   });
+  const paused = () => pausedResult(opts.messages, opts.userInput, steps);
+  const stopRequested = () => shouldCancel(io) || io.isPaused?.() === true;
   if (cfg2.copilot?.agentMode !== true) {
     const prompt = [cfg2.systemPrompt, opts.userInput].filter((s) => s && s.trim()).join("\n\n");
     try {
-      const text = (await backend.complete(prompt)).trim();
+      const text = (await backend.complete(prompt, io.signal)).trim();
       return { reply: text, messages: [...opts.messages, { role: "user", content: opts.userInput }, { role: "assistant", content: text }], aborted: false };
     } catch (err) {
       const msg = err.message;
@@ -891,6 +923,7 @@ async function runCopilotTurn(opts) {
     }
   }
   const steps = [];
+  io.event?.({ type: "plan.created", summary: "Run\u306E\u8A08\u753B\u3068\u691C\u8A3C\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F" });
   try {
     const listDef = TOOL_DEFS.find((d) => d.name === "list_files");
     steps.push(`TOOL_RESULT(list_files): ${(await listDef.run({}, ctx2)).slice(0, 600)}`);
@@ -900,10 +933,11 @@ async function runCopilotTurn(opts) {
   let refusals = 0;
   const maxIter = cfg2.maxToolIterations ?? 15;
   for (let i = 0; i < maxIter; i++) {
-    if (io.isCanceled?.()) return canceled();
+    if (shouldCancel(io)) return canceled();
+    if (io.isPaused?.()) return paused();
     let raw;
     try {
-      raw = await backend.complete(composeCopilotPrompt(opts.userInput, steps, opts.cfg.copilot?.maxPromptChars ?? 12e4, history));
+      raw = await backend.complete(composeCopilotPrompt(opts.userInput, steps, opts.cfg.copilot?.maxPromptChars ?? 12e4, history), io.signal);
       raw = raw.replace(/＜/g, "<").replace(/＞/g, ">").replace(new RegExp(String.fromCharCode(65312) === "" ? "" : "\uFF40", "g"), String.fromCharCode(96));
     } catch (err) {
       io.print(`[error] ${err.message}`);
@@ -936,25 +970,28 @@ async function runCopilotTurn(opts) {
       steps.push(`TOOL_RESULT: [error] \u672A\u77E5\u306E\u30C4\u30FC\u30EB "${parsed.tool}"\u3002tool \u306F\u6B63\u78BA\u306A\u540D\u524D\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
       continue;
     }
-    if (io.isCanceled?.()) return canceled();
+    if (stopRequested()) return io.isPaused?.() ? paused() : canceled();
     const summary = summarize(def.name, parsed.args ?? {});
-    io.event?.({ type: "tool.started", tool: def.name, summary });
-    io.print(`[tool] ${summary}`);
+    io.event?.({ type: "tool.requested", tool: def.name, summary });
+    io.event?.({ type: "step.started", tool: def.name, summary });
     if (def.kind !== "read") {
       const auto = def.kind === "write" ? cfg2.autoApprove?.write ?? true : cfg2.autoApprove?.command ?? false;
       if (!auto) {
-        io.event?.({ type: "approval.requested", tool: def.name, summary });
         const ok = await io.askYesNo(`\u5B9F\u884C\u3092\u8A31\u53EF\u3057\u307E\u3059\u304B\uFF1F
 ${summary}`);
-        io.event?.({ type: "approval.resolved", tool: def.name, summary, approved: ok });
+        if (ok) io.event?.({ type: "tool.approved", tool: def.name, summary, approved: true });
         if (!ok) {
           io.event?.({ type: "tool.denied", tool: def.name, summary });
           steps.push(`TOOL_RESULT(${def.name}): (\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)`);
           continue;
         }
+      } else {
+        io.event?.({ type: "tool.approved", tool: def.name, summary, approved: true, metadata: { automatic: true } });
       }
     }
-    if (io.isCanceled?.()) return canceled();
+    io.event?.({ type: "tool.started", tool: def.name, summary });
+    io.print(`[tool] ${summary}`);
+    if (stopRequested()) return io.isPaused?.() ? paused() : canceled();
     const startedAt = Date.now();
     let output;
     try {
@@ -963,14 +1000,17 @@ ${summary}`);
       output = `[tool error] ${err.message}`;
     }
     const failed = output.startsWith("[tool error]");
+    const durationMs = Date.now() - startedAt;
+    const metadata = parseToolResultMeta(output);
     io.event?.({
       type: failed ? "tool.failed" : "tool.succeeded",
       tool: def.name,
       summary,
       output: output.slice(0, 1200),
-      durationMs: Date.now() - startedAt,
-      metadata: parseToolResultMeta(output)
+      durationMs,
+      metadata
     });
+    io.event?.({ type: failed ? "step.failed" : "step.completed", tool: def.name, summary, output: output.slice(0, 800), durationMs, metadata });
     steps.push(`TOOL_RESULT(${def.name}): ${output.slice(0, 2e3)}`);
   }
   io.print("[warn] \u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F");
@@ -988,12 +1028,14 @@ async function runAgentTurn(opts) {
 async function runOpenAITurn(opts) {
   const { cfg: cfg2, ctx: ctx2, io } = opts;
   const messages = [...opts.messages, { role: "user", content: opts.userInput }];
+  io.event?.({ type: "plan.created", summary: "Run\u306E\u8A08\u753B\u3068\u691C\u8A3C\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F" });
   const maxIter = cfg2.maxToolIterations ?? 15;
   for (let i = 0; i < maxIter; i++) {
-    if (io.isCanceled?.()) return { reply: "", messages, aborted: true };
+    if (shouldCancel(io)) return { reply: "", messages, aborted: true };
+    if (io.isPaused?.()) return { reply: "", messages, aborted: true, paused: true };
     let assistant;
     try {
-      assistant = await chat(cfg2, messages, openAITools());
+      assistant = await chat(cfg2, messages, openAITools(), io.signal);
     } catch (err) {
       const msg = err.message;
       io.print(`[error] ${msg}`);
@@ -1005,7 +1047,8 @@ async function runOpenAITurn(opts) {
       return { reply: assistant.content ?? "", messages, aborted: false };
     }
     for (const call of calls) {
-      if (io.isCanceled?.()) return { reply: "", messages, aborted: true };
+      if (shouldCancel(io)) return { reply: "", messages, aborted: true };
+      if (io.isPaused?.()) return { reply: "", messages, aborted: true, paused: true };
       const output = await executeCall(call, cfg2, ctx2, io);
       messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: output });
     }
@@ -1024,29 +1067,38 @@ async function executeCall(call, cfg2, ctx2, io) {
     return "\u5F15\u6570\u306E JSON \u30D1\u30FC\u30B9\u306B\u5931\u6557\u3057\u307E\u3057\u305F";
   }
   const summary = summarize(def.name, args);
-  io.event?.({ type: "tool.started", tool: def.name, summary });
-  io.print(`[tool] ${summary}`);
+  io.event?.({ type: "tool.requested", tool: def.name, summary });
+  io.event?.({ type: "step.started", tool: def.name, summary });
   if (def.kind !== "read") {
     const auto = def.kind === "write" ? cfg2.autoApprove?.write ?? true : cfg2.autoApprove?.command ?? false;
     if (!auto) {
-      io.event?.({ type: "approval.requested", tool: def.name, summary });
       const ok = await io.askYesNo(`\u5B9F\u884C\u3092\u8A31\u53EF\u3057\u307E\u3059\u304B\uFF1F
 ${summary}`);
-      io.event?.({ type: "approval.resolved", tool: def.name, summary, approved: ok });
+      if (ok) io.event?.({ type: "tool.approved", tool: def.name, summary, approved: true });
       if (!ok) {
         io.event?.({ type: "tool.denied", tool: def.name, summary });
+        io.event?.({ type: "step.failed", tool: def.name, summary, error: "\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F" });
         return "(\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)";
       }
+    } else {
+      io.event?.({ type: "tool.approved", tool: def.name, summary, approved: true, metadata: { automatic: true } });
     }
   }
+  io.event?.({ type: "tool.started", tool: def.name, summary });
+  io.print(`[tool] ${summary}`);
   const startedAt = Date.now();
   try {
     const output = await def.run(args, ctx2);
-    io.event?.({ type: "tool.succeeded", tool: def.name, summary, output: output.slice(0, 1200), durationMs: Date.now() - startedAt, metadata: parseToolResultMeta(output) });
+    const durationMs = Date.now() - startedAt;
+    const metadata = parseToolResultMeta(output);
+    io.event?.({ type: "tool.succeeded", tool: def.name, summary, output: output.slice(0, 1200), durationMs, metadata });
+    io.event?.({ type: "step.completed", tool: def.name, summary, output: output.slice(0, 800), durationMs, metadata });
     return output;
   } catch (err) {
     const output = `[tool error] ${err.message}`;
-    io.event?.({ type: "tool.failed", tool: def.name, summary, output, error: output, durationMs: Date.now() - startedAt });
+    const durationMs = Date.now() - startedAt;
+    io.event?.({ type: "tool.failed", tool: def.name, summary, output, error: output, durationMs });
+    io.event?.({ type: "step.failed", tool: def.name, summary, output, error: output, durationMs });
     return output;
   }
 }
@@ -1257,6 +1309,9 @@ var CLICK_COPY_JS = `(() => {
   return JSON.stringify({ clicked: true, found: cand.length, label: (last.getAttribute('aria-label') || '').slice(0, 40) });
 })()`;
 var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+var throwIfAborted = (signal) => {
+  if (signal?.aborted) throw new Error("Copilot\u5B9F\u884C\u306F\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F");
+};
 var CdpConnection = class _CdpConnection {
   ws;
   nextId = 1;
@@ -1527,9 +1582,10 @@ var CopilotEdgeClient = class {
     if (!this.cdp) throw new Error("Copilot \u30DA\u30FC\u30B8\u672A\u63A5\u7D9A\u3067\u3059");
     return this.cdp.evalJs(expr, timeoutMs);
   }
-  async waitInputReady(timeoutSec) {
+  async waitInputReady(timeoutSec, signal) {
     const deadline = Date.now() + timeoutSec * 1e3;
     while (Date.now() < deadline) {
+      throwIfAborted(signal);
       const raw = await this.evalWithReconnect(INPUT_READY_JS, 15e3);
       const state = JSON.parse(String(raw));
       if (/login|signin|sign-in|auth/i.test(state.url)) {
@@ -1537,6 +1593,7 @@ var CopilotEdgeClient = class {
       }
       if (state.ready) return;
       await sleep(350);
+      throwIfAborted(signal);
     }
     throw new Error("Copilot \u306E\u5165\u529B\u6B04\u304C\u6E96\u5099\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F (\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8)\u3002");
   }
@@ -1651,13 +1708,14 @@ var CopilotEdgeClient = class {
     const raw = await this.evalWithReconnect(SCREEN_STATE_JS, 15e3);
     return JSON.parse(String(raw));
   }
-  async waitResponse(baseline) {
+  async waitResponse(baseline, signal) {
     const start = Date.now();
     let lastText = "";
     let lastChange = Date.now();
     let sawNewText = false;
     let stable = 0;
     while (Date.now() - start < this.s.responseTimeoutSec * 1e3) {
+      throwIfAborted(signal);
       const st = await this.readScreenState();
       if (st.signinRequired) throw new Error("Copilot \u3078\u306E\u30B5\u30A4\u30F3\u30A4\u30F3\u304C\u5FC5\u8981\u3067\u3059\u3002");
       if (st.text && st.text !== baseline) {
@@ -1680,6 +1738,7 @@ var CopilotEdgeClient = class {
         throw new Error("Copilot \u306E\u5FDC\u7B54\u304C\u505C\u6EDE\u3057\u305F\u305F\u3081\u8AE6\u3081\u307E\u3057\u305F");
       }
       await sleep(this.s.pollIntervalMs);
+      throwIfAborted(signal);
     }
     throw new Error(`Copilot \u306E\u5FDC\u7B54\u304C\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8\u3057\u307E\u3057\u305F (${this.s.responseTimeoutSec}\u79D2)`);
   }
@@ -1697,18 +1756,21 @@ var CopilotEdgeClient = class {
       console.log(`[model] \u5207\u66FF\u30B9\u30AD\u30C3\u30D7(\u7D99\u7D9A): ${err.message}`);
     }
   }
-  async complete(prompt) {
+  async complete(prompt, signal) {
+    throwIfAborted(signal);
     await this.ensureEdge();
     await this.ensurePage();
     await this.freshChat();
-    await this.waitInputReady(120);
+    await this.waitInputReady(120, signal);
     await this.selectModel();
-    await this.waitInputReady(30);
+    throwIfAborted(signal);
+    await this.waitInputReady(30, signal);
     await this.assertTrustedOrigin();
     await this.insertPrompt(prompt);
     await this.clickSend();
+    throwIfAborted(signal);
     const baseline = (await this.readScreenState()).text;
-    return this.waitResponse(baseline);
+    return this.waitResponse(baseline, signal);
   }
   close() {
     this.cdp?.close();
@@ -1718,43 +1780,61 @@ var CopilotEdgeClient = class {
 
 // src/approvals.ts
 var pending = /* @__PURE__ */ new Map();
+var resolutions = /* @__PURE__ */ new Map();
 var sequence2 = 0;
 var APPROVAL_TIMEOUT_MS = 10 * 60 * 1e3;
 function makeId2() {
   sequence2 = (sequence2 + 1) % 1048576;
   return `approval-${Date.now().toString(36)}-${sequence2.toString(36)}`;
 }
-function requestApproval(question) {
+function requestApproval(request) {
+  const normalized = typeof request === "string" ? { question: request } : request;
   const id = makeId2();
   const createdAt = Date.now();
+  const expiresAt = normalized.expiresAt ?? createdAt + APPROVAL_TIMEOUT_MS;
   return new Promise((resolve) => {
-    const entry = { id, question, createdAt, resolve };
+    const entry = { ...normalized, id, createdAt, expiresAt, resolve };
     pending.set(id, entry);
+    const timeout = Math.max(1, expiresAt - createdAt);
     setTimeout(() => {
       const current = pending.get(id);
       if (current !== entry) return;
       pending.delete(id);
+      const result = { id, approved: false, reason: "\u627F\u8A8D\u671F\u9650\u5207\u308C", resolvedAt: Date.now() };
+      resolutions.set(id, result);
+      while (resolutions.size > 100) resolutions.delete(resolutions.keys().next().value);
       resolve(false);
-    }, APPROVAL_TIMEOUT_MS).unref();
+    }, timeout).unref();
   });
 }
 function listApprovals() {
-  return [...pending.values()].sort((a, b) => a.createdAt - b.createdAt).map(({ id, question, createdAt }) => ({ id, question, createdAt }));
+  return [...pending.values()].sort((a, b) => a.createdAt - b.createdAt).map(({ resolve: _resolve, ...snapshot2 }) => snapshot2);
 }
-function resolveApproval(id, approved) {
+function resolveApproval(id, approved, reason = approved ? "\u5229\u7528\u8005\u304C\u8A31\u53EF\u3057\u307E\u3057\u305F" : "\u5229\u7528\u8005\u304C\u62D2\u5426\u3057\u307E\u3057\u305F") {
   const entry = pending.get(id);
   if (!entry) return false;
   pending.delete(id);
+  const result = { id, approved: Boolean(approved), reason, resolvedAt: Date.now() };
+  resolutions.set(id, result);
+  while (resolutions.size > 100) resolutions.delete(resolutions.keys().next().value);
   entry.resolve(Boolean(approved));
   return true;
 }
+function getApprovalResolution(id) {
+  return resolutions.get(id);
+}
 function clearApprovals() {
-  for (const entry of pending.values()) entry.resolve(false);
+  for (const entry of pending.values()) {
+    const result = { id: entry.id, approved: false, reason: "\u30B5\u30FC\u30D0\u30FC\u7D42\u4E86\u306B\u3088\u308A\u89E3\u9664\u3055\u308C\u307E\u3057\u305F", resolvedAt: Date.now() };
+    resolutions.set(entry.id, result);
+    entry.resolve(false);
+  }
   pending.clear();
 }
 
 // src/server.ts
 var PORT = Number(process.env.PORT ?? 3948);
+var execFileAsync = import_node_util2.default.promisify(import_node_child_process4.execFile);
 function argValue(flag) {
   const i = process.argv.indexOf(flag);
   return i >= 0 ? process.argv[i + 1] : void 0;
@@ -1786,6 +1866,8 @@ var sessions = /* @__PURE__ */ new Map();
 var runs = /* @__PURE__ */ new Map();
 var activeId = "";
 var activeRunId = null;
+var recoveredRunId = null;
+var runControllers = /* @__PURE__ */ new Map();
 var copilotBackend = null;
 var lastLogSeen = 0;
 var logLines = [];
@@ -1808,11 +1890,20 @@ function getBackend() {
 function makeRunId() {
   return `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
-function createRun(session, request, mode) {
+var DEFAULT_PLAN = [
+  { id: "inspect", title: "\u73FE\u72B6\u306E\u72B6\u614B\u8868\u793A\u3068\u69CB\u9020\u3092\u8ABF\u67FB", status: "pending" },
+  { id: "plan", title: "\u4F5C\u696D\u8A08\u753B\u3068\u691C\u8A3C\u6761\u4EF6\u3092\u4F5C\u6210", status: "pending" },
+  { id: "edit", title: "\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u3092\u7DE8\u96C6", status: "pending" },
+  { id: "execute", title: "\u30C4\u30FC\u30EB\u3068\u30D7\u30EC\u30D3\u30E5\u30FC\u3092\u5B9F\u884C", status: "pending" },
+  { id: "verify", title: "\u5DEE\u5206\u30FB\u69CB\u6587\u30FB\u30C6\u30B9\u30C8\u3092\u691C\u8A3C", status: "pending" },
+  { id: "confirm", title: "\u5B9F\u6A5F\u78BA\u8A8D\u3068\u5B8C\u4E86\u3092\u78BA\u5B9A", status: "pending" }
+];
+function createRun(session, request, mode, parentRunId) {
   const now = Date.now();
   const run = {
     id: makeRunId(),
     sessionId: session.id,
+    ...parentRunId ? { parentRunId } : {},
     title: request.slice(0, 40) || "\u65B0\u3057\u3044\u5B9F\u884C",
     request,
     mode,
@@ -1823,9 +1914,23 @@ function createRun(session, request, mode) {
     startedAt: now,
     updatedAt: now,
     completedSteps: 0,
+    plan: DEFAULT_PLAN.map((step) => ({ ...step })),
     changedFiles: [],
+    artifacts: [],
     events: [],
-    cancelRequested: false
+    verification: {
+      profile: "auto",
+      checks: [
+        { id: "file-readback", label: "\u5909\u66F4\u5F8C\u30D5\u30A1\u30A4\u30EB\u306E\u518D\u8AAD\u8FBC", status: "pending" },
+        { id: "syntax-tests", label: "\u69CB\u6587\u30FB\u30C6\u30B9\u30C8", status: "pending" },
+        { id: "user-confirmation", label: "\u5B9F\u6A5F\u64CD\u4F5C\u30FB\u8AAD\u307F\u4E0A\u3052\u78BA\u8A8D", status: "todo" }
+      ],
+      machinePassed: false,
+      userConfirmed: false
+    },
+    cancelRequested: false,
+    pauseRequested: false,
+    resumeCount: 0
   };
   runs.set(run.id, run);
   session.runs.unshift(run.id);
@@ -1833,12 +1938,22 @@ function createRun(session, request, mode) {
 }
 function addRunEvent(run, event) {
   run.updatedAt = Date.now();
-  run.events.push({ ...event, sequence: run.events.length + 1, at: run.updatedAt });
+  const sequence3 = run.events.length + 1;
+  const eventId = `${run.id}-event-${sequence3}`;
+  run.events.push({ ...event, eventId, runId: run.id, stepId: run.phase, toolEventId: eventId, sequence: sequence3, at: run.updatedAt });
   if (run.events.length > 200) run.events.splice(0, run.events.length - 200);
   persistState();
 }
 function runSnapshot(run) {
-  return { ...run, events: run.events.slice(-100), changedFiles: run.changedFiles.map((change) => ({ ...change })) };
+  return {
+    ...run,
+    plan: run.plan.map((step) => ({ ...step })),
+    events: run.events.slice(-120).map((event) => ({ ...event })),
+    changedFiles: run.changedFiles.map((change) => ({ ...change, diff: change.diff.map((line) => ({ ...line })) })),
+    artifacts: run.artifacts.map((artifact) => ({ ...artifact })),
+    verification: { ...run.verification, checks: run.verification.checks.map((check) => ({ ...check })) },
+    ...run.checkpoint ? { checkpoint: { ...run.checkpoint, messages: run.checkpoint.messages.map((message) => ({ ...message })), steps: [...run.checkpoint.steps] } } : {}
+  };
 }
 function phaseForTool(tool) {
   if (tool === "read_file" || tool === "list_files" || tool === "search_files") return "inspect";
@@ -1846,24 +1961,97 @@ function phaseForTool(tool) {
   if (tool === "start_process" || tool === "read_process_log" || tool === "stop_process" || tool === "run_command") return "execute";
   return "plan";
 }
-function changeFromEvent(event) {
+function buildDiff(before, after, maxLines = 600) {
+  const b = before.split(/\r?\n/);
+  const a = after.split(/\r?\n/);
+  let prefix = 0;
+  while (prefix < b.length && prefix < a.length && b[prefix] === a[prefix]) prefix++;
+  let suffix = 0;
+  while (suffix < b.length - prefix && suffix < a.length - prefix && b[b.length - suffix - 1] === a[a.length - suffix - 1]) suffix++;
+  const lines = [];
+  const context = 2;
+  for (let i = Math.max(0, prefix - context); i < prefix; i++) lines.push({ kind: "context", oldLine: i + 1, newLine: i + 1, text: b[i] });
+  for (let i = prefix; i < b.length - suffix && lines.length < maxLines; i++) lines.push({ kind: "remove", oldLine: i + 1, text: b[i] });
+  for (let i = prefix; i < a.length - suffix && lines.length < maxLines; i++) lines.push({ kind: "add", newLine: i + 1, text: a[i] });
+  for (let i = Math.max(prefix, b.length - suffix); i < b.length && lines.length < maxLines; i++) {
+    const j = i - (b.length - a.length);
+    if (j >= 0 && j < a.length) lines.push({ kind: "context", oldLine: i + 1, newLine: j + 1, text: b[i] });
+  }
+  return lines;
+}
+function changeFromEvent(run, event) {
   const metadata = event.metadata;
   const pathValue = typeof metadata?.path === "string" ? metadata.path : event.summary?.match(/:\s*(.+)$/)?.[1];
   if (!pathValue || event.tool !== "edit_file" && event.tool !== "write_file") return null;
+  const snapshot2 = getFileSnapshot(pathValue, ctx);
+  const before = snapshot2?.before ?? "";
+  const after = snapshot2?.after ?? "";
+  const changed = metadata?.changed !== false;
   return {
+    changeId: `${run.id}-change-${run.changedFiles.length + 1}`,
     path: pathValue,
-    changed: metadata?.changed !== false,
+    changed,
     status: metadata?.status === "no_op" ? "no_op" : "applied_unverified",
-    beforeHash: typeof metadata?.beforeHash === "string" ? metadata.beforeHash : void 0,
-    afterHash: typeof metadata?.afterHash === "string" ? metadata.afterHash : void 0,
+    beforeHash: typeof metadata?.beforeHash === "string" ? metadata.beforeHash : before ? import_node_crypto2.default.createHash("sha256").update(before, "utf8").digest("hex") : void 0,
+    afterHash: typeof metadata?.afterHash === "string" ? metadata.afterHash : snapshot2?.afterHash,
     readBack: metadata?.readBack === true,
     addedLines: typeof metadata?.addedLines === "number" ? metadata.addedLines : void 0,
-    removedLines: typeof metadata?.removedLines === "number" ? metadata.removedLines : void 0
+    removedLines: typeof metadata?.removedLines === "number" ? metadata.removedLines : void 0,
+    beforeContent: before.slice(0, 25e4),
+    afterContent: after.slice(0, 25e4),
+    diff: buildDiff(before, after)
   };
 }
 function updateRunFromEvent(run, event) {
   const summary = event.summary ?? event.tool ?? "";
   switch (event.type) {
+    case "plan.created":
+      run.status = "planning";
+      run.phase = "plan";
+      run.plan[1].status = "in_progress";
+      run.currentStep = "\u4F5C\u696D\u8A08\u753B\u3068\u691C\u8A3C\u6761\u4EF6\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F";
+      run.nextAction = "\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u3092\u8ABF\u67FB\u3057\u3066\u3044\u307E\u3059";
+      break;
+    case "step.started": {
+      const phase = phaseForTool(event.tool);
+      const step = run.plan.find((entry) => entry.id === phase) ?? run.plan[0];
+      step.status = "in_progress";
+      step.startedAt = Date.now();
+      run.status = "running";
+      run.phase = phase;
+      run.currentStep = summary;
+      run.nextAction = "\u30C4\u30FC\u30EB\u306E\u7D50\u679C\u3092\u78BA\u8A8D\u3057\u3066\u3044\u307E\u3059";
+      break;
+    }
+    case "step.completed": {
+      const phase = phaseForTool(event.tool);
+      const step = run.plan.find((entry) => entry.id === phase) ?? run.plan[0];
+      step.status = "completed";
+      step.completedAt = Date.now();
+      run.completedSteps = run.plan.filter((entry) => entry.status === "completed").length;
+      break;
+    }
+    case "step.failed": {
+      const phase = phaseForTool(event.tool);
+      const step = run.plan.find((entry) => entry.id === phase) ?? run.plan[0];
+      step.status = "failed";
+      step.completedAt = Date.now();
+      run.currentStep = `${summary}\uFF08\u5931\u6557\uFF09`;
+      run.nextAction = "\u5931\u6557\u7D50\u679C\u3092\u78BA\u8A8D\u3057\u3066\u518D\u8A66\u884C\u307E\u305F\u306F\u4EE3\u66FF\u624B\u9806\u3092\u9078\u629E\u3057\u3066\u304F\u3060\u3055\u3044";
+      break;
+    }
+    case "tool.requested":
+      run.status = "running";
+      run.phase = phaseForTool(event.tool);
+      run.currentStep = summary;
+      run.nextAction = "\u627F\u8A8D\u304C\u5FC5\u8981\u304B\u78BA\u8A8D\u3057\u3066\u3044\u307E\u3059";
+      break;
+    case "tool.approved":
+      run.status = "running";
+      run.phase = phaseForTool(event.tool);
+      run.currentStep = summary;
+      run.nextAction = "\u30C4\u30FC\u30EB\u3092\u5B9F\u884C\u3057\u3066\u3044\u307E\u3059";
+      break;
     case "tool.started":
       run.status = "running";
       run.phase = phaseForTool(event.tool);
@@ -1889,19 +2077,46 @@ function updateRunFromEvent(run, event) {
     case "tool.succeeded": {
       run.status = "running";
       run.phase = phaseForTool(event.tool);
-      run.completedSteps++;
       run.currentStep = `${summary}\uFF08\u5B8C\u4E86\uFF09`;
-      const change = changeFromEvent(event);
+      run.completedSteps = run.plan.filter((entry) => entry.status === "completed").length;
+      const change = changeFromEvent(run, event);
       if (change) {
         const existing = run.changedFiles.findIndex((entry) => entry.path === change.path);
         if (existing >= 0) run.changedFiles[existing] = change;
         else run.changedFiles.push(change);
+        addRunEvent(run, { type: "file.before_captured", message: `${change.path} \u306E\u5909\u66F4\u524D\u30B9\u30CA\u30C3\u30D7\u30B7\u30E7\u30C3\u30C8\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F`, metadata: { path: change.path, beforeHash: change.beforeHash, changeId: change.changeId } });
+        addRunEvent(run, { type: "snapshot.created", message: `${change.path} \u306E\u30ED\u30FC\u30EB\u30D0\u30C3\u30AF\u7528\u30B9\u30CA\u30C3\u30D7\u30B7\u30E7\u30C3\u30C8\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F`, metadata: { path: change.path, beforeHash: change.beforeHash, changeId: change.changeId } });
         if (change.changed) {
+          addRunEvent(run, { type: "file.changed", message: `${change.path} \u3092\u9069\u7528\u3057\u307E\u3057\u305F\uFF08\u672A\u691C\u8A3C\uFF09`, metadata: { path: change.path, changeId: change.changeId, beforeHash: change.beforeHash, afterHash: change.afterHash } });
+          addRunEvent(run, { type: "diff.ready", message: `${change.path} \u306E\u5DEE\u5206\u3092\u751F\u6210\u3057\u307E\u3057\u305F`, metadata: { path: change.path, changeId: change.changeId, addedLines: change.addedLines, removedLines: change.removedLines } });
+          if (change.readBack) addRunEvent(run, { type: "file.read_back", message: `${change.path} \u3092\u518D\u8AAD\u8FBC\u3057\u307E\u3057\u305F`, metadata: { path: change.path, changeId: change.changeId, afterHash: change.afterHash } });
           run.status = "applied_unverified";
+          run.phase = "verify";
           run.nextAction = "\u5DEE\u5206\u30FB\u518D\u8AAD\u8FBC\u7D50\u679C\u3092\u78BA\u8A8D\u3057\u3001\u691C\u8A3C\u3092\u5B9F\u884C\u3057\u3066\u304F\u3060\u3055\u3044";
+          const readback = run.verification.checks.find((check) => check.id === "file-readback");
+          if (readback) {
+            readback.status = change.readBack ? "pass" : "fail";
+            readback.evidence = change.readBack ? "\u5909\u66F4\u5F8C\u306E\u5185\u5BB9\u3092\u518D\u8AAD\u8FBC\u3057\u30CF\u30C3\u30B7\u30E5\u3092\u8A18\u9332\u3057\u307E\u3057\u305F" : "read-back\u304C\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093";
+          }
         } else {
           run.nextAction = "\u5909\u66F4\u306A\u3057\uFF08no-op\uFF09\u3092\u8A18\u9332\u3057\u307E\u3057\u305F";
         }
+      } else if (event.tool === "start_process") {
+        try {
+          const process2 = JSON.parse(event.output ?? "");
+          const artifact = {
+            id: `${run.id}-artifact-${run.artifacts.length + 1}`,
+            type: process2.url ? "preview" : "process-log",
+            name: process2.label || event.summary || "\u5B9F\u884C\u30D7\u30ED\u30BB\u30B9",
+            ...process2.url ? { url: process2.url } : {},
+            ...process2.id ? { processId: process2.id } : {},
+            createdAt: Date.now()
+          };
+          run.artifacts.push(artifact);
+          addRunEvent(run, { type: process2.url ? "preview.ready" : "artifact.created", message: artifact.name, metadata: { artifact } });
+        } catch {
+        }
+        run.nextAction = "\u751F\u6210\u7269\u3068\u30ED\u30B0\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044";
       } else {
         run.nextAction = "\u6B21\u306E\u30B9\u30C6\u30C3\u30D7\u3092\u9078\u3093\u3067\u3044\u307E\u3059";
       }
@@ -1918,6 +2133,8 @@ function updateRunFromEvent(run, event) {
       run.error = event.error;
       run.currentStep = "\u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F";
       run.nextAction = "\u5B8C\u4E86\u6E08\u307F\u306E\u5C65\u6B74\u304B\u3089\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044";
+      run.checkpoint = { createdAt: Date.now(), reason: event.error ?? "\u53CD\u5FA9\u4E0A\u9650", messages: [], steps: [] };
+      addRunEvent(run, { type: "checkpoint.created", message: "\u53CD\u5FA9\u4E0A\u9650\u6642\u70B9\u306E\u30C1\u30A7\u30C3\u30AF\u30DD\u30A4\u30F3\u30C8\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F", metadata: { checkpointAt: run.checkpoint.createdAt } });
       break;
   }
   addRunEvent(run, {
@@ -1944,7 +2161,19 @@ function updateRunFromLog(run, text) {
 function finalizeRun(run, result) {
   run.endedAt = Date.now();
   run.phase = "finalize";
-  if (run.cancelRequested) {
+  if (run.pauseRequested || result.paused) {
+    run.status = "paused";
+    run.currentStep = "\u30C1\u30A7\u30C3\u30AF\u30DD\u30A4\u30F3\u30C8\u3092\u4FDD\u5B58\u3057\u3066\u4E00\u6642\u505C\u6B62\u3057\u307E\u3057\u305F";
+    run.nextAction = "\u518D\u958B\u307E\u305F\u306F\u5931\u6557\u7B87\u6240\u304B\u3089\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044";
+    run.checkpoint = {
+      createdAt: Date.now(),
+      reason: "\u5229\u7528\u8005\u304C\u4E00\u6642\u505C\u6B62\u3057\u307E\u3057\u305F",
+      messages: result.messages ?? [],
+      steps: result.checkpoint ?? []
+    };
+    addRunEvent(run, { type: "run.paused", message: "\u30C1\u30A7\u30C3\u30AF\u30DD\u30A4\u30F3\u30C8\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F", metadata: { checkpointAt: run.checkpoint.createdAt } });
+    addRunEvent(run, { type: "checkpoint.created", message: "\u4E00\u6642\u505C\u6B62\u7528\u30C1\u30A7\u30C3\u30AF\u30DD\u30A4\u30F3\u30C8\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F", metadata: { checkpointAt: run.checkpoint.createdAt, reason: run.checkpoint.reason } });
+  } else if (run.cancelRequested) {
     run.status = "canceled";
     run.currentStep = "\u30AD\u30E3\u30F3\u30BB\u30EB\u3057\u307E\u3057\u305F";
     run.nextAction = "\u65B0\u3057\u3044\u4F9D\u983C\u3092\u9001\u4FE1\u3067\u304D\u307E\u3059";
@@ -1953,16 +2182,23 @@ function finalizeRun(run, result) {
     run.status = "failed";
     run.currentStep = run.error ? "\u30A8\u30E9\u30FC\u3067\u7D42\u4E86\u3057\u307E\u3057\u305F" : "\u5B9F\u884C\u304C\u4E2D\u65AD\u3055\u308C\u307E\u3057\u305F";
     run.nextAction = "\u5931\u6557\u7B87\u6240\u304B\u3089\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044";
-    addRunEvent(run, { type: "run.failed", message: run.error ?? "\u5B9F\u884C\u304C\u4E2D\u65AD\u3055\u308C\u307E\u3057\u305F" });
+    run.checkpoint = { createdAt: run.checkpoint?.createdAt ?? Date.now(), reason: run.checkpoint?.reason ?? (run.error ?? "\u5B9F\u884C\u304C\u4E2D\u65AD\u3055\u308C\u307E\u3057\u305F"), messages: result.messages ?? run.checkpoint?.messages ?? [], steps: result.checkpoint ?? run.checkpoint?.steps ?? [] };
+    addRunEvent(run, { type: "run.failed", message: run.error ?? "\u5B9F\u884C\u304C\u4E2D\u65AD\u3055\u308C\u307E\u3057\u305F", metadata: { checkpointAt: run.checkpoint.createdAt } });
+    addRunEvent(run, { type: "checkpoint.created", message: "\u5931\u6557\u6642\u70B9\u306E\u30C1\u30A7\u30C3\u30AF\u30DD\u30A4\u30F3\u30C8\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F", metadata: { checkpointAt: run.checkpoint.createdAt, reason: run.checkpoint.reason } });
   } else if (run.changedFiles.some((change) => change.changed)) {
     run.status = "applied_unverified";
+    run.phase = "verify";
     run.currentStep = "\u5909\u66F4\u3092\u9069\u7528\u3057\u307E\u3057\u305F\uFF08\u672A\u691C\u8A3C\uFF09";
     run.nextAction = "\u5DEE\u5206\u30FB\u30D7\u30EC\u30D3\u30E5\u30FC\u30FB\u691C\u8A3C\u7D50\u679C\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044";
+    const verifyStep = run.plan.find((step) => step.id === "verify");
+    if (verifyStep) verifyStep.status = "in_progress";
     addRunEvent(run, { type: "run.applied_unverified", message: "\u5909\u66F4\u306F\u4FDD\u5B58\u3055\u308C\u307E\u3057\u305F\u304C\u3001\u691C\u8A3C\u306F\u672A\u5B8C\u4E86\u3067\u3059" });
   } else {
     run.status = "verified";
     run.currentStep = "\u5B9F\u884C\u304C\u5B8C\u4E86\u3057\u307E\u3057\u305F";
     run.nextAction = "\u5FC5\u8981\u306A\u3089\u8FFD\u52A0\u306E\u4FEE\u6B63\u6307\u793A\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044";
+    run.verification.machinePassed = true;
+    run.verification.userConfirmed = true;
     addRunEvent(run, { type: "run.completed", message: result.reply || "\u5B9F\u884C\u304C\u5B8C\u4E86\u3057\u307E\u3057\u305F" });
   }
 }
@@ -1970,6 +2206,8 @@ function persistState() {
   try {
     const state = {
       activeId,
+      activeRunId,
+      recoveredRunId,
       sessions: [...sessions.values()],
       runs: [...runs.values()]
     };
@@ -1990,8 +2228,16 @@ function restoreState() {
       if (!session.id || !Array.isArray(session.messages)) continue;
       sessions.set(session.id, { ...session, runs: Array.isArray(session.runs) ? session.runs : [] });
     }
-    for (const run of raw.runs ?? []) {
+    for (const rawRun of raw.runs ?? []) {
+      const run = rawRun;
       if (!run.id || !run.sessionId) continue;
+      run.plan = Array.isArray(run.plan) ? run.plan : DEFAULT_PLAN.map((step) => ({ ...step }));
+      run.changedFiles = Array.isArray(run.changedFiles) ? run.changedFiles.map((change) => ({ ...change, changeId: change.changeId ?? `${run.id}-change-${Math.random().toString(36).slice(2, 7)}`, diff: Array.isArray(change.diff) ? change.diff : [] })) : [];
+      run.artifacts = Array.isArray(run.artifacts) ? run.artifacts : [];
+      run.events = Array.isArray(run.events) ? run.events : [];
+      if (!run.verification || !Array.isArray(run.verification.checks) || run.verification.checks.length === 0) run.verification = { profile: "auto", checks: [{ id: "file-readback", label: "\u5909\u66F4\u5F8C\u30D5\u30A1\u30A4\u30EB\u306E\u518D\u8AAD\u8FBC", status: "pending" }, { id: "syntax-tests", label: "\u69CB\u6587\u30FB\u30C6\u30B9\u30C8", status: "pending" }, { id: "user-confirmation", label: "\u5B9F\u6A5F\u64CD\u4F5C\u30FB\u8AAD\u307F\u4E0A\u3052\u78BA\u8A8D", status: "todo" }], machinePassed: false, userConfirmed: false };
+      run.pauseRequested = run.pauseRequested === true;
+      run.resumeCount = Number(run.resumeCount ?? 0);
       if (!run.endedAt && !["canceled", "failed", "verified", "rolled_back"].includes(run.status)) {
         run.status = "paused";
         run.currentStep = "\u30B5\u30FC\u30D0\u30FC\u518D\u8D77\u52D5\u5F8C\u306B\u4E00\u6642\u505C\u6B62\u3057\u307E\u3057\u305F";
@@ -2000,15 +2246,18 @@ function restoreState() {
         run.endedAt = Date.now();
         run.events = Array.isArray(run.events) ? run.events : [];
         run.events.push({ sequence: run.events.length + 1, type: "run.paused", at: Date.now(), message: run.error });
+        recoveredRunId = run.id;
       }
       runs.set(run.id, run);
     }
     activeId = raw.activeId && sessions.has(raw.activeId) ? raw.activeId : [...sessions.keys()][0] ?? "";
+    if (!recoveredRunId && raw.recoveredRunId && runs.has(raw.recoveredRunId)) recoveredRunId = raw.recoveredRunId;
+    activeRunId = raw.activeRunId && runs.has(raw.activeRunId) && !runs.get(raw.activeRunId)?.endedAt ? raw.activeRunId : null;
   } catch (err) {
     console.warn(`[state] \u5FA9\u5143\u3092\u30B9\u30AD\u30C3\u30D7\u3057\u307E\u3057\u305F: ${err.message}`);
   }
 }
-function makeRunIO(run) {
+function makeRunIO(run, controller) {
   return {
     print: (t) => {
       logLines.push(t);
@@ -2016,19 +2265,86 @@ function makeRunIO(run) {
       updateRunFromLog(run, t);
     },
     askYesNo: async (question) => {
+      const stepId = `${run.phase}-${Math.max(1, run.completedSteps + 1)}`;
+      const approvalRequest = {
+        question,
+        runId: run.id,
+        stepId,
+        toolName: run.currentStep.split(":")[0],
+        risk: "medium",
+        scope: ctx.workspace,
+        expiresAt: Date.now() + 10 * 60 * 1e3
+      };
+      const pending2 = requestApproval(approvalRequest);
+      const snapshot2 = listApprovals().find((entry) => entry.runId === run.id && entry.question === question);
+      run.approval = { ...approvalRequest, ...snapshot2 ? { id: snapshot2.id } : {} };
       run.status = "waiting_approval";
       run.phase = "execute";
       run.currentStep = question;
       run.nextAction = "\u627F\u8A8D\u307E\u305F\u306F\u62D2\u5426\u3092\u9078\u629E\u3057\u3066\u304F\u3060\u3055\u3044";
-      addRunEvent(run, { type: "approval.requested", message: question });
-      const approved = await requestApproval(question);
-      addRunEvent(run, { type: "approval.resolved", message: approved ? "\u627F\u8A8D\u3057\u307E\u3057\u305F" : "\u62D2\u5426\u3057\u307E\u3057\u305F", approved });
+      addRunEvent(run, { type: "approval.requested", message: question, metadata: { approval: run.approval } });
+      const approved = await pending2;
+      const resolution = run.approval?.id ? getApprovalResolution(run.approval.id) : void 0;
+      run.approval = { ...run.approval, approved, ...resolution ? { reason: resolution.reason } : {} };
+      if (resolution?.reason === "\u627F\u8A8D\u671F\u9650\u5207\u308C") addRunEvent(run, { type: "approval.expired", message: resolution.reason, approved: false, metadata: { approval: run.approval } });
+      addRunEvent(run, { type: "approval.resolved", message: resolution?.reason ?? (approved ? "\u627F\u8A8D\u3057\u307E\u3057\u305F" : "\u62D2\u5426\u3057\u307E\u3057\u305F"), approved, metadata: { approval: run.approval } });
       if (!run.cancelRequested) run.status = "running";
       return approved;
     },
     event: (event) => updateRunFromEvent(run, event),
-    isCanceled: () => run.cancelRequested
+    isCanceled: () => run.cancelRequested,
+    isPaused: () => run.pauseRequested,
+    signal: controller.signal
   };
+}
+async function executeRun(run, session, input, mode) {
+  const startIdx = logLines.length;
+  const controller = new AbortController();
+  runControllers.set(run.id, controller);
+  activeRunId = run.id;
+  run.status = "planning";
+  run.phase = "plan";
+  run.currentStep = "\u4F5C\u696D\u8A08\u753B\u3092\u4F5C\u6210\u3057\u3066\u3044\u307E\u3059";
+  run.nextAction = "\u6700\u521D\u306E\u8ABF\u67FB\u30B9\u30C6\u30C3\u30D7\u3092\u9078\u3093\u3067\u3044\u307E\u3059";
+  addRunEvent(run, { type: "run.started", message: "Run\u3092\u5B9F\u884C\u3057\u3066\u3044\u307E\u3059" });
+  const effCfg = mode === "chat" ? { ...cfg, copilot: { ...cfg.copilot ?? {}, agentMode: false } } : cfg;
+  try {
+    const backend = getBackend();
+    const result = await runAgentTurn({
+      cfg: effCfg,
+      messages: session.messages,
+      userInput: input,
+      ctx: { ...ctx, signal: controller.signal },
+      io: makeRunIO(run, controller),
+      backend
+    });
+    session.messages = result.messages;
+    finalizeRun(run, result);
+    persistState();
+    return { reply: result.reply, aborted: result.aborted, ...result.paused ? { paused: true } : {}, logs: logLines.slice(startIdx) };
+  } catch (err) {
+    const message = err.message;
+    run.error = message;
+    if (run.pauseRequested) {
+      run.status = "paused";
+      run.currentStep = "\u4E00\u6642\u505C\u6B62\u8981\u6C42\u3092\u53D7\u3051\u3066\u30C1\u30A7\u30C3\u30AF\u30DD\u30A4\u30F3\u30C8\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F";
+      run.nextAction = "\u518D\u958B\u307E\u305F\u306F\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044";
+      run.checkpoint = { createdAt: Date.now(), reason: "\u4E00\u6642\u505C\u6B62\u8981\u6C42", messages: session.messages, steps: [] };
+      addRunEvent(run, { type: "run.paused", message: run.currentStep });
+    } else {
+      run.status = run.cancelRequested || controller.signal.aborted ? "canceled" : "failed";
+      run.currentStep = run.status === "canceled" ? "\u30AD\u30E3\u30F3\u30BB\u30EB\u3057\u307E\u3057\u305F" : "\u51E6\u7406\u306B\u5931\u6557\u3057\u307E\u3057\u305F";
+      run.nextAction = run.status === "canceled" ? "\u65B0\u3057\u3044\u4F9D\u983C\u3092\u9001\u4FE1\u3067\u304D\u307E\u3059" : "\u30A8\u30E9\u30FC\u3092\u78BA\u8A8D\u3057\u3066\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044";
+      addRunEvent(run, { type: run.status === "canceled" ? "run.canceled" : "run.failed", message });
+    }
+    run.endedAt = Date.now();
+    persistState();
+    return { reply: "", aborted: true, ...run.status === "paused" ? { paused: true } : {}, logs: logLines.slice(startIdx) };
+  } finally {
+    runControllers.delete(run.id);
+    if (activeRunId === run.id) activeRunId = null;
+    persistState();
+  }
 }
 restoreState();
 if (!sessions.size) newSession();
@@ -2069,9 +2385,46 @@ var server = import_node_http2.default.createServer(async (req, res) => {
     json(res, 200, { total: logLines.length, lines: logLines.slice(offset) });
     return;
   }
+  if (req.method === "POST" && url.pathname === "/api/runs") {
+    if (activeRunId) {
+      json(res, 409, { error: "\u5225\u306E\u5B9F\u884C\u304C\u9032\u884C\u4E2D\u3067\u3059", activeRun: runSnapshot(runs.get(activeRunId)) });
+      return;
+    }
+    let body = {};
+    try {
+      body = JSON.parse(await readBody(req));
+    } catch {
+    }
+    const input = String(body.message ?? "").trim();
+    if (!input) {
+      json(res, 400, { error: "message \u304C\u7A7A\u3067\u3059" });
+      return;
+    }
+    const session = body.sessionId ? sessions.get(body.sessionId) : activeSession();
+    if (!session) {
+      json(res, 404, { error: "session not found" });
+      return;
+    }
+    const mode = body.mode === "chat" ? "chat" : "work";
+    const run = createRun(session, input, mode);
+    addRunEvent(run, { type: "run.created", message: `Run\u3092\u30AD\u30E5\u30FC\u3078\u8FFD\u52A0\u3057\u307E\u3057\u305F: ${run.title}` });
+    persistState();
+    json(res, 201, { run: runSnapshot(run) });
+    return;
+  }
+  const sessionRunsPath = url.pathname.match(/^\/api\/sessions\/([^/]+)\/runs$/);
+  if (req.method === "GET" && sessionRunsPath) {
+    const session = sessions.get(sessionRunsPath[1]);
+    if (!session) {
+      json(res, 404, { error: "session not found" });
+      return;
+    }
+    json(res, 200, { sessionId: session.id, runs: session.runs.map((id) => runs.get(id)).filter((run) => Boolean(run)).map(runSnapshot) });
+    return;
+  }
   if (req.method === "GET" && url.pathname === "/api/active-run") {
-    const activeRun = activeRunId ? runs.get(activeRunId) : void 0;
-    json(res, 200, { run: activeRun ? runSnapshot(activeRun) : null });
+    const activeRun = activeRunId ? runs.get(activeRunId) : recoveredRunId ? runs.get(recoveredRunId) : void 0;
+    json(res, 200, { run: activeRun ? runSnapshot(activeRun) : null, active: Boolean(activeRunId), recoverable: Boolean(recoveredRunId) });
     return;
   }
   const verifyPath = url.pathname.match(/^\/api\/runs\/([^/]+)\/verify$/);
@@ -2081,33 +2434,97 @@ var server = import_node_http2.default.createServer(async (req, res) => {
       json(res, 404, { error: "run not found" });
       return;
     }
+    let body = {};
+    try {
+      body = JSON.parse(await readBody(req));
+    } catch {
+    }
     run.status = "verifying";
     run.phase = "verify";
     run.currentStep = "\u5909\u66F4\u5F8C\u306E\u30D5\u30A1\u30A4\u30EB\u3092\u518D\u8AAD\u8FBC\u3057\u3066\u691C\u8A3C\u3057\u3066\u3044\u307E\u3059";
-    run.nextAction = "\u691C\u8A3C\u7D50\u679C\u3092\u96C6\u8A08\u3057\u3066\u3044\u307E\u3059";
-    addRunEvent(run, { type: "verification.started", message: "\u5909\u66F4\u5F8C\u306E\u30D5\u30A1\u30A4\u30EB\u3092\u518D\u8AAD\u8FBC\u3057\u3066\u691C\u8A3C\u3057\u3066\u3044\u307E\u3059" });
-    const checks = [];
-    for (const change of run.changedFiles.filter((entry) => entry.changed && entry.afterHash)) {
-      try {
-        const abs = import_node_path4.default.resolve(workspace, change.path);
-        const relative = import_node_path4.default.relative(workspace, abs);
-        if (relative.startsWith("..") || import_node_path4.default.isAbsolute(relative)) throw new Error("\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916");
-        const current = import_node_fs3.default.readFileSync(abs, "utf8");
-        const currentHash = import_node_crypto2.default.createHash("sha256").update(current, "utf8").digest("hex");
-        const ok2 = currentHash === change.afterHash;
-        checks.push({ path: change.path, ok: ok2, reason: ok2 ? "\u518D\u8AAD\u8FBC\u3068\u30CF\u30C3\u30B7\u30E5\u304C\u4E00\u81F4\u3057\u307E\u3057\u305F" : "\u5909\u66F4\u5F8C\u30CF\u30C3\u30B7\u30E5\u304C\u4E00\u81F4\u3057\u307E\u305B\u3093" });
-      } catch (err) {
-        checks.push({ path: change.path, ok: false, reason: err.message });
-      }
-    }
-    const ok = checks.every((check) => check.ok);
-    run.status = ok ? "verified" : "failed";
-    run.phase = "finalize";
-    run.currentStep = ok ? "\u691C\u8A3C\u6E08\u307F" : "\u691C\u8A3C\u306B\u5931\u6557\u3057\u307E\u3057\u305F";
-    run.nextAction = ok ? "\u5FC5\u8981\u306A\u3089\u8FFD\u52A0\u306E\u4FEE\u6B63\u6307\u793A\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044" : "\u5DEE\u5206\u3092\u78BA\u8A8D\u3057\u3066\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044";
+    run.nextAction = "\u69CB\u6587\u30FB\u30C6\u30B9\u30C8\u30FB\u5B9F\u6A5F\u78BA\u8A8D\u3092\u96C6\u8A08\u3057\u3066\u3044\u307E\u3059";
+    run.endedAt = void 0;
+    addRunEvent(run, { type: "verification.started", message: "\u5909\u66F4\u5F8C\u306E\u30D5\u30A1\u30A4\u30EB\u3092\u518D\u8AAD\u8FBC\u3057\u3066\u691C\u8A3C\u3057\u3066\u3044\u307E\u3059", metadata: { profile: body.profile ?? "auto" } });
+    addRunEvent(run, { type: "verification.profile_selected", message: `\u691C\u8A3C\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB: ${body.profile ?? "auto"}`, metadata: { profile: body.profile ?? "auto" } });
+    run.verification = await performVerification(run, body.profile);
+    for (const check of run.verification.checks) addRunEvent(run, { type: check.status === "pass" ? "verification.check_passed" : check.status === "fail" ? "verification.check_failed" : "verification.check_todo", message: `${check.label}: ${check.evidence ?? check.status}`, metadata: { check } });
+    run.status = run.verification.machinePassed ? "waiting_user" : "failed";
+    run.phase = "verify";
+    run.currentStep = run.verification.machinePassed ? "\u6A5F\u68B0\u691C\u8A3C\u306B\u5408\u683C\u3057\u307E\u3057\u305F" : "\u691C\u8A3C\u306B\u5931\u6557\u3057\u307E\u3057\u305F";
+    run.nextAction = run.verification.machinePassed ? "\u5B9F\u6A5F\u78BA\u8A8D\u5F8C\u306B\u300C\u78BA\u8A8D\u6E08\u307F\u3067\u5B8C\u4E86\u300D\u3092\u62BC\u3057\u3066\u304F\u3060\u3055\u3044" : "\u5DEE\u5206\u3068\u691C\u8A3C\u7D50\u679C\u3092\u78BA\u8A8D\u3057\u3066\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044";
     run.endedAt = Date.now();
-    addRunEvent(run, { type: "verification.completed", message: ok ? "\u691C\u8A3C\u306B\u5408\u683C\u3057\u307E\u3057\u305F" : "\u691C\u8A3C\u306B\u5931\u6557\u3057\u307E\u3057\u305F", metadata: { checks } });
-    json(res, ok ? 200 : 409, { ok, checks, run: runSnapshot(run) });
+    const verifyStep = run.plan.find((step) => step.id === "verify");
+    if (verifyStep) verifyStep.status = run.verification.machinePassed ? "completed" : "failed";
+    addRunEvent(run, { type: "verification.completed", message: run.currentStep, metadata: { verification: run.verification } });
+    persistState();
+    json(res, run.verification.machinePassed ? 200 : 409, { ok: run.verification.machinePassed, verification: run.verification, run: runSnapshot(run) });
+    return;
+  }
+  const confirmPath = url.pathname.match(/^\/api\/runs\/([^/]+)\/confirm$/);
+  if (req.method === "POST" && confirmPath) {
+    const run = runs.get(confirmPath[1]);
+    if (!run) {
+      json(res, 404, { error: "run not found" });
+      return;
+    }
+    if (!run.verification.machinePassed) {
+      json(res, 409, { error: "\u6A5F\u68B0\u691C\u8A3C\u304C\u5B8C\u4E86\u3057\u3066\u3044\u307E\u305B\u3093", run: runSnapshot(run) });
+      return;
+    }
+    run.verification.userConfirmed = true;
+    const userCheck = run.verification.checks.find((check) => check.id === "user-confirmation");
+    if (userCheck) {
+      userCheck.status = "pass";
+      userCheck.evidence = "\u5229\u7528\u8005\u304C\u5B9F\u6A5F\u64CD\u4F5C\u30FB\u8AAD\u307F\u4E0A\u3052\u78BA\u8A8D\u3092\u5B8C\u4E86\u3057\u307E\u3057\u305F";
+      userCheck.completedAt = Date.now();
+    }
+    run.status = "verified";
+    run.phase = "finalize";
+    run.currentStep = "\u691C\u8A3C\u6E08\u307F\u30FB\u5229\u7528\u8005\u78BA\u8A8D\u6E08\u307F";
+    run.nextAction = "\u5FC5\u8981\u306A\u3089\u8FFD\u52A0\u306E\u4FEE\u6B63\u6307\u793A\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044";
+    run.endedAt = Date.now();
+    const confirmStep = run.plan.find((step) => step.id === "confirm");
+    if (confirmStep) {
+      confirmStep.status = "completed";
+      confirmStep.completedAt = Date.now();
+    }
+    addRunEvent(run, { type: "verification.user_confirmed", message: "\u5229\u7528\u8005\u78BA\u8A8D\u304C\u5B8C\u4E86\u3057\u307E\u3057\u305F" });
+    persistState();
+    json(res, 200, { ok: true, run: runSnapshot(run) });
+    return;
+  }
+  const artifactsPath = url.pathname.match(/^\/api\/runs\/([^/]+)\/artifacts$/);
+  if (req.method === "GET" && artifactsPath) {
+    const run = runs.get(artifactsPath[1]);
+    if (!run) {
+      json(res, 404, { error: "run not found" });
+      return;
+    }
+    json(res, 200, { runId: run.id, artifacts: run.artifacts });
+    return;
+  }
+  const diagnosticPath = url.pathname.match(/^\/api\/runs\/([^/]+)\/diagnostic$/);
+  if (req.method === "GET" && diagnosticPath) {
+    const run = runs.get(diagnosticPath[1]);
+    if (!run) {
+      json(res, 404, { error: "run not found" });
+      return;
+    }
+    json(res, 200, diagnosticForRun(run));
+    return;
+  }
+  const diffPath = url.pathname.match(/^\/api\/changes\/([^/]+)\/diff$/);
+  if (req.method === "GET" && diffPath) {
+    const run = url.searchParams.get("runId") ? runs.get(url.searchParams.get("runId")) : [...runs.values()].find((candidate) => candidate.changedFiles.some((change2) => change2.changeId === diffPath[1]));
+    const change = run?.changedFiles.find((entry) => entry.changeId === diffPath[1]);
+    if (!run || !change) {
+      json(res, 404, { error: "change not found" });
+      return;
+    }
+    const offset = Math.max(0, Number(url.searchParams.get("offset") ?? 0));
+    const limit = Math.min(600, Math.max(1, Number(url.searchParams.get("limit") ?? 200)));
+    const diff = change.diff.slice(offset, offset + limit);
+    json(res, 200, { runId: run.id, change: { ...change, diff }, offset, limit, total: change.diff.length, hasMore: offset + diff.length < change.diff.length });
     return;
   }
   const rollbackPath = url.pathname.match(/^\/api\/runs\/([^/]+)\/rollback$/);
@@ -2129,6 +2546,7 @@ var server = import_node_http2.default.createServer(async (req, res) => {
       return;
     }
     const restored = [];
+    addRunEvent(run, { type: "rollback.started", message: `${targets.length}\u4EF6\u306E\u5909\u66F4\u3092\u30ED\u30FC\u30EB\u30D0\u30C3\u30AF\u3057\u307E\u3059`, metadata: { paths: targets.map((change) => change.path) } });
     try {
       for (const change of targets) restored.push(await rollbackFileChange(change, ctx));
     } catch (err) {
@@ -2141,8 +2559,10 @@ var server = import_node_http2.default.createServer(async (req, res) => {
     run.phase = "finalize";
     run.currentStep = "\u5909\u66F4\u524D\u306E\u72B6\u614B\u3078\u623B\u3057\u307E\u3057\u305F";
     run.nextAction = "\u5FC5\u8981\u306A\u3089\u518D\u691C\u8A3C\u3057\u3066\u304F\u3060\u3055\u3044";
+    run.verification = { ...run.verification, machinePassed: false, userConfirmed: false, checks: run.verification.checks.map((check) => ({ ...check, status: "pending", evidence: "\u30ED\u30FC\u30EB\u30D0\u30C3\u30AF\u5F8C\u306B\u518D\u691C\u8A3C\u304C\u5FC5\u8981\u3067\u3059" })) };
     run.endedAt = Date.now();
     addRunEvent(run, { type: "rollback.completed", message: `${restored.length}\u4EF6\u306E\u5909\u66F4\u3092\u30ED\u30FC\u30EB\u30D0\u30C3\u30AF\u3057\u307E\u3057\u305F`, metadata: { restored } });
+    persistState();
     json(res, 200, { ok: true, restored, run: runSnapshot(run) });
     return;
   }
@@ -2153,7 +2573,7 @@ var server = import_node_http2.default.createServer(async (req, res) => {
       json(res, 404, { error: "run not found" });
       return;
     }
-    json(res, 200, { runId: run.id, changes: run.changedFiles, note: "\u5DEE\u5206\u672C\u6587\u306F\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u73FE\u5728\u5185\u5BB9\u3068\u5909\u66F4\u524D\u30CF\u30C3\u30B7\u30E5\u3092\u7167\u5408\u3057\u3066\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044" });
+    json(res, 200, { runId: run.id, changes: run.changedFiles, note: "before/after\u672C\u6587\u3068\u884C\u756A\u53F7\u4ED8\u304Ddiff\u3092\u542B\u307F\u307E\u3059\u3002\u5927\u304D\u306A\u30D5\u30A1\u30A4\u30EB\u306F\u6700\u5927600\u884C\u307E\u3067\u8868\u793A\u3057\u307E\u3059\u3002" });
     return;
   }
   const runPath = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/events)?$/);
@@ -2169,6 +2589,88 @@ var server = import_node_http2.default.createServer(async (req, res) => {
     } else {
       json(res, 200, { run: runSnapshot(run) });
     }
+    return;
+  }
+  const pausePath = url.pathname.match(/^\/api\/runs\/([^/]+)\/pause$/);
+  if (req.method === "POST" && pausePath) {
+    const run = runs.get(pausePath[1]);
+    if (!run) {
+      json(res, 404, { error: "run not found" });
+      return;
+    }
+    if (run.endedAt || ["canceled", "failed", "verified", "rolled_back"].includes(run.status)) {
+      json(res, 409, { error: "\u3053\u306ERun\u306F\u4E00\u6642\u505C\u6B62\u3067\u304D\u307E\u305B\u3093", run: runSnapshot(run) });
+      return;
+    }
+    run.pauseRequested = true;
+    run.status = "paused";
+    run.currentStep = "\u4E00\u6642\u505C\u6B62\u3092\u8981\u6C42\u3057\u307E\u3057\u305F";
+    run.nextAction = "\u73FE\u5728\u306E\u30B9\u30C6\u30C3\u30D7\u5B8C\u4E86\u5F8C\u306B\u30C1\u30A7\u30C3\u30AF\u30DD\u30A4\u30F3\u30C8\u3092\u4FDD\u5B58\u3057\u307E\u3059";
+    addRunEvent(run, { type: "run.pause_requested", message: "\u4E00\u6642\u505C\u6B62\u3092\u8981\u6C42\u3057\u307E\u3057\u305F" });
+    persistState();
+    json(res, 200, { ok: true, run: runSnapshot(run) });
+    return;
+  }
+  const resumePath = url.pathname.match(/^\/api\/runs\/([^/]+)\/resume$/);
+  if (req.method === "POST" && resumePath) {
+    const base = runs.get(resumePath[1]);
+    if (!base) {
+      json(res, 404, { error: "run not found" });
+      return;
+    }
+    if (activeRunId) {
+      json(res, 409, { error: "\u5225\u306E\u5B9F\u884C\u304C\u9032\u884C\u4E2D\u3067\u3059", activeRun: runSnapshot(runs.get(activeRunId)) });
+      return;
+    }
+    if (base.status !== "paused") {
+      json(res, 409, { error: "\u4E00\u6642\u505C\u6B62\u4E2D\u306ERun\u3067\u306F\u3042\u308A\u307E\u305B\u3093", run: runSnapshot(base) });
+      return;
+    }
+    const session = sessions.get(base.sessionId);
+    if (!session) {
+      json(res, 404, { error: "session not found" });
+      return;
+    }
+    const run = createRun(session, base.request, base.mode, base.id);
+    run.resumeCount = base.resumeCount + 1;
+    run.checkpoint = base.checkpoint;
+    addRunEvent(run, { type: "run.resumed", message: `Run ${base.id} \u306E\u30C1\u30A7\u30C3\u30AF\u30DD\u30A4\u30F3\u30C8\u304B\u3089\u518D\u958B\u3057\u307E\u3057\u305F`, metadata: { parentRunId: base.id } });
+    const result = await executeRun(run, session, base.request, base.mode);
+    json(res, 200, { reply: result.reply, aborted: result.aborted, resumedFrom: base.id, run: runSnapshot(run) });
+    return;
+  }
+  const retryPath = url.pathname.match(/^\/api\/runs\/([^/]+)\/retry$/);
+  if (req.method === "POST" && retryPath) {
+    const base = runs.get(retryPath[1]);
+    if (!base) {
+      json(res, 404, { error: "run not found" });
+      return;
+    }
+    if (activeRunId) {
+      json(res, 409, { error: "\u5225\u306E\u5B9F\u884C\u304C\u9032\u884C\u4E2D\u3067\u3059", activeRun: runSnapshot(runs.get(activeRunId)) });
+      return;
+    }
+    if (!["failed", "canceled", "paused", "applied_unverified", "waiting_user"].includes(base.status)) {
+      json(res, 409, { error: "\u518D\u8A66\u884C\u3067\u304D\u306A\u3044\u72B6\u614B\u3067\u3059", run: runSnapshot(base) });
+      return;
+    }
+    let body = {};
+    try {
+      body = JSON.parse(await readBody(req));
+    } catch {
+    }
+    const session = sessions.get(base.sessionId);
+    if (!session) {
+      json(res, 404, { error: "session not found" });
+      return;
+    }
+    const input = String(body.message ?? base.request).trim();
+    const run = createRun(session, input, base.mode, base.id);
+    run.resumeCount = base.resumeCount + 1;
+    run.checkpoint = base.checkpoint;
+    addRunEvent(run, { type: "run.retried", message: `Run ${base.id} \u3092\u518D\u8A66\u884C\u3057\u307E\u3057\u305F`, metadata: { parentRunId: base.id } });
+    const result = await executeRun(run, session, input, base.mode);
+    json(res, 200, { reply: result.reply, aborted: result.aborted, retriedFrom: base.id, run: runSnapshot(run) });
     return;
   }
   const cancelPath = url.pathname.match(/^\/api\/runs\/([^/]+)\/cancel$/);
@@ -2187,7 +2689,14 @@ var server = import_node_http2.default.createServer(async (req, res) => {
     run.currentStep = "\u30AD\u30E3\u30F3\u30BB\u30EB\u3092\u8981\u6C42\u3057\u307E\u3057\u305F";
     run.nextAction = "\u73FE\u5728\u306E\u30C4\u30FC\u30EB\u547C\u3073\u51FA\u3057\u304C\u7D42\u308F\u308B\u306E\u3092\u5F85\u3063\u3066\u3044\u307E\u3059";
     addRunEvent(run, { type: "run.cancel_requested", message: "\u30AD\u30E3\u30F3\u30BB\u30EB\u3092\u8981\u6C42\u3057\u307E\u3057\u305F" });
-    clearApprovals();
+    if (run.approval?.id) resolveApproval(run.approval.id, false, "\u5B9F\u884C\u30AD\u30E3\u30F3\u30BB\u30EB\u306B\u3088\u308A\u62D2\u5426\u3055\u308C\u307E\u3057\u305F");
+    runControllers.get(run.id)?.abort();
+    for (const artifact of run.artifacts.filter((entry) => entry.processId)) {
+      try {
+        await stopManagedProcess(artifact.processId);
+      } catch {
+      }
+    }
     json(res, 200, { ok: true, run: runSnapshot(run) });
     return;
   }
@@ -2198,7 +2707,7 @@ var server = import_node_http2.default.createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/api/approvals/resolve") {
     try {
       const b = JSON.parse(await readBody(req));
-      const ok = resolveApproval(String(b.id ?? ""), Boolean(b.approved));
+      const ok = resolveApproval(String(b.id ?? ""), Boolean(b.approved), b.reason);
       if (!ok) {
         json(res, 404, { error: "approval not found" });
         return;
@@ -2246,11 +2755,15 @@ var server = import_node_http2.default.createServer(async (req, res) => {
           status: latestRun.status,
           phase: latestRun.phase,
           changedFiles: latestRun.changedFiles.length,
+          artifactCount: latestRun.artifacts.length,
+          verification: latestRun.verification,
+          parentRunId: latestRun.parentRunId,
           updatedAt: latestRun.updatedAt
         } : null
       };
     });
-    json(res, 200, { active: activeId, activeRun: activeRunId ? runSnapshot(runs.get(activeRunId)) : null, sessions: list });
+    const visibleActive = activeRunId ? runs.get(activeRunId) : recoveredRunId ? runs.get(recoveredRunId) : void 0;
+    json(res, 200, { active: activeId, activeRun: visibleActive ? runSnapshot(visibleActive) : null, activeExecution: Boolean(activeRunId), sessions: list });
     return;
   }
   if (req.method === "POST" && url.pathname === "/api/sessions") {
@@ -2283,7 +2796,7 @@ var server = import_node_http2.default.createServer(async (req, res) => {
       title: s.title,
       messages: s.messages.filter((m) => m.role === "user" || m.role === "assistant").map((m) => ({ role: m.role, content: m.content ?? "" })),
       runs: s.runs.map((id) => runs.get(id)).filter((run) => Boolean(run)).map(runSnapshot),
-      activeRun: activeRunId ? runSnapshot(runs.get(activeRunId)) : null
+      activeRun: (activeRunId ? runs.get(activeRunId) : recoveredRunId ? runs.get(recoveredRunId) : void 0) ? runSnapshot(activeRunId ? runs.get(activeRunId) : runs.get(recoveredRunId)) : null
     });
     return;
   }
@@ -2299,60 +2812,150 @@ var server = import_node_http2.default.createServer(async (req, res) => {
     }
     let input = "";
     let mode = "work";
+    let requestedParentRunId;
     try {
       const b = JSON.parse(await readBody(req));
       input = String(b.message ?? "").trim();
       if (b.mode === "chat") mode = "chat";
+      requestedParentRunId = typeof b.parentRunId === "string" ? b.parentRunId : void 0;
     } catch {
     }
     if (!input) {
       json(res, 400, { error: "message \u304C\u7A7A\u3067\u3059" });
       return;
     }
-    const startIdx = logLines.length;
     const s = activeSession();
     if (s.title === "\u65B0\u3057\u3044\u30BB\u30C3\u30B7\u30E7\u30F3") s.title = input.slice(0, 30);
-    const run = createRun(s, input, mode);
-    activeRunId = run.id;
-    run.status = "planning";
-    run.phase = "plan";
-    run.currentStep = "\u4F5C\u696D\u8A08\u753B\u3092\u4F5C\u6210\u3057\u3066\u3044\u307E\u3059";
-    run.nextAction = "\u6700\u521D\u306E\u8ABF\u67FB\u30B9\u30C6\u30C3\u30D7\u3092\u9078\u3093\u3067\u3044\u307E\u3059";
-    addRunEvent(run, { type: "run.created", message: `\u5B9F\u884C\u3092\u958B\u59CB\u3057\u307E\u3057\u305F: ${run.title}` });
-    const effCfg = mode === "chat" ? { ...cfg, copilot: { ...cfg.copilot ?? {}, agentMode: false } } : cfg;
-    const runIO = makeRunIO(run);
-    try {
-      const backend = getBackend();
-      const result = await runAgentTurn({ cfg: effCfg, messages: s.messages, userInput: input, ctx, io: runIO, backend });
-      s.messages = result.messages;
-      finalizeRun(run, result);
-      persistState();
-      json(res, 200, {
-        reply: result.reply || (result.aborted ? "(\u4E2D\u65AD\u3057\u307E\u3057\u305F\u3002\u5C65\u6B74\u306F\u4FDD\u6301\u3055\u308C\u3066\u3044\u307E\u3059)" : ""),
-        aborted: result.aborted,
-        logs: logLines.slice(startIdx),
-        sessionId: s.id,
-        run: runSnapshot(run)
-      });
-    } catch (err) {
-      const message = err.message;
-      run.error = message;
-      run.status = run.cancelRequested ? "canceled" : "failed";
-      run.phase = "finalize";
-      run.currentStep = "\u51E6\u7406\u306B\u5931\u6557\u3057\u307E\u3057\u305F";
-      run.nextAction = "\u30A8\u30E9\u30FC\u3092\u78BA\u8A8D\u3057\u3066\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044";
-      addRunEvent(run, { type: "run.failed", message });
-      json(res, 500, { error: message, run: runSnapshot(run) });
-    } finally {
-      run.endedAt ??= Date.now();
-      if (activeRunId === run.id) activeRunId = null;
+    let parentRunId;
+    if (requestedParentRunId) {
+      const parent = runs.get(requestedParentRunId);
+      if (!parent || parent.sessionId !== s.id) {
+        json(res, 409, { error: "\u89AARun\u304C\u898B\u3064\u304B\u3089\u306A\u3044\u304B\u3001\u5225\u30BB\u30C3\u30B7\u30E7\u30F3\u3067\u3059" });
+        return;
+      }
+      parentRunId = parent.id;
     }
+    const run = createRun(s, input, mode, parentRunId);
+    addRunEvent(run, { type: "run.created", message: `\u5B9F\u884C\u3092\u958B\u59CB\u3057\u307E\u3057\u305F: ${run.title}` });
+    if (parentRunId) addRunEvent(run, { type: "followup.created", message: `Run ${parentRunId} \u3078\u306E\u4FEE\u6B63\u6307\u793A\u3068\u3057\u3066\u958B\u59CB\u3057\u307E\u3057\u305F`, metadata: { parentRunId } });
+    const result = await executeRun(run, s, input, mode);
+    json(res, 200, {
+      reply: result.reply || (result.aborted ? "(\u4E2D\u65AD\u3057\u307E\u3057\u305F\u3002\u5C65\u6B74\u306F\u4FDD\u6301\u3055\u308C\u3066\u3044\u307E\u3059)" : ""),
+      aborted: result.aborted,
+      paused: result.paused === true,
+      logs: result.logs,
+      sessionId: s.id,
+      run: runSnapshot(run)
+    });
     return;
   }
   res.writeHead(404);
   res.end("not found");
 });
 lastLogSeen = logLines.length;
+function verificationProfileFor(run, requested) {
+  if (requested === "html" || requested === "typescript" || requested === "powershell" || requested === "generic") return requested;
+  const paths = run.changedFiles.map((change) => change.path.toLowerCase());
+  if (paths.some((p) => p.endsWith(".html"))) return "html";
+  if (paths.some((p) => p.endsWith(".ts") || p.endsWith(".tsx"))) return "typescript";
+  if (paths.some((p) => p.endsWith(".ps1"))) return "powershell";
+  return "generic";
+}
+function safeChangedPath(change) {
+  const abs = import_node_path4.default.resolve(workspace, change.path);
+  const relative = import_node_path4.default.relative(workspace, abs);
+  if (relative.startsWith("..") || import_node_path4.default.isAbsolute(relative)) throw new Error("\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u306E\u5909\u66F4\u3067\u3059");
+  return abs;
+}
+async function performVerification(run, requested) {
+  const profile = verificationProfileFor(run, requested);
+  const checks = [
+    { id: "file-readback", label: "\u5909\u66F4\u5F8C\u30D5\u30A1\u30A4\u30EB\u306E\u518D\u8AAD\u8FBC\u30FB\u30CF\u30C3\u30B7\u30E5", status: "running", startedAt: Date.now() },
+    { id: "syntax-tests", label: "\u69CB\u6587\u30FB\u30C6\u30B9\u30C8", status: "running", startedAt: Date.now() },
+    { id: "user-confirmation", label: "\u5B9F\u6A5F\u64CD\u4F5C\u30FB\u8AAD\u307F\u4E0A\u3052\u78BA\u8A8D", status: "todo", evidence: "\u5229\u7528\u8005\u304C\u78BA\u8A8D\u3057\u3066\u5B8C\u4E86\u3092\u78BA\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044" }
+  ];
+  for (const change of run.changedFiles.filter((entry) => entry.changed)) {
+    const check = checks[0];
+    try {
+      const abs = safeChangedPath(change);
+      const current = import_node_fs3.default.readFileSync(abs, "utf8");
+      const currentHash = import_node_crypto2.default.createHash("sha256").update(current, "utf8").digest("hex");
+      if (!change.afterHash || currentHash !== change.afterHash) {
+        check.status = "fail";
+        check.evidence = `${change.path}: \u5909\u66F4\u5F8C\u30CF\u30C3\u30B7\u30E5\u304C\u4E00\u81F4\u3057\u307E\u305B\u3093`;
+        break;
+      }
+      check.evidence = `${change.path}: read-back\u3068\u5909\u66F4\u5F8C\u30CF\u30C3\u30B7\u30E5\u304C\u4E00\u81F4\u3057\u307E\u3057\u305F`;
+    } catch (err) {
+      check.status = "fail";
+      check.evidence = err.message;
+      break;
+    }
+  }
+  if (checks[0].status === "running") {
+    checks[0].status = "pass";
+    checks[0].completedAt = Date.now();
+  } else {
+    checks[0].completedAt = Date.now();
+  }
+  const syntax = checks[1];
+  const candidates = run.changedFiles.filter((change) => change.changed);
+  try {
+    for (const change of candidates) {
+      const abs = safeChangedPath(change);
+      const lower = change.path.toLowerCase();
+      if (lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".cjs")) {
+        await execFileAsync(process.execPath, ["--check", abs], { timeout: 15e3, windowsHide: true });
+      } else if (lower.endsWith(".json")) {
+        JSON.parse(import_node_fs3.default.readFileSync(abs, "utf8"));
+      } else if (lower.endsWith(".html")) {
+        const text = import_node_fs3.default.readFileSync(abs, "utf8");
+        if (!/<html[\s>]/i.test(text) || !/<\/html>/i.test(text)) throw new Error(`${change.path}: html\u306E\u30EB\u30FC\u30C8\u8981\u7D20\u304C\u4E0D\u5B8C\u5168\u3067\u3059`);
+      } else if (lower.endsWith(".ts") || lower.endsWith(".tsx")) {
+        const tsc = import_node_path4.default.join(workspace, "node_modules", ".bin", process.platform === "win32" ? "tsc.cmd" : "tsc");
+        if (import_node_fs3.default.existsSync(tsc)) await execFileAsync(tsc, ["--noEmit", "--pretty", "false"], { cwd: workspace, timeout: 6e4, windowsHide: true });
+        else throw new Error("TypeScript\u30B3\u30F3\u30D1\u30A4\u30E9\u304C\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306B\u3042\u308A\u307E\u305B\u3093");
+      } else if (lower.endsWith(".ps1")) {
+        syntax.status = "todo";
+        syntax.evidence = "PowerShell Parser\u306E\u5B9F\u884C\u3092\u5229\u7528\u8005\u78BA\u8A8D\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB\u3078\u59D4\u8B72\u3057\u307E\u3057\u305F";
+        break;
+      }
+    }
+    if (syntax.status === "running") {
+      syntax.status = "pass";
+      syntax.evidence = candidates.length ? "\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u306E\u69CB\u6587\u691C\u67FB\u304C\u5B8C\u4E86\u3057\u307E\u3057\u305F" : "\u691C\u8A3C\u5BFE\u8C61\u306E\u5909\u66F4\u306F\u3042\u308A\u307E\u305B\u3093";
+    }
+  } catch (err) {
+    syntax.status = "fail";
+    syntax.evidence = err.message;
+  }
+  syntax.completedAt = Date.now();
+  const machinePassed = checks[0].status === "pass" && (checks[1].status === "pass" || checks[1].status === "skipped");
+  return { profile, checks, machinePassed, userConfirmed: false, startedAt: Date.now(), completedAt: Date.now() };
+}
+function diagnosticForRun(run) {
+  const replaceWorkspace = (value) => value.replaceAll(workspace, "<workspace>");
+  return {
+    generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    version: "0.10.2",
+    workspace: "<workspace>",
+    distribution: readDistributionState(),
+    run: {
+      id: run.id,
+      sessionId: run.sessionId,
+      parentRunId: run.parentRunId,
+      status: run.status,
+      phase: run.phase,
+      startedAt: run.startedAt,
+      updatedAt: run.updatedAt,
+      endedAt: run.endedAt,
+      error: run.error ? replaceWorkspace(run.error) : void 0,
+      changedFiles: run.changedFiles.map((change) => ({ changeId: change.changeId, path: replaceWorkspace(change.path), status: change.status, addedLines: change.addedLines, removedLines: change.removedLines })),
+      verification: run.verification,
+      events: run.events.map((event) => ({ sequence: event.sequence, type: event.type, at: event.at, tool: event.tool, summary: event.summary, message: replaceWorkspace(event.message).slice(0, 1e3), durationMs: event.durationMs }))
+    }
+  };
+}
 process.on("exit", () => {
   clearApprovals();
   killAllManagedProcesses();
