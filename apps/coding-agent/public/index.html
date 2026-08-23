@@ -68,7 +68,106 @@ body:not(.empty) #composerdock{margin:0 auto 20px;width:min(820px,92%)}
 .think i{width:6px;height:6px;border-radius:50%;background:#999;animation:pulse 1.1s infinite}
 .think i:nth-child(2){animation-delay:.18s}.think i:nth-child(3){animation-delay:.36s}
 @keyframes pulse{0%,100%{opacity:.25}50%{opacity:1}}
-</style>
+/* Run-first workspace layout */
+#main{display:grid;grid-template-columns:minmax(0,1fr) 360px;grid-template-rows:auto minmax(0,1fr) auto;min-width:0}
+#workbar{grid-column:1/-1;display:flex;align-items:center;gap:18px;padding:13px 22px 11px;border-bottom:1px solid #e8e8e8;background:#fff;min-height:76px}
+#workbar.hidden{display:none}
+.workbar-copy{min-width:0;flex:1}
+.eyebrow{display:block;font-size:10px;letter-spacing:.08em;color:#8a918c;margin-bottom:4px}
+#run-title{display:block;font-size:16px;color:#22352d;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#run-meta{display:block;color:#8b938d;font-size:11px;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.workbar-progress{width:min(230px,22vw);height:7px;background:#e9efec;border-radius:99px;overflow:hidden;flex:0 0 auto}
+#run-progress-fill{height:100%;width:8%;background:#2f805a;border-radius:99px;transition:width .25s ease}
+.workbar-actions{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+#run-status{border-radius:999px;padding:5px 10px;font-size:11px;font-weight:700;background:#eef5f0;color:#27704d;white-space:nowrap}
+#run-status.waiting_approval,#run-status.applied_unverified,#run-status.failed,#run-status.canceling{background:#fff5df;color:#966417}
+#run-status.verified{background:#e9f6ed;color:#267548}
+#run-cancel{border:1px solid #d8e0db;border-radius:8px;background:#fff;color:#345044;padding:6px 10px;font-size:11px;cursor:pointer}
+#run-cancel:hover{background:#f4f8f5}
+#run-cancel:disabled{opacity:.5;cursor:default}
+#run-events{display:none}
+#run-timeline{max-width:780px;width:100%;margin:0 auto;padding:4px 28px 0;display:flex;flex-direction:column;gap:6px}
+#run-timeline:empty{display:none}
+.timeline-item{display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border:1px solid #e5ece7;border-radius:9px;background:#fbfdfb;font-size:11px;color:#5e6f65}
+.timeline-dot{width:8px;height:8px;border-radius:50%;background:#b6c2bb;flex:0 0 auto;margin-top:3px}.timeline-dot.tool-succeeded,.timeline-dot.run-completed{background:#398b61}.timeline-dot.tool-failed,.timeline-dot.run-failed{background:#c85d55}.timeline-dot.approval-requested,.timeline-dot.run-warning{background:#d49a27}
+.timeline-body{min-width:0;flex:1}.timeline-title{font-weight:700;color:#385445}.timeline-meta{font-size:10px;color:#9aa69f;margin-top:2px;white-space:pre-wrap;word-break:break-word}
+#inspector{grid-column:2;grid-row:2/4;min-width:0;overflow:auto;border-left:1px solid #e8e8e8;background:#f7faf8;padding:12px}
+#inspector.hidden{display:none}
+.inspector-tabs{display:flex;gap:4px;background:#edf2ef;padding:3px;border-radius:9px;margin-bottom:10px}
+.inspector-tab{flex:1;border:0;border-radius:7px;background:transparent;color:#6e7d74;padding:8px 5px;font-size:11px;cursor:pointer}
+.inspector-tab.active{background:#fff;color:#1e4937;box-shadow:0 1px 3px rgba(26,66,48,.08);font-weight:700}
+.inspector-panel{background:#fff;border:1px solid #dce7e0;border-radius:11px;margin-bottom:10px;overflow:hidden}
+.inspector-panel h3{font-size:12px;color:#294c3d;padding:11px 12px 8px;border-bottom:1px solid #edf1ee}
+.inspector-panel h3{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.panel-action{border:1px solid #cddbd1;border-radius:6px;background:#fff;color:#2c6348;padding:4px 7px;font-size:10px;cursor:pointer}.panel-action:disabled{opacity:.45;cursor:default}
+
+.inspector-body{padding:10px 12px}
+.change-row,.verify-row{display:flex;gap:8px;align-items:flex-start;padding:9px 0;border-bottom:1px solid #edf1ee;font-size:11px;color:#506258}
+.change-row:last-child,.verify-row:last-child{border-bottom:0}
+.change-dot,.verify-dot{width:8px;height:8px;border-radius:50%;background:#e0a329;flex:0 0 auto;margin-top:3px}
+.change-dot.no_op,.verify-dot.pass{background:#398b61}
+.change-title{font-weight:700;color:#385445;word-break:break-word}
+.change-meta{color:#8a968e;font-size:10px;margin-top:3px;line-height:1.45}
+.inspector-note{font-size:10px;line-height:1.6;color:#8a7560;background:#fff7e8;border-radius:8px;padding:9px;margin-top:8px}
+.preview-placeholder{height:126px;border-radius:8px;background:#101d27;display:flex;align-items:center;justify-content:center;color:#b8d6ca;font-size:11px;margin-bottom:8px}
+#verification-summary{font-size:11px;color:#627168;margin-bottom:6px}
+#mobile-tabs{display:none}
+.sess{display:flex;flex-direction:column;gap:3px}
+.sess-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sess-meta{font-size:10px;color:#9a9a9a;display:flex;gap:5px;align-items:center}
+.sess-status{width:6px;height:6px;border-radius:50%;background:#a7b2ac;display:inline-block}
+.sess-status.running,.sess-status.waiting_approval,.sess-status.planning{background:#d59725}
+.sess-status.verified{background:#398b61}
+.sess-status.failed{background:#c85d55}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+#run-status-announcer{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+#chat{grid-column:1;grid-row:2;min-width:0}
+#composerdock{grid-column:1;grid-row:3}
+#runtimebar{right:382px}
+#approvalbar{left:18px}
+@media (max-width: 980px){
+  #main{grid-template-columns:minmax(0,1fr) 310px}
+  #runtimebar{right:330px}
+  .workbar-progress{width:150px}
+}
+@media (max-width: 720px){
+  html,body{height:auto;min-height:100%;overflow:auto}
+  body{display:block;font-size:13px;background:#f6f9f7}
+  #sidebar{width:100%;min-width:0;height:56px;display:flex;flex-direction:row;align-items:center;border-right:0;border-bottom:1px solid #dfe8e2;background:#fff;position:sticky;top:0;z-index:10}
+  #sidebar .brand{padding:10px 12px;flex:1;font-size:13px}
+  #sidebar .brand .logo{width:25px;height:25px;border-radius:8px}
+  #newchat{margin:8px 10px;padding:8px 10px;width:auto;font-size:11px;border-radius:8px}
+  #grouplabel,#sessions,#sidebar .foot{display:none}
+  #main{display:flex;min-height:calc(100vh - 56px);width:100%;background:#f6f9f7}
+  #workbar{display:block;padding:12px 12px 10px;min-height:0;border-bottom:1px solid #e3ebe5}
+  #run-title{font-size:14px}
+  #run-meta{font-size:10px}
+  .workbar-actions{margin-top:9px;justify-content:space-between}
+  .workbar-progress{width:100%;height:6px;margin-top:10px}
+  #run-status{font-size:10px}
+  #run-cancel{font-size:10px}
+  #chat{order:2;display:flex;min-height:0;padding:12px 0 6px;overflow:visible}
+  #composerdock{order:5;margin:0;padding:8px 10px 12px;width:100%!important;position:sticky;bottom:0;background:rgba(246,249,247,.96);z-index:4}
+  #composerdock .pill{border-radius:14px;padding:7px 7px 7px 12px;box-shadow:0 2px 8px rgba(27,61,46,.08)}
+  #q{font-size:13px;min-height:24px}
+  #sendbtn{width:34px;height:34px}
+  .msgwrap{padding:8px 12px}
+  .bubble-user{max-width:88%;font-size:13px;padding:9px 12px;border-radius:14px}
+  .assistant-text{font-size:13px;line-height:1.65}
+  #runtimebar,#approvalbar{position:relative;top:auto;left:auto;right:auto;width:auto;max-height:none;order:3;margin:8px 10px;z-index:3;border-radius:10px;box-shadow:0 2px 10px rgba(27,61,46,.08)}
+  #approvalbar{order:4}
+  #inspector{order:1;display:block;border-left:0;border-bottom:1px solid #e0eae3;padding:8px 10px;background:#f6f9f7;overflow:visible}
+  #inspector.hidden{display:none}
+  .inspector-tabs{margin-bottom:8px}
+  .inspector-panel{display:none;margin-bottom:0}
+  .inspector-panel.mobile-active{display:block}
+  #preview-panel .preview-placeholder{height:100px}
+  #mobile-tabs{display:flex}
+  body.empty #chat{justify-content:center;min-height:45vh}
+  body.empty #composerdock{position:sticky;left:auto;top:auto;transform:none}
+  body.empty #inspector{display:none}
+}
+@media (prefers-reduced-motion: reduce){*{scroll-behavior:auto!important;animation-duration:.001ms!important;transition-duration:.001ms!important}}</style>
 </head>
 <body class="empty">
 <div id="sidebar">
@@ -76,9 +175,21 @@ body:not(.empty) #composerdock{margin:0 auto 20px;width:min(820px,92%)}
   <button id="newchat">✚ 新しいチャット</button>
   <div id="grouplabel">プロジェクト</div>
   <div id="sessions"></div>
-  <div class="foot"><span id="footmodel"></span><br><span id="footws" style="color:#aaa;font-size:11px;word-break:break-all"></span></div>
+  <div class="foot"><span id="footdist">公開・更新状態: 未取得</span><br><span id="footmodel"></span><br><span id="footws" style="color:#aaa;font-size:11px;word-break:break-all"></span></div>
 </div>
 <div id="main">
+  <header id="workbar" class="hidden" aria-live="polite">
+    <div class="workbar-copy">
+      <span class="eyebrow">現在の作業</span>
+      <strong id="run-title">作業を待っています</strong>
+      <small id="run-meta">Runを開始すると、ここに進捗と実行IDが表示されます</small>
+      <div class="workbar-progress" aria-hidden="true"><div id="run-progress-fill"></div></div>
+    </div>
+    <div class="workbar-actions">
+      <span id="run-status">待機中</span>
+      <button id="run-cancel" type="button" disabled>キャンセル</button>
+    </div>
+  </header>
   <section id="runtimebar" class="hidden" aria-live="polite">
     <div class="runtime-head"><strong>実行プロセス</strong><button id="refresh-processes" type="button">更新</button></div>
     <div id="runtime-list"></div>
@@ -89,120 +200,102 @@ body:not(.empty) #composerdock{margin:0 auto 20px;width:min(820px,92%)}
   </section>
   <div id="chat">
     <div id="hero"><h1>今日は何をしますか？</h1></div>
+    <section id="run-timeline" aria-label="実行タイムライン"></section>
   </div>
   <div id="composerdock">
     <div class="pill">
-      <textarea id="q" rows="1" placeholder="メッセージを入力（Enterで送信）"></textarea>
-      <button id="sendbtn" title="送信"><svg viewBox="0 0 24 24" fill="none"><path d="M12 19V5M12 5l-6 6M12 5l6 6" stroke="#fff" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <textarea id="q" rows="1" aria-label="修正指示" aria-describedby="composer-help" placeholder="この実行への修正指示を入力…"></textarea>
+      <span id="composer-help" class="sr-only">Enterで送信、Shift+Enterで改行。日本語入力の変換中は送信されません。</span>
+      <button id="sendbtn" title="送信" aria-label="送信"><svg viewBox="0 0 24 24" fill="none"><path d="M12 19V5M12 5l-6 6M12 5l6 6" stroke="#fff" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     </div>
   </div>
+  <aside id="inspector" class="hidden" aria-label="実行の成果物と検証">
+    <div class="inspector-tabs" role="tablist" aria-label="実行ビュー">
+      <button class="inspector-tab active" type="button" role="tab" aria-selected="true" data-panel="changes-panel">変更 <span id="change-count">0</span></button>
+      <button class="inspector-tab" type="button" role="tab" aria-selected="false" data-panel="preview-panel">プレビュー</button>
+      <button class="inspector-tab" type="button" role="tab" aria-selected="false" data-panel="verify-panel">検証 <span id="verify-count">3</span></button>
+    </div>
+    <section id="changes-panel" class="inspector-panel mobile-active" role="tabpanel">
+      <h3>ファイル変更</h3>
+      <div id="changes-list" class="inspector-body"><div class="change-row"><span class="change-dot"></span><div>まだ変更はありません<div class="change-meta">編集後は差分と再読込結果がここに残ります。</div></div></div></div>
+    </section>
+    <section id="preview-panel" class="inspector-panel" role="tabpanel">
+      <h3>生成物プレビュー</h3>
+      <div class="inspector-body"><div class="preview-placeholder">プレビュー待ち</div><div id="preview-note" class="change-meta">start_process が返したURLを確認できます。</div></div>
+    </section>
+    <section id="verify-panel" class="inspector-panel" role="tabpanel">
+      <h3>検証の証拠 <button id="verify-run" class="panel-action" type="button" disabled>検証を実行</button></h3>
+      <div class="inspector-body">
+        <div id="verification-summary">変更後は未検証として扱います。</div>
+        <div class="verify-row"><span class="verify-dot"></span><div>ファイル再読込・期待文字列<div class="change-meta">編集ツールの再読込結果</div></div></div>
+        <div class="verify-row"><span class="verify-dot"></span><div>構文・テスト<div class="change-meta">必要な検証を追加してください</div></div></div>
+        <div class="verify-row"><span class="verify-dot"></span><div>実機操作・読み上げ<div class="change-meta">利用者確認が必要です</div></div></div>
+        <div class="inspector-note">「適用済み」と「検証済み」を分けています。未検証の変更を完了扱いにしません。</div>
+      </div>
+    </section>
+  </aside>
 </div>
-<script>
-const $=id=>document.getElementById(id);
+<div id="run-status-announcer" role="status" aria-live="polite" aria-atomic="true"></div>
+<script>const $=id=>document.getElementById(id);
 const chat=$('chat'),q=$('q'),send=$('sendbtn'),sessEl=$('sessions'),runtimebar=$('runtimebar'),runtimeList=$('runtime-list'),refreshProcessesBtn=$('refresh-processes'),approvalbar=$('approvalbar'),approvalList=$('approval-list'),refreshApprovalsBtn=$('refresh-approvals');
-let mode='work',busy=false,sessions=[],activeId=null,polling=null;
+let workbar=$('workbar'),runTitle=$('run-title'),runMeta=$('run-meta'),runStatus=$('run-status'),runProgress=$('run-progress-fill'),runCancel=$('run-cancel'),runTimeline=$('run-timeline'),inspector=$('inspector'),changesList=$('changes-list'),changeCount=$('change-count'),verifyCount=$('verify-count'),verifyRun=$('verify-run'),verificationSummary=$('verification-summary'),announcer=$('run-status-announcer');
+let mode='work',busy=false,sessions=[],activeId=null,polling=null,runPolling=null,latestRun=null,composing=false,lastAnnounced='';
+const STATUS_LABEL={queued:'開始待ち',planning:'計画中',running:'実行中',waiting_approval:'確認待ち',waiting_user:'利用者待ち',paused:'一時停止',canceling:'キャンセル中',canceled:'キャンセル済み',failed:'失敗',applied_unverified:'適用済み・未検証',verifying:'検証中',verified:'検証済み',rolled_back:'ロールバック済み'};
+const PHASE_LABEL={request:'依頼',plan:'計画',inspect:'調査',edit:'編集',execute:'実行',verify:'検証',finalize:'完了'};
 function setEmpty(e){document.body.classList.toggle('empty',e)}
-async function jget(u){return (await fetch(u)).json()}
-async function jpost(u,b){return (await fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:b?JSON.stringify(b):undefined})).json()}
-function addMsg(role,content){
- if(role==='system')return;
- const w=document.createElement('div');w.className='msgwrap '+(role==='user'?'user':'assistant');
- const b=document.createElement('div');b.className=role==='user'?'bubble-user':'assistant-text';b.textContent=content;
- w.appendChild(b);chat.appendChild(w);scrollEnd();
+async function jget(u){const r=await fetch(u);return r.json()}
+async function jpost(u,b){const r=await fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:b?JSON.stringify(b):undefined});return r.json()}
+function announce(message){if(!message||message===lastAnnounced)return;lastAnnounced=message;announcer.textContent='';requestAnimationFrame(()=>{announcer.textContent=message})}
+function formatTime(at){return at?new Date(at).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):''}
+function renderDistribution(d){const el=$('footdist');if(!el)return;const phase=d&&d.phase||'unknown';const labels={checking:'確認中',syncing:'同期中',verified:'整合性確認済み',failed:'取得失敗',unknown:'未取得'};const shared=d&&d.sharedVersion||'--';const local=d&&d.localVersion||'--';el.textContent=`公開・更新: ${labels[phase]||phase} · 共有 ${shared} / このPC ${local}`;el.title=d&&d.message||''}
+function terminalStatus(status){return ['canceled','failed','verified','rolled_back'].includes(status)}
+function statusLabel(status){return STATUS_LABEL[status]||status||'待機中'}
+function setRun(run,clear=false){
+ if(clear){latestRun=null;workbar.classList.add('hidden');inspector.classList.add('hidden');return}
+ if(!run){return}
+ const previous=latestRun&&latestRun.status;latestRun=run;workbar.classList.remove('hidden');inspector.classList.remove('hidden');
+ runTitle.textContent=run.title||run.request||'現在の作業';
+ runMeta.textContent=`${run.id} · ${PHASE_LABEL[run.phase]||run.phase} · ${run.completedSteps||0}ステップ · 開始 ${formatTime(run.startedAt)}`;
+ runStatus.textContent=statusLabel(run.status);runStatus.className=run.status||'';
+ const progress=Math.min(100,Math.max(8,((run.completedSteps||0)/Math.max(4,(run.completedSteps||0)+1))*100));runProgress.style.width=progress+'%';
+ runCancel.disabled=terminalStatus(run.status)||!busy;runCancel.textContent=run.status==='canceling'?'キャンセル中':'キャンセル';verifyRun.disabled=!Array.isArray(run.changedFiles)||!run.changedFiles.some(c=>c.changed)||run.status==='verifying';
+ if(previous!==run.status)announce(`現在の作業: ${runTitle.textContent}、${statusLabel(run.status)}。${run.currentStep||''}`);
+ renderChanges(run);renderVerification(run);renderTimeline(run);
 }
-function addRetryError(content,retryText){
- const w=document.createElement('div');w.className='msgwrap assistant';
- const b=document.createElement('div');b.className='assistant-text error';b.textContent=content;w.appendChild(b);
- const actions=document.createElement('div');actions.className='retry-wrap';
- const label=document.createElement('span');label.textContent='処理に失敗しました。';actions.appendChild(label);
- const btn=document.createElement('button');btn.className='retrybtn';btn.type='button';btn.textContent='再試行';btn.onclick=()=>run(retryText);actions.appendChild(btn);
- b.appendChild(actions);chat.appendChild(w);scrollEnd();
+function renderTimeline(run){
+ if(!runTimeline)return;runTimeline.replaceChildren();const events=Array.isArray(run.events)?run.events.slice(-8):[];for(const event of events){const item=document.createElement('div');item.className='timeline-item';const dot=document.createElement('span');dot.className='timeline-dot '+String(event.type||'').replaceAll('.','-');item.appendChild(dot);const body=document.createElement('div');body.className='timeline-body';const title=document.createElement('div');title.className='timeline-title';title.textContent=event.summary||event.type||'イベント';body.appendChild(title);const meta=document.createElement('div');meta.className='timeline-meta';meta.textContent=`${formatTime(event.at)} · ${event.message||''}`;body.appendChild(meta);item.appendChild(body);runTimeline.appendChild(item)}}function renderChanges(run){
+ const changes=Array.isArray(run.changedFiles)?run.changedFiles:[];changeCount.textContent=String(changes.length);changesList.replaceChildren();
+ if(!changes.length){const row=document.createElement('div');row.className='change-row';row.innerHTML='<span class="change-dot"></span><div>まだ変更はありません<div class="change-meta">編集後は差分と再読込結果がここに残ります。</div></div>';changesList.appendChild(row);return}
+ for(const change of changes){const row=document.createElement('div');row.className='change-row';const dot=document.createElement('span');dot.className='change-dot '+(change.status==='no_op'?'no_op':'');row.appendChild(dot);const body=document.createElement('div');const title=document.createElement('div');title.className='change-title';title.textContent=change.path+(change.status==='no_op'?'（変更なし）':'');body.appendChild(title);const meta=document.createElement('div');meta.className='change-meta';meta.textContent=`${change.status==='no_op'?'no-op':'適用済み・未検証'} · 再読込 ${change.readBack?'成功':'未確認'} · +${change.addedLines??0} -${change.removedLines??0}`;body.appendChild(meta);if(change.changed&&change.afterHash){const rollback=document.createElement('button');rollback.className='runtime-stop';rollback.type='button';rollback.textContent='この変更を戻す';rollback.onclick=async()=>{rollback.disabled=true;const r=await jpost(`/api/runs/${encodeURIComponent(run.id)}/rollback`,{path:change.path});if(r&&r.run)setRun(r.run);if(r&&r.error)announce(r.error)};body.appendChild(rollback)}row.appendChild(body);changesList.appendChild(row)}
+}function renderVerification(run){
+ const changed=Array.isArray(run.changedFiles)&&run.changedFiles.some(c=>c.changed);const verified=run.status==='verified';verifyCount.textContent=verified?'3':changed?'1':'0';
+ verificationSummary.textContent=verified?'3件の検証が完了しました。':changed?'変更は保存済みですが、構文・実機確認が残っています。':'検証対象の変更はありません。';
+ const dots=document.querySelectorAll('#verify-panel .verify-dot');dots.forEach((dot,i)=>{dot.classList.toggle('pass',verified||(i===0&&changed&&run.status!=='failed'))});
 }
+async function verifyCurrentRun(){if(!latestRun||verifyRun.disabled)return;verifyRun.disabled=true;const r=await jpost(`/api/runs/${encodeURIComponent(latestRun.id)}/verify`);if(r&&r.run)setRun(r.run);if(r&&r.error)announce(r.error);else announce(r&&r.ok?'検証に合格しました。':'検証結果を確認してください。')}async function refreshActiveRun(){try{const r=await jget('/api/active-run');if(r&&r.run)setRun(r.run)}catch(e){}}
+function startRunPolling(){if(runPolling!==null)return;runPolling=setInterval(refreshActiveRun,700)}
+function stopRunPolling(){if(runPolling!==null){clearInterval(runPolling);runPolling=null}}
+function addMsg(role,content){if(role==='system')return;const w=document.createElement('div');w.className='msgwrap '+(role==='user'?'user':'assistant');const b=document.createElement('div');b.className=role==='user'?'bubble-user':'assistant-text';b.textContent=content;w.appendChild(b);chat.appendChild(w);scrollEnd()}
+function addRetryError(content,retryText){const w=document.createElement('div');w.className='msgwrap assistant';const b=document.createElement('div');b.className='assistant-text error';b.setAttribute('role','alert');b.textContent=content;w.appendChild(b);const actions=document.createElement('div');actions.className='retry-wrap';const label=document.createElement('span');label.textContent='処理に失敗しました。';actions.appendChild(label);const btn=document.createElement('button');btn.className='retrybtn';btn.type='button';btn.textContent='再試行';btn.onclick=()=>run(retryText);actions.appendChild(btn);b.appendChild(actions);chat.appendChild(w);scrollEnd();announce(content)}
 function processStatusLabel(status){return status==='running'?'実行中':status==='exited'?'終了':status==='stopped'?'停止':'失敗'}
-async function refreshProcesses(){
- try{
-  const r=await jget('/api/processes');const list=Array.isArray(r.processes)?r.processes:[];
-  runtimebar.classList.toggle('hidden',list.length===0);runtimeList.replaceChildren();
-  for(const p of list.slice(0,8)){
-   const row=document.createElement('div');row.className='runtime-row';
-   const main=document.createElement('div');main.className='runtime-main';
-   const dot=document.createElement('span');dot.className='runtime-dot '+p.status;main.appendChild(dot);
-   const title=document.createElement('span');title.className='runtime-label';title.textContent=p.label||p.command;title.title=p.command;main.appendChild(title);
-   const status=document.createElement('span');status.textContent=processStatusLabel(p.status);main.appendChild(status);row.appendChild(main);
-   const meta=document.createElement('div');meta.className='runtime-meta';meta.textContent=(p.id||'')+' · '+new Date(p.startedAt).toLocaleTimeString();row.appendChild(meta);
-   const actions=document.createElement('div');actions.className='runtime-actions';
-   if(p.url){const a=document.createElement('a');a.href=p.url;a.target='_blank';a.rel='noreferrer';a.textContent='プレビューを開く';actions.appendChild(a)}
-   if(p.status==='running'){const stop=document.createElement('button');stop.className='runtime-stop';stop.type='button';stop.textContent='停止';stop.onclick=async()=>{stop.disabled=true;await jpost('/api/processes/stop',{process_id:p.id});refreshProcesses()};actions.appendChild(stop)}
-   if(actions.childNodes.length)row.appendChild(actions);
-   if(Array.isArray(p.tail)&&p.tail.length){const tail=document.createElement('pre');tail.className='runtime-tail';tail.textContent=p.tail.join('\n');row.appendChild(tail)}
-   runtimeList.appendChild(row);
-  }
- }catch(e){}
-}
-async function refreshApprovals(){
- try{
-  const r=await jget('/api/approvals');const list=Array.isArray(r.approvals)?r.approvals:[];
-  approvalbar.classList.toggle('hidden',list.length===0);approvalList.replaceChildren();
-  for(const a of list.slice(0,4)){
-   const row=document.createElement('div');row.className='approval-row';
-   const qtext=document.createElement('div');qtext.className='approval-question';qtext.textContent=a.question;row.appendChild(qtext);
-   const actions=document.createElement('div');actions.className='approval-actions';
-   const allow=document.createElement('button');allow.className='approval-allow';allow.type='button';allow.textContent='許可';allow.onclick=async()=>{allow.disabled=true;await jpost('/api/approvals/resolve',{id:a.id,approved:true});refreshApprovals()};actions.appendChild(allow);
-   const deny=document.createElement('button');deny.className='approval-deny';deny.type='button';deny.textContent='拒否';deny.onclick=async()=>{deny.disabled=true;await jpost('/api/approvals/resolve',{id:a.id,approved:false});refreshApprovals()};actions.appendChild(deny);
-   row.appendChild(actions);approvalList.appendChild(row);
-  }
- }catch(e){}
-}
-function thinkLine(){const d=document.createElement('div');d.className='msgwrap assistant';d.style.display='block';d.style.width='100%';d.innerHTML='<div class="think"><i></i><i></i><i></i> Copilot が考えています…</div>';chat.appendChild(d);scrollEnd();return d}
-function logLine(el,text){let lb=el.querySelector('.log');if(!lb){const th=el.querySelector('.think');if(th)th.remove();lb=document.createElement('div');lb.className='statusline log';el.appendChild(lb)}lb.textContent+=text+'\n';lb.scrollTop=lb.scrollHeight;scrollEnd()}
+async function refreshProcesses(){try{const r=await jget('/api/processes');const list=Array.isArray(r.processes)?r.processes:[];runtimebar.classList.toggle('hidden',list.length===0);runtimeList.replaceChildren();for(const p of list.slice(0,8)){const row=document.createElement('div');row.className='runtime-row';const main=document.createElement('div');main.className='runtime-main';const dot=document.createElement('span');dot.className='runtime-dot '+p.status;main.appendChild(dot);const title=document.createElement('span');title.className='runtime-label';title.textContent=p.label||p.command;title.title=p.command;main.appendChild(title);const status=document.createElement('span');status.textContent=processStatusLabel(p.status);main.appendChild(status);row.appendChild(main);const meta=document.createElement('div');meta.className='runtime-meta';meta.textContent=(p.id||'')+' · '+formatTime(p.startedAt);row.appendChild(meta);const actions=document.createElement('div');actions.className='runtime-actions';if(p.url){const a=document.createElement('a');a.href=p.url;a.target='_blank';a.rel='noreferrer';a.textContent='プレビューを開く';actions.appendChild(a);$('preview-note').textContent=`プレビュー: ${p.url}`}if(p.status==='running'){const stop=document.createElement('button');stop.className='runtime-stop';stop.type='button';stop.textContent='停止';stop.onclick=async()=>{stop.disabled=true;await jpost('/api/processes/stop',{process_id:p.id});refreshProcesses()};actions.appendChild(stop)}if(actions.childNodes.length)row.appendChild(actions);if(Array.isArray(p.tail)&&p.tail.length){const tail=document.createElement('pre');tail.className='runtime-tail';tail.textContent=p.tail.join('\n');row.appendChild(tail)}runtimeList.appendChild(row)}}catch(e){}}
+async function refreshApprovals(){try{const r=await jget('/api/approvals');const list=Array.isArray(r.approvals)?r.approvals:[];approvalbar.classList.toggle('hidden',list.length===0);approvalList.replaceChildren();for(const a of list.slice(0,4)){const row=document.createElement('div');row.className='approval-row';const qtext=document.createElement('div');qtext.className='approval-question';qtext.textContent=a.question;row.appendChild(qtext);const actions=document.createElement('div');actions.className='approval-actions';const allow=document.createElement('button');allow.className='approval-allow';allow.type='button';allow.textContent='許可';allow.onclick=async()=>{allow.disabled=true;await jpost('/api/approvals/resolve',{id:a.id,approved:true});refreshApprovals()};actions.appendChild(allow);const deny=document.createElement('button');deny.className='approval-deny';deny.type='button';deny.textContent='拒否';deny.onclick=async()=>{deny.disabled=true;await jpost('/api/approvals/resolve',{id:a.id,approved:false});refreshApprovals()};actions.appendChild(deny);row.appendChild(actions);approvalList.appendChild(row)}}catch(e){}}
+function logLine(el,text){let lb=el.querySelector('.log');if(!lb){const th=el.querySelector('.think');if(th)th.remove();lb=document.createElement('div');lb.className='statusline log';lb.setAttribute('role','status');el.appendChild(lb)}lb.textContent+=text+'\n';lb.scrollTop=lb.scrollHeight;scrollEnd()}
 function scrollEnd(){chat.scrollTop=chat.scrollHeight}
 function setEmptyState(){setEmpty(chat.querySelectorAll('.msgwrap').length===0)}
-async function loadSessions(){try{const r=await jget('/api/sessions');sessions=r.sessions;if(!r.sessions.find(s=>s.id===activeId)&&r.sessions.length)selectSession(r.sessions[0].id);renderSessions(r.active)}catch(e){}}
-function renderSessions(active){sessEl.innerHTML='';for(const s of sessions){const d=document.createElement('div');d.className='sess'+(s.id===active?' active':'');d.textContent=s.title;d.onclick=()=>selectSession(s.id);sessEl.appendChild(d)}}
-async function selectSession(id){if(busy)return;activeId=id;const s=await jget('/api/session?id='+id);chat.innerHTML='<div id="hero"><h1>今日は何をしますか？</h1></div>';
- for(const m of s.messages)addMsg(m.role,m.content);
- setEmptyState();renderSessions(activeId);
- if(!sessions.length||true)loadSessionsSilent();}
-function loadSessionsSilent(){jget('/api/sessions').then(r=>{sessions=r.sessions;renderSessions(r.active)}).catch(()=>{})}
-$('newchat').onclick=async()=>{if(busy)return;await jpost('/api/sessions');activeId=null;chat.innerHTML='<div id="hero"><h1>今日は何をしますか？</h1></div>';setEmpty(true);loadSessionsSilent();q.focus()};
-send.onclick=run;
+function renderSessions(active){sessEl.replaceChildren();for(const s of sessions){const d=document.createElement('div');d.className='sess'+(s.id===active?' active':'');const title=document.createElement('span');title.className='sess-title';title.textContent=s.title;d.appendChild(title);const meta=document.createElement('span');meta.className='sess-meta';const dot=document.createElement('span');dot.className='sess-status '+(s.latestRun?.status||'');meta.appendChild(dot);meta.appendChild(document.createTextNode(s.latestRun?statusLabel(s.latestRun.status):'待機中'));if(s.latestRun?.changedFiles)meta.appendChild(document.createTextNode(` · 変更 ${s.latestRun.changedFiles}`));d.appendChild(meta);d.onclick=()=>selectSession(s.id);sessEl.appendChild(d)}}
+async function loadSessions(){try{const r=await jget('/api/sessions');sessions=Array.isArray(r.sessions)?r.sessions:[];if(r.activeRun)setRun(r.activeRun);if(!sessions.find(s=>s.id===activeId)&&sessions.length)await selectSession(sessions[0].id);renderSessions(r.active)}catch(e){}}
+async function selectSession(id){if(busy)return;activeId=id;const s=await jget('/api/session?id='+encodeURIComponent(id));chat.innerHTML='<div id="hero"><h1>今日は何をしますか？</h1></div><section id="run-timeline" aria-label="実行タイムライン"></section>';runTimeline=$('run-timeline');for(const m of s.messages)addMsg(m.role,m.content);const sessionRun=Array.isArray(s.runs)&&s.runs.length?s.runs[0]:null;if(sessionRun)setRun(sessionRun);else if(!latestRun||latestRun.sessionId!==id)setRun(null,true);setEmptyState();renderSessions(activeId)}
+function loadSessionsSilent(){jget('/api/sessions').then(r=>{sessions=Array.isArray(r.sessions)?r.sessions:[];if(r.activeRun)setRun(r.activeRun);renderSessions(r.active)}).catch(()=>{})}
+$('newchat').onclick=async()=>{if(busy)return;await jpost('/api/sessions');activeId=null;chat.innerHTML='<div id="hero"><h1>今日は何をしますか？</h1></div><section id="run-timeline" aria-label="実行タイムライン"></section>';runTimeline=$('run-timeline');setRun(null,true);setEmpty(true);loadSessionsSilent();q.focus()};
 function autosize(){q.style.height='auto';q.style.height=Math.min(q.scrollHeight,160)+'px'}
-q.addEventListener('input',autosize);
-q.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();run()}});
-send.onclick=run;
-async function run(retryText){
- const candidate=typeof retryText==='string'?retryText:q.value;const text=candidate.trim();if(!text||busy)return;
- q.value='';autosize();addMsg('user',text);setEmptyState();busy=true;send.disabled=true;
- const st=document.createElement('div');st.className='msgwrap assistant';st.innerHTML='<span class="think"><i></i><i></i><i></i></span>';chat.appendChild(st);scrollEnd();
- const base=await jget('/api/log').catch(()=>({total:0}));startPoll(st,Number(base.total)||0);
- try{
-  const r=await jpost('/api/turn',{message:text,mode});if(!r||r.error)throw new Error(r&&r.error?r.error:'応答がありません');
-  const logError=Array.isArray(r.logs)?r.logs.find(l=>typeof l==='string'&&l.startsWith('[error]')):'';
-  if(r.aborted||logError){
-   st.remove();addRetryError(logError||'処理が中断されました。',text);
-  }else{
-   st.remove();addMsg('assistant',r.reply||'(応答なし)');loadSessionsSilent();refreshProcesses();
-  }
- }catch(e){st.remove();addRetryError('[error] '+(e&&e.message?e.message:String(e)),text)}
- finally{stopPoll();busy=false;send.disabled=false;setEmptyState();q.focus();refreshProcesses()}
-}
+q.addEventListener('input',autosize);q.addEventListener('compositionstart',()=>{composing=true});q.addEventListener('compositionend',()=>{composing=false});q.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!composing&&e.keyCode!==229){e.preventDefault();run()}});send.onclick=()=>run();
+verifyRun.onclick=verifyCurrentRun
+runCancel.onclick=async()=>{if(!latestRun||!latestRun.id||runCancel.disabled)return;runCancel.disabled=true;const r=await jpost(`/api/runs/${encodeURIComponent(latestRun.id)}/cancel`);if(r&&r.run)setRun(r.run);announce('キャンセルを要求しました。現在の処理が終わるのを待っています。')};
+async function run(retryText){const candidate=typeof retryText==='string'?retryText:q.value;const text=candidate.trim();if(!text||busy)return;q.value='';autosize();addMsg('user',text);setEmptyState();busy=true;send.disabled=true;startRunPolling();const st=document.createElement('div');st.className='msgwrap assistant';st.innerHTML='<span class="think" role="status"><i></i><i></i><i></i> 実行を開始しています…</span>';chat.appendChild(st);scrollEnd();const base=await jget('/api/log').catch(()=>({total:0}));startPoll(st,Number(base.total)||0);try{const r=await jpost('/api/turn',{message:text,mode});if(r&&r.run)setRun(r.run);if(!r||r.error){if(r&&r.activeRun)setRun(r.activeRun);const error=new Error(r&&r.error?r.error:'応答がありません');error.activeRun=r&&r.activeRun;throw error}const logError=Array.isArray(r.logs)?r.logs.find(l=>typeof l==='string'&&l.startsWith('[error]')):'';if(r.aborted||logError){st.remove();addRetryError(logError||r.reply||'処理が中断されました。',text)}else{st.remove();addMsg('assistant',r.reply||'(応答なし)');loadSessionsSilent();refreshProcesses()}}catch(e){st.remove();if(e&&e.activeRun){addRetryError('別の実行が進行中です。現在の作業カードを確認してください。',text)}else{addRetryError('[error] '+(e&&e.message?e.message:String(e)),text)}}finally{stopPoll();stopRunPolling();busy=false;send.disabled=false;setEmptyState();q.focus();refreshProcesses();loadSessionsSilent()}}
 function stopPoll(){if(polling!==null){clearInterval(polling);polling=null}}
-function startPoll(el,initialOffset){
- stopPoll();let seen=Number(initialOffset)||0;
- polling=setInterval(async()=>{try{const r=await jget('/api/log?offset='+seen);seen=r.total;for(const l of r.lines)logLine(el,l)}catch(e){}},1200);
-}
-refreshProcessesBtn.onclick=refreshProcesses;refreshApprovalsBtn.onclick=refreshApprovals;refreshProcesses();refreshApprovals();setInterval(refreshProcesses,2000);setInterval(refreshApprovals,1000);(async()=>{
- try{
-  const i=await jget('/api/info');
-  $('grouplabel').textContent='プロジェクト / '+(i.project||'workspace');
-  $('footmodel').textContent=(i.model&&i.model!==i.provider)?(i.provider+' / '+i.model):i.provider;
-  $('footws').textContent=i.workspace||'';
- }catch(e){}
- await loadSessions();
- const first=sessions[0];
- if(first)selectSession(first.id);
- q.focus();
-})();
-</script>
+function startPoll(el,initialOffset){stopPoll();let seen=Number(initialOffset)||0;polling=setInterval(async()=>{try{const r=await jget('/api/log?offset='+seen);seen=r.total;for(const l of r.lines)logLine(el,l)}catch(e){}},700)}
+for(const tab of document.querySelectorAll('.inspector-tab')){tab.addEventListener('click',()=>{for(const other of document.querySelectorAll('.inspector-tab')){const active=other===tab;other.classList.toggle('active',active);other.setAttribute('aria-selected',String(active))}for(const panel of document.querySelectorAll('.inspector-panel'))panel.classList.toggle('mobile-active',panel.id===tab.dataset.panel)})}
+refreshProcessesBtn.onclick=refreshProcesses;refreshApprovalsBtn.onclick=refreshApprovals;refreshProcesses();refreshApprovals();refreshActiveRun();setInterval(refreshProcesses,2000);setInterval(refreshApprovals,1000);(async()=>{try{const i=await jget('/api/info');$('grouplabel').textContent='プロジェクト / '+(i.project||'workspace');$('footmodel').textContent=(i.model&&i.model!==i.provider)?(i.provider+' / '+i.model):i.provider;$('footws').textContent=i.workspace||'';renderDistribution(i.distribution)}catch(e){}await loadSessions();if(!activeId&&sessions[0])await selectSession(sessions[0].id);q.focus()})();</script>
 </body>
 </html>

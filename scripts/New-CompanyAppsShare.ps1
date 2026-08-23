@@ -72,6 +72,8 @@ try {
     Copy-Item -LiteralPath $publicSource -Destination (Join-Path $stageApp 'public\index.html') -Force
 
     $manifest.version = $Version
+    $manifest.publishId = [guid]::NewGuid().ToString('N')
+    $manifest.publishedAt = (Get-Date).ToUniversalTime().ToString('o')
     Write-Utf8NoBom (Join-Path $stageApp 'manifest.json') (($manifest | ConvertTo-Json -Depth 10) + [Environment]::NewLine)
     Copy-Item -LiteralPath $RuntimeExe -Destination (Join-Path $stageRoot "runtime\$runtimeName\node.exe") -Force
 

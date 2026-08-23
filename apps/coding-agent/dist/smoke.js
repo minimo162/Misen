@@ -94,6 +94,7 @@ async function chat(cfg, messages, tools) {
 
 // src/tools.ts
 var import_node_child_process2 = require("node:child_process");
+var import_node_crypto = __toESM(require("node:crypto"));
 var import_promises = __toESM(require("node:fs/promises"));
 var import_node_path = __toESM(require("node:path"));
 var import_node_util = __toESM(require("node:util"));
@@ -295,6 +296,54 @@ var execAsync = import_node_util.default.promisify(import_node_child_process2.ex
 var IGNORED_DIRS = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", ".tmp"]);
 var MAX_LIST = 500;
 var MAX_SEARCH_RESULTS = 200;
+function sha256(text) {
+  return import_node_crypto.default.createHash("sha256").update(text, "utf8").digest("hex");
+}
+function lineDelta(before, after) {
+  const beforeLines = before === "" ? [] : before.split(/\r?\n/);
+  const afterLines = after === "" ? [] : after.split(/\r?\n/);
+  let prefix = 0;
+  while (prefix < beforeLines.length && prefix < afterLines.length && beforeLines[prefix] === afterLines[prefix]) prefix++;
+  let suffix = 0;
+  while (suffix < beforeLines.length - prefix && suffix < afterLines.length - prefix && beforeLines[beforeLines.length - 1 - suffix] === afterLines[afterLines.length - 1 - suffix]) suffix++;
+  return {
+    removedLines: Math.max(0, beforeLines.length - prefix - suffix),
+    addedLines: Math.max(0, afterLines.length - prefix - suffix)
+  };
+}
+function formatFileChangeResult(action, relativePath, before, after, count) {
+  const changed = before !== after;
+  const delta = lineDelta(before, after);
+  const meta = {
+    changed,
+    status: changed ? "applied_unverified" : "no_op",
+    path: relativePath,
+    count,
+    beforeHash: sha256(before),
+    afterHash: sha256(after),
+    readBack: true,
+    ...delta
+  };
+  return [
+    `${changed ? `${action}\u5B8C\u4E86` : "\u5909\u66F4\u306A\u3057"}: ${relativePath} (${count} \u7B87\u6240)`,
+    `\u72B6\u614B: ${meta.status}`,
+    `\u5909\u66F4\u524D\u30CF\u30C3\u30B7\u30E5: ${meta.beforeHash}`,
+    `\u5909\u66F4\u5F8C\u30CF\u30C3\u30B7\u30E5: ${meta.afterHash}`,
+    "\u518D\u8AAD\u8FBC: \u6210\u529F",
+    `\u5DEE\u5206: +${meta.addedLines} -${meta.removedLines}`,
+    `\u7D50\u679C\u30E1\u30BF\u30C7\u30FC\u30BF: ${JSON.stringify(meta)}`
+  ].join("\n");
+}
+function parseToolResultMeta(output) {
+  const line = output.split(/\r?\n/).find((entry) => entry.startsWith("\u7D50\u679C\u30E1\u30BF\u30C7\u30FC\u30BF:"));
+  if (!line) return null;
+  try {
+    return JSON.parse(line.slice("\u7D50\u679C\u30E1\u30BF\u30C7\u30FC\u30BF:".length).trim());
+  } catch {
+    return null;
+  }
+}
+var fileSnapshots = /* @__PURE__ */ new Map();
 function truncate(s, max = 8e3) {
   return s.length <= max ? s : s.slice(0, max) + `
 ...(\u7701\u7565: \u5168${s.length}\u6587\u5B57)`;
@@ -390,9 +439,20 @@ var TOOL_DEFS = [
       const abs = resolveInWorkspace(String(args.path), ctx);
       const content = String(args.content ?? "");
       if (!content.trim()) throw new Error("content \u304C\u7A7A\u3067\u3059\u3002JSON \u76F4\u5F8C\u306E\u30B3\u30FC\u30C9\u30D5\u30A7\u30F3\u30B9\u306B\u5185\u5BB9\u3092\u8A18\u8FF0\u3057\u3066\u304F\u3060\u3055\u3044");
+      let before = "";
+      try {
+        before = await import_promises.default.readFile(abs, "utf8");
+      } catch (err) {
+        const e = err;
+        if (e.code !== "ENOENT") throw err;
+      }
       await import_promises.default.mkdir(import_node_path.default.dirname(abs), { recursive: true });
       await import_promises.default.writeFile(abs, content, "utf8");
-      return `\u66F8\u304D\u8FBC\u307F\u5B8C\u4E86: ${import_node_path.default.relative(ctx.workspace, abs)} (${Buffer.byteLength(content)} bytes)`;
+      const readBack = await import_promises.default.readFile(abs, "utf8");
+      fileSnapshots.set(abs, { before, afterHash: sha256(readBack), createdAt: Date.now() });
+      const result = formatFileChangeResult("\u66F8\u304D\u8FBC\u307F", import_node_path.default.relative(ctx.workspace, abs), before, readBack, 1);
+      return `${result}
+\u30B5\u30A4\u30BA: ${Buffer.byteLength(readBack)} bytes`;
     }
   },
   {
@@ -420,8 +480,12 @@ var TOOL_DEFS = [
       if (count === 0) throw new Error("old_string \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
       if (count > 1 && !replaceAll) throw new Error(`${count} \u4EF6\u4E00\u81F4\u3057\u307E\u3057\u305F\u3002replace_all=true \u3092\u6307\u5B9A\u3059\u308B\u304B\u5BFE\u8C61\u7BC4\u56F2\u3092\u72ED\u3081\u3066\u304F\u3060\u3055\u3044`);
       const next = replaceAll ? src.split(oldStr).join(newStr) : src.replace(oldStr, newStr);
+      if (next === src) return formatFileChangeResult("\u7DE8\u96C6", import_node_path.default.relative(ctx.workspace, abs), src, src, count);
       await import_promises.default.writeFile(abs, next, "utf8");
-      return `\u7DE8\u96C6\u5B8C\u4E86: ${import_node_path.default.relative(ctx.workspace, abs)} (${count} \u7B87\u6240)`;
+      const readBack = await import_promises.default.readFile(abs, "utf8");
+      if (readBack !== next) throw new Error("\u7DE8\u96C6\u5F8C\u306E\u518D\u8AAD\u8FBC\u5185\u5BB9\u304C\u4E00\u81F4\u3057\u307E\u305B\u3093");
+      fileSnapshots.set(abs, { before: src, afterHash: sha256(readBack), createdAt: Date.now() });
+      return formatFileChangeResult("\u7DE8\u96C6", import_node_path.default.relative(ctx.workspace, abs), src, readBack, count);
     }
   },
   {
@@ -747,6 +811,16 @@ function composeCopilotPrompt(userInput, steps, budget = 12e4, history = []) {
 async function runCopilotTurn(opts) {
   const { cfg, ctx, io, backend } = opts;
   const history = opts.messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role === "assistant" ? "\u30A2\u30B7\u30B9\u30BF\u30F3\u30C8" : "\u30E6\u30FC\u30B6\u30FC", content: String(m.content ?? "").slice(0, 400) })).slice(-12);
+  const turnMessages = (assistantContent) => [
+    ...opts.messages,
+    { role: "user", content: opts.userInput },
+    { role: "assistant", content: assistantContent }
+  ];
+  const canceled = () => ({
+    reply: "",
+    messages: turnMessages("[\u4E2D\u65AD] \u30E6\u30FC\u30B6\u30FC\u304C\u30AD\u30E3\u30F3\u30BB\u30EB\u3057\u307E\u3057\u305F"),
+    aborted: true
+  });
   if (cfg.copilot?.agentMode !== true) {
     const prompt = [cfg.systemPrompt, opts.userInput].filter((s) => s && s.trim()).join("\n\n");
     try {
@@ -755,7 +829,7 @@ async function runCopilotTurn(opts) {
     } catch (err) {
       const msg = err.message;
       io.print(`[error] ${msg}`);
-      return { reply: "", messages: [{ role: "assistant", content: `[error] ${msg}` }], aborted: true };
+      return { reply: "", messages: turnMessages(`[error] ${msg}`), aborted: true };
     }
   }
   const steps = [];
@@ -768,13 +842,14 @@ async function runCopilotTurn(opts) {
   let refusals = 0;
   const maxIter = cfg.maxToolIterations ?? 15;
   for (let i = 0; i < maxIter; i++) {
+    if (io.isCanceled?.()) return canceled();
     let raw;
     try {
       raw = await backend.complete(composeCopilotPrompt(opts.userInput, steps, opts.cfg.copilot?.maxPromptChars ?? 12e4, history));
       raw = raw.replace(/＜/g, "<").replace(/＞/g, ">").replace(new RegExp(String.fromCharCode(65312) === "" ? "" : "\uFF40", "g"), String.fromCharCode(96));
     } catch (err) {
       io.print(`[error] ${err.message}`);
-      return { reply: "", messages: [{ role: "assistant", content: `[error] ${err.message}` }], aborted: true };
+      return { reply: "", messages: turnMessages(`[error] ${err.message}`), aborted: true };
     }
     const pe = extractReplyAndEnd(raw);
     let parsed = pe?.parsed ?? null;
@@ -786,7 +861,7 @@ async function runCopilotTurn(opts) {
         continue;
       }
       const fallback = unwrapAnswer(raw);
-      return { reply: fallback, messages: [...opts.messages, { role: "user", content: opts.userInput }, { role: "assistant", content: fallback }], aborted: false };
+      return { reply: fallback, messages: turnMessages(fallback), aborted: false };
     }
     if (parsed.answer !== void 0 && refusals < 3 && /使用でき|実行できません|共有して|確認できません|アップロードして/.test(parsed.answer)) {
       refusals++;
@@ -796,35 +871,53 @@ async function runCopilotTurn(opts) {
     if (parsed.answer !== void 0) {
       const reply = parsed.answer.trim();
       steps.push(`assistant: {"answer":"..."}`);
-      return { reply, messages: [...opts.messages, { role: "user", content: opts.userInput }, { role: "assistant", content: reply }], aborted: false };
+      return { reply, messages: turnMessages(reply), aborted: false };
     }
     const def = TOOL_DEFS.find((d) => d.name === parsed.tool);
     if (!def) {
       steps.push(`TOOL_RESULT: [error] \u672A\u77E5\u306E\u30C4\u30FC\u30EB "${parsed.tool}"\u3002tool \u306F\u6B63\u78BA\u306A\u540D\u524D\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
       continue;
     }
-    io.print(`[tool] ${summarize(def.name, parsed.args ?? {})}`);
+    if (io.isCanceled?.()) return canceled();
+    const summary = summarize(def.name, parsed.args ?? {});
+    io.event?.({ type: "tool.started", tool: def.name, summary });
+    io.print(`[tool] ${summary}`);
     if (def.kind !== "read") {
       const auto = def.kind === "write" ? cfg.autoApprove?.write ?? true : cfg.autoApprove?.command ?? false;
       if (!auto) {
+        io.event?.({ type: "approval.requested", tool: def.name, summary });
         const ok = await io.askYesNo(`\u5B9F\u884C\u3092\u8A31\u53EF\u3057\u307E\u3059\u304B\uFF1F
-${summarize(def.name, parsed.args ?? {})}`);
+${summary}`);
+        io.event?.({ type: "approval.resolved", tool: def.name, summary, approved: ok });
         if (!ok) {
+          io.event?.({ type: "tool.denied", tool: def.name, summary });
           steps.push(`TOOL_RESULT(${def.name}): (\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)`);
           continue;
         }
       }
     }
+    if (io.isCanceled?.()) return canceled();
+    const startedAt = Date.now();
     let output;
     try {
       output = await def.run(parsed.args ?? {}, ctx);
     } catch (err) {
       output = `[tool error] ${err.message}`;
     }
+    const failed = output.startsWith("[tool error]");
+    io.event?.({
+      type: failed ? "tool.failed" : "tool.succeeded",
+      tool: def.name,
+      summary,
+      output: output.slice(0, 1200),
+      durationMs: Date.now() - startedAt,
+      metadata: parseToolResultMeta(output)
+    });
     steps.push(`TOOL_RESULT(${def.name}): ${output.slice(0, 2e3)}`);
   }
   io.print("[warn] \u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F");
-  return { reply: "", messages: [], aborted: true };
+  io.event?.({ type: "run.warning", error: "\u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F" });
+  return { reply: "", messages: turnMessages("[\u4E2D\u65AD] \u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F\u3002\u5B8C\u4E86\u6E08\u307F\u306E\u5C65\u6B74\u3092\u4FDD\u6301\u3057\u3066\u3044\u307E\u3059\u3002"), aborted: true };
 }
 async function runAgentTurn(opts) {
   if (opts.backend || opts.cfg.provider === "copilot-edge") {
@@ -839,6 +932,7 @@ async function runOpenAITurn(opts) {
   const messages = [...opts.messages, { role: "user", content: opts.userInput }];
   const maxIter = cfg.maxToolIterations ?? 15;
   for (let i = 0; i < maxIter; i++) {
+    if (io.isCanceled?.()) return { reply: "", messages, aborted: true };
     let assistant;
     try {
       assistant = await chat(cfg, messages, openAITools());
@@ -853,11 +947,13 @@ async function runOpenAITurn(opts) {
       return { reply: assistant.content ?? "", messages, aborted: false };
     }
     for (const call of calls) {
+      if (io.isCanceled?.()) return { reply: "", messages, aborted: true };
       const output = await executeCall(call, cfg, ctx, io);
       messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: output });
     }
   }
   io.print("[warn] \u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F");
+  io.event?.({ type: "run.warning", error: "\u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F" });
   return { reply: "", messages, aborted: true };
 }
 async function executeCall(call, cfg, ctx, io) {
@@ -869,19 +965,31 @@ async function executeCall(call, cfg, ctx, io) {
   } catch {
     return "\u5F15\u6570\u306E JSON \u30D1\u30FC\u30B9\u306B\u5931\u6557\u3057\u307E\u3057\u305F";
   }
-  io.print(`[tool] ${summarize(def.name, args)}`);
+  const summary = summarize(def.name, args);
+  io.event?.({ type: "tool.started", tool: def.name, summary });
+  io.print(`[tool] ${summary}`);
   if (def.kind !== "read") {
     const auto = def.kind === "write" ? cfg.autoApprove?.write ?? true : cfg.autoApprove?.command ?? false;
     if (!auto) {
+      io.event?.({ type: "approval.requested", tool: def.name, summary });
       const ok = await io.askYesNo(`\u5B9F\u884C\u3092\u8A31\u53EF\u3057\u307E\u3059\u304B\uFF1F
-${summarize(def.name, args)}`);
-      if (!ok) return "(\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)";
+${summary}`);
+      io.event?.({ type: "approval.resolved", tool: def.name, summary, approved: ok });
+      if (!ok) {
+        io.event?.({ type: "tool.denied", tool: def.name, summary });
+        return "(\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)";
+      }
     }
   }
+  const startedAt = Date.now();
   try {
-    return await def.run(args, ctx);
+    const output = await def.run(args, ctx);
+    io.event?.({ type: "tool.succeeded", tool: def.name, summary, output: output.slice(0, 1200), durationMs: Date.now() - startedAt, metadata: parseToolResultMeta(output) });
+    return output;
   } catch (err) {
-    return `[tool error] ${err.message}`;
+    const output = `[tool error] ${err.message}`;
+    io.event?.({ type: "tool.failed", tool: def.name, summary, output, error: output, durationMs: Date.now() - startedAt });
+    return output;
   }
 }
 function summarize(name, args) {
@@ -964,6 +1072,11 @@ async function testTools() {
   const after = await get("read_file").run({ path: "a/hello.txt" }, ctx);
   import_node_assert.default.ok(after.includes("edited"));
   import_node_assert.default.ok(!after.includes("unique"));
+  const editMeta = parseToolResultMeta(edited);
+  import_node_assert.default.ok(editMeta && editMeta.changed === true && editMeta.status === "applied_unverified" && editMeta.readBack === true);
+  const noOp = await get("edit_file").run({ path: "a/hello.txt", old_string: "edited", new_string: "edited" }, ctx);
+  const noOpMeta = parseToolResultMeta(noOp);
+  import_node_assert.default.ok(noOp.includes("\u5909\u66F4\u306A\u3057") && noOpMeta && noOpMeta.changed === false && noOpMeta.status === "no_op");
   const search = await get("search_files").run({ query: "edited" }, ctx);
   import_node_assert.default.ok(search.includes("hello.txt"));
   const list = await get("list_files").run({ glob: "*.txt" }, ctx);
@@ -1139,6 +1252,17 @@ async function testCopilotLoop() {
   import_node_fs.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS copilot-loop");
 }
+async function testMaxIterationHistory() {
+  const root = import_node_fs.default.mkdtempSync(import_node_path2.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
+  const backend = new FakeBackend(['{"tool":"list_files","args":{}}']);
+  const cfg = { baseURL: "", model: "", provider: "copilot-edge", maxToolIterations: 1, copilot: { agentMode: true } };
+  const result = await runAgentTurn({ cfg, messages: [], userInput: "\u5C65\u6B74\u3092\u6B8B\u3057\u3066", ctx: makeCtx(root), io: ioStub(true), backend });
+  import_node_assert.default.strictEqual(result.aborted, true);
+  import_node_assert.default.ok(result.messages.some((message) => message.role === "user" && message.content === "\u5C65\u6B74\u3092\u6B8B\u3057\u3066"));
+  import_node_assert.default.ok(result.messages.some((message) => message.role === "assistant" && String(message.content).includes("\u6700\u5927\u53CD\u5FA9\u56DE\u6570")));
+  import_node_fs.default.rmSync(root, { recursive: true, force: true });
+  console.log("PASS max-iteration-history");
+}
 async function testCopilotPlainMode() {
   const backend = new FakeBackend(["\u3053\u308C\u306F\u5E73\u6587\u306E\u56DE\u7B54\u3067\u3059"]);
   const cfg = { baseURL: "", model: "", provider: "copilot-edge", systemPrompt: "SYS" };
@@ -1182,6 +1306,7 @@ async function testCopilotFenceMode() {
   await testDenial();
   await testProtocolParsing();
   await testCopilotLoop();
+  await testMaxIterationHistory();
   await testCopilotPlainMode();
   await testCopilotFenceMode();
   console.log("ALL PASS");

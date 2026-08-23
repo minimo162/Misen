@@ -14,24 +14,50 @@ $remoteAppDir = Join-Path $shareRoot "apps\$app"
 $localAppDir = Join-Path $localRoot "apps\$app"
 $remoteManifestPath = Join-Path $remoteAppDir 'manifest.json'
 $localManifestPath = Join-Path $localAppDir 'manifest.json'
+$stateDir = Join-Path $localRoot 'state'
+$statePath = Join-Path $stateDir "$app.json"
+
+function Write-DistributionState([string]$Phase, [string]$Message, [string]$RemoteVersion, [string]$LocalVersion, [bool]$Verified = $false) {
+    try {
+        New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
+        $state = [ordered]@{
+            app = $app
+            phase = $Phase
+            message = $Message
+            sharedVersion = $RemoteVersion
+            localVersion = $LocalVersion
+            verified = $Verified
+            checkedAt = (Get-Date).ToUniversalTime().ToString('o')
+        }
+        [System.IO.File]::WriteAllText($statePath, ($state | ConvertTo-Json -Depth 5) + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding($false)))
+    } catch { Write-Host "[launch] 配布状態の記録に失敗しました: $($_.Exception.Message)" }
+}
 
 if (-not (Test-Path -LiteralPath $remoteManifestPath)) {
     throw "アプリが見つかりません: $remoteManifestPath"
 }
 $remoteManifest = Get-Content -LiteralPath $remoteManifestPath -Raw | ConvertFrom-Json
+$localVersion = ''
+Write-DistributionState 'checking' 'checking shared and local versions' ([string]$remoteManifest.version) $localVersion
 
 $needSync = $true
 if (Test-Path -LiteralPath $localManifestPath) {
     try {
         $localManifest = Get-Content -LiteralPath $localManifestPath -Raw | ConvertFrom-Json
+        $localVersion = [string]$localManifest.version
         if ("$($localManifest.version)" -eq "$($remoteManifest.version)") { $needSync = $false }
     } catch { $needSync = $true }
 }
 if ($needSync) {
     Write-Host "[launch] 更新を取得中: $app v$($remoteManifest.version)"
+    Write-DistributionState 'syncing' 'syncing the shared version to this PC' ([string]$remoteManifest.version) $localVersion
     New-Item -ItemType Directory -Force -Path $localAppDir | Out-Null
     & robocopy $remoteAppDir $localAppDir /MIR /XD node_modules .git /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "robocopy 失敗 (exit=$LASTEXITCODE)" }
+    $localVersion = [string]$remoteManifest.version
+    Write-DistributionState 'verified' 'sync completed and versions match' ([string]$remoteManifest.version) $localVersion $true
+} else {
+    Write-DistributionState 'verified' 'starting the same version' ([string]$remoteManifest.version) $localVersion $true
 }
 
 $type = if ($remoteManifest.type) { "$($remoteManifest.type)" } else { 'cli' }

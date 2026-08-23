@@ -109,11 +109,24 @@ function stripLineNumbered(rest: string): string | null {
 }
 import type { AgentConfig } from './config'
 import { chat, type ChatMessage, type ToolCall } from './llm'
-import { openAITools, TOOL_DEFS, type ToolContext } from './tools'
+import { openAITools, parseToolResultMeta, TOOL_DEFS, type ToolContext } from './tools'
+
+export type AgentEvent = {
+  type: 'tool.started' | 'tool.succeeded' | 'tool.failed' | 'tool.denied' | 'approval.requested' | 'approval.resolved' | 'run.warning'
+  tool?: string
+  summary?: string
+  output?: string
+  error?: string
+  approved?: boolean
+  durationMs?: number
+  metadata?: Record<string, unknown> | null
+}
 
 export interface AgentIO {
   print(text: string): void
   askYesNo(question: string): Promise<boolean>
+  event?(event: AgentEvent): void
+  isCanceled?(): boolean
 }
 
 export interface AgentTurnResult {
@@ -223,6 +236,16 @@ async function runCopilotTurn(opts: {
 }): Promise<AgentTurnResult> {
   const { cfg, ctx, io, backend } = opts
   const history = opts.messages.filter((m: ChatMessage) => m.role !== 'system').map((m: ChatMessage) => ({ role: m.role === 'assistant' ? 'アシスタント' : 'ユーザー', content: String(m.content ?? '').slice(0, 400) })).slice(-12)
+  const turnMessages = (assistantContent: string): ChatMessage[] => [
+    ...opts.messages,
+    { role: 'user', content: opts.userInput },
+    { role: 'assistant', content: assistantContent }
+  ]
+  const canceled = (): AgentTurnResult => ({
+    reply: '',
+    messages: turnMessages('[中断] ユーザーがキャンセルしました'),
+    aborted: true
+  })
   if (cfg.copilot?.agentMode !== true) {
     const prompt = [cfg.systemPrompt, opts.userInput].filter((s) => s && s.trim()).join('\n\n')
     try {
@@ -231,7 +254,7 @@ async function runCopilotTurn(opts: {
     } catch (err) {
       const msg = (err as Error).message
       io.print(`[error] ${msg}`)
-      return { reply: '', messages: [{ role: 'assistant', content: `[error] ${msg}` }], aborted: true }
+      return { reply: '', messages: turnMessages(`[error] ${msg}`), aborted: true }
     }
   }
   const steps: string[] = []
@@ -243,13 +266,14 @@ async function runCopilotTurn(opts: {
   let refusals = 0
   const maxIter = cfg.maxToolIterations ?? 15
   for (let i = 0; i < maxIter; i++) {
+    if (io.isCanceled?.()) return canceled()
     let raw: string
     try {
       raw = await backend.complete(composeCopilotPrompt(opts.userInput, steps, opts.cfg.copilot?.maxPromptChars ?? 120000, history))
       raw = raw.replace(/＜/g, '<').replace(/＞/g, '>').replace(new RegExp(String.fromCharCode(65312) === '' ? '' : '｀', 'g'), String.fromCharCode(96))
     } catch (err) {
       io.print(`[error] ${(err as Error).message}`)
-      return { reply: '', messages: [{ role: 'assistant', content: `[error] ${(err as Error).message}` }], aborted: true }
+      return { reply: '', messages: turnMessages(`[error] ${(err as Error).message}`), aborted: true }
     }
     const pe = extractReplyAndEnd(raw)
     let parsed = pe?.parsed ?? null
@@ -261,7 +285,7 @@ async function runCopilotTurn(opts: {
         continue
       }
       const fallback = unwrapAnswer(raw)
-      return { reply: fallback, messages: [...opts.messages, { role: 'user', content: opts.userInput }, { role: 'assistant', content: fallback }], aborted: false }
+      return { reply: fallback, messages: turnMessages(fallback), aborted: false }
     }
     if (parsed.answer !== undefined && refusals < 3 && (/使用でき|実行できません|共有して|確認できません|アップロードして/.test(parsed.answer))) {
       refusals++
@@ -271,34 +295,52 @@ async function runCopilotTurn(opts: {
     if (parsed.answer !== undefined) {
       const reply = parsed.answer.trim()
       steps.push(`assistant: {"answer":"..."}`)
-    return { reply, messages: [...opts.messages, { role: 'user', content: opts.userInput }, { role: 'assistant', content: reply }], aborted: false }
+      return { reply, messages: turnMessages(reply), aborted: false }
     }
     const def = TOOL_DEFS.find((d) => d.name === parsed.tool)
     if (!def) {
       steps.push(`TOOL_RESULT: [error] 未知のツール "${parsed.tool}"。tool は正確な名前で指定してください。`)
       continue
     }
-    io.print(`[tool] ${summarize(def.name, parsed.args ?? {})}`)
+    if (io.isCanceled?.()) return canceled()
+    const summary = summarize(def.name, parsed.args ?? {})
+    io.event?.({ type: 'tool.started', tool: def.name, summary })
+    io.print(`[tool] ${summary}`)
     if (def.kind !== 'read') {
       const auto = def.kind === 'write' ? (cfg.autoApprove?.write ?? true) : (cfg.autoApprove?.command ?? false)
       if (!auto) {
-        const ok = await io.askYesNo(`実行を許可しますか？\n${summarize(def.name, parsed.args ?? {})}`)
+        io.event?.({ type: 'approval.requested', tool: def.name, summary })
+        const ok = await io.askYesNo(`実行を許可しますか？\n${summary}`)
+        io.event?.({ type: 'approval.resolved', tool: def.name, summary, approved: ok })
         if (!ok) {
+          io.event?.({ type: 'tool.denied', tool: def.name, summary })
           steps.push(`TOOL_RESULT(${def.name}): (ユーザーが拒否しました)`)
           continue
         }
       }
     }
+    if (io.isCanceled?.()) return canceled()
+    const startedAt = Date.now()
     let output: string
     try {
       output = await def.run(parsed.args ?? {}, ctx)
     } catch (err) {
       output = `[tool error] ${(err as Error).message}`
     }
+    const failed = output.startsWith('[tool error]')
+    io.event?.({
+      type: failed ? 'tool.failed' : 'tool.succeeded',
+      tool: def.name,
+      summary,
+      output: output.slice(0, 1200),
+      durationMs: Date.now() - startedAt,
+      metadata: parseToolResultMeta(output) as unknown as Record<string, unknown> | null
+    })
     steps.push(`TOOL_RESULT(${def.name}): ${output.slice(0, 2000)}`)
   }
   io.print('[warn] 最大反復回数に達しました')
-  return { reply: '', messages: [], aborted: true }
+  io.event?.({ type: 'run.warning', error: '最大反復回数に達しました' })
+  return { reply: '', messages: turnMessages('[中断] 最大反復回数に達しました。完了済みの履歴を保持しています。'), aborted: true }
 }
 
 
@@ -329,6 +371,7 @@ async function runOpenAITurn(opts: {
   const messages: ChatMessage[] = [...opts.messages, { role: 'user', content: opts.userInput }]
   const maxIter = cfg.maxToolIterations ?? 15
   for (let i = 0; i < maxIter; i++) {
+    if (io.isCanceled?.()) return { reply: '', messages, aborted: true }
     let assistant: ChatMessage
     try {
       assistant = await chat(cfg, messages, openAITools())
@@ -343,11 +386,13 @@ async function runOpenAITurn(opts: {
       return { reply: assistant.content ?? '', messages, aborted: false }
     }
     for (const call of calls) {
+      if (io.isCanceled?.()) return { reply: '', messages, aborted: true }
       const output = await executeCall(call, cfg, ctx, io)
       messages.push({ role: 'tool', tool_call_id: call.id, name: call.function.name, content: output })
     }
   }
   io.print('[warn] 最大反復回数に達しました')
+  io.event?.({ type: 'run.warning', error: '最大反復回数に達しました' })
   return { reply: '', messages, aborted: true }
 }
 
@@ -365,18 +410,30 @@ async function executeCall(
   } catch {
     return '引数の JSON パースに失敗しました'
   }
-  io.print(`[tool] ${summarize(def.name, args)}`)
+  const summary = summarize(def.name, args)
+  io.event?.({ type: 'tool.started', tool: def.name, summary })
+  io.print(`[tool] ${summary}`)
   if (def.kind !== 'read') {
     const auto = def.kind === 'write' ? (cfg.autoApprove?.write ?? true) : (cfg.autoApprove?.command ?? false)
     if (!auto) {
-      const ok = await io.askYesNo(`実行を許可しますか？\n${summarize(def.name, args)}`)
-      if (!ok) return '(ユーザーが拒否しました)'
+      io.event?.({ type: 'approval.requested', tool: def.name, summary })
+      const ok = await io.askYesNo(`実行を許可しますか？\n${summary}`)
+      io.event?.({ type: 'approval.resolved', tool: def.name, summary, approved: ok })
+      if (!ok) {
+        io.event?.({ type: 'tool.denied', tool: def.name, summary })
+        return '(ユーザーが拒否しました)'
+      }
     }
   }
+  const startedAt = Date.now()
   try {
-    return await def.run(args, ctx)
+    const output = await def.run(args, ctx)
+    io.event?.({ type: 'tool.succeeded', tool: def.name, summary, output: output.slice(0, 1200), durationMs: Date.now() - startedAt, metadata: parseToolResultMeta(output) as unknown as Record<string, unknown> | null })
+    return output
   } catch (err) {
-    return `[tool error] ${(err as Error).message}`
+    const output = `[tool error] ${(err as Error).message}`
+    io.event?.({ type: 'tool.failed', tool: def.name, summary, output, error: output, durationMs: Date.now() - startedAt })
+    return output
   }
 }
 
