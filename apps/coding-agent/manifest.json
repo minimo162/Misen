@@ -1,6 +1,6 @@
 {
   "name": "coding-agent",
-  "version": "0.10.7",
+  "version": "0.10.8",
   "type": "web",
   "entry": "dist/server.js",
   "runtime": "node-v22.14.0-win-x64",

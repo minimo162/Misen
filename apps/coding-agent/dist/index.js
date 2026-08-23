@@ -326,6 +326,119 @@ function readManagedProcessLog(id, offset = 0) {
   };
 }
 
+// src/weather.ts
+var DEFAULT_FETCH_TIMEOUT_MS = 15e3;
+function finiteNumber(value, label) {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) throw new Error(`\u5929\u6C17API\u306E${label}\u304C\u4E0D\u6B63\u3067\u3059`);
+  return n;
+}
+function optionalFiniteNumber(value, label) {
+  if (value === void 0 || value === null || value === "") return void 0;
+  return finiteNumber(value, label);
+}
+function stringValue(value, label) {
+  if (typeof value !== "string" || value.trim() === "") throw new Error(`\u5929\u6C17API\u306E${label}\u304C\u3042\u308A\u307E\u305B\u3093`);
+  return value.trim();
+}
+async function fetchJson(url, signal, fetcher) {
+  const timeout = AbortSignal.timeout(DEFAULT_FETCH_TIMEOUT_MS);
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  timeout.addEventListener("abort", abort, { once: true });
+  signal?.addEventListener("abort", abort, { once: true });
+  try {
+    const response = await fetcher(url, { signal: controller.signal, headers: { accept: "application/json" } });
+    if (!response.ok) throw new Error(`\u5929\u6C17API\u304CHTTP ${response.status}\u3092\u8FD4\u3057\u307E\u3057\u305F`);
+    try {
+      return await response.json();
+    } catch {
+      throw new Error("\u5929\u6C17API\u306E\u5FDC\u7B54\u304CJSON\u3067\u306F\u3042\u308A\u307E\u305B\u3093");
+    }
+  } catch (err) {
+    if (signal?.aborted) throw new Error("\u5929\u6C17\u53D6\u5F97\u306F\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F");
+    if (controller.signal.aborted) throw new Error("\u5929\u6C17API\u304C\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8\u3057\u307E\u3057\u305F");
+    throw err;
+  } finally {
+    timeout.removeEventListener("abort", abort);
+    signal?.removeEventListener("abort", abort);
+  }
+}
+function weatherCodeLabel(code) {
+  if (code === 0) return { emoji: "\u2600\uFE0F", label: "\u5FEB\u6674" };
+  if (code === 1) return { emoji: "\u{1F324}\uFE0F", label: "\u4E3B\u306B\u6674\u308C" };
+  if (code === 2) return { emoji: "\u26C5", label: "\u6674\u308C\u6642\u3005\u66C7\u308A" };
+  if (code === 3) return { emoji: "\u2601\uFE0F", label: "\u66C7\u308A" };
+  if (code === 45 || code === 48) return { emoji: "\u{1F32B}\uFE0F", label: "\u9727" };
+  if (code >= 51 && code <= 57) return { emoji: "\u{1F326}\uFE0F", label: "\u9727\u96E8" };
+  if (code >= 61 && code <= 67) return { emoji: "\u{1F327}\uFE0F", label: "\u96E8" };
+  if (code >= 71 && code <= 77) return { emoji: "\u2744\uFE0F", label: "\u96EA" };
+  if (code >= 80 && code <= 82) return { emoji: "\u{1F326}\uFE0F", label: "\u306B\u308F\u304B\u96E8" };
+  if (code === 85 || code === 86) return { emoji: "\u{1F328}\uFE0F", label: "\u306B\u308F\u304B\u96EA" };
+  if (code === 95 || code === 96 || code === 99) return { emoji: "\u26C8\uFE0F", label: "\u96F7\u96E8" };
+  return { emoji: "\u{1F321}\uFE0F", label: "\u5929\u6C17\u60C5\u5831" };
+}
+function locationText(location) {
+  const details = [location.admin1, location.country].filter(Boolean);
+  return details.length > 0 ? `${location.name}\uFF08${details.join("\u30FB")}\uFF09` : location.name;
+}
+function formatWeather(result) {
+  const current = weatherCodeLabel(result.weatherCode);
+  const daily = result.dailyWeatherCode === void 0 ? void 0 : weatherCodeLabel(result.dailyWeatherCode);
+  const place = locationText(result.location);
+  const lines = [
+    `${place}`,
+    `\u73FE\u5728: ${result.temperatureC.toFixed(1)}\xB0C${result.apparentTemperatureC === void 0 ? "" : `\uFF08\u4F53\u611F ${result.apparentTemperatureC.toFixed(1)}\xB0C\uFF09`}`,
+    `\u5929\u6C17: ${current.emoji} ${current.label}`,
+    `\u4ECA\u65E5: \u6700\u9AD8 ${result.maxTemperatureC === void 0 ? "\u4E0D\u660E" : `${result.maxTemperatureC.toFixed(1)}\xB0C`} / \u6700\u4F4E ${result.minTemperatureC === void 0 ? "\u4E0D\u660E" : `${result.minTemperatureC.toFixed(1)}\xB0C`}${daily ? `\uFF08${daily.emoji} ${daily.label}\uFF09` : ""}`,
+    `\u53D6\u5F97\u6642\u523B: ${result.time} (${result.timezone})`,
+    "\u51FA\u5178: Open-Meteo\uFF08\u4E88\u5831\u30E2\u30C7\u30EB\u306E\u73FE\u5728\u5024\uFF09"
+  ];
+  return lines.join("\n");
+}
+async function getWeather(locationName, signal, fetcher = (input, init) => fetch(input, init)) {
+  const location = locationName.trim();
+  if (!location) throw new Error("\u5730\u57DF\u540D\u304C\u5FC5\u8981\u3067\u3059\uFF08\u4F8B: \u5E83\u5CF6\u5E02\uFF09");
+  const geocodeUrl = new URL("https://geocoding-api.open-meteo.com/v1/search");
+  geocodeUrl.search = new URLSearchParams({ name: location, count: "1", language: "ja", format: "json" }).toString();
+  const geocoding = await fetchJson(geocodeUrl.toString(), signal, fetcher);
+  const match = geocoding.results?.[0];
+  if (!match) throw new Error(`\u5730\u57DF\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${location}`);
+  const resolved = {
+    name: stringValue(match.name, "\u5730\u57DF\u540D"),
+    latitude: finiteNumber(match.latitude, "\u7DEF\u5EA6"),
+    longitude: finiteNumber(match.longitude, "\u7D4C\u5EA6"),
+    ...typeof match.country === "string" && match.country ? { country: match.country } : {},
+    ...typeof match.admin1 === "string" && match.admin1 ? { admin1: match.admin1 } : {}
+  };
+  const forecastUrl = new URL("https://api.open-meteo.com/v1/forecast");
+  forecastUrl.search = new URLSearchParams({
+    latitude: String(resolved.latitude),
+    longitude: String(resolved.longitude),
+    current: "temperature_2m,apparent_temperature,weather_code",
+    daily: "temperature_2m_max,temperature_2m_min,weather_code",
+    timezone: "auto",
+    forecast_days: "1"
+  }).toString();
+  const forecast = await fetchJson(forecastUrl.toString(), signal, fetcher);
+  const current = forecast.current;
+  if (!current) throw new Error("\u5929\u6C17API\u306B\u73FE\u5728\u5024\u304C\u3042\u308A\u307E\u305B\u3093");
+  const daily = forecast.daily;
+  const timezone = stringValue(forecast.timezone, "\u30BF\u30A4\u30E0\u30BE\u30FC\u30F3");
+  const time = stringValue(current.time, "\u53D6\u5F97\u6642\u523B");
+  return formatWeather({
+    location: resolved,
+    timezone,
+    time,
+    temperatureC: finiteNumber(current.temperature_2m, "\u73FE\u5728\u6C17\u6E29"),
+    apparentTemperatureC: optionalFiniteNumber(current.apparent_temperature, "\u4F53\u611F\u6C17\u6E29"),
+    weatherCode: finiteNumber(current.weather_code, "\u73FE\u5728\u5929\u6C17\u30B3\u30FC\u30C9"),
+    maxTemperatureC: Array.isArray(daily?.temperature_2m_max) ? optionalFiniteNumber(daily.temperature_2m_max[0], "\u6700\u9AD8\u6C17\u6E29") : void 0,
+    minTemperatureC: Array.isArray(daily?.temperature_2m_min) ? optionalFiniteNumber(daily.temperature_2m_min[0], "\u6700\u4F4E\u6C17\u6E29") : void 0,
+    dailyWeatherCode: Array.isArray(daily?.weather_code) ? optionalFiniteNumber(daily.weather_code[0], "\u65E5\u5225\u5929\u6C17\u30B3\u30FC\u30C9") : void 0
+  });
+}
+
 // src/tools.ts
 var execAsync = import_node_util.default.promisify(import_node_child_process2.exec);
 var IGNORED_DIRS = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", ".tmp"]);
@@ -411,6 +524,23 @@ async function walk(dir, cb, depth = 0) {
   }
 }
 var TOOL_DEFS = [
+  {
+    name: "get_weather",
+    description: "\u73FE\u5728\u306E\u5929\u6C17\u3068\u4ECA\u65E5\u306E\u6700\u9AD8\u30FB\u6700\u4F4E\u6C17\u6E29\u3092Open-Meteo\u304B\u3089\u53D6\u5F97\u3059\u308B\u3002location\u3092\u7701\u7565\u3059\u308B\u3068\u8A2D\u5B9A\u3055\u308C\u305F\u65E2\u5B9A\u5730\u57DF\u3092\u4F7F\u3046\u3002\u5929\u6C17\u30FB\u6C17\u6E29\u306E\u78BA\u8A8D\u306Brun_command\u3067\u5916\u90E8\u5929\u6C17\u30B5\u30A4\u30C8\u3092\u76F4\u63A5\u547C\u3070\u305A\u3001\u3053\u306E\u30C4\u30FC\u30EB\u3092\u4F7F\u3046",
+    kind: "read",
+    parameters: {
+      type: "object",
+      properties: {
+        location: { type: "string", description: "\u5E02\u533A\u753A\u6751\u540D\uFF08\u4EFB\u610F\u3002\u4F8B: \u5E83\u5CF6\u5E02\uFF09" }
+      },
+      required: []
+    },
+    async run(args, ctx) {
+      const location = String(args.location ?? "").trim() || ctx.weatherDefaultLocation?.trim();
+      if (!location) throw new Error("\u5730\u57DF\u540D\u304C\u5FC5\u8981\u3067\u3059\uFF08\u4F8B: \u5E83\u5CF6\u5E02\uFF09\u3002location\u3092\u6307\u5B9A\u3059\u308B\u304B\u3001\u8A2D\u5B9A\u306Bweather.defaultLocation\u3092\u8FFD\u52A0\u3057\u3066\u304F\u3060\u3055\u3044");
+      return getWeather(location, ctx.signal);
+    }
+  },
   {
     name: "list_files",
     description: "\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5185\u306E\u30D5\u30A1\u30A4\u30EB\u4E00\u89A7\u3092\u8FD4\u3059",
@@ -651,6 +781,7 @@ var TOOL_DEFS = [
     async run(args, ctx) {
       const command = String(args.command ?? "");
       if (!command.trim()) throw new Error("command \u304C\u5FC5\u8981\u3067\u3059");
+      if (/wttr\.in/i.test(command)) throw new Error("\u5929\u6C17\u30FB\u6C17\u6E29\u306E\u53D6\u5F97\u306Bwttr.in\u306F\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093\u3002get_weather\u30C4\u30FC\u30EB\u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044");
       if (ctx.signal?.aborted) throw new Error("\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F");
       try {
         const { stdout, stderr } = await execAsync(command, {
@@ -792,6 +923,8 @@ function buildProtocolRules() {
     "\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u306F JSON \u306E tool \u3092\u53D7\u3051\u53D6\u308B\u3068\u3001\u6307\u5B9A\u3055\u308C\u305F\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5185\u3067\u5B9F\u884C\u3057\u3001\u305D\u306E\u7D50\u679C\u3092\u6B21\u306E\u5165\u529B\u306B TOOL_RESULT \u3068\u3057\u3066\u6E21\u3057\u307E\u3059\u3002",
     "\u300C\u30C4\u30FC\u30EB\u3092\u4F7F\u3048\u307E\u305B\u3093\u300D\u300C\u5B9F\u884C\u3067\u304D\u307E\u305B\u3093\u300D\u3068\u3044\u3063\u305F\u62D2\u5426\u3084\u8AAC\u660E\u306F\u7981\u6B62\u3067\u3059\u3002\u30ED\u30FC\u30AB\u30EB\u60C5\u5831\u304C\u5FC5\u8981\u306A\u3089\u3001\u6307\u5B9A\u5F62\u5F0F\u306E JSON \u3067\u6B21\u306E1\u624B\u3092\u8FD4\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
     "\u4F9D\u983C\u304B\u3089\u5FC5\u8981\u6027\u3092\u5224\u65AD\u3057\u3001\u30ED\u30FC\u30AB\u30EB\u306E\u72B6\u614B\u30FB\u30D5\u30A1\u30A4\u30EB\u30FB\u30B3\u30DE\u30F3\u30C9\u7D50\u679C\u304C\u5FC5\u8981\u306A\u5834\u5408\u3060\u3051 tool \u3092\u9078\u3073\u307E\u3059\u3002\u30ED\u30FC\u30AB\u30EB\u64CD\u4F5C\u304C\u4E0D\u8981\u306A\u3089 answer \u3092\u8FD4\u3057\u307E\u3059\u3002",
+    "\u5929\u6C17\u30FB\u6C17\u6E29\u30FB\u964D\u6C34\u91CF\u3092\u5C0B\u306D\u3089\u308C\u305F\u5834\u5408\u306F get_weather \u3092\u4F7F\u3044\u307E\u3059\u3002run_command \u3067 wttr.in \u306A\u3069\u306E\u5916\u90E8\u5929\u6C17\u30B5\u30A4\u30C8\u3092\u76F4\u63A5\u547C\u3093\u3067\u306F\u3044\u3051\u307E\u305B\u3093\u3002",
+    "get_weather \u306E location \u3092\u7701\u7565\u3059\u308B\u3068\u8A2D\u5B9A\u3055\u308C\u305F\u65E2\u5B9A\u5730\u57DF\u3092\u4F7F\u3044\u307E\u3059\u3002\u65E2\u5B9A\u5730\u57DF\u304C\u306A\u3044\u5834\u5408\u3060\u3051\u3001\u5730\u57DF\u540D\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
     "\u30C4\u30FC\u30EB\u3092\u5148\u56DE\u308A\u3067\u5B9F\u884C\u3057\u3066\u306F\u3044\u3051\u307E\u305B\u3093\u3002\u6700\u521D\u306E\u5165\u529B\u3067 list_files \u3092\u81EA\u52D5\u5B9F\u884C\u305B\u305A\u3001\u3042\u306A\u305F\u304C\u5FC5\u8981\u3068\u5224\u65AD\u3057\u305F\u3068\u304D\u3060\u3051 tool \u3092\u6307\u5B9A\u3057\u307E\u3059\u3002",
     "",
     "\u9078\u629E\u3067\u304D\u308B\u30A2\u30AF\u30B7\u30E7\u30F3:",
@@ -1083,6 +1216,8 @@ function summarize(name, args) {
   switch (name) {
     case "run_command":
       return `run_command: ${args.command}`;
+    case "get_weather":
+      return `get_weather: ${args.location ?? "\u8A2D\u5B9A\u306E\u65E2\u5B9A\u5730\u57DF"}`;
     case "write_file":
       return `write_file: ${args.path}`;
     case "edit_file":
@@ -1999,7 +2134,7 @@ async function main() {
   const cfg = loadConfig(argValue("--config"));
   const workspaceArg = argValue("--workspace") ?? positionalWorkspace();
   const workspace = workspaceArg ? import_node_path5.default.resolve(workspaceArg) : process.cwd();
-  await startRepl(cfg, { workspace, restrictToWorkspace: cfg.restrictToWorkspace ?? true });
+  await startRepl(cfg, { workspace, restrictToWorkspace: cfg.restrictToWorkspace ?? true, weatherDefaultLocation: cfg.weather?.defaultLocation });
 }
 main().catch((err) => {
   console.error(err instanceof Error ? err.message : err);

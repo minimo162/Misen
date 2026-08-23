@@ -23,7 +23,7 @@ scripts\prepare-company-apps.cmd "\\fileserver\CompanyApps\company-apps-share" -
 版数を明示する場合は、コマンドプロンプトから次のように指定できます。
 
 ```cmd
-scripts\prepare-company-apps.cmd "\\fileserver\CompanyApps\company-apps-share" -Version 0.10.7 -CleanDestination
+scripts\prepare-company-apps.cmd "\\fileserver\CompanyApps\company-apps-share" -Version 0.10.8 -CleanDestination
 ```
 
 共有先には、`launcher`、`apps\coding-agent`、`runtime\node-v...\node.exe`、`start-coding-agent.cmd` だけが配置されます。利用者には共有フォルダーの読み取り権限だけを付与してください。
@@ -69,6 +69,10 @@ start-coding-agent.cmd --workspace "C:\Users\me\Documents\my-project"
 ## Edge接続の分離
 
 coding-agentは通常、空きポートと専用Edgeプロファイルを自動で割り当てます。既に動作中の別アプリのEdgeや固定CDPポートへは接続しません。`copilot.reuseExistingEdge` を `true` にした場合だけ、指定した `copilot.cdpPort` の既存Edgeへ明示的に接続します。
+
+## 天気取得
+
+天気・気温の質問は、地域を設定した `weather.defaultLocation`（例: `広島市`）を使ってOpen-Meteoから取得します。既定地域を使わない場合は質問に市区町村名を含めてください。
 ## 更新
 
 管理者が新しい版を公開するときは、`manifest.json` の版数を上げてから、管理者側の `scripts\prepare-company-apps.cmd` をもう一度実行してください。同じ版数のままだと利用者は更新を取得しません。利用者は同じ `start-coding-agent.cmd` を使い続けます。

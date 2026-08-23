@@ -5,6 +5,7 @@ import path from 'node:path'
 import util from 'node:util'
 import type { OpenAIToolSchema } from './llm'
 import { listManagedProcesses, readManagedProcessLog, startManagedProcess, stopManagedProcess } from './processes'
+import { getWeather } from './weather'
 
 const execAsync = util.promisify(exec)
 
@@ -15,6 +16,7 @@ const MAX_SEARCH_RESULTS = 200
 export interface ToolContext {
   workspace: string
   restrictToWorkspace: boolean
+  weatherDefaultLocation?: string
   signal?: AbortSignal
 }
 
@@ -181,6 +183,23 @@ async function walk(dir: string, cb: (file: string) => void, depth = 0): Promise
 }
 
 export const TOOL_DEFS: ToolDef[] = [
+  {
+    name: 'get_weather',
+    description: '現在の天気と今日の最高・最低気温をOpen-Meteoから取得する。locationを省略すると設定された既定地域を使う。天気・気温の確認にrun_commandで外部天気サイトを直接呼ばず、このツールを使う',
+    kind: 'read',
+    parameters: {
+      type: 'object',
+      properties: {
+        location: { type: 'string', description: '市区町村名（任意。例: 広島市）' }
+      },
+      required: []
+    },
+    async run(args, ctx) {
+      const location = String(args.location ?? '').trim() || ctx.weatherDefaultLocation?.trim()
+      if (!location) throw new Error('地域名が必要です（例: 広島市）。locationを指定するか、設定にweather.defaultLocationを追加してください')
+      return getWeather(location, ctx.signal)
+    }
+  },
   {
     name: 'list_files',
     description: 'ワークスペース内のファイル一覧を返す',
@@ -417,6 +436,7 @@ export const TOOL_DEFS: ToolDef[] = [
     async run(args, ctx) {
       const command = String(args.command ?? '')
       if (!command.trim()) throw new Error('command が必要です')
+      if (/wttr\.in/i.test(command)) throw new Error('天気・気温の取得にwttr.inは使用できません。get_weatherツールを使ってください')
       if (ctx.signal?.aborted) throw new Error('コマンド実行はキャンセルされました')
       try {
         const { stdout, stderr } = await execAsync(command, {

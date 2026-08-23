@@ -23,7 +23,7 @@ function argValue(flag: string): string | undefined {
 const cfg: AgentConfig = loadConfig(argValue('--config'))
 const workspaceArg = argValue('--workspace')
 const workspace = workspaceArg ? path.resolve(workspaceArg) : process.cwd()
-const ctx: ToolContext = { workspace, restrictToWorkspace: cfg.restrictToWorkspace ?? true }
+const ctx: ToolContext = { workspace, restrictToWorkspace: cfg.restrictToWorkspace ?? true, weatherDefaultLocation: cfg.weather?.defaultLocation }
 
 const here = typeof __dirname !== 'undefined' ? __dirname : path.dirname(process.argv[1] ?? '.')
 const indexCandidates = [
@@ -714,7 +714,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/info') {
-    json(res, 200, { model: cfg.model || (cfg.provider ?? ''), provider: cfg.provider ?? 'openai', workspace, project: path.basename(workspace), version: '0.10.7', distribution: readDistributionState() })
+    json(res, 200, { model: cfg.model || (cfg.provider ?? ''), provider: cfg.provider ?? 'openai', workspace, project: path.basename(workspace), version: '0.10.8', distribution: readDistributionState() })
     return
   }
 
@@ -1195,7 +1195,7 @@ function diagnosticForRun(run: RunData): Record<string, unknown> {
   const replaceWorkspace = (value: string): string => value.replaceAll(workspace, '<workspace>')
   return {
     generatedAt: new Date().toISOString(),
-    version: '0.10.7',
+    version: '0.10.8',
     workspace: '<workspace>',
     distribution: readDistributionState(),
     run: {
