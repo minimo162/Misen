@@ -714,7 +714,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/info') {
-    json(res, 200, { model: cfg.model || (cfg.provider ?? ''), provider: cfg.provider ?? 'openai', workspace, project: path.basename(workspace), version: '0.10.4', distribution: readDistributionState() })
+    json(res, 200, { model: cfg.model || (cfg.provider ?? ''), provider: cfg.provider ?? 'openai', workspace, project: path.basename(workspace), version: '0.10.6', distribution: readDistributionState() })
     return
   }
 
@@ -1195,7 +1195,7 @@ function diagnosticForRun(run: RunData): Record<string, unknown> {
   const replaceWorkspace = (value: string): string => value.replaceAll(workspace, '<workspace>')
   return {
     generatedAt: new Date().toISOString(),
-    version: '0.10.4',
+    version: '0.10.6',
     workspace: '<workspace>',
     distribution: readDistributionState(),
     run: {

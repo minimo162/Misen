@@ -4,7 +4,7 @@ import net from 'node:net'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { extractJsonReply, isConversationalRequest, runAgentTurn, type AgentIO, type TextBackend } from '../src/agent'
+import { extractJsonReply, runAgentTurn, type AgentIO, type TextBackend } from '../src/agent'
 import type { AgentConfig } from '../src/config'
 import type { ChatMessage } from '../src/llm'
 import { CopilotEdgeClient } from '../src/copilot'
@@ -197,40 +197,70 @@ async function testDenial(): Promise<void> {
   console.log('PASS denial')
 }
 
-async function testConversationalIntent(): Promise<void> {
-  assert.strictEqual(isConversationalRequest('こんにちは'), true)
-  assert.strictEqual(isConversationalRequest('こんにちは！'), true)
-  assert.strictEqual(isConversationalRequest('こんにちは、index.htmlを修正して'), false)
-  assert.strictEqual(isConversationalRequest('ファイルを確認して'), false)
-  console.log('PASS conversational-intent')
-}
-
-async function testConversationalWorkMode(): Promise<void> {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-'))
-  let backendCalls = 0
-  const toolEvents: string[] = []
-  const backend: TextBackend = {
-    name: 'smoke',
-    complete: async () => {
-      backendCalls++
-      return 'こんにちは！'
-    }
-  }
-  const result = await runAgentTurn({
-    cfg: { baseURL: '', model: '', copilot: { agentMode: true } },
+async function testCopilotChoosesFirstAction(): Promise<void> {
+  const answerRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-'))
+  const answerBackend = new FakeBackend(['{"answer":"こんにちは！"}\nAGENT_END'])
+  const answerEvents: string[] = []
+  const cfg = { baseURL: '', model: '', provider: 'copilot-edge' as const, copilot: { agentMode: true } }
+  const answer = await runAgentTurn({
+    cfg,
     messages: [],
     userInput: 'こんにちは',
-    ctx: makeCtx(root),
-    io: { ...ioStub(true), event: (event) => { if (event.type.startsWith('tool.')) toolEvents.push(event.type) } },
-    backend
+    ctx: makeCtx(answerRoot),
+    io: { ...ioStub(true), event: (event) => { if (event.type.startsWith('tool.')) answerEvents.push(event.type) } },
+    backend: answerBackend
   })
-  assert.strictEqual(result.reply, 'こんにちは！')
-  assert.strictEqual(result.aborted, false)
-  assert.strictEqual(backendCalls, 1)
-  assert.deepStrictEqual(toolEvents, [])
-  assert.deepStrictEqual(fs.readdirSync(root), [])
-  fs.rmSync(root, { recursive: true, force: true })
-  console.log('PASS conversational-work-mode')
+  assert.strictEqual(answer.reply, 'こんにちは！')
+  assert.strictEqual(answer.aborted, false)
+  assert.strictEqual(answerBackend.calls, 1)
+  assert.deepStrictEqual(answerEvents, [])
+  assert.ok(!answerBackend.prompts[0].includes('TOOL_RESULT(list_files)'))
+  assert.deepStrictEqual(fs.readdirSync(answerRoot), [])
+  fs.rmSync(answerRoot, { recursive: true, force: true })
+
+  const toolRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-'))
+  const toolBackend = new FakeBackend([
+    '{"tool":"list_files","args":{}}\nAGENT_END',
+    '{"answer":"調査しました"}\nAGENT_END'
+  ])
+  const toolEvents: string[] = []
+  const toolResult = await runAgentTurn({
+    cfg,
+    messages: [],
+    userInput: 'ファイル一覧を確認して',
+    ctx: makeCtx(toolRoot),
+    io: { ...ioStub(true), event: (event) => { if (event.type.startsWith('tool.')) toolEvents.push(event.type) } },
+    backend: toolBackend
+  })
+  assert.strictEqual(toolResult.reply, '調査しました')
+  assert.strictEqual(toolResult.aborted, false)
+  assert.strictEqual(toolBackend.calls, 2)
+  assert.ok(toolEvents.includes('tool.requested'))
+  assert.ok(!toolBackend.prompts[0].includes('TOOL_RESULT(list_files)'))
+  assert.ok(toolBackend.prompts[1].includes('TOOL_RESULT(list_files)'))
+  fs.rmSync(toolRoot, { recursive: true, force: true })
+
+  const repeatRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-'))
+  const repeatBackend = new FakeBackend([
+    '{"tool":"list_files","args":{}}\nAGENT_END',
+    '{"tool":"list_files","args":{"path":".","glob":"**/*"}}\nAGENT_END',
+    '{"tool":"list_files","args":{"path":"."}}\nAGENT_END'
+  ])
+  const repeatEvents: string[] = []
+  const repeat = await runAgentTurn({
+    cfg,
+    messages: [],
+    userInput: 'ファイル一覧を確認して',
+    ctx: makeCtx(repeatRoot),
+    io: { ...ioStub(true), event: (event) => { if (event.type.startsWith('tool.')) repeatEvents.push(event.type) } },
+    backend: repeatBackend
+  })
+  assert.strictEqual(repeat.aborted, false)
+  assert.ok(repeat.reply.includes('同じツール操作'))
+  assert.strictEqual(repeatBackend.calls, 3)
+  assert.strictEqual(repeatEvents.filter((type) => type === 'tool.requested').length, 1)
+  fs.rmSync(repeatRoot, { recursive: true, force: true })
+  console.log('PASS copilot-tool-choice')
 }
 async function testProtocolParsing(): Promise<void> {
   assert.strictEqual(extractJsonReply('{"answer":"hi"}')?.answer, 'hi')
@@ -382,8 +412,7 @@ async function testUiContract(): Promise<void> {
   await testAgentLoop()
   await testDenial()
   await testProtocolParsing()
-  await testConversationalIntent()
-  await testConversationalWorkMode()
+  await testCopilotChoosesFirstAction()
   await testCopilotChunkFallback()
   await testCopilotLoop()
   await testMaxIterationHistory()
