@@ -256,8 +256,7 @@ async function runCopilotTurn(opts: {
       io.print('[warn] 応答を JSON として解釈できなかったため、内容を取り出して回答とします')
       return { reply: unwrapAnswer(raw), messages: [{ role: 'assistant', content: raw }], aborted: false }
     }
-    const noActionResult = !steps.some((s) => s.startsWith('TOOL_RESULT'))
-    if (parsed.answer !== undefined && refusals < 3 && (noActionResult || /使用でき|実行できません|共有して|確認できません/.test(parsed.answer))) {
+    if (parsed.answer !== undefined && refusals < 3 && (/使用でき|実行できません|共有して|確認できません|アップロードして/.test(parsed.answer))) {
       refusals++
       if (refusals >= 2) steps.push('SYSTEM: read_file や run_command は実際に動作します。断らず JSON でアクションを返してください。')
       continue

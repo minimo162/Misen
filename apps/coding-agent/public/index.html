@@ -76,8 +76,8 @@ function addMsg(role,content){
  const b=document.createElement('div');b.className=role==='user'?'bubble-user':'assistant-text';b.textContent=content;
  w.appendChild(b);chat.appendChild(w);scrollEnd();
 }
-function thinkLine(){const d=document.createElement('div');d.className='msgwrap assistant';d.innerHTML='<span class="think"><i></i><i></i><i></i></span>';chat.appendChild(d);scrollEnd();return d}
-function logLine(el,text){let lb=el.querySelector('.log');if(!lb){lb=document.createElement('div');lb.className='statusline';el.appendChild(lb)}lb.textContent+=text+'\n';lb.scrollTop=lb.scrollHeight;scrollEnd()}
+function thinkLine(){const d=document.createElement('div');d.className='msgwrap assistant';d.style.display='block';d.style.width='100%';d.innerHTML='<div class="think"><i></i><i></i><i></i> Copilot が考えています…</div>';chat.appendChild(d);scrollEnd();return d}
+function logLine(el,text){let lb=el.querySelector('.log');if(!lb){const th=el.querySelector('.think');if(th)th.remove();lb=document.createElement('div');lb.className='statusline log';el.appendChild(lb)}lb.textContent+=text+'\n';lb.scrollTop=lb.scrollHeight;scrollEnd()}
 function scrollEnd(){chat.scrollTop=chat.scrollHeight}
 function setEmptyState(){setEmpty(chat.querySelectorAll('.msgwrap').length===0)}
 async function loadSessions(){try{const r=await jget('/api/sessions');sessions=r.sessions;if(!r.sessions.find(s=>s.id===activeId)&&r.sessions.length)selectSession(r.sessions[0].id);renderSessions(r.active)}catch(e){}}

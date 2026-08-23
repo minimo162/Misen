@@ -562,8 +562,7 @@ async function runCopilotTurn(opts) {
       io.print("[warn] \u5FDC\u7B54\u3092 JSON \u3068\u3057\u3066\u89E3\u91C8\u3067\u304D\u306A\u304B\u3063\u305F\u305F\u3081\u3001\u5185\u5BB9\u3092\u53D6\u308A\u51FA\u3057\u3066\u56DE\u7B54\u3068\u3057\u307E\u3059");
       return { reply: unwrapAnswer(raw), messages: [{ role: "assistant", content: raw }], aborted: false };
     }
-    const noActionResult = !steps.some((s) => s.startsWith("TOOL_RESULT"));
-    if (parsed.answer !== void 0 && refusals < 3 && (noActionResult || /使用でき|実行できません|共有して|確認できません/.test(parsed.answer))) {
+    if (parsed.answer !== void 0 && refusals < 3 && /使用でき|実行できません|共有して|確認できません|アップロードして/.test(parsed.answer)) {
       refusals++;
       if (refusals >= 2) steps.push("SYSTEM: read_file \u3084 run_command \u306F\u5B9F\u969B\u306B\u52D5\u4F5C\u3057\u307E\u3059\u3002\u65AD\u3089\u305A JSON \u3067\u30A2\u30AF\u30B7\u30E7\u30F3\u3092\u8FD4\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
       continue;
