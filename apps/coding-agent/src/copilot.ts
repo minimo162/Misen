@@ -1,4 +1,5 @@
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
+import net from 'node:net'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { AgentConfig } from './config'
@@ -19,6 +20,7 @@ interface CdpTarget {
 export interface CopilotSettings {
   url: string
   cdpPort: number
+  reuseExistingEdge: boolean
   maxPromptChars: number
   pollIntervalMs: number
   responseTimeoutSec: number
@@ -31,9 +33,14 @@ export interface CopilotSettings {
 
 export function resolveCopilotSettings(cfg: AgentConfig): CopilotSettings {
   const c = cfg.copilot ?? {}
+  const reuseExistingEdge = c.reuseExistingEdge === true
+  const configuredPort = typeof c.cdpPort === 'number' && Number.isInteger(c.cdpPort) && c.cdpPort > 0 ? c.cdpPort : 9445
   return {
     url: c.url ?? 'https://m365.cloud.microsoft/chat/',
-    cdpPort: c.cdpPort ?? 9445,
+    // A fixed port is only honored when the user explicitly opts into attaching to an existing Edge.
+    // The normal path allocates a loopback port for an Edge process owned by this client.
+    cdpPort: reuseExistingEdge ? configuredPort : 0,
+    reuseExistingEdge,
     maxPromptChars: c.maxPromptChars ?? 120000,
     pollIntervalMs: Math.max(500, c.pollIntervalMs ?? 900),
     responseTimeoutSec: c.responseTimeoutSec ?? 300,
@@ -46,7 +53,6 @@ export function resolveCopilotSettings(cfg: AgentConfig): CopilotSettings {
       : ['GPT 5.6 Think Deeper', 'Opus', 'Think Deeper']
   }
 }
-
 const VISIBLE_JS = `const __vis=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};`
 const DOCS_JS = `const __docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)__docs.push(f.contentDocument);}catch(e){}}`
 
@@ -338,6 +344,41 @@ async function devToolsUp(port: number): Promise<boolean> {
   }
 }
 
+async function findFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer()
+    server.once('error', reject)
+    server.listen({ host: '127.0.0.1', port: 0 }, () => {
+      const address = server.address()
+      const port = typeof address === 'object' && address ? address.port : 0
+      server.close((error) => {
+        if (error) reject(error)
+        else if (port > 0) resolve(port)
+        else reject(new Error('Edge用の空きポートを取得できませんでした'))
+      })
+    })
+  })
+}
+
+function profileIsInUse(profileDir: string): boolean {
+  if (['SingletonLock', 'SingletonCookie', 'SingletonSocket'].some((name) => fs.existsSync(path.join(profileDir, name)))) return true
+  if (process.platform !== 'win32') return false
+  try {
+    const needle = path.resolve(profileDir).replace(/[\\/]+$/, '').toLowerCase()
+    const marker = `--user-data-dir=${needle}`
+    const output = execFileSync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      'Get-CimInstance Win32_Process -Filter "Name=\'msedge.exe\'" | Select-Object -ExpandProperty CommandLine'
+    ], { encoding: 'utf8', timeout: 3000, windowsHide: true })
+    return output.split(/\r?\n/).some((line) => {
+      const normalized = line.toLowerCase().replaceAll('"', '')
+      const index = normalized.indexOf(marker)
+      return index >= 0 && (index + marker.length === normalized.length || /\s/.test(normalized[index + marker.length]))
+    })
+  } catch {
+    return true
+  }
+}
 function findEdgePath(): string {
   const roots = [process.env['ProgramFiles(x86)'], process.env.ProgramFiles, process.env.LOCALAPPDATA].filter(Boolean) as string[]
   for (const root of roots) {
@@ -352,6 +393,8 @@ export class CopilotEdgeClient {
   private s: CopilotSettings
   private cdp: CdpConnection | null = null
   private clipGranted = false
+  private ownedEdgePid: number | null = null
+  private edgeProfileDir: string | null = null
 
   constructor(cfg: AgentConfig) {
     this.s = resolveCopilotSettings(cfg)
@@ -425,9 +468,24 @@ export class CopilotEdgeClient {
       fs.writeFileSync(prefPath, JSON.stringify(j), 'utf8')
     } catch {}
   }
+  private chooseEdgeProfile(): string {
+    const root = path.join(process.env.APPDATA ?? process.env.USERPROFILE ?? '.', 'CompanyApps', 'coding-agent')
+    fs.mkdirSync(root, { recursive: true })
+    const stable = path.join(root, 'edge-profile')
+    if (!profileIsInUse(stable)) return stable
+    return fs.mkdtempSync(path.join(root, 'edge-profile-session-'))
+  }
+
   private async ensureEdge(): Promise<void> {
-    if (await devToolsUp(this.s.cdpPort)) return
-    const userDataDir = path.join(process.env.APPDATA ?? process.env.USERPROFILE ?? '.', 'CompanyApps', 'coding-agent', 'edge-profile')
+    if (this.s.reuseExistingEdge) {
+      if (this.s.cdpPort > 0 && await devToolsUp(this.s.cdpPort)) return
+      if (this.s.cdpPort <= 0) throw new Error('既存Edge接続を再利用するには copilot.cdpPort を指定してください')
+    } else {
+      if (this.ownedEdgePid !== null && await devToolsUp(this.s.cdpPort)) return
+      this.s.cdpPort = await findFreePort()
+    }
+    const userDataDir = this.edgeProfileDir ?? this.chooseEdgeProfile()
+    this.edgeProfileDir = userDataDir
     this.hardenPreferences(userDataDir)
     const args = [
       `--remote-debugging-port=${this.s.cdpPort}`,
@@ -446,15 +504,17 @@ export class CopilotEdgeClient {
     ]
     if (this.s.displayMode === 'minimized') args.push('--window-position=-32000,-32000', '--window-size=1280,900')
     args.push(this.s.url)
-    spawn(findEdgePath(), args, { detached: true, stdio: 'ignore' }).unref()
+    const child = spawn(findEdgePath(), args, { detached: true, stdio: 'ignore' })
+    this.ownedEdgePid = child.pid ?? null
+    child.unref()
     const deadline = Date.now() + 30000
     while (Date.now() < deadline) {
       if (await devToolsUp(this.s.cdpPort)) return
       await sleep(500)
     }
-    throw new Error(`Edge DevTools Protocol が起動しませんでした (port=${this.s.cdpPort})。専用プロファイルの Edge ウィンドウをすべて閉じてから再実行してください。`)
+    const mode = this.s.reuseExistingEdge ? '指定されたEdge' : '専用Edge'
+    throw new Error(`${mode}のDevTools Protocolが起動しませんでした (port=${this.s.cdpPort})。他アプリのEdgeには接続せず、専用プロファイルで再試行してください。`)
   }
-
   private async listTargets(): Promise<CdpTarget[]> {
     try {
       const res = await fetch(`http://127.0.0.1:${this.s.cdpPort}/json`, { signal: AbortSignal.timeout(5000) })
@@ -471,7 +531,7 @@ export class CopilotEdgeClient {
       const targets = await this.listTargets()
       const pages = targets.filter((t) => t.type === 'page' && t.webSocketDebuggerUrl && !isLocalUrl(t.url))
       const preferred = pages.find((t) => (host && t.url?.includes(host)) || t.url?.toLowerCase().includes('copilot'))
-      const fallback = pages.find((t) => /^https?:/i.test(t.url ?? ''))
+      const fallback = this.s.reuseExistingEdge ? pages.find((t) => /^https?:/i.test(t.url ?? '')) : undefined
       const picked = preferred ?? fallback
       if (picked) {
         this.cdp?.close()

@@ -7,7 +7,8 @@ import path from 'node:path'
 import { extractJsonReply, runAgentTurn, type AgentIO, type TextBackend } from '../src/agent'
 import type { AgentConfig } from '../src/config'
 import type { ChatMessage } from '../src/llm'
-import { CopilotEdgeClient } from '../src/copilot'
+import { CopilotEdgeClient, resolveCopilotSettings } from '../src/copilot'
+
 import { getFileSnapshot, parseToolResultMeta, rollbackFileChange, TOOL_DEFS, type ToolContext } from '../src/tools'
 import { listApprovals, requestApproval, resolveApproval } from '../src/approvals'
 
@@ -291,6 +292,16 @@ class FakeBackend implements TextBackend {
   }
 }
 
+async function testCopilotEdgeIsolation(): Promise<void> {
+  const base = { baseURL: '', model: '', provider: 'copilot-edge' as const }
+  const isolated = resolveCopilotSettings({ ...base, copilot: { cdpPort: 9444 } })
+  assert.strictEqual(isolated.reuseExistingEdge, false)
+  assert.strictEqual(isolated.cdpPort, 0)
+  const attached = resolveCopilotSettings({ ...base, copilot: { cdpPort: 9444, reuseExistingEdge: true } })
+  assert.strictEqual(attached.reuseExistingEdge, true)
+  assert.strictEqual(attached.cdpPort, 9444)
+  console.log('PASS copilot-edge-isolation')
+}
 async function testCopilotChunkFallback(): Promise<void> {
   const client = new CopilotEdgeClient({ baseURL: '', model: '', provider: 'copilot-edge', copilot: { maxPromptChars: 5000 } })
   type Internals = {
@@ -402,7 +413,7 @@ async function testUiContract(): Promise<void> {
   const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1]
   assert.ok(script, 'UI script missing')
   new Function(script)
-  for (const required of ['run-plan', 'run-pause', 'run-resume', 'run-retry', 'run-complete', '実際の差分を表示', '差分の続き', 'preview-frame', 'verification-list', '診断JSON', 'approval-meta', 'parentRunId', '/api/runs/', '/api/changes/', 'compositionstart', 'aria-live', '@media (max-width: 720px)']) assert.ok(html.includes(required), `UI contract missing: ${required}`)
+  for (const required of ['run-plan', 'run-eyebrow', 'run-pause', 'run-resume', 'run-retry', 'run-complete', '回答完了', 'activity-details', '実際の差分を表示', '差分の続き', 'preview-frame', 'verification-list', '診断JSON', 'approval-meta', 'parentRunId', '/api/runs/', '/api/changes/', 'compositionstart', 'aria-live', '@media (max-width: 720px)']) assert.ok(html.includes(required), `UI contract missing: ${required}`)
   console.log('PASS ui-contract')
 }
 
@@ -413,6 +424,7 @@ async function testUiContract(): Promise<void> {
   await testDenial()
   await testProtocolParsing()
   await testCopilotChoosesFirstAction()
+  await testCopilotEdgeIsolation()
   await testCopilotChunkFallback()
   await testCopilotLoop()
   await testMaxIterationHistory()
