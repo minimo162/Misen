@@ -30,6 +30,7 @@ $AllowPatterns = @(
     '^start\.cmd$',
     '^manifest\.json$',
     '^dist/[^/]+\.js$',
+    '^public/index\.html$',
     ('^' + [regex]::Escape($AppName) + '\.cmd$'),
     '^runtime/node\.exe$'
 )
