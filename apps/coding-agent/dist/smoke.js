@@ -740,6 +740,11 @@ function stripLineNumbered(rest) {
   return out;
 }
 var END_MARKER = "AGENT_END";
+var CONVERSATIONAL_ONLY = /^(?:こんにちは|こんばんは|おはよう(?:ございます)?|お疲れ(?:さま|様)(?:です)?|ありがとう(?:ございます)?|どうも|よろしく(?:お願いします)?|やあ|ハロー|hello|hi|hey|thanks?)[\s!！。、，,.?？]*$/iu;
+function isConversationalRequest(input) {
+  const text = input.trim().replace(/\s+/g, " ");
+  return text.length > 0 && text.length <= 80 && CONVERSATIONAL_ONLY.test(text);
+}
 function shouldCancel(io) {
   return io.signal?.aborted === true || io.isCanceled?.() === true;
 }
@@ -764,6 +769,7 @@ function buildProtocolRules() {
     "\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u306F JSON \u306E tool \u3092\u53D7\u3051\u53D6\u308B\u3068\u3001\u6307\u5B9A\u3055\u308C\u305F\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5185\u3067\u5B9F\u884C\u3057\u3001\u305D\u306E\u7D50\u679C\u3092\u6B21\u306E\u5165\u529B\u306B TOOL_RESULT \u3068\u3057\u3066\u6E21\u3057\u307E\u3059\u3002",
     "\u300C\u30C4\u30FC\u30EB\u3092\u4F7F\u3048\u307E\u305B\u3093\u300D\u300C\u5B9F\u884C\u3067\u304D\u307E\u305B\u3093\u300D\u3068\u3044\u3063\u305F\u62D2\u5426\u3084\u8AAC\u660E\u306F\u7981\u6B62\u3067\u3059\u3002\u5FC5\u305A\u6307\u5B9A\u5F62\u5F0F\u306E JSON \u3067\u6B21\u306E1\u624B\u3092\u8FD4\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
     "\u3042\u306A\u305F\u306E\u4ED5\u4E8B\u306F\u3001\u72B6\u6CC1\u306B\u5FDC\u3058\u3066\u6B21\u306B\u884C\u3046\u3079\u304D\u30A2\u30AF\u30B7\u30E7\u30F3\u3092 1 \u3064\u9078\u3073 JSON \u3067\u5831\u544A\u3059\u308B\u3053\u3068\u3067\u3059\u3002",
+    '\u6328\u62F6\u30FB\u304A\u793C\u30FB\u96D1\u8AC7\u3060\u3051\u3067\u30ED\u30FC\u30AB\u30EB\u4F5C\u696D\u306E\u4F9D\u983C\u304C\u306A\u3044\u5834\u5408\u306F\u3001\u30C4\u30FC\u30EB\u3092\u4F7F\u308F\u305A {"answer":"..."} \u3067\u8FD4\u3057\u307E\u3059\u3002',
     "",
     "\u9078\u629E\u3067\u304D\u308B\u30A2\u30AF\u30B7\u30E7\u30F3:",
     toolDocs,
@@ -1977,6 +1983,13 @@ async function testDenial() {
   );
   console.log("PASS denial");
 }
+async function testConversationalIntent() {
+  import_node_assert.default.strictEqual(isConversationalRequest("\u3053\u3093\u306B\u3061\u306F"), true);
+  import_node_assert.default.strictEqual(isConversationalRequest("\u3053\u3093\u306B\u3061\u306F\uFF01"), true);
+  import_node_assert.default.strictEqual(isConversationalRequest("\u3053\u3093\u306B\u3061\u306F\u3001index.html\u3092\u4FEE\u6B63\u3057\u3066"), false);
+  import_node_assert.default.strictEqual(isConversationalRequest("\u30D5\u30A1\u30A4\u30EB\u3092\u78BA\u8A8D\u3057\u3066"), false);
+  console.log("PASS conversational-intent");
+}
 async function testProtocolParsing() {
   import_node_assert.default.strictEqual(extractJsonReply('{"answer":"hi"}')?.answer, "hi");
   const fenced = extractJsonReply('\u8AAC\u660E\u6587\n```json\n{"tool":"read_file","args":{"path":"a.txt"}}\n```\nAGENT_END');
@@ -2113,6 +2126,7 @@ async function testUiContract() {
   await testAgentLoop();
   await testDenial();
   await testProtocolParsing();
+  await testConversationalIntent();
   await testCopilotChunkFallback();
   await testCopilotLoop();
   await testMaxIterationHistory();

@@ -4,7 +4,7 @@ import net from 'node:net'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { extractJsonReply, runAgentTurn, type AgentIO, type TextBackend } from '../src/agent'
+import { extractJsonReply, isConversationalRequest, runAgentTurn, type AgentIO, type TextBackend } from '../src/agent'
 import type { AgentConfig } from '../src/config'
 import type { ChatMessage } from '../src/llm'
 import { CopilotEdgeClient } from '../src/copilot'
@@ -197,6 +197,13 @@ async function testDenial(): Promise<void> {
   console.log('PASS denial')
 }
 
+async function testConversationalIntent(): Promise<void> {
+  assert.strictEqual(isConversationalRequest('こんにちは'), true)
+  assert.strictEqual(isConversationalRequest('こんにちは！'), true)
+  assert.strictEqual(isConversationalRequest('こんにちは、index.htmlを修正して'), false)
+  assert.strictEqual(isConversationalRequest('ファイルを確認して'), false)
+  console.log('PASS conversational-intent')
+}
 async function testProtocolParsing(): Promise<void> {
   assert.strictEqual(extractJsonReply('{"answer":"hi"}')?.answer, 'hi')
 
@@ -347,6 +354,7 @@ async function testUiContract(): Promise<void> {
   await testAgentLoop()
   await testDenial()
   await testProtocolParsing()
+  await testConversationalIntent()
   await testCopilotChunkFallback()
   await testCopilotLoop()
   await testMaxIterationHistory()

@@ -5,7 +5,7 @@ import util from 'node:util'
 import fs from 'node:fs'
 import path from 'node:path'
 import { loadConfig, type AgentConfig } from './config'
-import { runAgentTurn, type AgentEvent, type AgentIO, type TextBackend } from './agent'
+import { isConversationalRequest, runAgentTurn, type AgentEvent, type AgentIO, type TextBackend } from './agent'
 import { CopilotEdgeClient } from './copilot'
 import type { ChatMessage } from './llm'
 import { getFileSnapshot, rollbackFileChange, type ToolContext } from './tools'
@@ -227,6 +227,7 @@ const DEFAULT_PLAN: PlanStep[] = [
 ]
 
 function createRun(session: SessionData, request: string, mode: 'chat' | 'work', parentRunId?: string): RunData {
+  const effectiveMode: 'chat' | 'work' = mode === 'work' && isConversationalRequest(request) ? 'chat' : mode
   const now = Date.now()
   const run: RunData = {
     id: makeRunId(),
@@ -234,7 +235,7 @@ function createRun(session: SessionData, request: string, mode: 'chat' | 'work',
     ...(parentRunId ? { parentRunId } : {}),
     title: request.slice(0, 40) || '新しい実行',
     request,
-    mode,
+    mode: effectiveMode,
     status: 'queued',
     phase: 'request',
     currentStep: '依頼を受け付けました',
@@ -714,7 +715,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/info') {
-    json(res, 200, { model: cfg.model || (cfg.provider ?? ''), provider: cfg.provider ?? 'openai', workspace, project: path.basename(workspace), version: '0.10.2', distribution: readDistributionState() })
+    json(res, 200, { model: cfg.model || (cfg.provider ?? ''), provider: cfg.provider ?? 'openai', workspace, project: path.basename(workspace), version: '0.10.3', distribution: readDistributionState() })
     return
   }
 
@@ -917,7 +918,7 @@ const server = http.createServer(async (req, res) => {
     run.resumeCount = base.resumeCount + 1
     run.checkpoint = base.checkpoint
     addRunEvent(run, { type: 'run.resumed', message: `Run ${base.id} のチェックポイントから再開しました`, metadata: { parentRunId: base.id } })
-    const result = await executeRun(run, session, base.request, base.mode)
+    const result = await executeRun(run, session, base.request, run.mode)
     json(res, 200, { reply: result.reply, aborted: result.aborted, resumedFrom: base.id, run: runSnapshot(run) })
     return
   }
@@ -937,7 +938,7 @@ const server = http.createServer(async (req, res) => {
     run.resumeCount = base.resumeCount + 1
     run.checkpoint = base.checkpoint
     addRunEvent(run, { type: 'run.retried', message: `Run ${base.id} を再試行しました`, metadata: { parentRunId: base.id } })
-    const result = await executeRun(run, session, input, base.mode)
+    const result = await executeRun(run, session, input, run.mode)
     json(res, 200, { reply: result.reply, aborted: result.aborted, retriedFrom: base.id, run: runSnapshot(run) })
     return
   }
@@ -1090,7 +1091,7 @@ const server = http.createServer(async (req, res) => {
     const run = createRun(s, input, mode, parentRunId)
     addRunEvent(run, { type: 'run.created', message: `実行を開始しました: ${run.title}` })
     if (parentRunId) addRunEvent(run, { type: 'followup.created', message: `Run ${parentRunId} への修正指示として開始しました`, metadata: { parentRunId } })
-    const result = await executeRun(run, s, input, mode)
+    const result = await executeRun(run, s, input, run.mode)
     json(res, 200, {
       reply: result.reply || (result.aborted ? '(中断しました。履歴は保持されています)' : ''),
       aborted: result.aborted,
@@ -1195,7 +1196,7 @@ function diagnosticForRun(run: RunData): Record<string, unknown> {
   const replaceWorkspace = (value: string): string => value.replaceAll(workspace, '<workspace>')
   return {
     generatedAt: new Date().toISOString(),
-    version: '0.10.2',
+    version: '0.10.3',
     workspace: '<workspace>',
     distribution: readDistributionState(),
     run: {
