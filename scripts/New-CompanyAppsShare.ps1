@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory = $true)][string]$Destination,
@@ -47,9 +47,12 @@ if ($destinationComparable.StartsWith($sourceComparable, [System.StringCompariso
 
 $stageRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('company-apps-share-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 $stageApp = Join-Path $stageRoot "apps\$AppName"
-New-Item -ItemType Directory -Force -Path $stageApp | Out-Null
+New-Item -ItemType Directory -Force -Path $stageApp -WhatIf:$false | Out-Null
 
+$stageWhatIfPreference = $WhatIfPreference
 try {
+    # 一時ステージングはWhatIfでも生成して整合性を検証し、共有先へのコピーだけを抑止する。
+    $WhatIfPreference = $false
     Write-Step "ステージング: $stageRoot"
     New-Item -ItemType Directory -Force -Path (Join-Path $stageRoot 'launcher') | Out-Null
     New-Item -ItemType Directory -Force -Path (Join-Path $stageRoot "runtime\$runtimeName") | Out-Null
@@ -71,9 +74,17 @@ try {
     New-Item -ItemType Directory -Force -Path (Join-Path $stageApp 'public') | Out-Null
     Copy-Item -LiteralPath $publicSource -Destination (Join-Path $stageApp 'public\index.html') -Force
 
-    $manifest.version = $Version
-    $manifest.publishId = [guid]::NewGuid().ToString('N')
-    $manifest.publishedAt = (Get-Date).ToUniversalTime().ToString('o')
+    $manifestMap = [ordered]@{}
+    foreach ($property in $manifest.PSObject.Properties) { $manifestMap[$property.Name] = $property.Value }
+    $manifestMap['version'] = $Version
+    $manifestMap['publishId'] = [guid]::NewGuid().ToString('N')
+    $manifestMap['publishedAt'] = (Get-Date).ToUniversalTime().ToString('o')
+    $manifestMap['files'] = [ordered]@{}
+    foreach ($relative in @('dist\server.js', 'dist\index.js', 'public\index.html')) {
+        $filePath = Join-Path $stageApp $relative
+        if (Test-Path -LiteralPath $filePath -PathType Leaf) { $manifestMap['files'][$relative] = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant() }
+    }
+    $manifest = $manifestMap
     Write-Utf8NoBom (Join-Path $stageApp 'manifest.json') (($manifest | ConvertTo-Json -Depth 10) + [Environment]::NewLine)
     Copy-Item -LiteralPath $RuntimeExe -Destination (Join-Path $stageRoot "runtime\$runtimeName\node.exe") -Force
 
@@ -86,6 +97,7 @@ try {
         if (-not (Test-Path -LiteralPath (Join-Path $stageRoot $relative) -PathType Leaf)) { Fail "ステージング必須ファイルが不足しています: $relative" }
     }
 
+    $WhatIfPreference = $stageWhatIfPreference
     if (-not $WhatIfPreference) {
         if (-not (Test-Path -LiteralPath $destinationFull)) { New-Item -ItemType Directory -Force -Path $destinationFull | Out-Null }
         if ($CleanDestination) {
@@ -106,6 +118,6 @@ try {
     }
 } finally {
     if (Test-Path -LiteralPath $stageRoot) {
-        try { Remove-Item -LiteralPath $stageRoot -Recurse -Force -ErrorAction SilentlyContinue } catch {}
+        try { Remove-Item -LiteralPath $stageRoot -Recurse -Force -WhatIf:$false -ErrorAction SilentlyContinue } catch {}
     }
 }

@@ -37,7 +37,7 @@ interface CompletionResponse {
   }>
 }
 
-function postJson(url: string, body: string, headers: Record<string, string>): Promise<{ status: number; text: string }> {
+function postJson(url: string, body: string, headers: Record<string, string>, signal?: AbortSignal): Promise<{ status: number; text: string }> {
   return new Promise((resolve, reject) => {
     const u = new URL(url)
     const mod = u.protocol === 'https:' ? https : http
@@ -54,12 +54,16 @@ function postJson(url: string, body: string, headers: Record<string, string>): P
       }
     )
     req.setTimeout(0)
+    const abort = () => req.destroy(new Error('LLM request aborted'))
+    if (signal?.aborted) abort()
+    signal?.addEventListener('abort', abort, { once: true })
     req.on('error', reject)
+    req.on('close', () => signal?.removeEventListener('abort', abort))
     req.end(body)
   })
 }
 
-export async function chat(cfg: AgentConfig, messages: ChatMessage[], tools: OpenAIToolSchema[]): Promise<ChatMessage> {
+export async function chat(cfg: AgentConfig, messages: ChatMessage[], tools: OpenAIToolSchema[], signal?: AbortSignal): Promise<ChatMessage> {
   const url = cfg.baseURL.replace(/\/+$/, '') + '/chat/completions'
   const headers: Record<string, string> = { 'content-type': 'application/json' }
   const key = resolveApiKey(cfg)
@@ -71,7 +75,7 @@ export async function chat(cfg: AgentConfig, messages: ChatMessage[], tools: Ope
     ...(cfg.chatTemplateKwargs ? { chat_template_kwargs: cfg.chatTemplateKwargs } : {}),
     ...(tools.length > 0 ? { tools } : {})
   })
-  const res = await postJson(url, payload, headers)
+  const res = await postJson(url, payload, headers, signal)
   if (res.status < 200 || res.status >= 300) {
     throw new Error(`LLM API エラー ${res.status}: ${res.text.slice(0, 400)}`)
   }

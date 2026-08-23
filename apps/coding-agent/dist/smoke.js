@@ -40,7 +40,7 @@ function resolveApiKey(cfg) {
 }
 
 // src/llm.ts
-function postJson(url, body, headers) {
+function postJson(url, body, headers, signal) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     const mod = u.protocol === "https:" ? import_node_https.default : import_node_http.default;
@@ -57,11 +57,15 @@ function postJson(url, body, headers) {
       }
     );
     req.setTimeout(0);
+    const abort = () => req.destroy(new Error("LLM request aborted"));
+    if (signal?.aborted) abort();
+    signal?.addEventListener("abort", abort, { once: true });
     req.on("error", reject);
+    req.on("close", () => signal?.removeEventListener("abort", abort));
     req.end(body);
   });
 }
-async function chat(cfg, messages, tools) {
+async function chat(cfg, messages, tools, signal) {
   const url = cfg.baseURL.replace(/\/+$/, "") + "/chat/completions";
   const headers = { "content-type": "application/json" };
   const key = resolveApiKey(cfg);
@@ -73,7 +77,7 @@ async function chat(cfg, messages, tools) {
     ...cfg.chatTemplateKwargs ? { chat_template_kwargs: cfg.chatTemplateKwargs } : {},
     ...tools.length > 0 ? { tools } : {}
   });
-  const res = await postJson(url, payload, headers);
+  const res = await postJson(url, payload, headers, signal);
   if (res.status < 200 || res.status >= 300) {
     throw new Error(`LLM API \u30A8\u30E9\u30FC ${res.status}: ${res.text.slice(0, 400)}`);
   }
@@ -449,7 +453,7 @@ var TOOL_DEFS = [
       await import_promises.default.mkdir(import_node_path.default.dirname(abs), { recursive: true });
       await import_promises.default.writeFile(abs, content, "utf8");
       const readBack = await import_promises.default.readFile(abs, "utf8");
-      fileSnapshots.set(abs, { before, afterHash: sha256(readBack), createdAt: Date.now() });
+      fileSnapshots.set(abs, { before, after: readBack, afterHash: sha256(readBack), createdAt: Date.now() });
       const result = formatFileChangeResult("\u66F8\u304D\u8FBC\u307F", import_node_path.default.relative(ctx.workspace, abs), before, readBack, 1);
       return `${result}
 \u30B5\u30A4\u30BA: ${Buffer.byteLength(readBack)} bytes`;
@@ -480,11 +484,14 @@ var TOOL_DEFS = [
       if (count === 0) throw new Error("old_string \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
       if (count > 1 && !replaceAll) throw new Error(`${count} \u4EF6\u4E00\u81F4\u3057\u307E\u3057\u305F\u3002replace_all=true \u3092\u6307\u5B9A\u3059\u308B\u304B\u5BFE\u8C61\u7BC4\u56F2\u3092\u72ED\u3081\u3066\u304F\u3060\u3055\u3044`);
       const next = replaceAll ? src.split(oldStr).join(newStr) : src.replace(oldStr, newStr);
-      if (next === src) return formatFileChangeResult("\u7DE8\u96C6", import_node_path.default.relative(ctx.workspace, abs), src, src, count);
+      if (next === src) {
+        fileSnapshots.set(abs, { before: src, after: src, afterHash: sha256(src), createdAt: Date.now() });
+        return formatFileChangeResult("\u7DE8\u96C6", import_node_path.default.relative(ctx.workspace, abs), src, src, count);
+      }
       await import_promises.default.writeFile(abs, next, "utf8");
       const readBack = await import_promises.default.readFile(abs, "utf8");
       if (readBack !== next) throw new Error("\u7DE8\u96C6\u5F8C\u306E\u518D\u8AAD\u8FBC\u5185\u5BB9\u304C\u4E00\u81F4\u3057\u307E\u305B\u3093");
-      fileSnapshots.set(abs, { before: src, afterHash: sha256(readBack), createdAt: Date.now() });
+      fileSnapshots.set(abs, { before: src, after: readBack, afterHash: sha256(readBack), createdAt: Date.now() });
       return formatFileChangeResult("\u7DE8\u96C6", import_node_path.default.relative(ctx.workspace, abs), src, readBack, count);
     }
   },
@@ -613,12 +620,14 @@ var TOOL_DEFS = [
     async run(args, ctx) {
       const command = String(args.command ?? "");
       if (!command.trim()) throw new Error("command \u304C\u5FC5\u8981\u3067\u3059");
+      if (ctx.signal?.aborted) throw new Error("\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F");
       try {
         const { stdout, stderr } = await execAsync(command, {
           cwd: ctx.workspace,
           timeout: 6e4,
           maxBuffer: 1024 * 1024,
-          windowsHide: true
+          windowsHide: true,
+          signal: ctx.signal
         });
         const parts = [stdout, stderr].filter((s) => s.trim().length > 0).map((s) => truncate(s));
         return parts.length > 0 ? parts.join("\n---stderr---\n") : "(\u51FA\u529B\u306A\u3057)";
@@ -731,6 +740,18 @@ function stripLineNumbered(rest) {
   return out;
 }
 var END_MARKER = "AGENT_END";
+function shouldCancel(io) {
+  return io.signal?.aborted === true || io.isCanceled?.() === true;
+}
+function pausedResult(messages, userInput, steps) {
+  return {
+    reply: "",
+    messages: [...messages, { role: "user", content: userInput }, { role: "assistant", content: "[\u4E00\u6642\u505C\u6B62] \u30C1\u30A7\u30C3\u30AF\u30DD\u30A4\u30F3\u30C8\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F\u3002\u518D\u958B\u3059\u308B\u3068\u7D9A\u304D\u304B\u3089\u78BA\u8A8D\u3057\u307E\u3059\u3002" }],
+    aborted: true,
+    paused: true,
+    checkpoint: steps.slice(-20)
+  };
+}
 function buildProtocolRules() {
   const toolDocs = TOOL_DEFS.map((t) => {
     const req = t.parameters.required ?? [];
@@ -821,10 +842,12 @@ async function runCopilotTurn(opts) {
     messages: turnMessages("[\u4E2D\u65AD] \u30E6\u30FC\u30B6\u30FC\u304C\u30AD\u30E3\u30F3\u30BB\u30EB\u3057\u307E\u3057\u305F"),
     aborted: true
   });
+  const paused = () => pausedResult(opts.messages, opts.userInput, steps);
+  const stopRequested = () => shouldCancel(io) || io.isPaused?.() === true;
   if (cfg.copilot?.agentMode !== true) {
     const prompt = [cfg.systemPrompt, opts.userInput].filter((s) => s && s.trim()).join("\n\n");
     try {
-      const text = (await backend.complete(prompt)).trim();
+      const text = (await backend.complete(prompt, io.signal)).trim();
       return { reply: text, messages: [...opts.messages, { role: "user", content: opts.userInput }, { role: "assistant", content: text }], aborted: false };
     } catch (err) {
       const msg = err.message;
@@ -833,6 +856,7 @@ async function runCopilotTurn(opts) {
     }
   }
   const steps = [];
+  io.event?.({ type: "plan.created", summary: "Run\u306E\u8A08\u753B\u3068\u691C\u8A3C\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F" });
   try {
     const listDef = TOOL_DEFS.find((d) => d.name === "list_files");
     steps.push(`TOOL_RESULT(list_files): ${(await listDef.run({}, ctx)).slice(0, 600)}`);
@@ -842,10 +866,11 @@ async function runCopilotTurn(opts) {
   let refusals = 0;
   const maxIter = cfg.maxToolIterations ?? 15;
   for (let i = 0; i < maxIter; i++) {
-    if (io.isCanceled?.()) return canceled();
+    if (shouldCancel(io)) return canceled();
+    if (io.isPaused?.()) return paused();
     let raw;
     try {
-      raw = await backend.complete(composeCopilotPrompt(opts.userInput, steps, opts.cfg.copilot?.maxPromptChars ?? 12e4, history));
+      raw = await backend.complete(composeCopilotPrompt(opts.userInput, steps, opts.cfg.copilot?.maxPromptChars ?? 12e4, history), io.signal);
       raw = raw.replace(/＜/g, "<").replace(/＞/g, ">").replace(new RegExp(String.fromCharCode(65312) === "" ? "" : "\uFF40", "g"), String.fromCharCode(96));
     } catch (err) {
       io.print(`[error] ${err.message}`);
@@ -878,25 +903,28 @@ async function runCopilotTurn(opts) {
       steps.push(`TOOL_RESULT: [error] \u672A\u77E5\u306E\u30C4\u30FC\u30EB "${parsed.tool}"\u3002tool \u306F\u6B63\u78BA\u306A\u540D\u524D\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
       continue;
     }
-    if (io.isCanceled?.()) return canceled();
+    if (stopRequested()) return io.isPaused?.() ? paused() : canceled();
     const summary = summarize(def.name, parsed.args ?? {});
-    io.event?.({ type: "tool.started", tool: def.name, summary });
-    io.print(`[tool] ${summary}`);
+    io.event?.({ type: "tool.requested", tool: def.name, summary });
+    io.event?.({ type: "step.started", tool: def.name, summary });
     if (def.kind !== "read") {
       const auto = def.kind === "write" ? cfg.autoApprove?.write ?? true : cfg.autoApprove?.command ?? false;
       if (!auto) {
-        io.event?.({ type: "approval.requested", tool: def.name, summary });
         const ok = await io.askYesNo(`\u5B9F\u884C\u3092\u8A31\u53EF\u3057\u307E\u3059\u304B\uFF1F
 ${summary}`);
-        io.event?.({ type: "approval.resolved", tool: def.name, summary, approved: ok });
+        if (ok) io.event?.({ type: "tool.approved", tool: def.name, summary, approved: true });
         if (!ok) {
           io.event?.({ type: "tool.denied", tool: def.name, summary });
           steps.push(`TOOL_RESULT(${def.name}): (\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)`);
           continue;
         }
+      } else {
+        io.event?.({ type: "tool.approved", tool: def.name, summary, approved: true, metadata: { automatic: true } });
       }
     }
-    if (io.isCanceled?.()) return canceled();
+    io.event?.({ type: "tool.started", tool: def.name, summary });
+    io.print(`[tool] ${summary}`);
+    if (stopRequested()) return io.isPaused?.() ? paused() : canceled();
     const startedAt = Date.now();
     let output;
     try {
@@ -905,14 +933,17 @@ ${summary}`);
       output = `[tool error] ${err.message}`;
     }
     const failed = output.startsWith("[tool error]");
+    const durationMs = Date.now() - startedAt;
+    const metadata = parseToolResultMeta(output);
     io.event?.({
       type: failed ? "tool.failed" : "tool.succeeded",
       tool: def.name,
       summary,
       output: output.slice(0, 1200),
-      durationMs: Date.now() - startedAt,
-      metadata: parseToolResultMeta(output)
+      durationMs,
+      metadata
     });
+    io.event?.({ type: failed ? "step.failed" : "step.completed", tool: def.name, summary, output: output.slice(0, 800), durationMs, metadata });
     steps.push(`TOOL_RESULT(${def.name}): ${output.slice(0, 2e3)}`);
   }
   io.print("[warn] \u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F");
@@ -930,12 +961,14 @@ async function runAgentTurn(opts) {
 async function runOpenAITurn(opts) {
   const { cfg, ctx, io } = opts;
   const messages = [...opts.messages, { role: "user", content: opts.userInput }];
+  io.event?.({ type: "plan.created", summary: "Run\u306E\u8A08\u753B\u3068\u691C\u8A3C\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F" });
   const maxIter = cfg.maxToolIterations ?? 15;
   for (let i = 0; i < maxIter; i++) {
-    if (io.isCanceled?.()) return { reply: "", messages, aborted: true };
+    if (shouldCancel(io)) return { reply: "", messages, aborted: true };
+    if (io.isPaused?.()) return { reply: "", messages, aborted: true, paused: true };
     let assistant;
     try {
-      assistant = await chat(cfg, messages, openAITools());
+      assistant = await chat(cfg, messages, openAITools(), io.signal);
     } catch (err) {
       const msg = err.message;
       io.print(`[error] ${msg}`);
@@ -947,7 +980,8 @@ async function runOpenAITurn(opts) {
       return { reply: assistant.content ?? "", messages, aborted: false };
     }
     for (const call of calls) {
-      if (io.isCanceled?.()) return { reply: "", messages, aborted: true };
+      if (shouldCancel(io)) return { reply: "", messages, aborted: true };
+      if (io.isPaused?.()) return { reply: "", messages, aborted: true, paused: true };
       const output = await executeCall(call, cfg, ctx, io);
       messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: output });
     }
@@ -966,29 +1000,38 @@ async function executeCall(call, cfg, ctx, io) {
     return "\u5F15\u6570\u306E JSON \u30D1\u30FC\u30B9\u306B\u5931\u6557\u3057\u307E\u3057\u305F";
   }
   const summary = summarize(def.name, args);
-  io.event?.({ type: "tool.started", tool: def.name, summary });
-  io.print(`[tool] ${summary}`);
+  io.event?.({ type: "tool.requested", tool: def.name, summary });
+  io.event?.({ type: "step.started", tool: def.name, summary });
   if (def.kind !== "read") {
     const auto = def.kind === "write" ? cfg.autoApprove?.write ?? true : cfg.autoApprove?.command ?? false;
     if (!auto) {
-      io.event?.({ type: "approval.requested", tool: def.name, summary });
       const ok = await io.askYesNo(`\u5B9F\u884C\u3092\u8A31\u53EF\u3057\u307E\u3059\u304B\uFF1F
 ${summary}`);
-      io.event?.({ type: "approval.resolved", tool: def.name, summary, approved: ok });
+      if (ok) io.event?.({ type: "tool.approved", tool: def.name, summary, approved: true });
       if (!ok) {
         io.event?.({ type: "tool.denied", tool: def.name, summary });
+        io.event?.({ type: "step.failed", tool: def.name, summary, error: "\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F" });
         return "(\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)";
       }
+    } else {
+      io.event?.({ type: "tool.approved", tool: def.name, summary, approved: true, metadata: { automatic: true } });
     }
   }
+  io.event?.({ type: "tool.started", tool: def.name, summary });
+  io.print(`[tool] ${summary}`);
   const startedAt = Date.now();
   try {
     const output = await def.run(args, ctx);
-    io.event?.({ type: "tool.succeeded", tool: def.name, summary, output: output.slice(0, 1200), durationMs: Date.now() - startedAt, metadata: parseToolResultMeta(output) });
+    const durationMs = Date.now() - startedAt;
+    const metadata = parseToolResultMeta(output);
+    io.event?.({ type: "tool.succeeded", tool: def.name, summary, output: output.slice(0, 1200), durationMs, metadata });
+    io.event?.({ type: "step.completed", tool: def.name, summary, output: output.slice(0, 800), durationMs, metadata });
     return output;
   } catch (err) {
     const output = `[tool error] ${err.message}`;
-    io.event?.({ type: "tool.failed", tool: def.name, summary, output, error: output, durationMs: Date.now() - startedAt });
+    const durationMs = Date.now() - startedAt;
+    io.event?.({ type: "tool.failed", tool: def.name, summary, output, error: output, durationMs });
+    io.event?.({ type: "step.failed", tool: def.name, summary, output, error: output, durationMs });
     return output;
   }
 }
@@ -1007,33 +1050,43 @@ function summarize(name, args) {
 
 // src/approvals.ts
 var pending = /* @__PURE__ */ new Map();
+var resolutions = /* @__PURE__ */ new Map();
 var sequence2 = 0;
 var APPROVAL_TIMEOUT_MS = 10 * 60 * 1e3;
 function makeId2() {
   sequence2 = (sequence2 + 1) % 1048576;
   return `approval-${Date.now().toString(36)}-${sequence2.toString(36)}`;
 }
-function requestApproval(question) {
+function requestApproval(request) {
+  const normalized = typeof request === "string" ? { question: request } : request;
   const id = makeId2();
   const createdAt = Date.now();
+  const expiresAt = normalized.expiresAt ?? createdAt + APPROVAL_TIMEOUT_MS;
   return new Promise((resolve) => {
-    const entry = { id, question, createdAt, resolve };
+    const entry = { ...normalized, id, createdAt, expiresAt, resolve };
     pending.set(id, entry);
+    const timeout = Math.max(1, expiresAt - createdAt);
     setTimeout(() => {
       const current = pending.get(id);
       if (current !== entry) return;
       pending.delete(id);
+      const result = { id, approved: false, reason: "\u627F\u8A8D\u671F\u9650\u5207\u308C", resolvedAt: Date.now() };
+      resolutions.set(id, result);
+      while (resolutions.size > 100) resolutions.delete(resolutions.keys().next().value);
       resolve(false);
-    }, APPROVAL_TIMEOUT_MS).unref();
+    }, timeout).unref();
   });
 }
 function listApprovals() {
-  return [...pending.values()].sort((a, b) => a.createdAt - b.createdAt).map(({ id, question, createdAt }) => ({ id, question, createdAt }));
+  return [...pending.values()].sort((a, b) => a.createdAt - b.createdAt).map(({ resolve: _resolve, ...snapshot2 }) => snapshot2);
 }
-function resolveApproval(id, approved) {
+function resolveApproval(id, approved, reason = approved ? "\u5229\u7528\u8005\u304C\u8A31\u53EF\u3057\u307E\u3057\u305F" : "\u5229\u7528\u8005\u304C\u62D2\u5426\u3057\u307E\u3057\u305F") {
   const entry = pending.get(id);
   if (!entry) return false;
   pending.delete(id);
+  const result = { id, approved: Boolean(approved), reason, resolvedAt: Date.now() };
+  resolutions.set(id, result);
+  while (resolutions.size > 100) resolutions.delete(resolutions.keys().next().value);
   entry.resolve(Boolean(approved));
   return true;
 }
@@ -1299,6 +1352,14 @@ async function testCopilotFenceMode() {
   import_node_fs.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS copilot-fence");
 }
+async function testUiContract() {
+  const html = import_node_fs.default.readFileSync(import_node_path2.default.join(process.cwd(), "public", "index.html"), "utf8");
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+  import_node_assert.default.ok(script, "UI script missing");
+  new Function(script);
+  for (const required of ["run-plan", "run-pause", "run-resume", "run-retry", "run-complete", "\u5B9F\u969B\u306E\u5DEE\u5206\u3092\u8868\u793A", "\u5DEE\u5206\u306E\u7D9A\u304D", "preview-frame", "verification-list", "\u8A3A\u65ADJSON", "approval-meta", "parentRunId", "/api/runs/", "/api/changes/", "compositionstart", "aria-live", "@media (max-width: 720px)"]) import_node_assert.default.ok(html.includes(required), `UI contract missing: ${required}`);
+  console.log("PASS ui-contract");
+}
 (async () => {
   await testApprovals();
   await testTools();
@@ -1309,6 +1370,7 @@ async function testCopilotFenceMode() {
   await testMaxIterationHistory();
   await testCopilotPlainMode();
   await testCopilotFenceMode();
+  await testUiContract();
   console.log("ALL PASS");
 })().catch((err) => {
   console.error(err);

@@ -112,7 +112,7 @@ import { chat, type ChatMessage, type ToolCall } from './llm'
 import { openAITools, parseToolResultMeta, TOOL_DEFS, type ToolContext } from './tools'
 
 export type AgentEvent = {
-  type: 'tool.started' | 'tool.succeeded' | 'tool.failed' | 'tool.denied' | 'approval.requested' | 'approval.resolved' | 'run.warning'
+  type: 'plan.created' | 'step.started' | 'step.completed' | 'step.failed' | 'tool.requested' | 'tool.approved' | 'tool.started' | 'tool.succeeded' | 'tool.failed' | 'tool.denied' | 'approval.requested' | 'approval.resolved' | 'artifact.created' | 'preview.ready' | 'run.warning'
   tool?: string
   summary?: string
   output?: string
@@ -127,21 +127,40 @@ export interface AgentIO {
   askYesNo(question: string): Promise<boolean>
   event?(event: AgentEvent): void
   isCanceled?(): boolean
+  isPaused?(): boolean
+  waitIfPaused?(): Promise<void>
+  signal?: AbortSignal
 }
 
 export interface AgentTurnResult {
   reply: string
   messages: ChatMessage[]
   aborted: boolean
+  paused?: boolean
+  checkpoint?: string[]
 }
 
 export interface TextBackend {
   readonly name: string
-  complete(prompt: string): Promise<string>
+  complete(prompt: string, signal?: AbortSignal): Promise<string>
   close?(): void
 }
 
 const END_MARKER = 'AGENT_END'
+
+function shouldCancel(io: AgentIO): boolean {
+  return io.signal?.aborted === true || io.isCanceled?.() === true
+}
+
+function pausedResult(messages: ChatMessage[], userInput: string, steps: string[]): AgentTurnResult {
+  return {
+    reply: '',
+    messages: [...messages, { role: 'user', content: userInput }, { role: 'assistant', content: '[一時停止] チェックポイントを保存しました。再開すると続きから確認します。' }],
+    aborted: true,
+    paused: true,
+    checkpoint: steps.slice(-20)
+  }
+}
 
 function buildProtocolRules(): string {
   const toolDocs = TOOL_DEFS.map((t) => {
@@ -246,10 +265,12 @@ async function runCopilotTurn(opts: {
     messages: turnMessages('[中断] ユーザーがキャンセルしました'),
     aborted: true
   })
+  const paused = (): AgentTurnResult => pausedResult(opts.messages, opts.userInput, steps)
+  const stopRequested = (): boolean => shouldCancel(io) || io.isPaused?.() === true
   if (cfg.copilot?.agentMode !== true) {
     const prompt = [cfg.systemPrompt, opts.userInput].filter((s) => s && s.trim()).join('\n\n')
     try {
-      const text = (await backend.complete(prompt)).trim()
+      const text = (await backend.complete(prompt, io.signal)).trim()
       return { reply: text, messages: [...opts.messages, { role: 'user', content: opts.userInput }, { role: 'assistant', content: text }], aborted: false }
     } catch (err) {
       const msg = (err as Error).message
@@ -258,6 +279,7 @@ async function runCopilotTurn(opts: {
     }
   }
   const steps: string[] = []
+  io.event?.({ type: 'plan.created', summary: 'Runの計画と検証プロファイルを作成しました' })
   try {
     const listDef = TOOL_DEFS.find((d) => d.name === 'list_files')!
     steps.push(`TOOL_RESULT(list_files): ${(await listDef.run({}, ctx)).slice(0, 600)}`)
@@ -266,10 +288,11 @@ async function runCopilotTurn(opts: {
   let refusals = 0
   const maxIter = cfg.maxToolIterations ?? 15
   for (let i = 0; i < maxIter; i++) {
-    if (io.isCanceled?.()) return canceled()
+    if (shouldCancel(io)) return canceled()
+    if (io.isPaused?.()) return paused()
     let raw: string
     try {
-      raw = await backend.complete(composeCopilotPrompt(opts.userInput, steps, opts.cfg.copilot?.maxPromptChars ?? 120000, history))
+      raw = await backend.complete(composeCopilotPrompt(opts.userInput, steps, opts.cfg.copilot?.maxPromptChars ?? 120000, history), io.signal)
       raw = raw.replace(/＜/g, '<').replace(/＞/g, '>').replace(new RegExp(String.fromCharCode(65312) === '' ? '' : '｀', 'g'), String.fromCharCode(96))
     } catch (err) {
       io.print(`[error] ${(err as Error).message}`)
@@ -302,24 +325,27 @@ async function runCopilotTurn(opts: {
       steps.push(`TOOL_RESULT: [error] 未知のツール "${parsed.tool}"。tool は正確な名前で指定してください。`)
       continue
     }
-    if (io.isCanceled?.()) return canceled()
+    if (stopRequested()) return io.isPaused?.() ? paused() : canceled()
     const summary = summarize(def.name, parsed.args ?? {})
-    io.event?.({ type: 'tool.started', tool: def.name, summary })
-    io.print(`[tool] ${summary}`)
+    io.event?.({ type: 'tool.requested', tool: def.name, summary })
+    io.event?.({ type: 'step.started', tool: def.name, summary })
     if (def.kind !== 'read') {
       const auto = def.kind === 'write' ? (cfg.autoApprove?.write ?? true) : (cfg.autoApprove?.command ?? false)
       if (!auto) {
-        io.event?.({ type: 'approval.requested', tool: def.name, summary })
         const ok = await io.askYesNo(`実行を許可しますか？\n${summary}`)
-        io.event?.({ type: 'approval.resolved', tool: def.name, summary, approved: ok })
+        if (ok) io.event?.({ type: 'tool.approved', tool: def.name, summary, approved: true })
         if (!ok) {
           io.event?.({ type: 'tool.denied', tool: def.name, summary })
           steps.push(`TOOL_RESULT(${def.name}): (ユーザーが拒否しました)`)
           continue
         }
+      } else {
+        io.event?.({ type: 'tool.approved', tool: def.name, summary, approved: true, metadata: { automatic: true } })
       }
     }
-    if (io.isCanceled?.()) return canceled()
+    io.event?.({ type: 'tool.started', tool: def.name, summary })
+    io.print(`[tool] ${summary}`)
+    if (stopRequested()) return io.isPaused?.() ? paused() : canceled()
     const startedAt = Date.now()
     let output: string
     try {
@@ -328,14 +354,17 @@ async function runCopilotTurn(opts: {
       output = `[tool error] ${(err as Error).message}`
     }
     const failed = output.startsWith('[tool error]')
+    const durationMs = Date.now() - startedAt
+    const metadata = parseToolResultMeta(output) as unknown as Record<string, unknown> | null
     io.event?.({
       type: failed ? 'tool.failed' : 'tool.succeeded',
       tool: def.name,
       summary,
       output: output.slice(0, 1200),
-      durationMs: Date.now() - startedAt,
-      metadata: parseToolResultMeta(output) as unknown as Record<string, unknown> | null
+      durationMs,
+      metadata
     })
+    io.event?.({ type: failed ? 'step.failed' : 'step.completed', tool: def.name, summary, output: output.slice(0, 800), durationMs, metadata })
     steps.push(`TOOL_RESULT(${def.name}): ${output.slice(0, 2000)}`)
   }
   io.print('[warn] 最大反復回数に達しました')
@@ -369,12 +398,14 @@ async function runOpenAITurn(opts: {
 }): Promise<AgentTurnResult> {
   const { cfg, ctx, io } = opts
   const messages: ChatMessage[] = [...opts.messages, { role: 'user', content: opts.userInput }]
+  io.event?.({ type: 'plan.created', summary: 'Runの計画と検証プロファイルを作成しました' })
   const maxIter = cfg.maxToolIterations ?? 15
   for (let i = 0; i < maxIter; i++) {
-    if (io.isCanceled?.()) return { reply: '', messages, aborted: true }
+    if (shouldCancel(io)) return { reply: '', messages, aborted: true }
+    if (io.isPaused?.()) return { reply: '', messages, aborted: true, paused: true }
     let assistant: ChatMessage
     try {
-      assistant = await chat(cfg, messages, openAITools())
+      assistant = await chat(cfg, messages, openAITools(), io.signal)
     } catch (err) {
       const msg = (err as Error).message
       io.print(`[error] ${msg}`)
@@ -386,7 +417,8 @@ async function runOpenAITurn(opts: {
       return { reply: assistant.content ?? '', messages, aborted: false }
     }
     for (const call of calls) {
-      if (io.isCanceled?.()) return { reply: '', messages, aborted: true }
+      if (shouldCancel(io)) return { reply: '', messages, aborted: true }
+      if (io.isPaused?.()) return { reply: '', messages, aborted: true, paused: true }
       const output = await executeCall(call, cfg, ctx, io)
       messages.push({ role: 'tool', tool_call_id: call.id, name: call.function.name, content: output })
     }
@@ -411,28 +443,37 @@ async function executeCall(
     return '引数の JSON パースに失敗しました'
   }
   const summary = summarize(def.name, args)
-  io.event?.({ type: 'tool.started', tool: def.name, summary })
-  io.print(`[tool] ${summary}`)
+  io.event?.({ type: 'tool.requested', tool: def.name, summary })
+  io.event?.({ type: 'step.started', tool: def.name, summary })
   if (def.kind !== 'read') {
     const auto = def.kind === 'write' ? (cfg.autoApprove?.write ?? true) : (cfg.autoApprove?.command ?? false)
     if (!auto) {
-      io.event?.({ type: 'approval.requested', tool: def.name, summary })
       const ok = await io.askYesNo(`実行を許可しますか？\n${summary}`)
-      io.event?.({ type: 'approval.resolved', tool: def.name, summary, approved: ok })
+      if (ok) io.event?.({ type: 'tool.approved', tool: def.name, summary, approved: true })
       if (!ok) {
         io.event?.({ type: 'tool.denied', tool: def.name, summary })
+        io.event?.({ type: 'step.failed', tool: def.name, summary, error: 'ユーザーが拒否しました' })
         return '(ユーザーが拒否しました)'
       }
+    } else {
+      io.event?.({ type: 'tool.approved', tool: def.name, summary, approved: true, metadata: { automatic: true } })
     }
   }
+  io.event?.({ type: 'tool.started', tool: def.name, summary })
+  io.print(`[tool] ${summary}`)
   const startedAt = Date.now()
   try {
     const output = await def.run(args, ctx)
-    io.event?.({ type: 'tool.succeeded', tool: def.name, summary, output: output.slice(0, 1200), durationMs: Date.now() - startedAt, metadata: parseToolResultMeta(output) as unknown as Record<string, unknown> | null })
+    const durationMs = Date.now() - startedAt
+    const metadata = parseToolResultMeta(output) as unknown as Record<string, unknown> | null
+    io.event?.({ type: 'tool.succeeded', tool: def.name, summary, output: output.slice(0, 1200), durationMs, metadata })
+    io.event?.({ type: 'step.completed', tool: def.name, summary, output: output.slice(0, 800), durationMs, metadata })
     return output
   } catch (err) {
     const output = `[tool error] ${(err as Error).message}`
-    io.event?.({ type: 'tool.failed', tool: def.name, summary, output, error: output, durationMs: Date.now() - startedAt })
+    const durationMs = Date.now() - startedAt
+    io.event?.({ type: 'tool.failed', tool: def.name, summary, output, error: output, durationMs })
+    io.event?.({ type: 'step.failed', tool: def.name, summary, output, error: output, durationMs })
     return output
   }
 }
