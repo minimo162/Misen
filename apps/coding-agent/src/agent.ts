@@ -189,8 +189,11 @@ function unwrapAnswer(raw: string): string {
   return cleaned.replace(new RegExp(`"?${END_MARKER}"?`, 'g'), '').trim()
 }
 
-function composeCopilotPrompt(userInput: string, steps: string[], budget = 120000): string {
-  const head = [buildProtocolRules(), '', '[依頼]', userInput]
+function composeCopilotPrompt(userInput: string, steps: string[], budget = 120000, history: { role: string; content: string }[] = []): string {
+  const histBlock = history.length > 0
+    ? ['', '[これまでのやりとり]', ...history.map((h) => `${h.role}: ${h.content.replace(/\r?\n+/g, ' ')}`)]
+    : []
+  const head = [buildProtocolRules(), ...histBlock, '', '[依頼]', userInput]
   const tail = [
     '',
     '[指示]',
@@ -210,17 +213,19 @@ function composeCopilotPrompt(userInput: string, steps: string[], budget = 12000
 
 async function runCopilotTurn(opts: {
   cfg: AgentConfig
+  messages: ChatMessage[]
   backend: TextBackend
   userInput: string
   ctx: ToolContext
   io: AgentIO
 }): Promise<AgentTurnResult> {
   const { cfg, ctx, io, backend } = opts
+  const history = opts.messages.filter((m: ChatMessage) => m.role !== 'system').map((m: ChatMessage) => ({ role: m.role === 'assistant' ? 'アシスタント' : 'ユーザー', content: String(m.content ?? '').slice(0, 400) })).slice(-12)
   if (cfg.copilot?.agentMode !== true) {
     const prompt = [cfg.systemPrompt, opts.userInput].filter((s) => s && s.trim()).join('\n\n')
     try {
       const text = (await backend.complete(prompt)).trim()
-      return { reply: text, messages: [{ role: 'user', content: opts.userInput }, { role: 'assistant', content: text }], aborted: false }
+      return { reply: text, messages: [...opts.messages, { role: 'user', content: opts.userInput }, { role: 'assistant', content: text }], aborted: false }
     } catch (err) {
       const msg = (err as Error).message
       io.print(`[error] ${msg}`)
@@ -238,7 +243,7 @@ async function runCopilotTurn(opts: {
   for (let i = 0; i < maxIter; i++) {
     let raw: string
     try {
-      raw = await backend.complete(composeCopilotPrompt(opts.userInput, steps, opts.cfg.copilot?.maxPromptChars ?? 120000))
+      raw = await backend.complete(composeCopilotPrompt(opts.userInput, steps, opts.cfg.copilot?.maxPromptChars ?? 120000, history))
       raw = raw.replace(/＜/g, '<').replace(/＞/g, '>').replace(new RegExp(String.fromCharCode(65312) === '' ? '' : '｀', 'g'), String.fromCharCode(96))
     } catch (err) {
       io.print(`[error] ${(err as Error).message}`)
@@ -253,8 +258,8 @@ async function runCopilotTurn(opts: {
         steps.push('SYSTEM: 直前の応答は指定形式に違反しました。説明文を省き、{"tool":...} または {"answer":"..."} の JSON オブジェクト1つだけを出力してください。')
         continue
       }
-      io.print('[warn] 応答を JSON として解釈できなかったため、内容を取り出して回答とします')
-      return { reply: unwrapAnswer(raw), messages: [{ role: 'assistant', content: raw }], aborted: false }
+      const fallback = unwrapAnswer(raw)
+      return { reply: fallback, messages: [...opts.messages, { role: 'user', content: opts.userInput }, { role: 'assistant', content: fallback }], aborted: false }
     }
     if (parsed.answer !== undefined && refusals < 3 && (/使用でき|実行できません|共有して|確認できません|アップロードして/.test(parsed.answer))) {
       refusals++
@@ -264,7 +269,7 @@ async function runCopilotTurn(opts: {
     if (parsed.answer !== undefined) {
       const reply = parsed.answer.trim()
       steps.push(`assistant: {"answer":"..."}`)
-      return { reply, messages: [{ role: 'user', content: opts.userInput }, { role: 'assistant', content: reply }], aborted: false }
+    return { reply, messages: [...opts.messages, { role: 'user', content: opts.userInput }, { role: 'assistant', content: reply }], aborted: false }
     }
     const def = TOOL_DEFS.find((d) => d.name === parsed.tool)
     if (!def) {

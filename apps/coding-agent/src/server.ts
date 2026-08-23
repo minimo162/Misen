@@ -140,7 +140,7 @@ const server = http.createServer(async (req, res) => {
     json(res, 200, {
       id: s.id,
       title: s.title,
-      messages: s.messages.filter((m) => m.role !== 'system').map((m) => ({ role: m.role, content: m.content ?? '' }))
+      messages: s.messages.filter((m) => m.role === 'user' || m.role === 'assistant').map((m) => ({ role: m.role, content: m.content ?? '' }))
     })
     return
   }

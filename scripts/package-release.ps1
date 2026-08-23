@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     社内アプリ標準の配布ZIPを生成する（汎用テンプレート）。
@@ -71,7 +71,7 @@ try {
     }
     Write-Step ('コピー完了: {0} ファイル（除外 {1} 件）' -f $copied, $skipped)
 
-    $required = @('start.cmd', 'manifest.json')
+    $required = @('start.cmd', 'manifest.json', 'public/index.html')
     $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $stageApp $_) -PathType Leaf) })
     if ($missing.Count -gt 0) {
         Write-Fail '必須ファイルが不足しています:'

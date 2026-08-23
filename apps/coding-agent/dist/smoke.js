@@ -474,8 +474,9 @@ function unwrapAnswer(raw) {
   }
   return cleaned.replace(new RegExp(`"?${END_MARKER}"?`, "g"), "").trim();
 }
-function composeCopilotPrompt(userInput, steps, budget = 12e4) {
-  const head = [buildProtocolRules(), "", "[\u4F9D\u983C]", userInput];
+function composeCopilotPrompt(userInput, steps, budget = 12e4, history = []) {
+  const histBlock = history.length > 0 ? ["", "[\u3053\u308C\u307E\u3067\u306E\u3084\u308A\u3068\u308A]", ...history.map((h) => `${h.role}: ${h.content.replace(/\r?\n+/g, " ")}`)] : [];
+  const head = [buildProtocolRules(), ...histBlock, "", "[\u4F9D\u983C]", userInput];
   const tail = [
     "",
     "[\u6307\u793A]",
@@ -493,11 +494,12 @@ function composeCopilotPrompt(userInput, steps, budget = 12e4) {
 }
 async function runCopilotTurn(opts) {
   const { cfg, ctx, io, backend } = opts;
+  const history = opts.messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role === "assistant" ? "\u30A2\u30B7\u30B9\u30BF\u30F3\u30C8" : "\u30E6\u30FC\u30B6\u30FC", content: String(m.content ?? "").slice(0, 400) })).slice(-12);
   if (cfg.copilot?.agentMode !== true) {
     const prompt = [cfg.systemPrompt, opts.userInput].filter((s) => s && s.trim()).join("\n\n");
     try {
       const text = (await backend.complete(prompt)).trim();
-      return { reply: text, messages: [{ role: "user", content: opts.userInput }, { role: "assistant", content: text }], aborted: false };
+      return { reply: text, messages: [...opts.messages, { role: "user", content: opts.userInput }, { role: "assistant", content: text }], aborted: false };
     } catch (err) {
       const msg = err.message;
       io.print(`[error] ${msg}`);
@@ -516,7 +518,7 @@ async function runCopilotTurn(opts) {
   for (let i = 0; i < maxIter; i++) {
     let raw;
     try {
-      raw = await backend.complete(composeCopilotPrompt(opts.userInput, steps, opts.cfg.copilot?.maxPromptChars ?? 12e4));
+      raw = await backend.complete(composeCopilotPrompt(opts.userInput, steps, opts.cfg.copilot?.maxPromptChars ?? 12e4, history));
       raw = raw.replace(/＜/g, "<").replace(/＞/g, ">").replace(new RegExp(String.fromCharCode(65312) === "" ? "" : "\uFF40", "g"), String.fromCharCode(96));
     } catch (err) {
       io.print(`[error] ${err.message}`);
@@ -531,8 +533,8 @@ async function runCopilotTurn(opts) {
         steps.push('SYSTEM: \u76F4\u524D\u306E\u5FDC\u7B54\u306F\u6307\u5B9A\u5F62\u5F0F\u306B\u9055\u53CD\u3057\u307E\u3057\u305F\u3002\u8AAC\u660E\u6587\u3092\u7701\u304D\u3001{"tool":...} \u307E\u305F\u306F {"answer":"..."} \u306E JSON \u30AA\u30D6\u30B8\u30A7\u30AF\u30C81\u3064\u3060\u3051\u3092\u51FA\u529B\u3057\u3066\u304F\u3060\u3055\u3044\u3002');
         continue;
       }
-      io.print("[warn] \u5FDC\u7B54\u3092 JSON \u3068\u3057\u3066\u89E3\u91C8\u3067\u304D\u306A\u304B\u3063\u305F\u305F\u3081\u3001\u5185\u5BB9\u3092\u53D6\u308A\u51FA\u3057\u3066\u56DE\u7B54\u3068\u3057\u307E\u3059");
-      return { reply: unwrapAnswer(raw), messages: [{ role: "assistant", content: raw }], aborted: false };
+      const fallback = unwrapAnswer(raw);
+      return { reply: fallback, messages: [...opts.messages, { role: "user", content: opts.userInput }, { role: "assistant", content: fallback }], aborted: false };
     }
     if (parsed.answer !== void 0 && refusals < 3 && /使用でき|実行できません|共有して|確認できません|アップロードして/.test(parsed.answer)) {
       refusals++;
@@ -542,7 +544,7 @@ async function runCopilotTurn(opts) {
     if (parsed.answer !== void 0) {
       const reply = parsed.answer.trim();
       steps.push(`assistant: {"answer":"..."}`);
-      return { reply, messages: [{ role: "user", content: opts.userInput }, { role: "assistant", content: reply }], aborted: false };
+      return { reply, messages: [...opts.messages, { role: "user", content: opts.userInput }, { role: "assistant", content: reply }], aborted: false };
     }
     const def = TOOL_DEFS.find((d) => d.name === parsed.tool);
     if (!def) {
