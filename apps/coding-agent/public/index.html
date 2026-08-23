@@ -20,6 +20,32 @@ body{font-family:"Segoe UI","Hiragino Sans","Noto Sans JP",sans-serif;background
 .sess.active{background:#e7e7e7;font-weight:600}
 #sidebar .foot{padding:10px 16px;border-top:1px solid #ececec;font-size:11px;color:#8a8a8a}
 #main{flex:1;display:flex;flex-direction:column;position:relative}
+#approvalbar{position:absolute;top:12px;left:18px;z-index:6;width:min(370px,42%);max-height:35vh;overflow:auto;background:rgba(255,252,239,.98);border:1px solid #ead9a6;border-radius:12px;box-shadow:0 4px 18px rgba(0,0,0,.1);padding:10px 12px;font-size:12px}
+#approvalbar.hidden{display:none}
+.approval-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;color:#69551d}
+.approval-head button,.approval-allow,.approval-deny{border:1px solid #d9c78f;border-radius:7px;background:#fff;padding:4px 8px;cursor:pointer;font-size:11px}
+.approval-allow{background:#3b6f45;color:#fff;border-color:#3b6f45}.approval-deny{color:#8e3434}
+.approval-question{white-space:pre-wrap;word-break:break-word;color:#4d442d;line-height:1.45}
+.approval-actions{display:flex;gap:6px;margin-top:7px}
+#runtimebar{position:absolute;top:12px;right:18px;z-index:5;width:min(380px,42%);max-height:42vh;overflow:auto;background:rgba(255,255,255,.96);border:1px solid #e2e2e2;border-radius:12px;box-shadow:0 4px 18px rgba(0,0,0,.1);padding:10px 12px;font-size:12px}
+#runtimebar.hidden{display:none}
+.runtime-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;color:#555}
+.runtime-head button,.runtime-stop,.retrybtn{border:1px solid #ddd;border-radius:7px;background:#fff;padding:4px 8px;cursor:pointer;color:#444;font-size:11px}
+.runtime-head button:hover,.runtime-stop:hover,.retrybtn:hover{background:#f1f1f1}
+.runtime-row{border-top:1px solid #eee;padding:7px 0;color:#666}
+.runtime-row:first-child{border-top:0;padding-top:0}
+.runtime-main{display:flex;align-items:center;gap:6px}
+.runtime-dot{width:7px;height:7px;border-radius:50%;background:#bbb;flex:0 0 auto}
+.runtime-dot.running{background:#32a852;box-shadow:0 0 0 3px #e3f4e7}
+.runtime-dot.failed{background:#d33}
+.runtime-dot.stopped,.runtime-dot.exited{background:#aaa}
+.runtime-label{font-weight:600;color:#333;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.runtime-meta{color:#999;margin-top:3px;word-break:break-all}
+.runtime-tail{margin-top:4px;padding:5px;background:#f7f7f7;border-radius:6px;white-space:pre-wrap;max-height:60px;overflow:auto;font:10px/1.35 Consolas,monospace;color:#777}
+.runtime-actions{display:flex;align-items:center;gap:5px;margin-top:5px}
+.runtime-actions a{color:#3768a8;text-decoration:none}
+.error{color:#b3261e}
+.retry-wrap{display:flex;align-items:center;gap:8px;margin-top:6px}
 #chat{flex:1;overflow-y:auto;display:flex;flex-direction:column;padding:30px 0 10px}
 body.empty #chat{justify-content:center;align-items:center;padding-bottom:170px}
 #hero{display:none;text-align:center;padding-bottom:26px}
@@ -53,6 +79,14 @@ body:not(.empty) #composerdock{margin:0 auto 20px;width:min(820px,92%)}
   <div class="foot"><span id="footmodel"></span><br><span id="footws" style="color:#aaa;font-size:11px;word-break:break-all"></span></div>
 </div>
 <div id="main">
+  <section id="runtimebar" class="hidden" aria-live="polite">
+    <div class="runtime-head"><strong>実行プロセス</strong><button id="refresh-processes" type="button">更新</button></div>
+    <div id="runtime-list"></div>
+  </section>
+  <section id="approvalbar" class="hidden" aria-live="assertive">
+    <div class="approval-head"><strong>コマンド承認待ち</strong><button id="refresh-approvals" type="button">更新</button></div>
+    <div id="approval-list"></div>
+  </section>
   <div id="chat">
     <div id="hero"><h1>今日は何をしますか？</h1></div>
   </div>
@@ -65,7 +99,7 @@ body:not(.empty) #composerdock{margin:0 auto 20px;width:min(820px,92%)}
 </div>
 <script>
 const $=id=>document.getElementById(id);
-const chat=$('chat'),q=$('q'),send=$('sendbtn'),sessEl=$('sessions');
+const chat=$('chat'),q=$('q'),send=$('sendbtn'),sessEl=$('sessions'),runtimebar=$('runtimebar'),runtimeList=$('runtime-list'),refreshProcessesBtn=$('refresh-processes'),approvalbar=$('approvalbar'),approvalList=$('approval-list'),refreshApprovalsBtn=$('refresh-approvals');
 let mode='work',busy=false,sessions=[],activeId=null,polling=null;
 function setEmpty(e){document.body.classList.toggle('empty',e)}
 async function jget(u){return (await fetch(u)).json()}
@@ -75,6 +109,49 @@ function addMsg(role,content){
  const w=document.createElement('div');w.className='msgwrap '+(role==='user'?'user':'assistant');
  const b=document.createElement('div');b.className=role==='user'?'bubble-user':'assistant-text';b.textContent=content;
  w.appendChild(b);chat.appendChild(w);scrollEnd();
+}
+function addRetryError(content,retryText){
+ const w=document.createElement('div');w.className='msgwrap assistant';
+ const b=document.createElement('div');b.className='assistant-text error';b.textContent=content;w.appendChild(b);
+ const actions=document.createElement('div');actions.className='retry-wrap';
+ const label=document.createElement('span');label.textContent='処理に失敗しました。';actions.appendChild(label);
+ const btn=document.createElement('button');btn.className='retrybtn';btn.type='button';btn.textContent='再試行';btn.onclick=()=>run(retryText);actions.appendChild(btn);
+ b.appendChild(actions);chat.appendChild(w);scrollEnd();
+}
+function processStatusLabel(status){return status==='running'?'実行中':status==='exited'?'終了':status==='stopped'?'停止':'失敗'}
+async function refreshProcesses(){
+ try{
+  const r=await jget('/api/processes');const list=Array.isArray(r.processes)?r.processes:[];
+  runtimebar.classList.toggle('hidden',list.length===0);runtimeList.replaceChildren();
+  for(const p of list.slice(0,8)){
+   const row=document.createElement('div');row.className='runtime-row';
+   const main=document.createElement('div');main.className='runtime-main';
+   const dot=document.createElement('span');dot.className='runtime-dot '+p.status;main.appendChild(dot);
+   const title=document.createElement('span');title.className='runtime-label';title.textContent=p.label||p.command;title.title=p.command;main.appendChild(title);
+   const status=document.createElement('span');status.textContent=processStatusLabel(p.status);main.appendChild(status);row.appendChild(main);
+   const meta=document.createElement('div');meta.className='runtime-meta';meta.textContent=(p.id||'')+' · '+new Date(p.startedAt).toLocaleTimeString();row.appendChild(meta);
+   const actions=document.createElement('div');actions.className='runtime-actions';
+   if(p.url){const a=document.createElement('a');a.href=p.url;a.target='_blank';a.rel='noreferrer';a.textContent='プレビューを開く';actions.appendChild(a)}
+   if(p.status==='running'){const stop=document.createElement('button');stop.className='runtime-stop';stop.type='button';stop.textContent='停止';stop.onclick=async()=>{stop.disabled=true;await jpost('/api/processes/stop',{process_id:p.id});refreshProcesses()};actions.appendChild(stop)}
+   if(actions.childNodes.length)row.appendChild(actions);
+   if(Array.isArray(p.tail)&&p.tail.length){const tail=document.createElement('pre');tail.className='runtime-tail';tail.textContent=p.tail.join('\n');row.appendChild(tail)}
+   runtimeList.appendChild(row);
+  }
+ }catch(e){}
+}
+async function refreshApprovals(){
+ try{
+  const r=await jget('/api/approvals');const list=Array.isArray(r.approvals)?r.approvals:[];
+  approvalbar.classList.toggle('hidden',list.length===0);approvalList.replaceChildren();
+  for(const a of list.slice(0,4)){
+   const row=document.createElement('div');row.className='approval-row';
+   const qtext=document.createElement('div');qtext.className='approval-question';qtext.textContent=a.question;row.appendChild(qtext);
+   const actions=document.createElement('div');actions.className='approval-actions';
+   const allow=document.createElement('button');allow.className='approval-allow';allow.type='button';allow.textContent='許可';allow.onclick=async()=>{allow.disabled=true;await jpost('/api/approvals/resolve',{id:a.id,approved:true});refreshApprovals()};actions.appendChild(allow);
+   const deny=document.createElement('button');deny.className='approval-deny';deny.type='button';deny.textContent='拒否';deny.onclick=async()=>{deny.disabled=true;await jpost('/api/approvals/resolve',{id:a.id,approved:false});refreshApprovals()};actions.appendChild(deny);
+   row.appendChild(actions);approvalList.appendChild(row);
+  }
+ }catch(e){}
 }
 function thinkLine(){const d=document.createElement('div');d.className='msgwrap assistant';d.style.display='block';d.style.width='100%';d.innerHTML='<div class="think"><i></i><i></i><i></i> Copilot が考えています…</div>';chat.appendChild(d);scrollEnd();return d}
 function logLine(el,text){let lb=el.querySelector('.log');if(!lb){const th=el.querySelector('.think');if(th)th.remove();lb=document.createElement('div');lb.className='statusline log';el.appendChild(lb)}lb.textContent+=text+'\n';lb.scrollTop=lb.scrollHeight;scrollEnd()}
@@ -93,28 +170,28 @@ function autosize(){q.style.height='auto';q.style.height=Math.min(q.scrollHeight
 q.addEventListener('input',autosize);
 q.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();run()}});
 send.onclick=run;
-async function run(){
- const text=q.value.trim();if(!text||busy)return;
- q.value='';autosize();
- addMsg('user',text);setEmptyState();
- busy=true;send.disabled=true;
+async function run(retryText){
+ const candidate=typeof retryText==='string'?retryText:q.value;const text=candidate.trim();if(!text||busy)return;
+ q.value='';autosize();addMsg('user',text);setEmptyState();busy=true;send.disabled=true;
  const st=document.createElement('div');st.className='msgwrap assistant';st.innerHTML='<span class="think"><i></i><i></i><i></i></span>';chat.appendChild(st);scrollEnd();
- startPoll(st);
+ const base=await jget('/api/log').catch(()=>({total:0}));startPoll(st,Number(base.total)||0);
  try{
-  const r=await jpost('/api/turn',{message:text,mode});
-  st.remove();
-  addMsg('assistant',r.reply||'(応答なし)');
-  loadSessionsSilent();
- }catch(e){st.remove();addMsg('assistant','[error] '+e.message)}
- busy=false;send.disabled=false;setEmptyState();q.focus();
+  const r=await jpost('/api/turn',{message:text,mode});if(!r||r.error)throw new Error(r&&r.error?r.error:'応答がありません');
+  const logError=Array.isArray(r.logs)?r.logs.find(l=>typeof l==='string'&&l.startsWith('[error]')):'';
+  if(r.aborted||logError){
+   st.remove();addRetryError(logError||'処理が中断されました。',text);
+  }else{
+   st.remove();addMsg('assistant',r.reply||'(応答なし)');loadSessionsSilent();refreshProcesses();
+  }
+ }catch(e){st.remove();addRetryError('[error] '+(e&&e.message?e.message:String(e)),text)}
+ finally{stopPoll();busy=false;send.disabled=false;setEmptyState();q.focus();refreshProcesses()}
 }
-function startPoll(el){
- let seen=0;
- polling=setInterval(async()=>{
-  try{const r=await jget('/api/log?offset='+seen);seen=r.total;for(const l of r.lines)logLine(el,l)}catch(e){}
- },1200);
+function stopPoll(){if(polling!==null){clearInterval(polling);polling=null}}
+function startPoll(el,initialOffset){
+ stopPoll();let seen=Number(initialOffset)||0;
+ polling=setInterval(async()=>{try{const r=await jget('/api/log?offset='+seen);seen=r.total;for(const l of r.lines)logLine(el,l)}catch(e){}},1200);
 }
-(async()=>{
+refreshProcessesBtn.onclick=refreshProcesses;refreshApprovalsBtn.onclick=refreshApprovals;refreshProcesses();refreshApprovals();setInterval(refreshProcesses,2000);setInterval(refreshApprovals,1000);(async()=>{
  try{
   const i=await jget('/api/info');
   $('grouplabel').textContent='プロジェクト / '+(i.project||'workspace');

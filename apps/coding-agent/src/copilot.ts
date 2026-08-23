@@ -69,7 +69,7 @@ const SCREEN_STATE_JS = `(() => {
   for (const d of __docs) { input = sels.map(s => ({ s, el: d.querySelector(s) })).find(x => __vis(x.el)); if (input) break; }
   const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button,[role="button"],a')));
   const stopButton = buttons.find(el => /^(停止|stop)$/i.test((el.getAttribute('aria-label') || el.title || '').trim()) && !el.disabled && __vis(el));
-  const signIn = buttons.find(el => /sign\\s*in|log\\s*in|サインイン|ログイン/i.test((el.innerText || el.textContent || el.getAttribute('aria-label') || el.title || '').trim()));
+  const signIn = buttons.find(el => __vis(el) && /sign\\s*in|log\\s*in|サインイン|ログイン/i.test((el.innerText || el.textContent || el.getAttribute('aria-label') || el.title || '').trim()));
   const url = String(location.href || '');
   const signinRequired = /(?:login|signin|sign-in|auth)/i.test(url) || (!input && !!signIn);
   const selectors = ['[data-testid="markdown-reply"]','[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][data-author="assistant"],[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
@@ -553,6 +553,8 @@ export class CopilotEdgeClient {
   private async pasteViaClipboard(prompt: string): Promise<void> {
     await this.bringToFront()
     await this.grantClipboard()
+    await this.focusEditor()
+    await this.evalWithReconnect('window.focus(); true', 5000)
     await this.evalWithReconnect(`navigator.clipboard.writeText(${JSON.stringify(prompt)})`, 15000)
     for (let i = 0; i < 6; i++) {
       await this.evalWithReconnect(CLEAR_EDITOR_JS)
@@ -573,13 +575,14 @@ export class CopilotEdgeClient {
       await this.clearEditor()
     }
     let pos = 0
-    let chunkSize = 3000
+    let chunkSize = 900
     while (pos < prompt.length) {
       const chunk = prompt.slice(pos, pos + chunkSize)
       const expectedGrowth = Math.floor(chunk.length * 0.9)
       let ok = false
       for (let attempt = 1; attempt <= 4 && !ok; attempt++) {
         const before = Math.max(0, await this.editorLength())
+        await this.bringToFront()
         await this.focusEditor()
         await this.cdpMethod('Input.insertText', { text: chunk })
         await sleep(300)

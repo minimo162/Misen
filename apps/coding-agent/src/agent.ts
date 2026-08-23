@@ -137,17 +137,19 @@ function buildProtocolRules(): string {
     return `- ${t.name}(${props.join(', ')}):${req.length ? ` 必須=${req.join(',')};` : ''} ${t.description}`
   }).join('\n')
   return [
-    'あなたは社内コーディング支援エージェントで、実際のアクション実行系に接続されています。',
-    'あなたの発言はすべて社内ツールから受け取られ、記載されたアクションは外部システムが自動実行します。',
-    'あなた自身はアクションを実行できないため、「〜を確認しました」「〜はできません」といった回答は不要です。',
-    '「ツールを使えません」等と断ることは禁止です。必ず指定形式の JSON でアクションを返してください。',
+    'あなたは社内コーディング支援エージェントです。次に取るべきローカル開発アクションを、ホストブリッジへ渡す構造化 JSON として返します。',
+    'あなたの応答は実行結果ではなく、ホストブリッジが解釈する「次の1手」です。あなたが直接ファイルを操作できるかどうかを説明する必要はありません。',
+    'ホストブリッジは JSON の tool を受け取ると、指定されたワークスペース内で実行し、その結果を次の入力に TOOL_RESULT として渡します。',
+    '「ツールを使えません」「実行できません」といった拒否や説明は禁止です。必ず指定形式の JSON で次の1手を返してください。',
     'あなたの仕事は、状況に応じて次に行うべきアクションを 1 つ選び JSON で報告することです。',
     '',
     '選択できるアクション:',
     toolDocs,
+    '長時間のローカル開発サーバーはrun_commandではなく、start_process→read_process_log→stop_processの順で管理する。',
+    'プレビューURLが分かる場合はstart_processのurlにhttp/httpsを指定し、起動後にログで待受状態を確認する。',
     '',
-    'この接続は実在します。{"tool":"list_files","args":{}} を返すと、次回の入力に実際のワークスペースのファイル一覧が TOOL_RESULT として届きます。',
-    '重要: アクションの実行先は「ユーザーの実マシン」です。あなた自身のサンドボックス(/mnt/data 等)とは完全に別物で、無関係です。ファイルもユーザーのマシン上にあります。',
+    'この会話はローカルホストブリッジと連携しています。tool JSON を返すと、ホストブリッジが取得した一覧が次の入力に TOOL_RESULT として届きます。',
+    'TOOL_RESULT はホストブリッジが取得した実際の結果です。結果を想像せず、受け取った内容だけを根拠に次の1手を選びます。',
     '実際には存在しない環境・ファイル・実行結果を想像して答えることは禁止です。',
     '',
     '対話の流れ:',
@@ -280,7 +282,7 @@ async function runCopilotTurn(opts: {
     if (def.kind !== 'read') {
       const auto = def.kind === 'write' ? (cfg.autoApprove?.write ?? true) : (cfg.autoApprove?.command ?? false)
       if (!auto) {
-        const ok = await io.askYesNo(`  ↑ 実行しますか？ (${def.kind})`)
+        const ok = await io.askYesNo(`実行を許可しますか？\n${summarize(def.name, parsed.args ?? {})}`)
         if (!ok) {
           steps.push(`TOOL_RESULT(${def.name}): (ユーザーが拒否しました)`)
           continue
@@ -311,7 +313,7 @@ export async function runAgentTurn(opts: {
   if (opts.backend || opts.cfg.provider === 'copilot-edge') {
     const backend = opts.backend
     if (!backend) throw new Error('provider=copilot-edge には backend が必要です')
-    return runCopilotTurn({ cfg: opts.cfg, backend, userInput: opts.userInput, ctx: opts.ctx, io: opts.io })
+    return runCopilotTurn({ cfg: opts.cfg, messages: opts.messages, backend, userInput: opts.userInput, ctx: opts.ctx, io: opts.io })
   }
   return runOpenAITurn(opts)
 }
@@ -367,7 +369,7 @@ async function executeCall(
   if (def.kind !== 'read') {
     const auto = def.kind === 'write' ? (cfg.autoApprove?.write ?? true) : (cfg.autoApprove?.command ?? false)
     if (!auto) {
-      const ok = await io.askYesNo(`  ↑ 実行しますか？ (${def.kind})`)
+      const ok = await io.askYesNo(`実行を許可しますか？\n${summarize(def.name, args)}`)
       if (!ok) return '(ユーザーが拒否しました)'
     }
   }

@@ -6,6 +6,8 @@ import { runAgentTurn, type AgentIO, type TextBackend } from './agent'
 import { CopilotEdgeClient } from './copilot'
 import type { ChatMessage } from './llm'
 import type { ToolContext } from './tools'
+import { killAllManagedProcesses, listManagedProcesses, readManagedProcessLog, stopManagedProcess } from './processes'
+import { clearApprovals, listApprovals, requestApproval, resolveApproval } from './approvals'
 
 const PORT = Number(process.env.PORT ?? 3948)
 
@@ -70,7 +72,7 @@ const io: AgentIO = {
     logLines.push(t)
     console.log(t)
   },
-  askYesNo: async () => false
+  askYesNo: (question) => requestApproval(question)
 }
 
 function json(res: http.ServerResponse, status: number, obj: unknown): void {
@@ -102,7 +104,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/info') {
-    json(res, 200, { model: cfg.model || (cfg.provider ?? ''), provider: cfg.provider ?? 'openai', workspace, project: path.basename(workspace), version: '0.8.0' })
+    json(res, 200, { model: cfg.model || (cfg.provider ?? ''), provider: cfg.provider ?? 'openai', workspace, project: path.basename(workspace), version: '0.10.2' })
     return
   }
 
@@ -112,6 +114,48 @@ const server = http.createServer(async (req, res) => {
     return
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/approvals') {
+    json(res, 200, { approvals: listApprovals() })
+    return
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/approvals/resolve') {
+    try {
+      const b = JSON.parse(await readBody(req)) as { id?: string; approved?: boolean }
+      const ok = resolveApproval(String(b.id ?? ''), Boolean(b.approved))
+      if (!ok) { json(res, 404, { error: 'approval not found' }); return }
+      json(res, 200, { ok: true })
+    } catch (err) {
+      json(res, 400, { error: (err as Error).message })
+    }
+    return
+  }
+  if (req.method === 'GET' && url.pathname === '/api/processes') {
+    json(res, 200, { processes: listManagedProcesses() })
+    return
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/processes/log') {
+    const processId = url.searchParams.get('process_id') ?? ''
+    const offset = Number(url.searchParams.get('offset') ?? 0)
+    try {
+      json(res, 200, readManagedProcessLog(processId, offset))
+    } catch (err) {
+      json(res, 404, { error: (err as Error).message })
+    }
+    return
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/processes/stop') {
+    try {
+      const b = JSON.parse(await readBody(req)) as { process_id?: string }
+      const stopped = await stopManagedProcess(String(b.process_id ?? ''))
+      json(res, 200, { process: stopped })
+    } catch (err) {
+      json(res, 404, { error: (err as Error).message })
+    }
+    return
+  }
   if (req.method === 'GET' && url.pathname === '/api/sessions') {
     const list = [...sessions.values()].sort((a, b) => b.created - a.created).map((s) => ({ id: s.id, title: s.title, created: s.created }))
     json(res, 200, { active: activeId, sessions: list })
@@ -177,6 +221,18 @@ const server = http.createServer(async (req, res) => {
 })
 
 lastLogSeen = logLines.length
+
+process.on('exit', () => {
+  clearApprovals()
+  killAllManagedProcesses()
+})
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => {
+    clearApprovals()
+    killAllManagedProcesses()
+    process.exit(0)
+  })
+}
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`coding-agent web UI: http://127.0.0.1:${PORT}  (workspace=${workspace})`)
