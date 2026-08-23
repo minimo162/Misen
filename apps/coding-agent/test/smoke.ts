@@ -7,7 +7,7 @@ import path from 'node:path'
 import { extractJsonReply, runAgentTurn, type AgentIO, type TextBackend } from '../src/agent'
 import type { AgentConfig } from '../src/config'
 import type { ChatMessage } from '../src/llm'
-import { TOOL_DEFS, type ToolContext } from '../src/tools'
+import { parseToolResultMeta, TOOL_DEFS, type ToolContext } from '../src/tools'
 import { listApprovals, requestApproval, resolveApproval } from '../src/approvals'
 
 function makeCtx(root: string, restrict = true): ToolContext {
@@ -46,6 +46,11 @@ async function testTools(): Promise<void> {
   const after = await get('read_file').run({ path: 'a/hello.txt' }, ctx)
   assert.ok(after.includes('edited'))
   assert.ok(!after.includes('unique'))
+  const editMeta = parseToolResultMeta(edited)
+  assert.ok(editMeta && editMeta.changed === true && editMeta.status === 'applied_unverified' && editMeta.readBack === true)
+  const noOp = await get('edit_file').run({ path: 'a/hello.txt', old_string: 'edited', new_string: 'edited' }, ctx)
+  const noOpMeta = parseToolResultMeta(noOp)
+  assert.ok(noOp.includes('変更なし') && noOpMeta && noOpMeta.changed === false && noOpMeta.status === 'no_op')
 
   const search = await get('search_files').run({ query: 'edited' }, ctx)
   assert.ok(search.includes('hello.txt'))
@@ -245,6 +250,18 @@ async function testCopilotLoop(): Promise<void> {
   console.log('PASS copilot-loop')
 }
 
+async function testMaxIterationHistory(): Promise<void> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-'))
+  const backend = new FakeBackend(['{"tool":"list_files","args":{}}'])
+  const cfg = { baseURL: '', model: '', provider: 'copilot-edge' as const, maxToolIterations: 1, copilot: { agentMode: true } }
+  const result = await runAgentTurn({ cfg, messages: [], userInput: '履歴を残して', ctx: makeCtx(root), io: ioStub(true), backend })
+  assert.strictEqual(result.aborted, true)
+  assert.ok(result.messages.some((message) => message.role === 'user' && message.content === '履歴を残して'))
+  assert.ok(result.messages.some((message) => message.role === 'assistant' && String(message.content).includes('最大反復回数')))
+  fs.rmSync(root, { recursive: true, force: true })
+  console.log('PASS max-iteration-history')
+}
+
 async function testCopilotPlainMode(): Promise<void> {
   const backend = new FakeBackend(['これは平文の回答です'])
   const cfg = { baseURL: '', model: '', provider: 'copilot-edge' as const, systemPrompt: 'SYS' }
@@ -290,6 +307,7 @@ async function testCopilotFenceMode(): Promise<void> {
   await testDenial()
   await testProtocolParsing()
   await testCopilotLoop()
+  await testMaxIterationHistory()
   await testCopilotPlainMode()
   await testCopilotFenceMode()
   console.log('ALL PASS')

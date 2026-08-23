@@ -1,4 +1,5 @@
 import { exec } from 'node:child_process'
+import crypto from 'node:crypto'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import util from 'node:util'
@@ -22,6 +23,106 @@ export interface ToolDef {
   kind: 'read' | 'write' | 'command'
   parameters: Record<string, unknown>
   run(args: Record<string, unknown>, ctx: ToolContext): Promise<string>
+}
+
+export type FileChangeStatus = 'no_op' | 'applied_unverified'
+
+export interface ToolResultMeta {
+  changed?: boolean
+  status?: FileChangeStatus
+  path?: string
+  count?: number
+  beforeHash?: string
+  afterHash?: string
+  readBack?: boolean
+  addedLines?: number
+  removedLines?: number
+}
+
+function sha256(text: string): string {
+  return crypto.createHash('sha256').update(text, 'utf8').digest('hex')
+}
+
+function lineDelta(before: string, after: string): { addedLines: number; removedLines: number } {
+  const beforeLines = before === '' ? [] : before.split(/\r?\n/)
+  const afterLines = after === '' ? [] : after.split(/\r?\n/)
+  let prefix = 0
+  while (prefix < beforeLines.length && prefix < afterLines.length && beforeLines[prefix] === afterLines[prefix]) prefix++
+  let suffix = 0
+  while (
+    suffix < beforeLines.length - prefix &&
+    suffix < afterLines.length - prefix &&
+    beforeLines[beforeLines.length - 1 - suffix] === afterLines[afterLines.length - 1 - suffix]
+  ) suffix++
+  return {
+    removedLines: Math.max(0, beforeLines.length - prefix - suffix),
+    addedLines: Math.max(0, afterLines.length - prefix - suffix)
+  }
+}
+
+function formatFileChangeResult(
+  action: '編集' | '書き込み',
+  relativePath: string,
+  before: string,
+  after: string,
+  count: number
+): string {
+  const changed = before !== after
+  const delta = lineDelta(before, after)
+  const meta: ToolResultMeta = {
+    changed,
+    status: changed ? 'applied_unverified' : 'no_op',
+    path: relativePath,
+    count,
+    beforeHash: sha256(before),
+    afterHash: sha256(after),
+    readBack: true,
+    ...delta
+  }
+  return [
+    `${changed ? `${action}完了` : '変更なし'}: ${relativePath} (${count} 箇所)`,
+    `状態: ${meta.status}`,
+    `変更前ハッシュ: ${meta.beforeHash}`,
+    `変更後ハッシュ: ${meta.afterHash}`,
+    '再読込: 成功',
+    `差分: +${meta.addedLines} -${meta.removedLines}`,
+    `結果メタデータ: ${JSON.stringify(meta)}`
+  ].join('\n')
+}
+
+export function parseToolResultMeta(output: string): ToolResultMeta | null {
+  const line = output.split(/\r?\n/).find((entry) => entry.startsWith('結果メタデータ:'))
+  if (!line) return null
+  try {
+    return JSON.parse(line.slice('結果メタデータ:'.length).trim()) as ToolResultMeta
+  } catch {
+    return null
+  }
+}
+
+interface FileSnapshot {
+  before: string
+  afterHash: string
+  createdAt: number
+}
+
+const fileSnapshots = new Map<string, FileSnapshot>()
+
+export async function rollbackFileChange(
+  change: Pick<ToolResultMeta, 'path' | 'afterHash'>,
+  ctx: ToolContext
+): Promise<{ path: string; status: 'rolled_back'; hash: string }> {
+  if (!change.path || !change.afterHash) throw new Error('ロールバック対象のハッシュがありません')
+  const abs = resolveInWorkspace(change.path, ctx)
+  const snapshot = fileSnapshots.get(abs)
+  if (!snapshot || snapshot.afterHash !== change.afterHash) throw new Error('このプロセスに変更前スナップショットがありません')
+  const current = await fsp.readFile(abs, 'utf8')
+  if (sha256(current) !== change.afterHash) throw new Error('変更後の内容からファイルが変更されています。競合を確認してください')
+  await fsp.writeFile(abs, snapshot.before, 'utf8')
+  const restored = await fsp.readFile(abs, 'utf8')
+  const hash = sha256(restored)
+  fileSnapshots.delete(abs)
+  return { path: change.path, status: 'rolled_back', hash }
 }
 
 function truncate(s: string, max = 8000): string {
@@ -125,9 +226,19 @@ export const TOOL_DEFS: ToolDef[] = [
       const abs = resolveInWorkspace(String(args.path), ctx)
       const content = String(args.content ?? '')
       if (!content.trim()) throw new Error('content が空です。JSON 直後のコードフェンスに内容を記述してください')
+      let before = ''
+      try {
+        before = await fsp.readFile(abs, 'utf8')
+      } catch (err) {
+        const e = err as NodeJS.ErrnoException
+        if (e.code !== 'ENOENT') throw err
+      }
       await fsp.mkdir(path.dirname(abs), { recursive: true })
       await fsp.writeFile(abs, content, 'utf8')
-      return `書き込み完了: ${path.relative(ctx.workspace, abs)} (${Buffer.byteLength(content)} bytes)`
+      const readBack = await fsp.readFile(abs, 'utf8')
+      fileSnapshots.set(abs, { before, afterHash: sha256(readBack), createdAt: Date.now() })
+      const result = formatFileChangeResult('書き込み', path.relative(ctx.workspace, abs), before, readBack, 1)
+      return `${result}\nサイズ: ${Buffer.byteLength(readBack)} bytes`
     }
   },
   {
@@ -155,8 +266,12 @@ export const TOOL_DEFS: ToolDef[] = [
       if (count === 0) throw new Error('old_string が見つかりません')
       if (count > 1 && !replaceAll) throw new Error(`${count} 件一致しました。replace_all=true を指定するか対象範囲を狭めてください`)
       const next = replaceAll ? src.split(oldStr).join(newStr) : src.replace(oldStr, newStr)
+      if (next === src) return formatFileChangeResult('編集', path.relative(ctx.workspace, abs), src, src, count)
       await fsp.writeFile(abs, next, 'utf8')
-      return `編集完了: ${path.relative(ctx.workspace, abs)} (${count} 箇所)`
+      const readBack = await fsp.readFile(abs, 'utf8')
+      if (readBack !== next) throw new Error('編集後の再読込内容が一致しません')
+      fileSnapshots.set(abs, { before: src, afterHash: sha256(readBack), createdAt: Date.now() })
+      return formatFileChangeResult('編集', path.relative(ctx.workspace, abs), src, readBack, count)
     }
   },
   {
