@@ -4962,6 +4962,10 @@ var IGNORED_DIRS = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", ".tm
 var MAX_LIST = 500;
 var MAX_SEARCH_RESULTS = 200;
 var MAX_READ_FILES_CHARS = 8e4;
+var READ_XLSX_USAGE = "powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path <\u30D1\u30B9>";
+var READ_XLSX_DEMO_COMMAND = "powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\*.xlsx";
+var UPDATE_LEDGER_USAGE = "powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted <\u62BD\u51FAJSON> -Rates <\u30EC\u30FC\u30C8CSV> -Ledger <\u53F0\u5E33xlsx>";
+var UPDATE_LEDGER_DEMO_COMMAND = "powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\\u30EC\u30FC\u30C8\u8868.csv -Ledger \u96C6\u8A08\u53F0\u5E33.xlsx";
 function sha256(text) {
   return import_node_crypto.default.createHash("sha256").update(text, "utf8").digest("hex");
 }
@@ -4976,6 +4980,120 @@ function lineDelta(before, after) {
     removedLines: Math.max(0, beforeLines.length - prefix - suffix),
     addedLines: Math.max(0, afterLines.length - prefix - suffix)
   };
+}
+function splitCommandWords(command) {
+  const words = [];
+  let current = "";
+  let quote = null;
+  let unsafe = false;
+  for (const ch of command) {
+    if (quote) {
+      if (ch === quote) quote = null;
+      else {
+        if ("&|;<>`%^()".includes(ch) || ch === "\r" || ch === "\n") unsafe = true;
+        current += ch;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (/\s/.test(ch)) {
+      if (ch === "\r" || ch === "\n") unsafe = true;
+      if (current) {
+        words.push(current);
+        current = "";
+      }
+    } else {
+      if ("&|;<>`%^()".includes(ch) || ch === "\r" || ch === "\n") unsafe = true;
+      current += ch;
+    }
+  }
+  if (current) words.push(current);
+  return { words, unsafe: unsafe || quote !== null };
+}
+function isForbiddenExecutionPolicyFlag(word) {
+  const match = word.match(/^[-/]([A-Za-z]+)(?=$|[:=])/u);
+  if (!match) return false;
+  const name = match[1].toLowerCase();
+  return name === "ep" || name.length >= 2 && "executionpolicy".startsWith(name);
+}
+function quoteCommandWord(value) {
+  if (!/[\s"]/u.test(value)) return value;
+  if (value.includes('"')) throw new Error(`Read-Xlsx \u306E\u5F15\u6570\u306B\u5F15\u7528\u7B26\u306F\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093\u3002${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
+  return `"${value}"`;
+}
+function normalizeRunCommand(command) {
+  const trimmed = command.trim();
+  if (!trimmed) throw new Error("command \u304C\u5FC5\u8981\u3067\u3059");
+  const parsed = splitCommandWords(trimmed);
+  const fileIndex = parsed.words.findIndex((word) => /^-File$/iu.test(word));
+  const directScript = fileIndex < 0 ? parsed.words[0] : void 0;
+  const script = fileIndex >= 0 ? parsed.words[fileIndex + 1] : directScript;
+  const scriptArgsIndex = fileIndex >= 0 ? fileIndex + 2 : 1;
+  const isReadXlsx = script !== void 0 && /^(?:\.\\|\.\/)?tools[\\/]Read-Xlsx\.ps1$/iu.test(script);
+  const isUpdateLedger = script !== void 0 && /^(?:\.\\|\.\/)?tools[\\/]Update-Ledger\.ps1$/iu.test(script);
+  const hasForbiddenPolicyFlag = parsed.words.some(isForbiddenExecutionPolicyFlag);
+  if (hasForbiddenPolicyFlag) {
+    if (isUpdateLedger) {
+      throw new Error(`-ExecutionPolicy \u306E\u6307\u5B9A\u306F\u7981\u6B62\u3002Update-Ledger \u306F ${UPDATE_LEDGER_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3076\u3053\u3068\u3002\u6B21\u306E\u30BF\u30FC\u30F3\u3067\u306F host.run_command \u306E command \u3092\u300C${UPDATE_LEDGER_DEMO_COMMAND}\u300D\u306B\u3057\u3066\u518D\u8A66\u884C\u3059\u308B\u3053\u3068`);
+    }
+    if (isReadXlsx) {
+      throw new Error(`-ExecutionPolicy \u306E\u6307\u5B9A\u306F\u7981\u6B62\u3002Read-Xlsx \u306F ${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3076\u3053\u3068\u3002\u6B21\u306E\u30BF\u30FC\u30F3\u3067\u306F host.run_command \u306E command \u3092\u300C${READ_XLSX_DEMO_COMMAND}\u300D\u306B\u3057\u3066\u518D\u8A66\u884C\u3059\u308B\u3053\u3068`);
+    }
+    throw new Error("-ExecutionPolicy \u306E\u6307\u5B9A\u306F\u7981\u6B62\u3002PowerShell \u306F powershell.exe -NoProfile -File <\u30B9\u30AF\u30EA\u30D7\u30C8> <\u5F15\u6570> \u306E\u5F62\u5F0F\u3067\u547C\u3076\u3053\u3068");
+  }
+  if (!isReadXlsx && !isUpdateLedger) return command;
+  const toolLabel = isReadXlsx ? "Read-Xlsx" : "Update-Ledger";
+  const usage = isReadXlsx ? READ_XLSX_USAGE : UPDATE_LEDGER_USAGE;
+  if (parsed.unsafe) throw new Error(`${toolLabel} \u306F\u8907\u5408\u30B3\u30DE\u30F3\u30C9\u306B\u305B\u305A\u3001${usage} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
+  if (fileIndex >= 0 && !/^(?:powershell|powershell\.exe)$/iu.test(parsed.words[0] ?? "")) {
+    throw new Error(`${toolLabel} \u306F ${usage} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
+  }
+  if (isReadXlsx) {
+    let pathWords = parsed.words.slice(scriptArgsIndex);
+    if (/^-Path$/iu.test(pathWords[0] ?? "")) pathWords = pathWords.slice(1);
+    pathWords = pathWords.flatMap((word) => word.split(",")).filter(Boolean);
+    if (pathWords.length === 0 || pathWords.some((word) => /^-/u.test(word))) {
+      throw new Error(`Read-Xlsx \u306F ${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
+    }
+    const normalized = pathWords.map((word) => word.replaceAll("/", "\\"));
+    const reportPaths = normalized.length > 1 ? normalized.filter((word) => !(import_node_path2.default.win32.dirname(word) === "." && import_node_path2.default.win32.basename(word).toLowerCase() === "\u96C6\u8A08\u53F0\u5E33.xlsx")) : normalized;
+    if (reportPaths.length === 0) throw new Error(`Read-Xlsx \u306F ${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
+    let normalizedPath;
+    if (reportPaths.length === 1) {
+      normalizedPath = reportPaths[0];
+    } else {
+      const directories = new Set(reportPaths.map((word) => import_node_path2.default.win32.dirname(word).toLowerCase()));
+      if (directories.size !== 1 || reportPaths.some((word) => import_node_path2.default.win32.extname(word).toLowerCase() !== ".xlsx")) {
+        throw new Error(`Read-Xlsx \u306E\u8907\u6570\u30D5\u30A1\u30A4\u30EB\u306F\u540C\u3058\u30D5\u30A9\u30EB\u30C0\u30FC\u306E *.xlsx \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\u3002${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
+      }
+      normalizedPath = import_node_path2.default.win32.join(import_node_path2.default.win32.dirname(reportPaths[0]), "*.xlsx");
+    }
+    return `powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path ${quoteCommandWord(normalizedPath)}`;
+  }
+  const rest = parsed.words.slice(scriptArgsIndex);
+  const named = /* @__PURE__ */ new Map();
+  const positional = [];
+  for (let index = 0; index < rest.length; index++) {
+    const token = rest[index];
+    const match = token.match(/^-(Extracted|ExtractedPath|Rates|Ledger)$/iu);
+    if (match) {
+      const value = rest[++index];
+      if (!value || /^-/u.test(value)) throw new Error(`Update-Ledger \u306F ${UPDATE_LEDGER_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
+      const key = /^ExtractedPath$/iu.test(match[1]) ? "extracted" : match[1].toLowerCase();
+      named.set(key, value);
+    } else if (/^-/u.test(token)) {
+      throw new Error(`Update-Ledger \u306B\u672A\u8A31\u53EF\u306E\u5F15\u6570\u304C\u3042\u308A\u307E\u3059\u3002${UPDATE_LEDGER_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
+    } else {
+      positional.push(token);
+    }
+  }
+  if (named.size > 0 && positional.length > 0) throw new Error(`Update-Ledger \u306F\u540D\u524D\u4ED8\u304D\u5F15\u6570\u3060\u3051\u3067 ${UPDATE_LEDGER_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
+  const extracted = (named.get("extracted") ?? positional[0])?.replaceAll("/", "\\");
+  const rates = (named.get("rates") ?? positional[1])?.replaceAll("/", "\\");
+  const ledger = (named.get("ledger") ?? positional[2])?.replaceAll("/", "\\");
+  if (!extracted || !rates || !ledger || positional.length > 3) throw new Error(`Update-Ledger \u306F ${UPDATE_LEDGER_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
+  return `powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted ${quoteCommandWord(extracted)} -Rates ${quoteCommandWord(rates)} -Ledger ${quoteCommandWord(ledger)}`;
 }
 function formatFileChangeResult(action, relativePath, before, after, count, existedBefore = true) {
   const changed = before !== after;
@@ -5552,8 +5670,7 @@ var TOOL_DEFS = [
       required: ["command"]
     },
     async run(args, ctx) {
-      const command = String(args.command ?? "");
-      if (!command.trim()) throw new Error("command \u304C\u5FC5\u8981\u3067\u3059");
+      const command = normalizeRunCommand(String(args.command ?? ""));
       if (/wttr\.in/i.test(command)) throw new Error("\u5929\u6C17\u30FB\u6C17\u6E29\u306E\u53D6\u5F97\u306Bwttr.in\u306F\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093\u3002get_weather\u30C4\u30FC\u30EB\u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044");
       if (ctx.signal?.aborted) throw new Error("\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F");
       try {

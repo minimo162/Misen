@@ -9,7 +9,7 @@ import { capabilityPolicy, type AgentConfig } from '../src/config'
 import type { ChatMessage } from '../src/llm'
 import { CopilotEdgeClient, resolveCopilotSettings } from '../src/copilot'
 
-import { getFileSnapshot, openAITools, parseToolResultMeta, rollbackFileChange, validateToolArgs, TOOL_DEFS, type ToolContext } from '../src/tools'
+import { getFileSnapshot, normalizeRunCommand, openAITools, parseToolResultMeta, rollbackFileChange, validateToolArgs, TOOL_DEFS, type ToolContext } from '../src/tools'
 import { listApprovals, requestApproval, resolveApproval } from '../src/approvals'
 import { getWeather, weatherCodeLabel, type WeatherFetcher } from '../src/weather'
 
@@ -129,6 +129,90 @@ async function testTools(): Promise<void> {
 
   const cmd = await get('run_command').run({ command: 'echo smoke-ok' }, ctx)
   assert.ok(cmd.includes('smoke-ok'))
+
+  assert.strictEqual(
+    normalizeRunCommand('powershell -File tools/Read-Xlsx.ps1 reports/OS04.xlsx reports/OS05.xlsx'),
+    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\*.xlsx'
+  )
+  assert.strictEqual(
+    normalizeRunCommand('powershell.exe -File tools\\Read-Xlsx.ps1 "reports\\one file.xlsx"'),
+    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path "reports\\one file.xlsx"'
+  )
+  assert.strictEqual(
+    normalizeRunCommand('tools/Read-Xlsx.ps1 reports/OS04.xlsx'),
+    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx'
+  )
+  assert.strictEqual(
+    normalizeRunCommand('powershell -NoProfile -File tools/Read-Xlsx.ps1 reports/OS04.xlsx,reports/OS05.xlsx,集計台帳.xlsx'),
+    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\*.xlsx'
+  )
+  assert.strictEqual(
+    normalizeRunCommand('powershell -File tools/Update-Ledger.ps1 work/extracted.json rates/レート表.csv 集計台帳.xlsx'),
+    'powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\レート表.csv -Ledger 集計台帳.xlsx'
+  )
+  assert.strictEqual(
+    normalizeRunCommand('tools\\Update-Ledger.ps1 work\\extracted.json rates\\レート表.csv 集計台帳.xlsx'),
+    'powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\レート表.csv -Ledger 集計台帳.xlsx'
+  )
+  assert.strictEqual(
+    normalizeRunCommand('powershell.exe -File tools\\Update-Ledger.ps1 -Ledger 集計台帳.xlsx -Extracted work\\extracted.json -Rates rates\\レート表.csv'),
+    'powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\レート表.csv -Ledger 集計台帳.xlsx'
+  )
+  let executionPolicyBlocked = false
+  try {
+    await get('run_command').run({
+      command: 'powershell.exe -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'
+    }, ctx)
+  } catch (err) {
+    const message = String((err as Error).message)
+    executionPolicyBlocked = message.includes('-ExecutionPolicy の指定は禁止') && message.includes('powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path <パス>')
+  }
+  assert.ok(executionPolicyBlocked, 'forbidden PowerShell policy flags must return self-correctable guidance')
+  assert.throws(
+    () => normalizeRunCommand('powershell.exe "-ExecutionPolicy" Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'),
+    /-ExecutionPolicy の指定は禁止/u
+  )
+  assert.throws(
+    () => normalizeRunCommand('powershell.exe -ExecutionPolicy:Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'),
+    /-ExecutionPolicy の指定は禁止/u
+  )
+  for (const flag of ['-Ex', '-Execution', '-ExecutionP', '-EP']) {
+    assert.throws(
+      () => normalizeRunCommand(`powershell.exe ${flag} Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx`),
+      /-ExecutionPolicy の指定は禁止/u,
+      `${flag} must be rejected as a PowerShell execution-policy abbreviation`
+    )
+  }
+  assert.throws(
+    () => normalizeRunCommand('powershell.exe -File tools\\Read-Xlsx.ps1 "reports\\x&whoami.xlsx"'),
+    /複合コマンド/u,
+    'quoted Read-Xlsx arguments must not reintroduce shell metacharacters'
+  )
+  assert.throws(
+    () => normalizeRunCommand('powershell.exe -File tools\\Update-Ledger.ps1 -Extracted "work\\%PATH%.json" -Rates rates\\レート表.csv -Ledger 集計台帳.xlsx'),
+    /複合コマンド/u,
+    'known-tool values must reject environment expansion metacharacters'
+  )
+  assert.throws(
+    () => normalizeRunCommand("powershell.exe -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx\necho injected"),
+    /複合コマンド/u,
+    'known-tool calls must reject embedded newlines'
+  )
+  assert.throws(
+    () => normalizeRunCommand('powershell.exe -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\レート表.csv -Ledger 集計台帳.xlsx -ImportExcelPath C:\\outside'),
+    /未許可の引数/u,
+    'known-tool normalization must not load a caller-selected PowerShell module'
+  )
+  let updatePolicyBlocked = false
+  try {
+    await get('run_command').run({
+      command: 'powershell.exe -ExecutionPolicy Bypass -File tools\\Update-Ledger.ps1 work\\extracted.json rates\\レート表.csv 集計台帳.xlsx'
+    }, ctx)
+  } catch (err) {
+    const message = String((err as Error).message)
+    updatePolicyBlocked = message.includes('-ExecutionPolicy の指定は禁止') && message.includes('powershell.exe -NoProfile -File tools\\Update-Ledger.ps1')
+  }
+  assert.ok(updatePolicyBlocked, 'Update-Ledger policy rejection must include its correct invocation')
 
   let wttrBlocked = false
   try {
