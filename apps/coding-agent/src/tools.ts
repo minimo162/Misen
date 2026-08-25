@@ -15,6 +15,10 @@ const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', '.tmp'])
 const MAX_LIST = 500
 const MAX_SEARCH_RESULTS = 200
 const MAX_READ_FILES_CHARS = 80_000
+const READ_XLSX_USAGE = 'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path <パス>'
+const READ_XLSX_DEMO_COMMAND = 'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\*.xlsx'
+const UPDATE_LEDGER_USAGE = 'powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted <抽出JSON> -Rates <レートCSV> -Ledger <台帳xlsx>'
+const UPDATE_LEDGER_DEMO_COMMAND = 'powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\レート表.csv -Ledger 集計台帳.xlsx'
 
 export interface ToolContext {
   workspace: string
@@ -67,6 +71,131 @@ function lineDelta(before: string, after: string): { addedLines: number; removed
     removedLines: Math.max(0, beforeLines.length - prefix - suffix),
     addedLines: Math.max(0, afterLines.length - prefix - suffix)
   }
+}
+
+function splitCommandWords(command: string): { words: string[]; unsafe: boolean } {
+  const words: string[] = []
+  let current = ''
+  let quote: '"' | "'" | null = null
+  let unsafe = false
+  for (const ch of command) {
+    if (quote) {
+      if (ch === quote) quote = null
+      else {
+        if ('&|;<>`%^()'.includes(ch) || ch === '\r' || ch === '\n') unsafe = true
+        current += ch
+      }
+      continue
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch
+    } else if (/\s/.test(ch)) {
+      if (ch === '\r' || ch === '\n') unsafe = true
+      if (current) {
+        words.push(current)
+        current = ''
+      }
+    } else {
+      if ('&|;<>`%^()'.includes(ch) || ch === '\r' || ch === '\n') unsafe = true
+      current += ch
+    }
+  }
+  if (current) words.push(current)
+  return { words, unsafe: unsafe || quote !== null }
+}
+
+function isForbiddenExecutionPolicyFlag(word: string): boolean {
+  const match = word.match(/^[-/]([A-Za-z]+)(?=$|[:=])/u)
+  if (!match) return false
+  const name = match[1].toLowerCase()
+  return name === 'ep' || (name.length >= 2 && 'executionpolicy'.startsWith(name))
+}
+
+function quoteCommandWord(value: string): string {
+  if (!/[\s"]/u.test(value)) return value
+  if (value.includes('"')) throw new Error(`Read-Xlsx の引数に引用符は使用できません。${READ_XLSX_USAGE} の形式で呼んでください`)
+  return `"${value}"`
+}
+
+/** Apply the run_command safety policy before the command reaches the shell. */
+export function normalizeRunCommand(command: string): string {
+  const trimmed = command.trim()
+  if (!trimmed) throw new Error('command が必要です')
+  const parsed = splitCommandWords(trimmed)
+  const fileIndex = parsed.words.findIndex((word) => /^-File$/iu.test(word))
+  const directScript = fileIndex < 0 ? parsed.words[0] : undefined
+  const script = fileIndex >= 0 ? parsed.words[fileIndex + 1] : directScript
+  const scriptArgsIndex = fileIndex >= 0 ? fileIndex + 2 : 1
+  const isReadXlsx = script !== undefined && /^(?:\.\\|\.\/)?tools[\\/]Read-Xlsx\.ps1$/iu.test(script)
+  const isUpdateLedger = script !== undefined && /^(?:\.\\|\.\/)?tools[\\/]Update-Ledger\.ps1$/iu.test(script)
+  const hasForbiddenPolicyFlag = parsed.words.some(isForbiddenExecutionPolicyFlag)
+  if (hasForbiddenPolicyFlag) {
+    if (isUpdateLedger) {
+      throw new Error(`-ExecutionPolicy の指定は禁止。Update-Ledger は ${UPDATE_LEDGER_USAGE} の形式で呼ぶこと。次のターンでは host.run_command の command を「${UPDATE_LEDGER_DEMO_COMMAND}」にして再試行すること`)
+    }
+    if (isReadXlsx) {
+      throw new Error(`-ExecutionPolicy の指定は禁止。Read-Xlsx は ${READ_XLSX_USAGE} の形式で呼ぶこと。次のターンでは host.run_command の command を「${READ_XLSX_DEMO_COMMAND}」にして再試行すること`)
+    }
+    throw new Error('-ExecutionPolicy の指定は禁止。PowerShell は powershell.exe -NoProfile -File <スクリプト> <引数> の形式で呼ぶこと')
+  }
+
+  if (!isReadXlsx && !isUpdateLedger) return command
+  const toolLabel = isReadXlsx ? 'Read-Xlsx' : 'Update-Ledger'
+  const usage = isReadXlsx ? READ_XLSX_USAGE : UPDATE_LEDGER_USAGE
+  if (parsed.unsafe) throw new Error(`${toolLabel} は複合コマンドにせず、${usage} の形式で呼んでください`)
+  if (fileIndex >= 0 && !/^(?:powershell|powershell\.exe)$/iu.test(parsed.words[0] ?? '')) {
+    throw new Error(`${toolLabel} は ${usage} の形式で呼んでください`)
+  }
+
+  if (isReadXlsx) {
+    let pathWords = parsed.words.slice(scriptArgsIndex)
+    if (/^-Path$/iu.test(pathWords[0] ?? '')) pathWords = pathWords.slice(1)
+    pathWords = pathWords.flatMap((word) => word.split(',')).filter(Boolean)
+    if (pathWords.length === 0 || pathWords.some((word) => /^-/u.test(word))) {
+      throw new Error(`Read-Xlsx は ${READ_XLSX_USAGE} の形式で呼んでください`)
+    }
+
+    const normalized = pathWords.map((word) => word.replaceAll('/', '\\'))
+    const reportPaths = normalized.length > 1
+      ? normalized.filter((word) => !(path.win32.dirname(word) === '.' && path.win32.basename(word).toLowerCase() === '集計台帳.xlsx'))
+      : normalized
+    if (reportPaths.length === 0) throw new Error(`Read-Xlsx は ${READ_XLSX_USAGE} の形式で呼んでください`)
+    let normalizedPath: string
+    if (reportPaths.length === 1) {
+      normalizedPath = reportPaths[0]
+    } else {
+      const directories = new Set(reportPaths.map((word) => path.win32.dirname(word).toLowerCase()))
+      if (directories.size !== 1 || reportPaths.some((word) => path.win32.extname(word).toLowerCase() !== '.xlsx')) {
+        throw new Error(`Read-Xlsx の複数ファイルは同じフォルダーの *.xlsx で指定してください。${READ_XLSX_USAGE} の形式で呼んでください`)
+      }
+      normalizedPath = path.win32.join(path.win32.dirname(reportPaths[0]), '*.xlsx')
+    }
+    return `powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path ${quoteCommandWord(normalizedPath)}`
+  }
+
+  const rest = parsed.words.slice(scriptArgsIndex)
+  const named = new Map<string, string>()
+  const positional: string[] = []
+  for (let index = 0; index < rest.length; index++) {
+    const token = rest[index]
+    const match = token.match(/^-(Extracted|ExtractedPath|Rates|Ledger)$/iu)
+    if (match) {
+      const value = rest[++index]
+      if (!value || /^-/u.test(value)) throw new Error(`Update-Ledger は ${UPDATE_LEDGER_USAGE} の形式で呼んでください`)
+      const key = /^ExtractedPath$/iu.test(match[1]) ? 'extracted' : match[1].toLowerCase()
+      named.set(key, value)
+    } else if (/^-/u.test(token)) {
+      throw new Error(`Update-Ledger に未許可の引数があります。${UPDATE_LEDGER_USAGE} の形式で呼んでください`)
+    } else {
+      positional.push(token)
+    }
+  }
+  if (named.size > 0 && positional.length > 0) throw new Error(`Update-Ledger は名前付き引数だけで ${UPDATE_LEDGER_USAGE} の形式で呼んでください`)
+  const extracted = (named.get('extracted') ?? positional[0])?.replaceAll('/', '\\')
+  const rates = (named.get('rates') ?? positional[1])?.replaceAll('/', '\\')
+  const ledger = (named.get('ledger') ?? positional[2])?.replaceAll('/', '\\')
+  if (!extracted || !rates || !ledger || positional.length > 3) throw new Error(`Update-Ledger は ${UPDATE_LEDGER_USAGE} の形式で呼んでください`)
+  return `powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted ${quoteCommandWord(extracted)} -Rates ${quoteCommandWord(rates)} -Ledger ${quoteCommandWord(ledger)}`
 }
 
 function formatFileChangeResult(
@@ -725,8 +854,7 @@ export const TOOL_DEFS: ToolDef[] = [
       required: ['command']
     },
     async run(args, ctx) {
-      const command = String(args.command ?? '')
-      if (!command.trim()) throw new Error('command が必要です')
+      const command = normalizeRunCommand(String(args.command ?? ''))
       if (/wttr\.in/i.test(command)) throw new Error('天気・気温の取得にwttr.inは使用できません。get_weatherツールを使ってください')
       if (ctx.signal?.aborted) throw new Error('コマンド実行はキャンセルされました')
       try {
