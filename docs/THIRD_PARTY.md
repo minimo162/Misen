@@ -14,6 +14,8 @@
 
 `apps/coding-agent/vendor/npm/package-lock.json` の resolved/integrity と `package.json` の exact dependency も、上記 npm 3 パッケージの固定根拠です。ImportExcel の `ImportExcel.psd1` は ModuleVersion 7.8.10 と `EPPlus.dll` の required assembly を示します。
 
+自作の `Build-DemoData.ps1` と `workspace/tools/` 配下4本は UTF-8 BOM付き・CRLFで固定し、Windows PowerShell 5.1 parserで検査します。一方、`vendor/` 内の第三者配布 `.ps1` は取得物の同一性を優先して上流の改行・encodingを変更しません。
+
 ## License 本文の場所
 
 - ImportExcel (Apache-2.0): `demo/renketsu-demo/workspace/vendor/ImportExcel/7.8.10/LICENSE.txt`。`ImportExcel.psd1` の LicenseUri は <https://github.com/dfinke/ImportExcel/blob/master/LICENSE.txt> です。
