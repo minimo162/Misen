@@ -6042,13 +6042,13 @@ var END_MARKER = "AGENT_END";
 function shouldCancel(io) {
   return io.signal?.aborted === true || io.isCanceled?.() === true;
 }
-function buildProtocolRules(mode = "work", allowArbitraryCommands = false) {
+function buildProtocolRules(mode = "work", allowArbitraryCommands = false, autoApproveCommand = false) {
   const toolDocs = TOOL_DEFS.filter((t) => allowArbitraryCommands || t.name !== "run_command").map((t) => {
     const req = t.parameters.required ?? [];
     const props = Object.keys(t.parameters.properties ?? {});
     return `- ${qualifiedToolName(t.name)}(${props.join(", ")}):${req.length ? ` \u5FC5\u9808=${req.join(",")};` : ""} ${t.description}`;
   }).join("\n");
-  const commandRule = allowArbitraryCommands ? "\u660E\u793A\u8A2D\u5B9A\u306B\u3088\u308A\u4EFB\u610F\u306Ehost\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u304C\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u3059\u3002\u5B9F\u884C\u524D\u306B\u627F\u8A8D\u3092\u53D6\u5F97\u3057\u3066\u304F\u3060\u3055\u3044\u3002" : "\u4EFB\u610F\u306E\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u3053\u306ERun\u3067\u306F\u7121\u52B9\u3067\u3059\u3002\u65E2\u77E5\u306E\u691C\u8A3C\u624B\u9806\u3084\u7BA1\u7406\u30D7\u30ED\u30BB\u30B9\u3092\u4F7F\u3044\u3001\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u3092\u8981\u6C42\u3057\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002";
+  const commandRule = allowArbitraryCommands ? autoApproveCommand ? "\u660E\u793A\u8A2D\u5B9A\u306B\u3088\u308A\u4EFB\u610F\u306Ehost\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u81EA\u52D5\u627F\u8A8D\u6E08\u307F\u3067\u3059\u3002\u627F\u8A8D\u3092\u6C42\u3081\u308Banswer\u3092\u8FD4\u3055\u305A\u3001\u5FC5\u8981\u306Ahost.run_command\u3092\u76F4\u3061\u306B\u8981\u6C42\u3057\u3066\u304F\u3060\u3055\u3044\u3002" : "\u660E\u793A\u8A2D\u5B9A\u306B\u3088\u308A\u4EFB\u610F\u306Ehost\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u304C\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u3059\u3002\u5B9F\u884C\u524D\u306B\u627F\u8A8D\u3092\u53D6\u5F97\u3057\u3066\u304F\u3060\u3055\u3044\u3002" : "\u4EFB\u610F\u306E\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u3053\u306ERun\u3067\u306F\u7121\u52B9\u3067\u3059\u3002\u65E2\u77E5\u306E\u691C\u8A3C\u624B\u9806\u3084\u7BA1\u7406\u30D7\u30ED\u30BB\u30B9\u3092\u4F7F\u3044\u3001\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u3092\u8981\u6C42\u3057\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002";
   if (mode !== "work") {
     const label = mode === "research" ? "\u8ABF\u67FB" : "\u901A\u5E38\u56DE\u7B54";
     return [
@@ -6165,9 +6165,9 @@ async function approvalPreconditionChanged(binding, ctx2) {
   const state = await getFilePrecondition(binding.path, ctx2);
   return state.existedBefore !== binding.existedBefore || state.beforeHash !== binding.beforeHash;
 }
-function composeCopilotPrompt(mode, userInput, steps, budget = 12e4, history = [], allowArbitraryCommands = false) {
+function composeCopilotPrompt(mode, userInput, steps, budget = 12e4, history = [], allowArbitraryCommands = false, autoApproveCommand = false) {
   const histBlock = history.length > 0 ? ["", "[\u3053\u308C\u307E\u3067\u306E\u3084\u308A\u3068\u308A]", ...history.map((h) => `${h.role}: ${h.content.replace(/\r?\n+/g, " ")}`)] : [];
-  const head = [buildProtocolRules(mode, allowArbitraryCommands), ...histBlock, "", "[\u4F9D\u983C]", userInput];
+  const head = [buildProtocolRules(mode, allowArbitraryCommands, autoApproveCommand), ...histBlock, "", "[\u4F9D\u983C]", userInput];
   const tail = [
     "",
     "[\u6307\u793A]",
@@ -6248,7 +6248,7 @@ async function runCopilotTurn(opts) {
     if (io.isPaused?.()) return { reply: "", messages: turnMessages("[\u4E00\u6642\u505C\u6B62] \u30C1\u30A7\u30C3\u30AF\u30DD\u30A4\u30F3\u30C8\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F"), aborted: true, paused: true, checkpoint: steps.slice(-20) };
     let raw;
     try {
-      raw = await backend.complete(composeCopilotPrompt("work", opts.userInput, steps, cfg2.copilot?.maxPromptChars ?? 12e4, history, policy.allowArbitraryCommands), io.signal);
+      raw = await backend.complete(composeCopilotPrompt("work", opts.userInput, steps, cfg2.copilot?.maxPromptChars ?? 12e4, history, policy.allowArbitraryCommands, policy.autoApproveCommand), io.signal);
       raw = raw.replace(/＜/g, "<").replace(/＞/g, ">").replace(/｀/g, String.fromCharCode(96));
       io.event?.({ type: "model.decision", summary: "Copilot\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: "copilot", namespace: "native", authority: "claimed" });
     } catch (err) {

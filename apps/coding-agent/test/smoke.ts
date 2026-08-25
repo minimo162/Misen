@@ -710,6 +710,8 @@ async function testCopilotToolResultBudgets(): Promise<void> {
     backend: commandBackend
   })
   assert.strictEqual(commandResult.reply, 'command complete')
+  assert.ok(commandBackend.prompts[0].includes('任意のhostコマンド実行は自動承認済みです'), 'auto-approved command prompt must state that approval is already granted')
+  assert.ok(!commandBackend.prompts[0].includes('実行前に承認を取得してください'), 'auto-approved command prompt must not ask the model to request approval')
   assert.ok(commandBackend.prompts[1].includes('last.xlsx FINAL_WORKBOOK_MARKER'), 'final command workbook must reach the next prompt')
   fs.rmSync(commandRoot, { recursive: true, force: true })
   console.log('PASS copilot-tool-result-budgets')
