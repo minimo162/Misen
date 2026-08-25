@@ -4982,9 +4982,7 @@ var MAX_LIST = 500;
 var MAX_SEARCH_RESULTS = 200;
 var MAX_READ_FILES_CHARS = 8e4;
 var READ_XLSX_USAGE = "powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path <\u30D1\u30B9>";
-var READ_XLSX_DEMO_COMMAND = "powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\*.xlsx";
 var UPDATE_LEDGER_USAGE = "powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted <\u62BD\u51FAJSON> -Rates <\u30EC\u30FC\u30C8CSV> -Ledger <\u53F0\u5E33xlsx>";
-var UPDATE_LEDGER_DEMO_COMMAND = "powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\\u30EC\u30FC\u30C8\u8868.csv -Ledger \u96C6\u8A08\u53F0\u5E33.xlsx";
 function sha256(text) {
   return import_node_crypto.default.createHash("sha256").update(text, "utf8").digest("hex");
 }
@@ -5030,11 +5028,11 @@ function splitCommandWords(command) {
   if (current) words.push(current);
   return { words, unsafe: unsafe || quote !== null };
 }
-function isForbiddenExecutionPolicyFlag(word) {
+function isEncodedCommandFlag(word) {
   const match = word.match(/^[-/]([A-Za-z]+)(?=$|[:=])/u);
   if (!match) return false;
   const name = match[1].toLowerCase();
-  return name === "ep" || name.length >= 2 && "executionpolicy".startsWith(name);
+  return name.length >= 1 && "encodedcommand".startsWith(name);
 }
 function quoteCommandWord(value) {
   if (!/[\s"]/u.test(value)) return value;
@@ -5051,16 +5049,6 @@ function normalizeRunCommand(command) {
   const scriptArgsIndex = fileIndex >= 0 ? fileIndex + 2 : 1;
   const isReadXlsx = script !== void 0 && /^(?:\.\\|\.\/)?tools[\\/]Read-Xlsx\.ps1$/iu.test(script);
   const isUpdateLedger = script !== void 0 && /^(?:\.\\|\.\/)?tools[\\/]Update-Ledger\.ps1$/iu.test(script);
-  const hasForbiddenPolicyFlag = parsed.words.some(isForbiddenExecutionPolicyFlag);
-  if (hasForbiddenPolicyFlag) {
-    if (isUpdateLedger) {
-      throw new Error(`-ExecutionPolicy \u306E\u6307\u5B9A\u306F\u7981\u6B62\u3002Update-Ledger \u306F ${UPDATE_LEDGER_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3076\u3053\u3068\u3002\u6B21\u306E\u30BF\u30FC\u30F3\u3067\u306F host.run_command \u306E command \u3092\u300C${UPDATE_LEDGER_DEMO_COMMAND}\u300D\u306B\u3057\u3066\u518D\u8A66\u884C\u3059\u308B\u3053\u3068`);
-    }
-    if (isReadXlsx) {
-      throw new Error(`-ExecutionPolicy \u306E\u6307\u5B9A\u306F\u7981\u6B62\u3002Read-Xlsx \u306F ${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3076\u3053\u3068\u3002\u6B21\u306E\u30BF\u30FC\u30F3\u3067\u306F host.run_command \u306E command \u3092\u300C${READ_XLSX_DEMO_COMMAND}\u300D\u306B\u3057\u3066\u518D\u8A66\u884C\u3059\u308B\u3053\u3068`);
-    }
-    throw new Error("-ExecutionPolicy \u306E\u6307\u5B9A\u306F\u7981\u6B62\u3002PowerShell \u306F powershell.exe -NoProfile -File <\u30B9\u30AF\u30EA\u30D7\u30C8> <\u5F15\u6570> \u306E\u5F62\u5F0F\u3067\u547C\u3076\u3053\u3068");
-  }
   if (!isReadXlsx && !isUpdateLedger) return command;
   const toolLabel = isReadXlsx ? "Read-Xlsx" : "Update-Ledger";
   const usage = isReadXlsx ? READ_XLSX_USAGE : UPDATE_LEDGER_USAGE;
@@ -5113,6 +5101,171 @@ function normalizeRunCommand(command) {
   const ledger = (named.get("ledger") ?? positional[2])?.replaceAll("/", "\\");
   if (!extracted || !rates || !ledger || positional.length > 3) throw new Error(`Update-Ledger \u306F ${UPDATE_LEDGER_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
   return `powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted ${quoteCommandWord(extracted)} -Rates ${quoteCommandWord(rates)} -Ledger ${quoteCommandWord(ledger)}`;
+}
+var DELETE_OPERATIONS = /* @__PURE__ */ new Set([
+  "remove-item",
+  "clear-content",
+  "del",
+  "erase",
+  "rd",
+  "rmdir",
+  "rm",
+  "ri",
+  "unlink"
+]);
+var NETWORK_OPERATIONS = /* @__PURE__ */ new Set([
+  "invoke-webrequest",
+  "iwr",
+  "invoke-restmethod",
+  "irm",
+  "curl",
+  "curl.exe",
+  "wget",
+  "wget.exe",
+  "start-bitstransfer",
+  "bitsadmin",
+  "ftp",
+  "ssh",
+  "scp",
+  "ping",
+  "test-netconnection",
+  "resolve-dnsname"
+]);
+var PROCESS_SERVICE_OPERATIONS = /* @__PURE__ */ new Set([
+  "start-process",
+  "stop-process",
+  "debug-process",
+  "taskkill",
+  "taskkill.exe",
+  "sc",
+  "sc.exe",
+  "start-service",
+  "stop-service",
+  "restart-service",
+  "set-service",
+  "new-service",
+  "remove-service",
+  "restart-computer",
+  "stop-computer",
+  "shutdown",
+  "shutdown.exe"
+]);
+var REGISTRY_MUTATION_OPERATIONS = /* @__PURE__ */ new Set([
+  "set-itemproperty",
+  "new-itemproperty",
+  "remove-itemproperty",
+  "rename-itemproperty",
+  "clear-itemproperty"
+]);
+var FILE_WRITE_OPERATIONS = /* @__PURE__ */ new Set([
+  "set-content",
+  "add-content",
+  "out-file",
+  "tee-object",
+  "export-csv",
+  "new-item",
+  "copy-item",
+  "move-item",
+  "copy",
+  "move",
+  "xcopy",
+  "robocopy",
+  "mkdir",
+  "md",
+  "touch"
+]);
+function commandWords(command) {
+  return splitCommandWords(command).words.flatMap((word) => {
+    if (!/\s/u.test(word)) return [word];
+    const nested = word.split(/\s+/u).map((part) => part.replace(/^[;&|()]+|[;&|()]+$/gu, "").toLowerCase());
+    const containsOperation = nested.some(
+      (part) => DELETE_OPERATIONS.has(part) || NETWORK_OPERATIONS.has(part) || PROCESS_SERVICE_OPERATIONS.has(part) || REGISTRY_MUTATION_OPERATIONS.has(part) || FILE_WRITE_OPERATIONS.has(part) || ["reg", "reg.exe", "net", "net.exe", "git"].includes(part) || isEncodedCommandFlag(part)
+    );
+    return containsOperation ? splitCommandWords(word).words : [word];
+  }).flatMap((word) => word.split(/[;&|()]+/u)).map((word) => word.trim()).filter(Boolean);
+}
+function commandOperationTokens(command) {
+  return commandWords(command).map((word) => word.toLowerCase());
+}
+function assertWorkspaceWriteTarget(target, ctx2) {
+  const cleaned = target.trim().replace(/^['"]|['"]$/g, "");
+  if (!cleaned || /^&\d$/u.test(cleaned) || /^(?:nul|\$null)$/iu.test(cleaned)) return;
+  if (/[\r\n]/u.test(cleaned) || /%[^%]+%|\$\{?env:|^~(?:[\\/]|$)/iu.test(cleaned)) {
+    throw new Error(`run_command\u62D2\u5426: \u66F8\u304D\u8FBC\u307F\u5148\u3092\u5B89\u5168\u306B\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093: ${target}`);
+  }
+  try {
+    resolveInWorkspace(cleaned, ctx2);
+  } catch {
+    throw new Error(`run_command\u62D2\u5426: \u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u3078\u306E\u66F8\u304D\u8FBC\u307F\u306F\u7981\u6B62\u3067\u3059: ${target}`);
+  }
+}
+function redirectionTargets(command) {
+  const targets = [];
+  const pattern = /(?:\d*)>{1,2}\s*("[^"]+"|'[^']+'|[^\s;&|]+)/gu;
+  for (const match of command.matchAll(pattern)) targets.push(match[1]);
+  return targets;
+}
+function writeOperationTargets(command) {
+  const words = commandWords(command);
+  const targets = [];
+  for (let index = 0; index < words.length; index++) {
+    const operation = words[index].toLowerCase();
+    if (!FILE_WRITE_OPERATIONS.has(operation)) continue;
+    const tail = words.slice(index + 1);
+    const copyOrMove = ["copy-item", "move-item", "copy", "move", "xcopy", "robocopy"].includes(operation);
+    const namedTargetNames = copyOrMove ? /* @__PURE__ */ new Set(["-destination", "-dest"]) : /* @__PURE__ */ new Set(["-path", "-literalpath", "-filepath"]);
+    let found;
+    for (let offset = 0; offset < tail.length - 1; offset++) {
+      if (namedTargetNames.has(tail[offset].toLowerCase())) {
+        found = tail[offset + 1];
+        break;
+      }
+    }
+    if (!found) {
+      const positional = tail.filter((word) => !word.startsWith("-"));
+      found = copyOrMove ? positional[1] : positional[0];
+    }
+    if (!found) throw new Error(`run_command\u62D2\u5426: ${words[index]} \u306E\u66F8\u304D\u8FBC\u307F\u5148\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093`);
+    targets.push(found);
+  }
+  return targets;
+}
+function assertRunCommandPolicy(command, ctx2) {
+  if (commandWords(command).some(isEncodedCommandFlag)) {
+    throw new Error("run_command\u62D2\u5426: -EncodedCommand \u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
+  }
+  const operations = commandOperationTokens(command);
+  const blocked = operations.find((word) => DELETE_OPERATIONS.has(word));
+  if (blocked) throw new Error(`run_command\u62D2\u5426: \u524A\u9664\u64CD\u4F5C ${blocked} \u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093`);
+  const network = operations.find((word) => NETWORK_OPERATIONS.has(word));
+  if (network) throw new Error(`run_command\u62D2\u5426: \u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u64CD\u4F5C ${network} \u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093`);
+  const process2 = operations.find((word) => PROCESS_SERVICE_OPERATIONS.has(word));
+  if (process2) throw new Error(`run_command\u62D2\u5426: \u30D7\u30ED\u30BB\u30B9\u30FB\u30B5\u30FC\u30D3\u30B9\u64CD\u4F5C ${process2} \u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093`);
+  const registry = operations.find((word) => REGISTRY_MUTATION_OPERATIONS.has(word));
+  if (registry) throw new Error(`run_command\u62D2\u5426: \u30EC\u30B8\u30B9\u30C8\u30EA\u5909\u66F4 ${registry} \u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093`);
+  const registryPath = /(?:^|[\s'"(])(?:HKLM|HKCU|HKCR|HKU|HKCC):[\\/]|Registry::/iu.test(command);
+  if (registryPath && operations.some((word) => FILE_WRITE_OPERATIONS.has(word) || word === "set-item" || word === "rename-item")) {
+    throw new Error("run_command\u62D2\u5426: \u30EC\u30B8\u30B9\u30C8\u30EA\u5909\u66F4\u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
+  }
+  const regIndex = operations.findIndex((word) => word === "reg" || word === "reg.exe");
+  if (regIndex >= 0 && operations[regIndex + 1] !== "query") {
+    throw new Error("run_command\u62D2\u5426: \u30EC\u30B8\u30B9\u30C8\u30EA\u5909\u66F4 reg \u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
+  }
+  const netIndex = operations.findIndex((word) => word === "net" || word === "net.exe");
+  if (netIndex >= 0 && ["start", "stop"].includes(operations[netIndex + 1] ?? "")) {
+    throw new Error("run_command\u62D2\u5426: \u30B5\u30FC\u30D3\u30B9\u64CD\u4F5C net \u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
+  }
+  if (/\[(?:System\.)?IO\.File\]::(?:WriteAllText|WriteAllBytes|AppendAllText|Create)/iu.test(command)) {
+    throw new Error("run_command\u62D2\u5426: \u4F4E\u6C34\u6E96\u30D5\u30A1\u30A4\u30EB\u66F8\u304D\u8FBC\u307FAPI\u306F\u66F8\u304D\u8FBC\u307F\u5148\u3092\u5B89\u5168\u306B\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093");
+  }
+  const gitIndex = operations.findIndex((word) => word === "git");
+  if (gitIndex >= 0 && ["clean", "rm", "reset"].includes(operations[gitIndex + 1] ?? "")) {
+    throw new Error(`run_command\u62D2\u5426: \u7834\u58CA\u7684\u306Agit ${operations[gitIndex + 1]} \u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093`);
+  }
+  if (!ctx2.restrictToWorkspace) return;
+  for (const target of [...redirectionTargets(command), ...writeOperationTargets(command)]) {
+    assertWorkspaceWriteTarget(target, ctx2);
+  }
 }
 function formatFileChangeResult(action, relativePath, before, after, count, existedBefore = true) {
   const changed = before !== after;
@@ -5723,6 +5876,7 @@ var TOOL_DEFS = [
     async run(args, ctx2) {
       const command = normalizeRunCommand(String(args.command ?? ""));
       if (/wttr\.in/i.test(command)) throw new Error("\u5929\u6C17\u30FB\u6C17\u6E29\u306E\u53D6\u5F97\u306Bwttr.in\u306F\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093\u3002get_weather\u30C4\u30FC\u30EB\u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044");
+      assertRunCommandPolicy(command, ctx2);
       if (ctx2.signal?.aborted) throw new Error("\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F");
       try {
         const { stdout, stderr } = await execAsync(command, {

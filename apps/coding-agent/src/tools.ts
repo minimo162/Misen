@@ -16,9 +16,7 @@ const MAX_LIST = 500
 const MAX_SEARCH_RESULTS = 200
 const MAX_READ_FILES_CHARS = 80_000
 const READ_XLSX_USAGE = 'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path <パス>'
-const READ_XLSX_DEMO_COMMAND = 'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\*.xlsx'
 const UPDATE_LEDGER_USAGE = 'powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted <抽出JSON> -Rates <レートCSV> -Ledger <台帳xlsx>'
-const UPDATE_LEDGER_DEMO_COMMAND = 'powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\レート表.csv -Ledger 集計台帳.xlsx'
 
 export interface ToolContext {
   workspace: string
@@ -104,11 +102,11 @@ function splitCommandWords(command: string): { words: string[]; unsafe: boolean 
   return { words, unsafe: unsafe || quote !== null }
 }
 
-function isForbiddenExecutionPolicyFlag(word: string): boolean {
+function isEncodedCommandFlag(word: string): boolean {
   const match = word.match(/^[-/]([A-Za-z]+)(?=$|[:=])/u)
   if (!match) return false
   const name = match[1].toLowerCase()
-  return name === 'ep' || (name.length >= 2 && 'executionpolicy'.startsWith(name))
+  return name.length >= 1 && 'encodedcommand'.startsWith(name)
 }
 
 function quoteCommandWord(value: string): string {
@@ -128,16 +126,6 @@ export function normalizeRunCommand(command: string): string {
   const scriptArgsIndex = fileIndex >= 0 ? fileIndex + 2 : 1
   const isReadXlsx = script !== undefined && /^(?:\.\\|\.\/)?tools[\\/]Read-Xlsx\.ps1$/iu.test(script)
   const isUpdateLedger = script !== undefined && /^(?:\.\\|\.\/)?tools[\\/]Update-Ledger\.ps1$/iu.test(script)
-  const hasForbiddenPolicyFlag = parsed.words.some(isForbiddenExecutionPolicyFlag)
-  if (hasForbiddenPolicyFlag) {
-    if (isUpdateLedger) {
-      throw new Error(`-ExecutionPolicy の指定は禁止。Update-Ledger は ${UPDATE_LEDGER_USAGE} の形式で呼ぶこと。次のターンでは host.run_command の command を「${UPDATE_LEDGER_DEMO_COMMAND}」にして再試行すること`)
-    }
-    if (isReadXlsx) {
-      throw new Error(`-ExecutionPolicy の指定は禁止。Read-Xlsx は ${READ_XLSX_USAGE} の形式で呼ぶこと。次のターンでは host.run_command の command を「${READ_XLSX_DEMO_COMMAND}」にして再試行すること`)
-    }
-    throw new Error('-ExecutionPolicy の指定は禁止。PowerShell は powershell.exe -NoProfile -File <スクリプト> <引数> の形式で呼ぶこと')
-  }
 
   if (!isReadXlsx && !isUpdateLedger) return command
   const toolLabel = isReadXlsx ? 'Read-Xlsx' : 'Update-Ledger'
@@ -196,6 +184,133 @@ export function normalizeRunCommand(command: string): string {
   const ledger = (named.get('ledger') ?? positional[2])?.replaceAll('/', '\\')
   if (!extracted || !rates || !ledger || positional.length > 3) throw new Error(`Update-Ledger は ${UPDATE_LEDGER_USAGE} の形式で呼んでください`)
   return `powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted ${quoteCommandWord(extracted)} -Rates ${quoteCommandWord(rates)} -Ledger ${quoteCommandWord(ledger)}`
+}
+
+const DELETE_OPERATIONS = new Set([
+  'remove-item', 'clear-content', 'del', 'erase', 'rd', 'rmdir', 'rm', 'ri', 'unlink'
+])
+const NETWORK_OPERATIONS = new Set([
+  'invoke-webrequest', 'iwr', 'invoke-restmethod', 'irm', 'curl', 'curl.exe', 'wget', 'wget.exe',
+  'start-bitstransfer', 'bitsadmin', 'ftp', 'ssh', 'scp', 'ping', 'test-netconnection', 'resolve-dnsname'
+])
+const PROCESS_SERVICE_OPERATIONS = new Set([
+  'start-process', 'stop-process', 'debug-process', 'taskkill', 'taskkill.exe', 'sc', 'sc.exe',
+  'start-service', 'stop-service', 'restart-service', 'set-service', 'new-service', 'remove-service',
+  'restart-computer', 'stop-computer', 'shutdown', 'shutdown.exe'
+])
+const REGISTRY_MUTATION_OPERATIONS = new Set([
+  'set-itemproperty', 'new-itemproperty', 'remove-itemproperty', 'rename-itemproperty', 'clear-itemproperty'
+])
+const FILE_WRITE_OPERATIONS = new Set([
+  'set-content', 'add-content', 'out-file', 'tee-object', 'export-csv', 'new-item', 'copy-item', 'move-item',
+  'copy', 'move', 'xcopy', 'robocopy', 'mkdir', 'md', 'touch'
+])
+
+function commandWords(command: string): string[] {
+  return splitCommandWords(command).words
+    .flatMap((word) => {
+      if (!/\s/u.test(word)) return [word]
+      const nested = word.split(/\s+/u).map((part) => part.replace(/^[;&|()]+|[;&|()]+$/gu, '').toLowerCase())
+      const containsOperation = nested.some((part) =>
+        DELETE_OPERATIONS.has(part) || NETWORK_OPERATIONS.has(part) || PROCESS_SERVICE_OPERATIONS.has(part) ||
+        REGISTRY_MUTATION_OPERATIONS.has(part) || FILE_WRITE_OPERATIONS.has(part) ||
+        ['reg', 'reg.exe', 'net', 'net.exe', 'git'].includes(part) || isEncodedCommandFlag(part)
+      )
+      return containsOperation ? splitCommandWords(word).words : [word]
+    })
+    .flatMap((word) => word.split(/[;&|()]+/u))
+    .map((word) => word.trim())
+    .filter(Boolean)
+}
+
+function commandOperationTokens(command: string): string[] {
+  return commandWords(command).map((word) => word.toLowerCase())
+}
+
+function assertWorkspaceWriteTarget(target: string, ctx: ToolContext): void {
+  const cleaned = target.trim().replace(/^['"]|['"]$/g, '')
+  if (!cleaned || /^&\d$/u.test(cleaned) || /^(?:nul|\$null)$/iu.test(cleaned)) return
+  if (/[\r\n]/u.test(cleaned) || /%[^%]+%|\$\{?env:|^~(?:[\\/]|$)/iu.test(cleaned)) {
+    throw new Error(`run_command拒否: 書き込み先を安全に確認できません: ${target}`)
+  }
+  try {
+    resolveInWorkspace(cleaned, ctx)
+  } catch {
+    throw new Error(`run_command拒否: ワークスペース外への書き込みは禁止です: ${target}`)
+  }
+}
+
+function redirectionTargets(command: string): string[] {
+  const targets: string[] = []
+  const pattern = /(?:\d*)>{1,2}\s*("[^"]+"|'[^']+'|[^\s;&|]+)/gu
+  for (const match of command.matchAll(pattern)) targets.push(match[1])
+  return targets
+}
+
+function writeOperationTargets(command: string): string[] {
+  const words = commandWords(command)
+  const targets: string[] = []
+  for (let index = 0; index < words.length; index++) {
+    const operation = words[index].toLowerCase()
+    if (!FILE_WRITE_OPERATIONS.has(operation)) continue
+    const tail = words.slice(index + 1)
+    const copyOrMove = ['copy-item', 'move-item', 'copy', 'move', 'xcopy', 'robocopy'].includes(operation)
+    const namedTargetNames = copyOrMove
+      ? new Set(['-destination', '-dest'])
+      : new Set(['-path', '-literalpath', '-filepath'])
+    let found: string | undefined
+    for (let offset = 0; offset < tail.length - 1; offset++) {
+      if (namedTargetNames.has(tail[offset].toLowerCase())) {
+        found = tail[offset + 1]
+        break
+      }
+    }
+    if (!found) {
+      const positional = tail.filter((word) => !word.startsWith('-'))
+      found = copyOrMove ? positional[1] : positional[0]
+    }
+    if (!found) throw new Error(`run_command拒否: ${words[index]} の書き込み先を確認できません`)
+    targets.push(found)
+  }
+  return targets
+}
+
+function assertRunCommandPolicy(command: string, ctx: ToolContext): void {
+  if (commandWords(command).some(isEncodedCommandFlag)) {
+    throw new Error('run_command拒否: -EncodedCommand は許可されていません')
+  }
+  const operations = commandOperationTokens(command)
+  const blocked = operations.find((word) => DELETE_OPERATIONS.has(word))
+  if (blocked) throw new Error(`run_command拒否: 削除操作 ${blocked} は許可されていません`)
+  const network = operations.find((word) => NETWORK_OPERATIONS.has(word))
+  if (network) throw new Error(`run_command拒否: ネットワーク操作 ${network} は許可されていません`)
+  const process = operations.find((word) => PROCESS_SERVICE_OPERATIONS.has(word))
+  if (process) throw new Error(`run_command拒否: プロセス・サービス操作 ${process} は許可されていません`)
+  const registry = operations.find((word) => REGISTRY_MUTATION_OPERATIONS.has(word))
+  if (registry) throw new Error(`run_command拒否: レジストリ変更 ${registry} は許可されていません`)
+  const registryPath = /(?:^|[\s'"(])(?:HKLM|HKCU|HKCR|HKU|HKCC):[\\/]|Registry::/iu.test(command)
+  if (registryPath && operations.some((word) => FILE_WRITE_OPERATIONS.has(word) || word === 'set-item' || word === 'rename-item')) {
+    throw new Error('run_command拒否: レジストリ変更は許可されていません')
+  }
+  const regIndex = operations.findIndex((word) => word === 'reg' || word === 'reg.exe')
+  if (regIndex >= 0 && operations[regIndex + 1] !== 'query') {
+    throw new Error('run_command拒否: レジストリ変更 reg は許可されていません')
+  }
+  const netIndex = operations.findIndex((word) => word === 'net' || word === 'net.exe')
+  if (netIndex >= 0 && ['start', 'stop'].includes(operations[netIndex + 1] ?? '')) {
+    throw new Error('run_command拒否: サービス操作 net は許可されていません')
+  }
+  if (/\[(?:System\.)?IO\.File\]::(?:WriteAllText|WriteAllBytes|AppendAllText|Create)/iu.test(command)) {
+    throw new Error('run_command拒否: 低水準ファイル書き込みAPIは書き込み先を安全に確認できません')
+  }
+  const gitIndex = operations.findIndex((word) => word === 'git')
+  if (gitIndex >= 0 && ['clean', 'rm', 'reset'].includes(operations[gitIndex + 1] ?? '')) {
+    throw new Error(`run_command拒否: 破壊的なgit ${operations[gitIndex + 1]} は許可されていません`)
+  }
+  if (!ctx.restrictToWorkspace) return
+  for (const target of [...redirectionTargets(command), ...writeOperationTargets(command)]) {
+    assertWorkspaceWriteTarget(target, ctx)
+  }
 }
 
 function formatFileChangeResult(
@@ -856,6 +971,7 @@ export const TOOL_DEFS: ToolDef[] = [
     async run(args, ctx) {
       const command = normalizeRunCommand(String(args.command ?? ''))
       if (/wttr\.in/i.test(command)) throw new Error('天気・気温の取得にwttr.inは使用できません。get_weatherツールを使ってください')
+      assertRunCommandPolicy(command, ctx)
       if (ctx.signal?.aborted) throw new Error('コマンド実行はキャンセルされました')
       try {
         const { stdout, stderr } = await execAsync(command, {

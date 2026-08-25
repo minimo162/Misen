@@ -77,6 +77,11 @@ async function testTools(): Promise<void> {
   const ctx = makeCtx(root)
   const get = (n: string) => TOOL_DEFS.find((t) => t.name === n)!
 
+  fs.mkdirSync(path.join(root, 'tools'), { recursive: true })
+  fs.writeFileSync(path.join(root, 'tools', 'Read-Xlsx.ps1'), "param([string]$Path)\nWrite-Output ('READ_OK:' + $Path)\n")
+  fs.writeFileSync(path.join(root, 'tools', 'Update-Ledger.ps1'), "param([string]$Extracted,[string]$Rates,[string]$Ledger)\nWrite-Output ('UPDATE_OK:' + $Ledger)\n")
+  fs.writeFileSync(path.join(root, 'safe-read.txt'), 'safe-read-ok')
+
   await get('write_file').run({ path: 'a/hello.txt', content: 'line1\nline2 unique\n' }, ctx)
   const read = await get('read_file').run({ path: 'a/hello.txt' }, ctx)
   assert.ok(read.includes('unique'))
@@ -158,31 +163,34 @@ async function testTools(): Promise<void> {
     normalizeRunCommand('powershell.exe -File tools\\Update-Ledger.ps1 -Ledger 集計台帳.xlsx -Extracted work\\extracted.json -Rates rates\\レート表.csv'),
     'powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\レート表.csv -Ledger 集計台帳.xlsx'
   )
-  let executionPolicyBlocked = false
-  try {
-    await get('run_command').run({
-      command: 'powershell.exe -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'
-    }, ctx)
-  } catch (err) {
-    const message = String((err as Error).message)
-    executionPolicyBlocked = message.includes('-ExecutionPolicy の指定は禁止') && message.includes('powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path <パス>')
-  }
-  assert.ok(executionPolicyBlocked, 'forbidden PowerShell policy flags must return self-correctable guidance')
-  assert.throws(
-    () => normalizeRunCommand('powershell.exe "-ExecutionPolicy" Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'),
-    /-ExecutionPolicy の指定は禁止/u
+  assert.strictEqual(
+    normalizeRunCommand('powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'),
+    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx'
   )
-  assert.throws(
-    () => normalizeRunCommand('powershell.exe -ExecutionPolicy:Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'),
-    /-ExecutionPolicy の指定は禁止/u
+  assert.strictEqual(
+    normalizeRunCommand('powershell.exe "-ExecutionPolicy" Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'),
+    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx'
   )
-  for (const flag of ['-Ex', '-Execution', '-ExecutionP', '-EP']) {
-    assert.throws(
-      () => normalizeRunCommand(`powershell.exe ${flag} Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx`),
-      /-ExecutionPolicy の指定は禁止/u,
-      `${flag} must be rejected as a PowerShell execution-policy abbreviation`
-    )
-  }
+  assert.strictEqual(
+    normalizeRunCommand('powershell.exe -ExecutionPolicy:Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'),
+    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx'
+  )
+  const bypassReadXlsx = await get('run_command').run({
+    command: 'powershell.exe -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'
+  }, ctx)
+  assert.ok(bypassReadXlsx.includes('READ_OK:reports\\OS04.xlsx'), 'known Read-Xlsx with Bypass must execute after normalization')
+  const bypassUpdateLedger = await get('run_command').run({
+    command: 'powershell.exe -ExecutionPolicy Bypass -File tools\\Update-Ledger.ps1 work\\extracted.json rates\\rates.csv ledger.xlsx'
+  }, ctx)
+  assert.ok(bypassUpdateLedger.includes('UPDATE_OK:ledger.xlsx'), 'known Update-Ledger with Bypass must execute after normalization')
+  const bypassGeneralRead = await get('run_command').run({
+    command: 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -LiteralPath safe-read.txt"'
+  }, ctx)
+  assert.ok(bypassGeneralRead.includes('safe-read-ok'), 'harmless general read with Bypass must execute')
+  await get('run_command').run({
+    command: 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-Content -LiteralPath safe-write.txt -Value inside-ok"'
+  }, ctx)
+  assert.ok(fs.readFileSync(path.join(root, 'safe-write.txt'), 'utf8').includes('inside-ok'), 'workspace-local writes must remain allowed')
   assert.throws(
     () => normalizeRunCommand('powershell.exe -File tools\\Read-Xlsx.ps1 "reports\\x&whoami.xlsx"'),
     /複合コマンド/u,
@@ -203,16 +211,36 @@ async function testTools(): Promise<void> {
     /未許可の引数/u,
     'known-tool normalization must not load a caller-selected PowerShell module'
   )
-  let updatePolicyBlocked = false
-  try {
-    await get('run_command').run({
-      command: 'powershell.exe -ExecutionPolicy Bypass -File tools\\Update-Ledger.ps1 work\\extracted.json rates\\レート表.csv 集計台帳.xlsx'
-    }, ctx)
-  } catch (err) {
-    const message = String((err as Error).message)
-    updatePolicyBlocked = message.includes('-ExecutionPolicy の指定は禁止') && message.includes('powershell.exe -NoProfile -File tools\\Update-Ledger.ps1')
+  for (const blockedCommand of [
+    'powershell.exe -ExecutionPolicy Bypass -Command "Remove-Item -LiteralPath safe-read.txt"',
+    'cmd.exe /c del safe-read.txt',
+    'powershell.exe -ExecutionPolicy Bypass -Command "Invoke-WebRequest https://example.com"',
+    'curl.exe https://example.com',
+    'powershell.exe -ExecutionPolicy Bypass -Command "Stop-Process -Id 999999"',
+    'reg.exe add HKCU\\Software\\CodingAgentSmoke /v Test /d 1',
+    'powershell.exe -EncodedCommand RwBlAHQALQBEAGEAdABlAA=='
+  ]) {
+    await assert.rejects(
+      () => get('run_command').run({ command: blockedCommand }, ctx),
+      /run_command拒否/u,
+      `dangerous operation must be rejected: ${blockedCommand}`
+    )
   }
-  assert.ok(updatePolicyBlocked, 'Update-Ledger policy rejection must include its correct invocation')
+  const outsideName = `ca-smoke-outside-${process.pid}.txt`
+  await assert.rejects(
+    () => get('run_command').run({
+      command: `powershell.exe -ExecutionPolicy Bypass -Command "Set-Content -LiteralPath ..\\${outsideName} -Value blocked"`
+    }, ctx),
+    /ワークスペース外への書き込みは禁止/u
+  )
+  assert.ok(!fs.existsSync(path.resolve(root, '..', outsideName)), 'outside write rejection must happen before execution')
+  await assert.rejects(
+    () => get('run_command').run({
+      command: `cmd.exe /c "echo blocked > ..\\${outsideName}"`
+    }, ctx),
+    /ワークスペース外への書き込みは禁止/u
+  )
+  assert.ok(!fs.existsSync(path.resolve(root, '..', outsideName)), 'outside redirection must be rejected before execution')
 
   let wttrBlocked = false
   try {
