@@ -5662,8 +5662,16 @@ function extractReplyAndEnd(raw) {
   if (!parsed) return null;
   if (allCandidates.length !== 1 && !(bareToolName(parsed.tool ?? "") === "write_file" && /(?:CONTENT|内容)\s*[:：]|```/i.test(text.slice(candidate.end)))) return null;
   const before = unwrapProtocolText(text.slice(0, candidate.start));
-  const after = unwrapProtocolText(text.slice(candidate.end));
-  if (before || after && bareToolName(parsed.tool ?? "") !== "write_file" && !/^AGENT_END$/i.test(after)) return null;
+  const rawAfter = text.slice(candidate.end).trim();
+  const after = unwrapProtocolText(rawAfter);
+  if (before) return null;
+  if (rawAfter) {
+    const markerOnly = /^(?:```\s*)?AGENT_END$/i.test(rawAfter) || /^```$/i.test(rawAfter);
+    const explicitWritePayload = bareToolName(parsed.tool ?? "") === "write_file" && typeof parsed.args?.content !== "string" && (/^(?:CONTENT|内容)\s*[:：]\s*[\s\S]+?(?:\s*AGENT_END)?$/i.test(rawAfter) || /^```[\w+-]*[ \t]*\r?\n?[\s\S]*?```(?:\s*AGENT_END)?$/i.test(rawAfter));
+    if (!markerOnly && !explicitWritePayload) return null;
+  } else if (after) {
+    return null;
+  }
   return { parsed, end: candidate.end };
 }
 function extractJsonReply(raw) {
@@ -7464,6 +7472,7 @@ ${nestedWriteRaw}`), null);
   import_node_assert.default.strictEqual(extractJsonReply('{"tool":"write_file","path":"x.txt",,"content":"x","AGENT_END":true}'), null);
   import_node_assert.default.strictEqual(extractJsonReply('{"tool":"write_file" "path":"x.txt","content":"x","AGENT_END":true}'), null);
   import_node_assert.default.strictEqual(extractJsonReply('{"tool":"write_file","path":"x.txt",/*comment*/"content":"x","AGENT_END":true}'), null);
+  import_node_assert.default.strictEqual(extractJsonReply('{"tool":"write_file","args":{"path":"x.txt","content":"ok"}} trailing prose'), null);
   import_node_assert.default.strictEqual(extractJsonReply('{"answer":"a"}\n{"answer":"b"}'), null);
   import_node_assert.default.strictEqual(extractJsonReply('{"answer":"a","tool":"host.list_files"}'), null);
   import_node_assert.default.strictEqual(extractJsonReply('{"answer":"a","extra":1}'), null);

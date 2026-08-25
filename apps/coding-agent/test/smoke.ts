@@ -451,6 +451,7 @@ async function testProtocolParsing(): Promise<void> {
   assert.strictEqual(extractJsonReply('{"tool":"write_file","path":"x.txt",,"content":"x","AGENT_END":true}'), null)
   assert.strictEqual(extractJsonReply('{"tool":"write_file" "path":"x.txt","content":"x","AGENT_END":true}'), null)
   assert.strictEqual(extractJsonReply('{"tool":"write_file","path":"x.txt",/*comment*/"content":"x","AGENT_END":true}'), null)
+  assert.strictEqual(extractJsonReply('{"tool":"write_file","args":{"path":"x.txt","content":"ok"}} trailing prose'), null)
   assert.strictEqual(extractJsonReply('{"answer":"a"}\n{"answer":"b"}'), null)
   assert.strictEqual(extractJsonReply('{"answer":"a","tool":"host.list_files"}'), null)
   assert.strictEqual(extractJsonReply('{"answer":"a","extra":1}'), null)
