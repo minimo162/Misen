@@ -1,0 +1,7 @@
+﻿Company: OS03 / 架空OS子会社03
+Currency: CNY; Unit: 百万元
+Revenue: 320 百万元 CNY
+Operating profit: 44 百万元 CNY
+Net income: 29 百万元 CNY
+Total assets: 510 百万元 CNY
+Employees: 640 persons CNY
