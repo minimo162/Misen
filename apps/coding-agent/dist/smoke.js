@@ -7470,6 +7470,14 @@ async function testTools() {
     command: 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -LiteralPath safe-read.txt"'
   }, ctx);
   import_node_assert.default.ok(bypassGeneralRead.includes("safe-read-ok"), "harmless general read with Bypass must execute");
+  for (const harmlessRead of [
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -LiteralPath safe-read.txt | Select-Object -ExpandProperty Name"',
+    "cmd.exe /c dir safe-read.txt",
+    "cmd.exe /c type safe-read.txt"
+  ]) {
+    const result = await get("run_command").run({ command: harmlessRead }, ctx);
+    import_node_assert.default.ok(result.includes("safe-read"), `harmless read command must execute: ${harmlessRead}`);
+  }
   await get("run_command").run({
     command: 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-Content -LiteralPath safe-write.txt -Value inside-ok"'
   }, ctx);
