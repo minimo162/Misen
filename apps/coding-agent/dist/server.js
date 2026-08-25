@@ -6165,9 +6165,10 @@ async function approvalPreconditionChanged(binding, ctx2) {
   const state = await getFilePrecondition(binding.path, ctx2);
   return state.existedBefore !== binding.existedBefore || state.beforeHash !== binding.beforeHash;
 }
-function composeCopilotPrompt(mode, userInput, steps, budget = 12e4, history = [], allowArbitraryCommands = false, autoApproveCommand = false) {
+function composeCopilotPrompt(mode, userInput, steps, budget = 12e4, history = [], allowArbitraryCommands = false, autoApproveCommand = false, systemInstructions = "") {
   const histBlock = history.length > 0 ? ["", "[\u3053\u308C\u307E\u3067\u306E\u3084\u308A\u3068\u308A]", ...history.map((h) => `${h.role}: ${h.content.replace(/\r?\n+/g, " ")}`)] : [];
-  const head = [buildProtocolRules(mode, allowArbitraryCommands, autoApproveCommand), ...histBlock, "", "[\u4F9D\u983C]", userInput];
+  const systemBlock = systemInstructions.trim() ? ["", "[\u696D\u52D9\u56FA\u6709\u6307\u793A]", systemInstructions.trim()] : [];
+  const head = [buildProtocolRules(mode, allowArbitraryCommands, autoApproveCommand), ...systemBlock, ...histBlock, "", "[\u4F9D\u983C]", userInput];
   const tail = [
     "",
     "[\u6307\u793A]",
@@ -6188,6 +6189,7 @@ async function runCopilotTurn(opts) {
   const mode = cfg2.turnMode ?? (cfg2.copilot?.agentMode === true ? "work" : "chat");
   const policy = capabilityPolicy(cfg2, mode);
   const history = opts.messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role === "assistant" ? "\u30A2\u30B7\u30B9\u30BF\u30F3\u30C8" : "\u30E6\u30FC\u30B6\u30FC", content: String(m.content ?? "").slice(0, 400) })).slice(-12);
+  const systemInstructions = opts.messages.filter((m) => m.role === "system").map((m) => String(m.content ?? "")).filter((content) => content.trim()).join("\n\n") || cfg2.systemPrompt || "";
   const turnMessages = (assistantContent) => [
     ...opts.messages,
     { role: "user", content: opts.userInput },
@@ -6248,7 +6250,7 @@ async function runCopilotTurn(opts) {
     if (io.isPaused?.()) return { reply: "", messages: turnMessages("[\u4E00\u6642\u505C\u6B62] \u30C1\u30A7\u30C3\u30AF\u30DD\u30A4\u30F3\u30C8\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F"), aborted: true, paused: true, checkpoint: steps.slice(-20) };
     let raw;
     try {
-      raw = await backend.complete(composeCopilotPrompt("work", opts.userInput, steps, cfg2.copilot?.maxPromptChars ?? 12e4, history, policy.allowArbitraryCommands, policy.autoApproveCommand), io.signal);
+      raw = await backend.complete(composeCopilotPrompt("work", opts.userInput, steps, cfg2.copilot?.maxPromptChars ?? 12e4, history, policy.allowArbitraryCommands, policy.autoApproveCommand, systemInstructions), io.signal);
       raw = raw.replace(/＜/g, "<").replace(/＞/g, ">").replace(/｀/g, String.fromCharCode(96));
       io.event?.({ type: "model.decision", summary: "Copilot\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: "copilot", namespace: "native", authority: "claimed" });
     } catch (err) {

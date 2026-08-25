@@ -409,7 +409,7 @@ async function testCopilotChoosesFirstAction(): Promise<void> {
   fs.writeFileSync(path.join(answerRoot, 'evidence.txt'), 'bootstrap evidence')
   const answerBackend = new FakeBackend(['{"answer":"こんにちは！"}\nAGENT_END'])
   const answerEvents: string[] = []
-  const cfg = { baseURL: '', model: '', provider: 'copilot-edge' as const, copilot: { agentMode: true } }
+  const cfg = { baseURL: '', model: '', provider: 'copilot-edge' as const, systemPrompt: 'WORK_SYSTEM_PROMPT_SENTINEL', copilot: { agentMode: true } }
   const answer = await runAgentTurn({
     cfg,
     messages: [],
@@ -423,6 +423,7 @@ async function testCopilotChoosesFirstAction(): Promise<void> {
   assert.strictEqual(answerBackend.calls, 1)
   assert.deepStrictEqual(answerEvents, ['tool.requested', 'tool.succeeded'])
   assert.ok(answerBackend.prompts[0].includes('TOOL_RESULT (第0ターン自動実行'))
+  assert.ok(answerBackend.prompts[0].includes('[業務固有指示]') && answerBackend.prompts[0].includes('WORK_SYSTEM_PROMPT_SENTINEL'), 'work-mode prompts must include configured system instructions')
   assert.ok(answerBackend.prompts[0].includes('BEGIN_UNTRUSTED_HOST_RESULT'))
   assert.ok(answerBackend.prompts[0].includes('evidence.txt'))
   assert.ok(answerBackend.prompts[0].includes('host.get_weather') && !answerBackend.prompts[0].includes('host.run_command(command)'))
