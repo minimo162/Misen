@@ -58,17 +58,29 @@ function Get-DemoChildJson {
     # Invoke the tools in this already-authorized PowerShell process. This
     # avoids a second interpreter/policy boundary and keeps the diagnosis
     # aligned with the normal offline run contract.
-    if ($Arguments.Count -eq 1) {
-        $raw = & $ScriptPath $Arguments[0] 2>&1
+    $previousThrowMode = $env:RENKETSU_TEST_THROW_ON_ERROR
+    try {
+        $env:RENKETSU_TEST_THROW_ON_ERROR = '1'
+        if ($Arguments.Count -eq 1) {
+            $raw = & $ScriptPath $Arguments[0] 2>&1
+        }
+        elseif ($Arguments.Count -eq 2) {
+            $raw = & $ScriptPath $Arguments[0] $Arguments[1] 2>&1
+        }
+        elseif ($Arguments.Count -eq 3) {
+            $raw = & $ScriptPath $Arguments[0] $Arguments[1] $Arguments[2] 2>&1
+        }
+        else {
+            throw 'Unexpected child argument count.'
+        }
     }
-    elseif ($Arguments.Count -eq 2) {
-        $raw = & $ScriptPath $Arguments[0] $Arguments[1] 2>&1
-    }
-    elseif ($Arguments.Count -eq 3) {
-        $raw = & $ScriptPath $Arguments[0] $Arguments[1] $Arguments[2] 2>&1
-    }
-    else {
-        throw 'Unexpected child argument count.'
+    finally {
+        if ($null -eq $previousThrowMode) {
+            Remove-Item Env:RENKETSU_TEST_THROW_ON_ERROR -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:RENKETSU_TEST_THROW_ON_ERROR = $previousThrowMode
+        }
     }
     $jsonLine = $null
     foreach ($line in $raw) {
@@ -94,6 +106,34 @@ function Get-DemoChildJson {
         throw ("Tool failed: " + [string]$errorText)
     }
     return $object
+}
+
+function Copy-DemoJsonObject {
+    param([Parameter(Mandatory = $true)][object]$InputObject)
+
+    return (($InputObject | ConvertTo-Json -Compress -Depth 40) | ConvertFrom-Json -ErrorAction Stop)
+}
+
+function Assert-DemoUpdateRejected {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][object]$InputObject,
+        [Parameter(Mandatory = $true)][string]$RatesPath,
+        [Parameter(Mandatory = $true)][string]$LedgerTemplate,
+        [Parameter(Mandatory = $true)][string]$TempPath,
+        [Parameter(Mandatory = $true)][string]$UpdateScript
+    )
+
+    $caseLedger = Join-Path $TempPath ('reject-' + $Name + '.xlsx')
+    Copy-Item -LiteralPath $LedgerTemplate -Destination $caseLedger -Force
+    $inputJson = $InputObject | ConvertTo-Json -Compress -Depth 40
+    try {
+        $null = Get-DemoChildJson -ScriptPath $UpdateScript -Arguments @($inputJson, $RatesPath, $caseLedger)
+        Write-DemoNg ('negative validation accepted: ' + $Name)
+    }
+    catch {
+        Write-DemoOk ('negative validation rejected: ' + $Name)
+    }
 }
 
 function Compare-DemoExpected {
@@ -317,6 +357,55 @@ try {
             }
             catch {
                 Write-DemoNg ('roundtrip failed: ' + $_.Exception.Message)
+            }
+
+            if ($null -ne $dataObject) {
+                $zeroRatesPath = Join-Path $tempRoot 'rates-zero.csv'
+                $zeroRateLines = New-Object System.Collections.Generic.List[string]
+                foreach ($rateLine in [IO.File]::ReadAllLines($ratesPath)) {
+                    if ($rateLine -match '^USD,') {
+                        $null = $zeroRateLines.Add('USD,0')
+                    }
+                    else {
+                        $null = $zeroRateLines.Add($rateLine)
+                    }
+                }
+                $utf8Bom = New-Object Text.UTF8Encoding($true)
+                [IO.File]::WriteAllLines($zeroRatesPath, $zeroRateLines.ToArray(), $utf8Bom)
+                Assert-DemoUpdateRejected -Name 'nonpositive-rate' -InputObject (Copy-DemoJsonObject $dataObject) -RatesPath $zeroRatesPath -LedgerTemplate $ledgerPath -TempPath $tempRoot -UpdateScript $updateScript
+
+                $nullMetric = Copy-DemoJsonObject $dataObject
+                $nullMetric.companies[0].values.revenue = $null
+                Assert-DemoUpdateRejected -Name 'null-metric' -InputObject $nullMetric -RatesPath $ratesPath -LedgerTemplate $ledgerPath -TempPath $tempRoot -UpdateScript $updateScript
+
+                $omittedCompany = Copy-DemoJsonObject $dataObject
+                $omittedCompany.companies = @($omittedCompany.companies | Select-Object -Skip 1)
+                Assert-DemoUpdateRejected -Name 'omitted-ledger-company' -InputObject $omittedCompany -RatesPath $ratesPath -LedgerTemplate $ledgerPath -TempPath $tempRoot -UpdateScript $updateScript
+
+                $missingQuotes = Copy-DemoJsonObject $dataObject
+                $missingQuotes.companies[0].PSObject.Properties.Remove('quotes')
+                Assert-DemoUpdateRejected -Name 'missing-quotes' -InputObject $missingQuotes -RatesPath $ratesPath -LedgerTemplate $ledgerPath -TempPath $tempRoot -UpdateScript $updateScript
+
+                $missingIssues = Copy-DemoJsonObject $dataObject
+                $missingIssues.companies[0].PSObject.Properties.Remove('issues')
+                Assert-DemoUpdateRejected -Name 'missing-issues' -InputObject $missingIssues -RatesPath $ratesPath -LedgerTemplate $ledgerPath -TempPath $tempRoot -UpdateScript $updateScript
+
+                $unknownIssue = Copy-DemoJsonObject $dataObject
+                $unknownIssueCompany = $unknownIssue.companies | Where-Object { @($_.issues).Count -gt 0 } | Select-Object -First 1
+                $unknownIssueCompany.issues[0].type = 'other_variation'
+                Assert-DemoUpdateRejected -Name 'unknown-issue-type' -InputObject $unknownIssue -RatesPath $ratesPath -LedgerTemplate $ledgerPath -TempPath $tempRoot -UpdateScript $updateScript
+
+                $emptyIssueQuote = Copy-DemoJsonObject $dataObject
+                $emptyIssueCompany = $emptyIssueQuote.companies | Where-Object { @($_.issues).Count -gt 0 } | Select-Object -First 1
+                $emptyIssueCompany.issues[0].quote = ''
+                Assert-DemoUpdateRejected -Name 'empty-issue-quote' -InputObject $emptyIssueQuote -RatesPath $ratesPath -LedgerTemplate $ledgerPath -TempPath $tempRoot -UpdateScript $updateScript
+
+                $emptyMissingQuote = Copy-DemoJsonObject $dataObject
+                $emptyMissingQuote.missing[0].quote = ''
+                Assert-DemoUpdateRejected -Name 'empty-missing-quote' -InputObject $emptyMissingQuote -RatesPath $ratesPath -LedgerTemplate $ledgerPath -TempPath $tempRoot -UpdateScript $updateScript
+            }
+            else {
+                Write-DemoNg 'negative validation fixture unavailable'
             }
         }
     }

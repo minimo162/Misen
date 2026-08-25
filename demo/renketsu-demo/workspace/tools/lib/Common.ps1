@@ -77,6 +77,9 @@ function Write-RenketsuError {
     )
 
     $safeMessage = ($Message -replace '[\r\n]+', ' ').Trim()
+    if ($env:RENKETSU_TEST_THROW_ON_ERROR -eq '1') {
+        throw ($Code + ': ' + $safeMessage)
+    }
     $payload = [ordered]@{
         ok = $false
         error = $safeMessage
@@ -84,6 +87,20 @@ function Write-RenketsuError {
     }
     Write-Output (ConvertTo-RenketsuJsonLine -InputObject $payload)
     exit 1
+}
+
+function Test-RenketsuPropertyExists {
+    [CmdletBinding()]
+    param(
+        [object]$InputObject,
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    if ($null -eq $InputObject) {
+        return $false
+    }
+    return ($null -ne $InputObject.PSObject.Properties[$Name])
 }
 
 function Get-RenketsuPropertyValue {

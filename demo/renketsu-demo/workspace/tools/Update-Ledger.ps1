@@ -138,7 +138,7 @@ function Get-RenketsuInputValue {
     )
 
     $value = Get-RenketsuPropertyValue -InputObject $Values -Name $Name
-    return (ConvertTo-RenketsuDecimal -Value $value -FieldName "$CompanyId.values.$Name" -AllowNull)
+    return (ConvertTo-RenketsuDecimal -Value $value -FieldName "$CompanyId.values.$Name")
 }
 
 function Add-RenketsuConfirmationRow {
@@ -167,11 +167,15 @@ function Add-RenketsuConfirmationRow {
 
 try {
     $extractedObject = Read-RenketsuJsonInput -InputPathOrJson $Extracted
-    $companies = Get-RenketsuArray -Value (Get-RenketsuPropertyValue -InputObject $extractedObject -Name 'companies')
-    if ($null -eq (Get-RenketsuPropertyValue -InputObject $extractedObject -Name 'companies')) {
+    if (-not (Test-RenketsuPropertyExists -InputObject $extractedObject -Name 'companies')) {
         throw 'Extracted JSON must contain companies[].'
     }
-    $missing = Get-RenketsuArray -Value (Get-RenketsuPropertyValue -InputObject $extractedObject -Name 'missing')
+    $companies = Get-RenketsuArray -Value (Get-RenketsuPropertyValue -InputObject $extractedObject -Name 'companies')
+    if (-not (Test-RenketsuPropertyExists -InputObject $extractedObject -Name 'missing')) {
+        throw 'Extracted JSON must contain missing[].'
+    }
+    $missingValue = Get-RenketsuPropertyValue -InputObject $extractedObject -Name 'missing'
+    $missing = Get-RenketsuArray -Value $missingValue
 
     $ratePath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Rates)
     if (-not (Test-Path -LiteralPath $ratePath -PathType Leaf)) {
@@ -192,7 +196,11 @@ try {
         if ($ratesByCurrency.ContainsKey($currency)) {
             throw "Rates CSV contains duplicate Currency: $currency"
         }
-        $ratesByCurrency[$currency] = ConvertTo-RenketsuDecimal -Value $rateValue -FieldName "Rates.$currency"
+        $parsedRate = ConvertTo-RenketsuDecimal -Value $rateValue -FieldName "Rates.$currency"
+        if ($parsedRate -le [decimal]0) {
+            throw "Rates.$currency must be greater than zero."
+        }
+        $ratesByCurrency[$currency] = $parsedRate
     }
 
     $workspacePath = Split-Path -Parent $scriptRoot
@@ -214,6 +222,8 @@ try {
     }
     $moneyFields = @('revenue', 'operatingProfit', 'netIncome', 'totalAssets')
     $ledgerMetrics = @('revenue', 'operatingProfit', 'netIncome', 'totalAssets', 'employees')
+    $allowedCurrencies = @('JPY', 'USD', 'EUR', 'CNY', 'THB', 'GBP')
+    $allowedIssueTypes = @('unit_variation', 'account_variation')
     $processedValues = @{}
     $companyById = @{}
     $missingById = @{}
@@ -236,13 +246,23 @@ try {
         $companyById[$companyId] = $company
         $null = $companyIds.Add($companyId)
         $nameValue = Get-RenketsuPropertyValue -InputObject $company -Name 'name'
+        $sourceValue = Get-RenketsuPropertyValue -InputObject $company -Name 'source'
         $currencyValue = Get-RenketsuPropertyValue -InputObject $company -Name 'currency'
         $unitValue = Get-RenketsuPropertyValue -InputObject $company -Name 'unit'
         $values = Get-RenketsuPropertyValue -InputObject $company -Name 'values'
+        if ($null -eq $nameValue -or [string]::IsNullOrWhiteSpace([string]$nameValue)) {
+            throw "$companyId.name is required."
+        }
+        if ($null -eq $sourceValue -or [string]::IsNullOrWhiteSpace([string]$sourceValue)) {
+            throw "$companyId.source is required."
+        }
         if ($null -eq $values) {
             throw "$companyId.values is required."
         }
         $currency = if ($null -eq $currencyValue) { '' } else { ([string]$currencyValue).Trim().ToUpperInvariant() }
+        if ($allowedCurrencies -notcontains $currency) {
+            throw "Invalid currency '$currency' for $companyId."
+        }
         if (-not $ratesByCurrency.ContainsKey($currency)) {
             throw "No JPYPerUnit rate for currency $currency ($companyId)."
         }
@@ -260,23 +280,58 @@ try {
         $converted = @{}
         foreach ($moneyField in $moneyFields) {
             $sourceValue = Get-RenketsuInputValue -Values $values -Name $moneyField -CompanyId $companyId
-            if ($null -eq $sourceValue) {
-                $converted[$moneyField] = $null
-            }
-            else {
-                $converted[$moneyField] = ($sourceValue * $unitFactors[$unit] * $ratesByCurrency[$currency] / [decimal]1000000)
-            }
+            $converted[$moneyField] = ($sourceValue * $unitFactors[$unit] * $ratesByCurrency[$currency] / [decimal]1000000)
         }
         $converted['employees'] = Get-RenketsuInputValue -Values $values -Name 'employees' -CompanyId $companyId
         $processedValues[$companyId] = $converted
 
-        $issues = Get-RenketsuArray -Value (Get-RenketsuPropertyValue -InputObject $company -Name 'issues')
+        if (-not (Test-RenketsuPropertyExists -InputObject $company -Name 'quotes')) {
+            throw "$companyId.quotes[] is required."
+        }
+        $quotesValue = Get-RenketsuPropertyValue -InputObject $company -Name 'quotes'
+        $quotes = Get-RenketsuArray -Value $quotesValue
+        if ($quotes.Count -ne $ledgerMetrics.Count) {
+            throw "$companyId.quotes[] must contain exactly one quote for each ledger metric."
+        }
+        $quotedFields = @{}
+        foreach ($quoteItem in $quotes) {
+            $quoteFieldValue = Get-RenketsuPropertyValue -InputObject $quoteItem -Name 'field'
+            $quoteTextValue = Get-RenketsuPropertyValue -InputObject $quoteItem -Name 'quote'
+            $quoteField = if ($null -eq $quoteFieldValue) { '' } else { ([string]$quoteFieldValue).Trim() }
+            $quoteText = if ($null -eq $quoteTextValue) { '' } else { ([string]$quoteTextValue).Trim() }
+            if ($ledgerMetrics -notcontains $quoteField) {
+                throw "$companyId.quotes[] contains an invalid field '$quoteField'."
+            }
+            if ($quotedFields.ContainsKey($quoteField)) {
+                throw "$companyId.quotes[] contains duplicate field '$quoteField'."
+            }
+            if ([string]::IsNullOrWhiteSpace($quoteText)) {
+                throw "$companyId.quotes[$quoteField].quote is required."
+            }
+            $quotedFields[$quoteField] = $true
+        }
+
+        if (-not (Test-RenketsuPropertyExists -InputObject $company -Name 'issues')) {
+            throw "$companyId.issues[] is required (use an empty array when there are no issues)."
+        }
+        $issuesValue = Get-RenketsuPropertyValue -InputObject $company -Name 'issues'
+        $issues = Get-RenketsuArray -Value $issuesValue
         foreach ($issue in $issues) {
-            $kind = Get-RenketsuIssueKind -Issue $issue
-            if ($kind -eq 'unit') {
+            $issueTypeValue = Get-RenketsuPropertyValue -InputObject $issue -Name 'type'
+            $issueType = if ($null -eq $issueTypeValue) { '' } else { ([string]$issueTypeValue).Trim().ToLowerInvariant() }
+            $issueField = (Get-RenketsuIssueField -Issue $issue).Trim()
+            $issueMessage = (Get-RenketsuIssueMessage -Issue $issue).Trim()
+            $issueQuote = (Get-RenketsuIssueQuote -Issue $issue).Trim()
+            if ($allowedIssueTypes -notcontains $issueType) {
+                throw "$companyId.issues[] contains an invalid type '$issueType'."
+            }
+            if ([string]::IsNullOrWhiteSpace($issueField) -or [string]::IsNullOrWhiteSpace($issueMessage) -or [string]::IsNullOrWhiteSpace($issueQuote)) {
+                throw "$companyId.issues[$issueType] requires non-empty field, message, and quote."
+            }
+            if ($issueType -eq 'unit_variation') {
                 $unitVariationCompanies[$companyId] = $true
             }
-            elseif ($kind -eq 'account') {
+            elseif ($issueType -eq 'account_variation') {
                 $accountVariationCompanies[$companyId] = $true
             }
         }
@@ -294,6 +349,14 @@ try {
         $typeValue = Get-RenketsuPropertyValue -InputObject $missingItem -Name 'type'
         if ($null -eq $typeValue -or ([string]$typeValue).Trim().ToLowerInvariant() -ne 'unsubmitted') {
             throw "missing[$missingId] must have type=unsubmitted."
+        }
+        $missingNameValue = Get-RenketsuPropertyValue -InputObject $missingItem -Name 'name'
+        $missingQuoteValue = Get-RenketsuPropertyValue -InputObject $missingItem -Name 'quote'
+        if ($null -eq $missingNameValue -or [string]::IsNullOrWhiteSpace([string]$missingNameValue)) {
+            throw "missing[$missingId].name is required."
+        }
+        if ($null -eq $missingQuoteValue -or [string]::IsNullOrWhiteSpace([string]$missingQuoteValue)) {
+            throw "missing[$missingId].quote is required."
         }
         $missingById[$missingId] = $missingItem
         $null = $missingIds.Add($missingId)
@@ -339,6 +402,15 @@ try {
                 throw "Duplicate ledger company id: $idText"
             }
             $rowsById[$idText] = $row
+        }
+
+        foreach ($ledgerId in @($rowsById.Keys)) {
+            if (-not $companyById.ContainsKey($ledgerId) -and -not $missingById.ContainsKey($ledgerId)) {
+                throw "Ledger company id is omitted from companies[] and missing[]: $ledgerId"
+            }
+        }
+        if (($companyById.Count + $missingById.Count) -ne $rowsById.Count) {
+            throw 'Extracted company coverage does not exactly match the Ledger worksheet.'
         }
 
         foreach ($companyId in $companyIds.ToArray()) {
