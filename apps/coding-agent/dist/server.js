@@ -5399,7 +5399,7 @@ function normalizeWorkspaceGlob(pattern) {
   if (import_node_path2.default.isAbsolute(normalized) || /^[A-Za-z]:/.test(normalized) || normalized.split("/").includes("..")) {
     throw new Error(`\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u3092\u6307\u3059pattern\u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093: ${pattern}`);
   }
-  return normalized;
+  return normalized.endsWith("/") ? `${normalized}*` : normalized;
 }
 function decodeWorkspaceText(bytes) {
   if (bytes.length >= 3 && bytes[0] === 239 && bytes[1] === 187 && bytes[2] === 191) {

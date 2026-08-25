@@ -483,7 +483,9 @@ function normalizeWorkspaceGlob(pattern: string): string {
   if (path.isAbsolute(normalized) || /^[A-Za-z]:/.test(normalized) || normalized.split('/').includes('..')) {
     throw new Error(`ワークスペース外を指すpatternは許可されていません: ${pattern}`)
   }
-  return normalized
+  // Copilot commonly names a directory when it means its immediate contents.
+  // Treat a trailing slash as the documented `directory/*` glob.
+  return normalized.endsWith('/') ? `${normalized}*` : normalized
 }
 
 function decodeWorkspaceText(bytes: Buffer): string {

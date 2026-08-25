@@ -5329,7 +5329,7 @@ function normalizeWorkspaceGlob(pattern) {
   if (import_node_path.default.isAbsolute(normalized) || /^[A-Za-z]:/.test(normalized) || normalized.split("/").includes("..")) {
     throw new Error(`\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u3092\u6307\u3059pattern\u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093: ${pattern}`);
   }
-  return normalized;
+  return normalized.endsWith("/") ? `${normalized}*` : normalized;
 }
 function decodeWorkspaceText(bytes) {
   if (bytes.length >= 3 && bytes[0] === 239 && bytes[1] === 187 && bytes[2] === 191) {
@@ -7400,6 +7400,8 @@ async function testTools() {
   import_node_fs3.default.writeFileSync(import_node_path4.default.join(root, "other", "note.md"), "\u5225glob");
   const batch = await get("read_files").run({ patterns: ["batch/*.txt", "other/*.md"] }, ctx);
   import_node_assert.default.ok(batch.includes("UTF-8\u672C\u6587") && batch.includes("BOM\u672C\u6587") && batch.includes("CP932:\u65E5\u672C") && batch.includes("\u5225glob"));
+  const directoryPatterns = await get("read_files").run({ patterns: ["batch/", "other/"] }, ctx);
+  import_node_assert.default.ok(directoryPatterns.includes("UTF-8\u672C\u6587") && directoryPatterns.includes("\u5225glob"), "trailing-slash directory patterns must read immediate files");
   import_node_assert.default.ok(batch.includes("===== batch/empty.txt ====="), "empty files must be successful results");
   import_node_assert.default.ok(batch.indexOf("batch/bom.txt") < batch.indexOf("batch/cp932.txt"), "read_files ordering must be stable");
   const xlsx = await get("read_files").run({ paths: ["batch/ledger.xlsx", "batch/utf8.txt", "batch/utf8.txt"] }, ctx);

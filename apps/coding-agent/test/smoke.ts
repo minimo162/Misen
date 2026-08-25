@@ -113,6 +113,8 @@ async function testTools(): Promise<void> {
   fs.writeFileSync(path.join(root, 'other', 'note.md'), '別glob')
   const batch = await get('read_files').run({ patterns: ['batch/*.txt', 'other/*.md'] }, ctx)
   assert.ok(batch.includes('UTF-8本文') && batch.includes('BOM本文') && batch.includes('CP932:日本') && batch.includes('別glob'))
+  const directoryPatterns = await get('read_files').run({ patterns: ['batch/', 'other/'] }, ctx)
+  assert.ok(directoryPatterns.includes('UTF-8本文') && directoryPatterns.includes('別glob'), 'trailing-slash directory patterns must read immediate files')
   assert.ok(batch.includes('===== batch/empty.txt ====='), 'empty files must be successful results')
   assert.ok(batch.indexOf('batch/bom.txt') < batch.indexOf('batch/cp932.txt'), 'read_files ordering must be stable')
   const xlsx = await get('read_files').run({ paths: ['batch/ledger.xlsx', 'batch/utf8.txt', 'batch/utf8.txt'] }, ctx)
