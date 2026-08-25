@@ -1,8 +1,10 @@
+import fs from 'node:fs'
 import { exec } from 'node:child_process'
 import crypto from 'node:crypto'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import util from 'node:util'
+import iconv from '../vendor/npm/node_modules/iconv-lite'
 import type { OpenAIToolSchema } from './llm'
 import { listManagedProcesses, readManagedProcessLog, startManagedProcess, stopManagedProcess } from './processes'
 import { getWeather } from './weather'
@@ -12,12 +14,15 @@ const execAsync = util.promisify(exec)
 const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', '.tmp'])
 const MAX_LIST = 500
 const MAX_SEARCH_RESULTS = 200
+const MAX_READ_FILES_CHARS = 80_000
 
 export interface ToolContext {
   workspace: string
   restrictToWorkspace: boolean
   weatherDefaultLocation?: string
   signal?: AbortSignal
+  /** Run-scoped journal key. Tests and REPL may omit it. */
+  runId?: string
 }
 
 export interface ToolDef {
@@ -34,6 +39,7 @@ export interface ToolResultMeta {
   changed?: boolean
   status?: FileChangeStatus
   path?: string
+  existedBefore?: boolean
   count?: number
   beforeHash?: string
   afterHash?: string
@@ -68,7 +74,8 @@ function formatFileChangeResult(
   relativePath: string,
   before: string,
   after: string,
-  count: number
+  count: number,
+  existedBefore = true
 ): string {
   const changed = before !== after
   const delta = lineDelta(before, after)
@@ -76,6 +83,7 @@ function formatFileChangeResult(
     changed,
     status: changed ? 'applied_unverified' : 'no_op',
     path: relativePath,
+    existedBefore,
     count,
     beforeHash: sha256(before),
     afterHash: sha256(after),
@@ -107,6 +115,7 @@ interface FileSnapshot {
   before: string
   after: string
   afterHash: string
+  existedBefore: boolean
   createdAt: number
 }
 
@@ -115,33 +124,74 @@ export interface FileSnapshotInfo {
   before: string
   after: string
   afterHash: string
+  existedBefore: boolean
   createdAt: number
 }
 
 const fileSnapshots = new Map<string, FileSnapshot>()
 
+function snapshotKey(abs: string, ctx: ToolContext): string {
+  return `${ctx.runId ?? 'default'}:${abs}`
+}
+
+function recordFileSnapshot(abs: string, ctx: ToolContext, before: string, existedBefore: boolean, after: string): FileSnapshot {
+  const key = snapshotKey(abs, ctx)
+  const previous = fileSnapshots.get(key)
+  const snapshot: FileSnapshot = {
+    before: previous?.before ?? before,
+    after,
+    afterHash: sha256(after),
+    existedBefore: previous?.existedBefore ?? existedBefore,
+    createdAt: previous?.createdAt ?? Date.now()
+  }
+  fileSnapshots.set(key, snapshot)
+  return snapshot
+}
+
+export async function getFilePrecondition(p: string, ctx: ToolContext): Promise<{ existedBefore: boolean; beforeHash?: string }> {
+  const abs = resolveInWorkspace(p, ctx)
+  try {
+    const content = await fsp.readFile(abs, 'utf8')
+    return { existedBefore: true, beforeHash: sha256(content) }
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException
+    if (e.code === 'ENOENT') return { existedBefore: false }
+    throw err
+  }
+}
+
 export function getFileSnapshot(p: string, ctx: ToolContext): FileSnapshotInfo | null {
   const abs = resolveInWorkspace(p, ctx)
-  const snapshot = fileSnapshots.get(abs)
+  const snapshot = fileSnapshots.get(snapshotKey(abs, ctx))
   return snapshot ? { path: p, ...snapshot } : null
 }
 
 export async function rollbackFileChange(
-  change: Pick<ToolResultMeta, 'path' | 'afterHash'>,
+  change: Pick<ToolResultMeta, 'path' | 'afterHash' | 'existedBefore'> & { beforeContent?: string },
   ctx: ToolContext
 ): Promise<{ path: string; status: 'rolled_back'; hash: string }> {
   if (!change.path || !change.afterHash) throw new Error('ロールバック対象のハッシュがありません')
   const abs = resolveInWorkspace(change.path, ctx)
-  const snapshot = fileSnapshots.get(abs)
-  const before = snapshot?.before ?? (typeof (change as { beforeContent?: unknown }).beforeContent === 'string' ? String((change as { beforeContent?: unknown }).beforeContent) : null)
+  const snapshot = fileSnapshots.get(snapshotKey(abs, ctx))
+  const beforeContent = typeof change.beforeContent === 'string' ? change.beforeContent : null
+  const before = snapshot?.before ?? beforeContent
+  const existedBefore = snapshot?.existedBefore ?? change.existedBefore ?? before !== null
   const expected = snapshot?.afterHash ?? change.afterHash
   if (before === null || expected !== change.afterHash) throw new Error('このRunに変更前スナップショットがありません')
-  const current = await fsp.readFile(abs, 'utf8')
+  let current = ''
+  try { current = await fsp.readFile(abs, 'utf8') } catch (err) {
+    const e = err as NodeJS.ErrnoException
+    if (e.code !== 'ENOENT') throw err
+  }
   if (sha256(current) !== change.afterHash) throw new Error('変更後の内容からファイルが変更されています。競合を確認してください')
-  await fsp.writeFile(abs, before, 'utf8')
-  const restored = await fsp.readFile(abs, 'utf8')
+  if (existedBefore) {
+    await fsp.writeFile(abs, before, 'utf8')
+  } else {
+    await fsp.rm(abs, { force: true })
+  }
+  const restored = existedBefore ? await fsp.readFile(abs, 'utf8') : ''
   const hash = sha256(restored)
-  fileSnapshots.delete(abs)
+  fileSnapshots.delete(snapshotKey(abs, ctx))
   return { path: change.path, status: 'rolled_back', hash }
 }
 
@@ -157,11 +207,80 @@ function wildcardToRegExp(pattern: string): RegExp {
   return new RegExp(`^${escaped}$`, 'i')
 }
 
+function workspaceGlobToRegExp(pattern: string): RegExp {
+  const normalized = pattern.replaceAll('\\', '/').replace(/^\.\//, '')
+  let source = ''
+  for (let i = 0; i < normalized.length; i++) {
+    const ch = normalized[i]
+    if (ch === '*') {
+      if (normalized[i + 1] === '*') {
+        i++
+        if (normalized[i + 1] === '/') {
+          i++
+          source += '(?:.*/)?'
+        } else {
+          source += '.*'
+        }
+      } else {
+        source += '[^/]*'
+      }
+    } else if (ch === '?') {
+      source += '[^/]'
+    } else {
+      source += ch.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    }
+  }
+  return new RegExp(`^${source}$`, 'i')
+}
+
+function normalizeWorkspaceGlob(pattern: string): string {
+  const normalized = pattern.trim().replaceAll('\\', '/').replace(/^\.\//, '')
+  if (!normalized) throw new Error('pattern が空です')
+  if (path.isAbsolute(normalized) || /^[A-Za-z]:/.test(normalized) || normalized.split('/').includes('..')) {
+    throw new Error(`ワークスペース外を指すpatternは許可されていません: ${pattern}`)
+  }
+  return normalized
+}
+
+function decodeWorkspaceText(bytes: Buffer): string {
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    return bytes.subarray(3).toString('utf8')
+  }
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  } catch {
+    return iconv.decode(bytes, 'cp932')
+  }
+}
+
+function realPathWithMissingTail(abs: string): string {
+  let cursor = abs
+  const tail: string[] = []
+  while (!fs.existsSync(cursor)) {
+    const parent = path.dirname(cursor)
+    if (parent === cursor) return abs
+    tail.unshift(path.basename(cursor))
+    cursor = parent
+  }
+  const real = fs.realpathSync.native(cursor)
+  return path.resolve(real, ...tail)
+}
+
+function isWithin(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate)
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
+}
+
 function resolveInWorkspace(p: string, ctx: ToolContext): string {
   if (!p) throw new Error('パスが空です')
-  const abs = path.isAbsolute(p) ? path.normalize(p) : path.resolve(ctx.workspace, p)
-  if (ctx.restrictToWorkspace && path.relative(ctx.workspace, abs).startsWith('..')) {
-    throw new Error(`ワークスペース外のパスは許可されていません: ${p}`)
+  const workspaceAbs = path.resolve(ctx.workspace)
+  const abs = path.isAbsolute(p) ? path.normalize(p) : path.resolve(workspaceAbs, p)
+  if (ctx.restrictToWorkspace) {
+    const rootReal = realPathWithMissingTail(workspaceAbs)
+    const candidateReal = realPathWithMissingTail(abs)
+    if (!isWithin(rootReal, candidateReal)) {
+      throw new Error(`ワークスペース外のパスは許可されていません: ${p}`)
+    }
   }
   return abs
 }
@@ -180,6 +299,59 @@ async function walk(dir: string, cb: (file: string) => void, depth = 0): Promise
     if (e.isDirectory()) await walk(full, cb, depth + 1)
     else if (e.isFile()) cb(full)
   }
+}
+
+export const HOST_TOOL_PREFIX = 'host.'
+
+export function qualifiedToolName(name: string): string {
+  return name.startsWith(HOST_TOOL_PREFIX) ? name : `${HOST_TOOL_PREFIX}${name}`
+}
+
+export function bareToolName(name: string): string {
+  return name.startsWith(HOST_TOOL_PREFIX) ? name.slice(HOST_TOOL_PREFIX.length) : name
+}
+
+export function findHostTool(name: string): ToolDef | undefined {
+  if (!name.startsWith(HOST_TOOL_PREFIX)) return undefined
+  return TOOL_DEFS.find((tool) => tool.name === bareToolName(name))
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function schemaTypeMatches(value: unknown, type: unknown): boolean {
+  if (type === 'string') return typeof value === 'string'
+  if (type === 'number') return typeof value === 'number' && Number.isFinite(value)
+  if (type === 'integer') return typeof value === 'number' && Number.isInteger(value)
+  if (type === 'boolean') return typeof value === 'boolean'
+  if (type === 'object') return isRecord(value)
+  if (type === 'array') return Array.isArray(value)
+  return true
+}
+
+export function validateToolArgs(def: ToolDef, args: unknown): string | null {
+  if (!isRecord(args)) return 'args はJSONオブジェクトで指定してください'
+  const schema = def.parameters as { properties?: Record<string, { type?: string; maxLength?: number; minimum?: number; maximum?: number }>; required?: string[] }
+  const properties = schema.properties ?? {}
+  const unknown = Object.keys(args).filter((key) => !(key in properties))
+  if (unknown.length) return `未許可の引数です: ${unknown.join(', ')}`
+  for (const required of schema.required ?? []) {
+    if (!(required in args)) return `必須引数がありません: ${required}`
+  }
+  for (const [key, value] of Object.entries(args)) {
+    const rule = properties[key] ?? {}
+    if (!schemaTypeMatches(value, rule.type)) return `${key} の型が不正です（期待: ${rule.type ?? 'unknown'}）`
+    if (typeof value === 'string') {
+      const maxLength = rule.maxLength ?? (key === 'content' ? 1_000_000 : key === 'command' ? 20_000 : 8_000)
+      if (value.length > maxLength) return `${key} が長すぎます（上限 ${maxLength} 文字）`
+    }
+    if (typeof value === 'number') {
+      if (rule.minimum !== undefined && value < rule.minimum) return `${key} が小さすぎます`
+      if (rule.maximum !== undefined && value > rule.maximum) return `${key} が大きすぎます`
+    }
+  }
+  return null
 }
 
 export const TOOL_DEFS: ToolDef[] = [
@@ -248,6 +420,122 @@ export const TOOL_DEFS: ToolDef[] = [
     }
   },
   {
+    name: 'read_files',
+    description: 'ワークスペース相対のglobまたは複数パスに一致するテキストファイルをまとめて読む。xlsxはRead-Xlsx.ps1の利用方法を返す',
+    kind: 'read',
+    parameters: {
+      type: 'object',
+      properties: {
+        pattern: { type: 'string', description: 'ワークスペース相対glob。例: reports/*' },
+        patterns: { type: 'array', description: 'ワークスペース相対globの配列' },
+        paths: { type: 'array', description: 'ワークスペース相対ファイルパスの配列' },
+        maxChars: { type: 'integer', description: '合計文字数予算（既定・最大 80000）', minimum: 1, maximum: MAX_READ_FILES_CHARS }
+      },
+      required: []
+    },
+    async run(args, ctx) {
+      const patterns: string[] = []
+      if (args.pattern !== undefined) {
+        if (typeof args.pattern !== 'string') throw new Error('pattern は文字列で指定してください')
+        patterns.push(normalizeWorkspaceGlob(args.pattern))
+      }
+      if (args.patterns !== undefined) {
+        if (!Array.isArray(args.patterns) || args.patterns.some((item) => typeof item !== 'string')) throw new Error('patterns は文字列配列で指定してください')
+        patterns.push(...args.patterns.map((item) => normalizeWorkspaceGlob(String(item))))
+      }
+      let requestedPaths: string[] = []
+      if (args.paths !== undefined) {
+        if (!Array.isArray(args.paths) || args.paths.some((item) => typeof item !== 'string' || !item.trim())) throw new Error('paths は空でない文字列の配列で指定してください')
+        requestedPaths = args.paths.map(String)
+      }
+      if (patterns.length === 0 && requestedPaths.length === 0) throw new Error('pattern、patterns、paths のいずれかを指定してください')
+      const maxChars = args.maxChars === undefined ? MAX_READ_FILES_CHARS : Number(args.maxChars)
+      if (!Number.isInteger(maxChars) || maxChars < 1 || maxChars > MAX_READ_FILES_CHARS) throw new Error(`maxChars は1以上${MAX_READ_FILES_CHARS}以下の整数で指定してください`)
+
+      const selected = new Map<string, { abs: string; relative: string }>()
+      const addFile = (abs: string, displayPath?: string): void => {
+        const checked = resolveInWorkspace(abs, ctx)
+        const relative = (displayPath ?? path.relative(ctx.workspace, checked)).replaceAll('\\', '/')
+        selected.set(checked.toLowerCase(), { abs: checked, relative })
+      }
+      for (const requested of requestedPaths) addFile(resolveInWorkspace(requested, ctx), requested.replaceAll('\\', '/'))
+      if (patterns.length > 0) {
+        const matchers = patterns.map(workspaceGlobToRegExp)
+        await walk(ctx.workspace, (file) => {
+          const relative = path.relative(ctx.workspace, file).replaceAll('\\', '/')
+          if (matchers.some((matcher) => matcher.test(relative))) addFile(file, relative)
+        })
+      }
+      const files = [...selected.values()].sort((a, b) => a.relative < b.relative ? -1 : a.relative > b.relative ? 1 : 0)
+      if (files.length === 0) return '(該当なし)'
+
+      const sections: string[] = []
+      const unread: string[] = []
+      // Reserve enough room to name every skipped/partial file. The character
+      // ceiling applies to the complete result, including headings and the list.
+      const unreadReserve = Math.min(maxChars, 50 + files.reduce((sum, file) => sum + file.relative.length + 100, 0))
+      const bodyBudget = maxChars - unreadReserve
+      let used = 0
+      let exhausted = false
+      for (const file of files) {
+        if (exhausted) {
+          unread.push(`${file.relative}: 文字数予算を使い切ったため未読`)
+          continue
+        }
+        let stat
+        try {
+          stat = await fsp.stat(file.abs)
+        } catch (err) {
+          unread.push(`${file.relative}: 読み取り失敗 (${(err as Error).message})`)
+          continue
+        }
+        if (!stat.isFile()) {
+          unread.push(`${file.relative}: ファイルではありません`)
+          continue
+        }
+        const heading = `===== ${file.relative} =====\n`
+        const xlsxHint = `run_commandで tools/Read-Xlsx.ps1 ${file.relative} を使ってください`
+        if (path.extname(file.relative).toLowerCase() === '.xlsx') {
+          const section = `${heading}${xlsxHint}\n`
+          if (used + section.length <= bodyBudget) {
+            sections.push(section)
+            used += section.length
+          } else {
+            unread.push(`${file.relative}: 文字数予算を超えるためヒントを出力できませんでした`)
+            exhausted = true
+          }
+          continue
+        }
+        let content: string
+        try {
+          content = decodeWorkspaceText(await fsp.readFile(file.abs))
+        } catch (err) {
+          unread.push(`${file.relative}: 読み取り失敗 (${(err as Error).message})`)
+          continue
+        }
+        const available = bodyBudget - used
+        const suffix = '\n'
+        if (heading.length + content.length + suffix.length <= available) {
+          sections.push(`${heading}${content}${suffix}`)
+          used += heading.length + content.length + suffix.length
+          continue
+        }
+        const marker = '\n...(文字数予算により途中打切り)\n'
+        const take = Math.max(0, available - heading.length - marker.length)
+        if (take > 0) {
+          sections.push(`${heading}${content.slice(0, take)}${marker}`)
+          used += heading.length + take + marker.length
+        }
+        unread.push(`${file.relative}: ${content.length - take}文字を文字数予算により未読`)
+        exhausted = true
+      }
+      if (unread.length > 0) {
+        sections.push(['===== 読めなかった/途中打切り一覧 =====', ...unread.map((item) => `- ${item}`), ''].join('\n'))
+      }
+      return sections.join('').slice(0, maxChars)
+    }
+  },
+  {
     name: 'write_file',
     description: 'テキストファイルを新規作成または上書きする',
     kind: 'write',
@@ -264,17 +552,19 @@ export const TOOL_DEFS: ToolDef[] = [
       const content = String(args.content ?? '')
       if (!content.trim()) throw new Error('content が空です。JSON 直後のコードフェンスに内容を記述してください')
       let before = ''
+      let existedBefore = true
       try {
         before = await fsp.readFile(abs, 'utf8')
       } catch (err) {
         const e = err as NodeJS.ErrnoException
         if (e.code !== 'ENOENT') throw err
+        existedBefore = false
       }
       await fsp.mkdir(path.dirname(abs), { recursive: true })
       await fsp.writeFile(abs, content, 'utf8')
       const readBack = await fsp.readFile(abs, 'utf8')
-      fileSnapshots.set(abs, { before, after: readBack, afterHash: sha256(readBack), createdAt: Date.now() })
-      const result = formatFileChangeResult('書き込み', path.relative(ctx.workspace, abs), before, readBack, 1)
+      recordFileSnapshot(abs, ctx, before, existedBefore, readBack)
+      const result = formatFileChangeResult('書き込み', path.relative(ctx.workspace, abs), before, readBack, 1, existedBefore)
       return `${result}\nサイズ: ${Buffer.byteLength(readBack)} bytes`
     }
   },
@@ -297,18 +587,19 @@ export const TOOL_DEFS: ToolDef[] = [
       const oldStr = String(args.old_string ?? '')
       const newStr = String(args.new_string ?? '')
       if (!oldStr) throw new Error('old_string が空です')
-      const replaceAll = Boolean(args.replace_all)
+      const replaceAll = args.replace_all === undefined ? false : args.replace_all
+      if (typeof replaceAll !== 'boolean') throw new Error('replace_all はbooleanで指定してください')
       const src = await fsp.readFile(abs, 'utf8')
       const count = src.split(oldStr).length - 1
       if (count === 0) throw new Error('old_string が見つかりません')
       if (count > 1 && !replaceAll) throw new Error(`${count} 件一致しました。replace_all=true を指定するか対象範囲を狭めてください`)
       const next = replaceAll ? src.split(oldStr).join(newStr) : src.replace(oldStr, newStr)
-      if (next === src) { fileSnapshots.set(abs, { before: src, after: src, afterHash: sha256(src), createdAt: Date.now() }); return formatFileChangeResult('編集', path.relative(ctx.workspace, abs), src, src, count) }
+      if (next === src) { recordFileSnapshot(abs, ctx, src, true, src); return formatFileChangeResult('編集', path.relative(ctx.workspace, abs), src, src, count, true) }
       await fsp.writeFile(abs, next, 'utf8')
       const readBack = await fsp.readFile(abs, 'utf8')
       if (readBack !== next) throw new Error('編集後の再読込内容が一致しません')
-      fileSnapshots.set(abs, { before: src, after: readBack, afterHash: sha256(readBack), createdAt: Date.now() })
-      return formatFileChangeResult('編集', path.relative(ctx.workspace, abs), src, readBack, count)
+      recordFileSnapshot(abs, ctx, src, true, readBack)
+      return formatFileChangeResult('編集', path.relative(ctx.workspace, abs), src, readBack, count, true)
     }
   },
   {
@@ -460,9 +751,10 @@ export const TOOL_DEFS: ToolDef[] = [
   }
 ]
 
-export function openAITools(): OpenAIToolSchema[] {
-  return TOOL_DEFS.map((t) => ({
+export function openAITools(options: { allowArbitraryCommands?: boolean } = {}): OpenAIToolSchema[] {
+  const defs = options.allowArbitraryCommands ? TOOL_DEFS : TOOL_DEFS.filter((tool) => tool.name !== 'run_command')
+  return defs.map((t) => ({
     type: 'function' as const,
-    function: { name: t.name, description: t.description, parameters: t.parameters }
+    function: { name: qualifiedToolName(t.name), description: t.description, parameters: { ...t.parameters, additionalProperties: false } }
   }))
 }

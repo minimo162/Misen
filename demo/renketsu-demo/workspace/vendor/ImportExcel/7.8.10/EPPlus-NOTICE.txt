@@ -1,0 +1,19 @@
+EPPlus 4.5.3.2 license and provenance
+
+The bundled EPPlus.dll is the net40 asset from the official NuGet package
+EPPlus 4.5.3.2. The package metadata declares LGPL-3.0-or-later:
+https://licenses.nuget.org/LGPL-3.0-or-later
+
+NuGet package URL:
+https://www.nuget.org/api/v2/package/EPPlus/4.5.3.2
+NuGet package SHA256:
+ED124FB1EA4E98B0AAD0FCF9126566837A9874F415FD5BBB6739F0CD29B26381
+
+Bundled DLL SHA256:
+C32CEFBD1EA051ED3AF06E7FB9DD558598A612F042164140CD8BE722A351BC63
+AssemblyVersion/FileVersion: 4.5.3.2
+
+The complete LGPL-3.0-or-later text is in EPPlus-LICENSE.txt. It was
+retrieved from https://www.gnu.org/licenses/lgpl-3.0.txt.
+EPPlus-LICENSE.txt SHA256:
+E3A994D82E644B03A792A930F574002658412F62407F5FEE083F2555C5F23118

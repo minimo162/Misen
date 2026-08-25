@@ -1,0 +1,7 @@
+﻿Company: OS10 / 架空OS子会社10
+Currency: GBP; Unit: 千GBP
+Revenue: 330000 千GBP GBP
+Operating Profit: 45000 千GBP GBP
+Net Income: 29000 千GBP GBP
+Total Assets: 640000 千GBP GBP
+Employees: 720 persons GBP
