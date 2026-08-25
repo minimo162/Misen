@@ -54,6 +54,12 @@ if ([string]$info.provider -ne 'copilot-edge') {
     throw "coding-agent provider mismatch: $($info.provider)"
 }
 
+$sessionResponse = Invoke-RestMethod -Uri ($AgentUrl + '/api/sessions') -Method Post -ContentType 'application/json; charset=utf-8' -Body '{}'
+$sessionId = [string]$sessionResponse.id
+if ([string]::IsNullOrWhiteSpace($sessionId)) {
+    throw 'coding-agent did not create a fresh session for this take.'
+}
+
 if (-not ('VideoCapture.NativeWindow' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
@@ -318,6 +324,7 @@ $metadata = [ordered]@{
     savedAt = if ($null -ne $savedAt) { $savedAt.ToString('o') } else { $null }
     elapsedSeconds = $elapsedSeconds
     elapsedMinutes = if ($null -ne $elapsedSeconds) { [Math]::Round($elapsedSeconds / 60, 2) } else { $null }
+    sessionId = $sessionId
     runId = if ($null -ne $runResponse -and $null -ne $runResponse.run) { [string]$runResponse.run.id } else { $null }
     initialRunId = $initialRunId
     inputRetryUsed = $inputRetryUsed
