@@ -6553,6 +6553,35 @@ var import_node_child_process3 = require("node:child_process");
 var import_node_net = __toESM(require("node:net"));
 var import_node_fs3 = __toESM(require("node:fs"));
 var import_node_path4 = __toESM(require("node:path"));
+var RESPONSE_STABILITY_MS = 1e3;
+function assertResponseDeadline(deadlineMs, responseTimeoutSec, nowMs = Date.now()) {
+  if (nowMs >= deadlineMs) throw new Error(`Copilot \u306E\u5FDC\u7B54\u304C\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8\u3057\u307E\u3057\u305F (${responseTimeoutSec}\u79D2)`);
+}
+function selectLatestResponseCandidate(candidates) {
+  const usable = candidates.filter((candidate) => candidate.text.trim().length > 0);
+  usable.sort((a, b) => a.bottom - b.bottom || a.order - b.order);
+  return usable.length > 0 ? usable[usable.length - 1] : null;
+}
+function isStopGenerationControl(candidate) {
+  const structural = /fai-SendButton__stopBackground|stopGeneratingButton|stop-button/i.test(candidate.selector);
+  const semantic = /stop\s*(?:generating|response)|cancel\s*(?:generation|response)|生成を停止|応答を停止|停止する/i.test(candidate.label);
+  return structural || semantic;
+}
+function updateResponseCompletionState(previous, sample) {
+  if (sample.generating || !sample.copyEnabled || sample.textLength <= 0) {
+    return { state: { stableLength: null, stableSinceMs: null }, ready: false };
+  }
+  if (previous.stableLength !== sample.textLength || previous.stableSinceMs === null) {
+    return {
+      state: { stableLength: sample.textLength, stableSinceMs: sample.observedAtMs },
+      ready: false
+    };
+  }
+  return {
+    state: previous,
+    ready: sample.observedAtMs - previous.stableSinceMs >= RESPONSE_STABILITY_MS
+  };
+}
 function resolveCopilotSettings(cfg2) {
   const c = cfg2.copilot ?? {};
   const reuseExistingEdge = c.reuseExistingEdge === true;
@@ -6575,7 +6604,7 @@ function resolveCopilotSettings(cfg2) {
   };
 }
 var VISIBLE_JS = `const __vis=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};`;
-var DOCS_JS = `const __docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)__docs.push(f.contentDocument);}catch(e){}}`;
+var DOCS_JS = `const __docs=[];const __seenRoots=new Set();const __addRoot=r=>{if(!r||__seenRoots.has(r))return;__seenRoots.add(r);__docs.push(r);let all=[];try{all=Array.from(r.querySelectorAll('*'));}catch(e){}for(const el of all){try{if(el.shadowRoot)__addRoot(el.shadowRoot);}catch(e){}try{if((el.tagName||'').toLowerCase()==='iframe'&&el.contentDocument)__addRoot(el.contentDocument);}catch(e){}}};__addRoot(document);`;
 var INPUT_READY_JS = `(() => {
   ${VISIBLE_JS}
   ${DOCS_JS}
@@ -6586,28 +6615,41 @@ var INPUT_READY_JS = `(() => {
   }
   return JSON.stringify({ ready: false, url: location.href });
 })()`;
-var SCREEN_STATE_JS = `(() => {
+var COPILOT_SCREEN_STATE_JS = `(() => {
   ${VISIBLE_JS}
   ${DOCS_JS}
   const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
   let input = null;
   for (const d of __docs) { input = sels.map(s => ({ s, el: d.querySelector(s) })).find(x => __vis(x.el)); if (input) break; }
   const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button,[role="button"],a')));
-  const stopButton = buttons.find(el => /^(\u505C\u6B62|stop)$/i.test((el.getAttribute('aria-label') || el.title || '').trim()) && !el.disabled && __vis(el));
+  const responseSelectors = ['[data-testid="markdown-reply"]','[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
+  const responseRootSelectors = ['[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
+  const responseSelectorText = responseSelectors.join(',');const responseRootSelectorText=responseRootSelectors.join(',');
+  const responseRoot = node => {try{return node.closest(responseRootSelectorText)||node;}catch(e){return node;}};
+  const topBottom = node => {const rect=node.getBoundingClientRect();let bottom=Number(rect.bottom)||0;let win=node.ownerDocument&&node.ownerDocument.defaultView;try{while(win&&win!==win.parent&&win.frameElement){bottom+=win.frameElement.getBoundingClientRect().top;win=win.parent;}}catch(e){}return bottom;};
+  const controlLabel = el => [el.getAttribute('aria-label'),el.title,el.getAttribute('data-testid'),el.getAttribute('data-automation-id'),el.id,el.className,el.innerText,el.textContent].filter(Boolean).join(' ').trim();
+  const enabledCopy = el => __vis(el) && /\u30B3\u30D4\u30FC|copy/i.test(controlLabel(el)) && !el.disabled && el.getAttribute('aria-disabled') !== 'true';
+  const copyForResponse = sourceNode => {
+    const ownRoot=responseRoot(sourceNode);let scope=ownRoot;
+    for(let depth=0;scope&&depth<6;depth++){
+      let others=[];try{others=Array.from(scope.querySelectorAll(responseSelectorText)).filter(el=>responseRoot(el)!==ownRoot);}catch(e){}
+      if(others.length>0)break;
+      let controls=[];try{controls=Array.from(scope.querySelectorAll('button,[role="button"],span[role="button"]'));}catch(e){}
+      if(controls.some(enabledCopy))return true;
+      if(scope.tagName&&/^(MAIN|BODY)$/.test(scope.tagName))break;
+      scope=scope.parentElement;
+    }
+    return false;
+  };
+  const responseCandidates=[];const seenResponses=new Set();let responseOrder=0;
+  for(const d of __docs)for(const selector of responseSelectors){let nodes=[];try{nodes=Array.from(d.querySelectorAll(selector));}catch(e){}for(const node of nodes){const root=responseRoot(node);if(seenResponses.has(root)||!__vis(node))continue;const text=((node.innerText||'')||(node.textContent||'')).trim();if(!text)continue;seenResponses.add(root);responseCandidates.push({text,bottom:topBottom(root),order:responseOrder++,copyEnabled:copyForResponse(node)});}}
+  const stopSelectors=['.fai-SendButton__stopBackground','[data-testid="stopGeneratingButton"]','[data-testid="stop-button"]','[aria-label*="Stop"]','[aria-label*="\u505C\u6B62"]','[aria-label*="Cancel"]','[aria-label*="\u30AD\u30E3\u30F3\u30BB\u30EB"]','[data-testid*="stop" i]'];
+  const stopCandidates=[];const seenStops=new Set();
+  for(const d of __docs)for(const selector of stopSelectors){let nodes=[];try{nodes=Array.from(d.querySelectorAll(selector));}catch(e){}for(const item of nodes){let el=item;try{el=item.closest('button,[role="button"],a')||item;}catch(e){}if(seenStops.has(el)||!__vis(el))continue;seenStops.add(el);stopCandidates.push({label:(controlLabel(el)+' '+controlLabel(item)).trim(),selector});}}
   const signIn = buttons.find(el => __vis(el) && /sign\\s*in|log\\s*in|\u30B5\u30A4\u30F3\u30A4\u30F3|\u30ED\u30B0\u30A4\u30F3/i.test((el.innerText || el.textContent || el.getAttribute('aria-label') || el.title || '').trim()));
   const url = String(location.href || '');
   const signinRequired = /(?:login|signin|sign-in|auth)/i.test(url) || (!input && !!signIn);
-  const selectors = ['[data-testid="markdown-reply"]','[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][data-author="assistant"],[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
-  let text = '';
-  for (let i = 0; i < selectors.length; i++) {
-    const nodes = document.querySelectorAll(selectors[i]);
-    for (let k = nodes.length - 1; k >= 0; k--) {
-      const t = ((nodes[k].innerText || '') || (nodes[k].textContent || '')).trim();
-      if (t) { text = t; break; }
-    }
-    if (text) break;
-  }
-  return JSON.stringify({ inputReady: !!input, generating: !!stopButton, signinRequired, url, text });
+  return JSON.stringify({ inputReady: !!input, stopCandidates, responseCandidates, signinRequired, url });
 })()`;
 var FRESH_CHAT_JS = `(() => {
   ${VISIBLE_JS}
@@ -6743,16 +6785,31 @@ var MODEL_SELECT_JS = String.raw`(async () => {
   }
   pressEscape();return JSON.stringify({ok:true,changed:false,reason:'model_not_in_menu',current,tried:candidates,skipped});
 })()`;
-var CLICK_COPY_JS = `(() => {
+var COPILOT_CLICK_COPY_JS = `(() => {
   ${VISIBLE_JS}
   ${DOCS_JS}
-  const btns = __docs.flatMap((d) => Array.from(d.querySelectorAll('button, [role="button"], span[role="button"]'))).filter(__vis);
-  const cand = btns.filter((b) => /\u30B3\u30D4\u30FC|copy/i.test(b.getAttribute('aria-label') || b.title || b.getAttribute('data-testid') || ''));
-  const labels = cand.slice(-5).map((b) => (b.getAttribute('aria-label') || b.title || b.tagName).slice(0, 40));
-  if (cand.length === 0) {
-    const sample = btns.slice(-12).map((b) => ((b.getAttribute('aria-label') || b.title || b.textContent || '').trim().slice(0, 24)));
-    return JSON.stringify({ clicked: false, found: 0, sample });
+  const responseSelectors=['[data-testid="markdown-reply"]','[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
+  const responseRootSelectors=['[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
+  const responseSelectorText=responseSelectors.join(',');const responseRootSelectorText=responseRootSelectors.join(',');
+  const responseRoot=node=>{try{return node.closest(responseRootSelectorText)||node;}catch(e){return node;}};
+  const topBottom=node=>{const rect=node.getBoundingClientRect();let bottom=Number(rect.bottom)||0;let win=node.ownerDocument&&node.ownerDocument.defaultView;try{while(win&&win!==win.parent&&win.frameElement){bottom+=win.frameElement.getBoundingClientRect().top;win=win.parent;}}catch(e){}return bottom;};
+  const labelOf=el=>[el.getAttribute('aria-label'),el.title,el.getAttribute('data-testid'),el.getAttribute('data-automation-id'),el.id,el.className,el.innerText,el.textContent].filter(Boolean).join(' ').trim();
+  const enabledCopy=el=>__vis(el)&&/\u30B3\u30D4\u30FC|copy/i.test(labelOf(el))&&!el.disabled&&el.getAttribute('aria-disabled')!=='true';
+  const responses=[];const seenResponses=new Set();let order=0;
+  for(const d of __docs)for(const selector of responseSelectors){let nodes=[];try{nodes=Array.from(d.querySelectorAll(selector));}catch(e){}for(const node of nodes){const root=responseRoot(node);if(seenResponses.has(root)||!__vis(node))continue;const text=((node.innerText||'')||(node.textContent||'')).trim();if(!text)continue;seenResponses.add(root);responses.push({node:root,bottom:topBottom(root),order:order++});}}
+  responses.sort((a,b)=>(a.bottom-b.bottom)||(a.order-b.order));
+  const latest=responses.length?responses[responses.length-1].node:null;
+  let cand=[];let scope=latest;
+  for(let depth=0;scope&&depth<6;depth++){
+    let others=[];try{others=Array.from(scope.querySelectorAll(responseSelectorText)).filter(el=>responseRoot(el)!==latest);}catch(e){}
+    if(others.length>0)break;
+    let controls=[];try{controls=Array.from(scope.querySelectorAll('button,[role="button"],span[role="button"]'));}catch(e){}
+    cand=controls.filter(enabledCopy);if(cand.length)break;
+    if(scope.tagName&&/^(MAIN|BODY)$/.test(scope.tagName))break;
+    scope=scope.parentElement;
   }
+  const labels = cand.slice(-5).map((b) => (b.getAttribute('aria-label') || b.title || b.tagName).slice(0, 40));
+  if (cand.length === 0) return JSON.stringify({ clicked: false, found: 0, sample: labels });
   const last = cand[cand.length - 1];
   try { last.scrollIntoView({ block: 'center' }); } catch (e) {}
   last.click();
@@ -6908,17 +6965,25 @@ var CopilotEdgeClient = class {
   constructor(cfg2) {
     this.s = resolveCopilotSettings(cfg2);
   }
-  async grantClipboard() {
+  remainingTimeoutMs(deadlineMs, maximumMs) {
+    if (!Number.isFinite(deadlineMs)) return maximumMs;
+    const remainingMs = Math.floor(deadlineMs - Date.now());
+    if (remainingMs <= 0) throw new Error("Copilot response deadline exhausted");
+    return Math.max(1, Math.min(maximumMs, remainingMs));
+  }
+  async grantClipboard(deadlineMs = Number.POSITIVE_INFINITY) {
     if (this.clipGranted) return;
-    const ver = await (await fetch(`http://127.0.0.1:${this.s.cdpPort}/json/version`, { signal: AbortSignal.timeout(5e3) })).json();
+    const ver = await (await fetch(`http://127.0.0.1:${this.s.cdpPort}/json/version`, {
+      signal: AbortSignal.timeout(this.remainingTimeoutMs(deadlineMs, 5e3))
+    })).json();
     const browserWs = String(ver.webSocketDebuggerUrl ?? "");
     if (!browserWs) throw new Error("browser WebSocket \u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093");
-    const bws = await CdpConnection.connect(browserWs, 1e4);
+    const bws = await CdpConnection.connect(browserWs, this.remainingTimeoutMs(deadlineMs, 1e4));
     try {
       await bws.method("Browser.grantPermissions", {
         permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"],
         origin: new URL(this.s.url).origin
-      }, 1e4);
+      }, this.remainingTimeoutMs(deadlineMs, 1e4));
     } finally {
       bws.close();
     }
@@ -6930,40 +6995,66 @@ var CopilotEdgeClient = class {
     if (m) s = m[1];
     return s.split("\n").filter((l) => l.trim() !== this.s.endMarker).join("\n").trim();
   }
-  async bringToFront() {
+  async bringToFront(deadlineMs = Number.POSITIVE_INFINITY) {
     try {
-      await this.cdpMethod("Page.bringToFront", {}, 5e3);
-      await sleep(300);
+      await this.cdpMethod("Page.bringToFront", {}, this.remainingTimeoutMs(deadlineMs, 5e3));
+      const pauseMs = this.remainingTimeoutMs(deadlineMs, 300);
+      await sleep(pauseMs);
     } catch {
     }
   }
-  async finalizeAnswer(fallbackText) {
+  async finalizeAnswer(fallbackText, deadlineMs = Number.POSITIVE_INFINITY) {
+    const assertWithinDeadline = () => {
+      assertResponseDeadline(deadlineMs, this.s.responseTimeoutSec);
+    };
+    const sleepWithinDeadline = async (requestedMs) => {
+      assertWithinDeadline();
+      await sleep(this.remainingTimeoutMs(deadlineMs, requestedMs));
+      assertWithinDeadline();
+    };
     let baseline = "";
     try {
-      await this.bringToFront();
-      await this.grantClipboard();
-      baseline = String(await this.evalWithReconnect("navigator.clipboard.readText()", 8e3)).trim();
+      await this.bringToFront(deadlineMs);
+      assertWithinDeadline();
+      await this.grantClipboard(deadlineMs);
+      baseline = String(await this.evalWithReconnect("navigator.clipboard.readText()", this.remainingTimeoutMs(deadlineMs, 8e3))).trim();
     } catch {
     }
+    assertWithinDeadline();
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        await this.bringToFront();
-        await this.grantClipboard();
-        const clicked = JSON.parse(String(await this.evalWithReconnect(CLICK_COPY_JS, 15e3)));
+        await this.bringToFront(deadlineMs);
+        assertWithinDeadline();
+        await this.grantClipboard(deadlineMs);
+        const clicked = JSON.parse(String(await this.evalWithReconnect(
+          COPILOT_CLICK_COPY_JS,
+          this.remainingTimeoutMs(deadlineMs, 15e3)
+        )));
         console.log("[clip] candidates=" + JSON.stringify(clicked));
         if (clicked.clicked) {
-          await sleep(400 + attempt * 200);
-          const clip = String(await this.evalWithReconnect("navigator.clipboard.readText()", 1e4));
+          await sleepWithinDeadline(400 + attempt * 200);
+          const clip = String(await this.evalWithReconnect(
+            "navigator.clipboard.readText()",
+            this.remainingTimeoutMs(deadlineMs, 1e4)
+          ));
+          assertWithinDeadline();
           const s = this.stripOuterFence(clip);
-          if (s.trim().length >= 10 && s.trim() !== baseline) return s;
+          if (s.trim().length >= 10 && s.trim() !== baseline) {
+            assertWithinDeadline();
+            return s;
+          }
         }
       } catch (err) {
+        assertWithinDeadline();
         console.log("[clip] attempt " + attempt + " error: " + err.message.slice(0, 80));
       }
-      await sleep(700);
+      await sleepWithinDeadline(700);
     }
+    assertWithinDeadline();
     console.log("[clip] fallback to innerText");
-    return this.cleanResponse(fallbackText);
+    const cleaned = this.cleanResponse(fallbackText);
+    assertWithinDeadline();
+    return cleaned;
   }
   hardenPreferences(profileDir) {
     try {
@@ -7258,40 +7349,55 @@ var CopilotEdgeClient = class {
       throw new Error("\u6709\u52B9\u306A\u9001\u4FE1\u30DC\u30BF\u30F3\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F");
     }
   }
-  async readScreenState() {
-    const raw = await this.evalWithReconnect(SCREEN_STATE_JS, 15e3);
-    return JSON.parse(String(raw));
+  async readScreenState(timeoutMs = 15e3) {
+    const raw = await this.evalWithReconnect(COPILOT_SCREEN_STATE_JS, timeoutMs);
+    const parsed = JSON.parse(String(raw));
+    const latest = selectLatestResponseCandidate(parsed.responseCandidates ?? []);
+    return {
+      text: latest?.text ?? "",
+      generating: (parsed.stopCandidates ?? []).some(isStopGenerationControl),
+      copyEnabled: latest?.copyEnabled === true,
+      signinRequired: parsed.signinRequired
+    };
   }
   async waitResponse(baseline, signal) {
-    const start = Date.now();
+    const deadline = Date.now() + this.s.responseTimeoutSec * 1e3;
     let lastText = "";
     let lastChange = Date.now();
     let sawNewText = false;
-    let stable = 0;
-    while (Date.now() - start < this.s.responseTimeoutSec * 1e3) {
+    let completionState = { stableLength: null, stableSinceMs: null };
+    while (Date.now() < deadline) {
       throwIfAborted(signal);
-      const st = await this.readScreenState();
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) break;
+      const st = await this.readScreenState(Math.min(15e3, remainingMs));
+      if (Date.now() >= deadline) break;
       if (st.signinRequired) throw new Error("Copilot \u3078\u306E\u30B5\u30A4\u30F3\u30A4\u30F3\u304C\u5FC5\u8981\u3067\u3059\u3002");
       if (st.text && st.text !== baseline) {
         sawNewText = true;
         if (st.text !== lastText) {
           lastText = st.text;
           lastChange = Date.now();
-          stable = 0;
-        } else if (lastText !== "") {
-          stable++;
         }
       }
-      const hasMarker = this.s.endMarker.length > 0 && lastText.includes(this.s.endMarker);
       const quietFor = Date.now() - lastChange;
-      if (sawNewText && lastText !== "" && st.text === lastText) {
-        if (hasMarker && stable >= 1 && quietFor >= 1100) return await this.finalizeAnswer(lastText);
-        if (!st.generating && stable >= 2 && quietFor >= 1700) return await this.finalizeAnswer(lastText);
+      const completion = updateResponseCompletionState(completionState, {
+        observedAtMs: Date.now(),
+        textLength: sawNewText && st.text === lastText ? lastText.length : 0,
+        generating: st.generating,
+        copyEnabled: st.copyEnabled
+      });
+      completionState = completion.state;
+      if (completion.ready) {
+        const answer = await this.finalizeAnswer(lastText, deadline);
+        assertResponseDeadline(deadline, this.s.responseTimeoutSec);
+        return answer;
       }
       if (!st.generating && sawNewText && quietFor > this.s.stallTimeoutSec * 1e3) {
         throw new Error("Copilot \u306E\u5FDC\u7B54\u304C\u505C\u6EDE\u3057\u305F\u305F\u3081\u8AE6\u3081\u307E\u3057\u305F");
       }
-      await sleep(this.s.pollIntervalMs);
+      const sleepMs = Math.min(this.s.pollIntervalMs, deadline - Date.now());
+      if (sleepMs > 0) await sleep(sleepMs);
       throwIfAborted(signal);
     }
     throw new Error(`Copilot \u306E\u5FDC\u7B54\u304C\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8\u3057\u307E\u3057\u305F (${this.s.responseTimeoutSec}\u79D2)`);
@@ -7321,9 +7427,9 @@ var CopilotEdgeClient = class {
     await this.waitInputReady(30, signal);
     await this.assertTrustedOrigin();
     await this.insertPrompt(prompt);
+    const baseline = (await this.readScreenState()).text;
     await this.clickSend();
     throwIfAborted(signal);
-    const baseline = (await this.readScreenState()).text;
     return this.waitResponse(baseline, signal);
   }
   close() {

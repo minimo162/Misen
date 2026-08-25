@@ -7,7 +7,17 @@ import path from 'node:path'
 import { extractJsonReply, runAgentTurn, type AgentIO, type TextBackend } from '../src/agent'
 import { capabilityPolicy, type AgentConfig } from '../src/config'
 import type { ChatMessage } from '../src/llm'
-import { CopilotEdgeClient, resolveCopilotSettings } from '../src/copilot'
+import {
+  COPILOT_CLICK_COPY_JS,
+  COPILOT_SCREEN_STATE_JS,
+  CopilotEdgeClient,
+  assertResponseDeadline,
+  isStopGenerationControl,
+  resolveCopilotSettings,
+  selectLatestResponseCandidate,
+  updateResponseCompletionState,
+  type ResponseCompletionState
+} from '../src/copilot'
 
 import { getFileSnapshot, normalizeRunCommand, openAITools, parseToolResultMeta, rollbackFileChange, validateToolArgs, TOOL_DEFS, type ToolContext } from '../src/tools'
 import { listApprovals, requestApproval, resolveApproval } from '../src/approvals'
@@ -610,6 +620,251 @@ async function testCopilotEdgeIsolation(): Promise<void> {
   assert.strictEqual(attached.cdpPort, 9444)
   console.log('PASS copilot-edge-isolation')
 }
+async function testCopilotResponseCompletion(): Promise<void> {
+  const empty = (): ResponseCompletionState => ({ stableLength: null, stableSinceMs: null })
+  let result = updateResponseCompletionState(empty(), {
+    observedAtMs: 0,
+    textLength: 5000,
+    generating: true,
+    copyEnabled: true
+  })
+  assert.strictEqual(result.ready, false)
+  assert.strictEqual(result.state.stableSinceMs, null)
+
+  result = updateResponseCompletionState(empty(), {
+    observedAtMs: 0,
+    textLength: 5000,
+    generating: false,
+    copyEnabled: false
+  })
+  assert.strictEqual(result.ready, false)
+  assert.strictEqual(result.state.stableSinceMs, null)
+
+  result = updateResponseCompletionState(empty(), {
+    observedAtMs: 100,
+    textLength: 5000,
+    generating: false,
+    copyEnabled: true
+  })
+  result = updateResponseCompletionState(result.state, {
+    observedAtMs: 1200,
+    textLength: 7000,
+    generating: false,
+    copyEnabled: true
+  })
+  assert.strictEqual(result.ready, false)
+  assert.strictEqual(result.state.stableSinceMs, 1200)
+
+  result = updateResponseCompletionState(result.state, {
+    observedAtMs: 2000,
+    textLength: 7000,
+    generating: false,
+    copyEnabled: true
+  })
+  assert.strictEqual(result.ready, false)
+  result = updateResponseCompletionState(result.state, {
+    observedAtMs: 2200,
+    textLength: 7000,
+    generating: false,
+    copyEnabled: true
+  })
+  assert.strictEqual(result.ready, true)
+
+  result = updateResponseCompletionState(result.state, {
+    observedAtMs: 2300,
+    textLength: 7000,
+    generating: false,
+    copyEnabled: false
+  })
+  assert.strictEqual(result.ready, false)
+  assert.strictEqual(result.state.stableSinceMs, null)
+
+  result = updateResponseCompletionState(empty(), {
+    observedAtMs: 3000,
+    textLength: 7000,
+    generating: false,
+    copyEnabled: true
+  })
+  result = updateResponseCompletionState(result.state, {
+    observedAtMs: 4100,
+    textLength: 7000,
+    generating: true,
+    copyEnabled: true
+  })
+  assert.strictEqual(result.ready, false)
+  assert.strictEqual(result.state.stableSinceMs, null)
+
+  const olderCopyOnly = selectLatestResponseCandidate([
+    { text: 'old', bottom: 100, order: 0, copyEnabled: true },
+    { text: 'latest', bottom: 200, order: 1, copyEnabled: false }
+  ])
+  assert.strictEqual(olderCopyOnly?.text, 'latest')
+  assert.strictEqual(olderCopyOnly?.copyEnabled, false)
+  const latestCopy = selectLatestResponseCandidate([
+    { text: 'old', bottom: 100, order: 0, copyEnabled: true },
+    { text: 'latest', bottom: 200, order: 1, copyEnabled: true }
+  ])
+  assert.strictEqual(latestCopy?.copyEnabled, true)
+
+  assert.strictEqual(isStopGenerationControl({ label: '', selector: '.fai-SendButton__stopBackground' }), true)
+  assert.strictEqual(isStopGenerationControl({ label: '応答の生成を停止する', selector: '[aria-label*="停止"]' }), true)
+  assert.strictEqual(isStopGenerationControl({ label: 'Stop generating', selector: '[aria-label*="Stop"]' }), true)
+  assert.strictEqual(isStopGenerationControl({ label: 'コピー', selector: 'button' }), false)
+  for (const required of ['shadowRoot', 'contentDocument', 'stopGeneratingButton', 'stop-button', 'fai-SendButton__stopBackground']) {
+    assert.ok(COPILOT_SCREEN_STATE_JS.includes(required), `screen-state detector missing ${required}`)
+  }
+  new Function('document', 'window', `return ${COPILOT_SCREEN_STATE_JS}`)
+  new Function('document', 'window', `return ${COPILOT_CLICK_COPY_JS}`)
+  assert.ok(COPILOT_CLICK_COPY_JS.includes('scope=latest'))
+  assert.ok(COPILOT_CLICK_COPY_JS.includes('others.length>0'))
+
+  const deadlineClient = new CopilotEdgeClient({
+    baseURL: '',
+    model: '',
+    provider: 'copilot-edge',
+    copilot: { responseTimeoutSec: 0.01 }
+  })
+  type DeadlineInternals = {
+    readScreenState: (timeoutMs?: number) => Promise<{ text: string; generating: boolean; copyEnabled: boolean; signinRequired: boolean }>
+    finalizeAnswer: (text: string) => Promise<string>
+    waitResponse: (baseline: string) => Promise<string>
+  }
+  const deadlineInternal = deadlineClient as unknown as DeadlineInternals
+  let finalized = false
+  deadlineInternal.readScreenState = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    return { text: 'complete', generating: false, copyEnabled: true, signinRequired: false }
+  }
+  deadlineInternal.finalizeAnswer = async (text) => { finalized = true; return text }
+  await assert.rejects(deadlineInternal.waitResponse('baseline'), /タイムアウト/)
+  assert.strictEqual(finalized, false)
+
+  const recoveryClient = new CopilotEdgeClient({
+    baseURL: '',
+    model: '',
+    provider: 'copilot-edge',
+    copilot: { responseTimeoutSec: 0.05 }
+  })
+  type RecoveryInternals = {
+    bringToFront: (deadlineMs?: number) => Promise<void>
+    grantClipboard: (deadlineMs?: number) => Promise<void>
+    evalWithReconnect: (expression: string, timeoutMs?: number) => Promise<unknown>
+    finalizeAnswer: (fallbackText: string, deadlineMs?: number) => Promise<string>
+  }
+  const recoveryInternal = recoveryClient as unknown as RecoveryInternals
+  recoveryInternal.bringToFront = async () => {}
+  recoveryInternal.grantClipboard = async () => {}
+  let recoveryEvalCalls = 0
+  recoveryInternal.evalWithReconnect = async () => {
+    recoveryEvalCalls++
+    return recoveryEvalCalls === 1 ? 'old clipboard' : JSON.stringify({ clicked: true })
+  }
+  const recoveryStarted = Date.now()
+  await assert.rejects(
+    recoveryInternal.finalizeAnswer('fallback response', recoveryStarted + 30),
+    /タイムアウト/
+  )
+  assert.ok(Date.now() - recoveryStarted < 250)
+  assert.doesNotThrow(() => assertResponseDeadline(101, 300, 100))
+  assert.throws(() => assertResponseDeadline(100, 300, 100), /タイムアウト/)
+
+  type ReturnBoundaryInternals = RecoveryInternals & {
+    stripOuterFence: (text: string) => string
+    cleanResponse: (text: string) => string
+  }
+  const realDateNow = Date.now
+  let boundaryNow = 100
+  Date.now = () => boundaryNow
+  try {
+    const clipboardBoundaryClient = new CopilotEdgeClient({ baseURL: '', model: '', provider: 'copilot-edge' })
+    const clipboardBoundary = clipboardBoundaryClient as unknown as ReturnBoundaryInternals
+    clipboardBoundary.bringToFront = async () => {}
+    clipboardBoundary.grantClipboard = async () => {}
+    let clipboardEvalCalls = 0
+    clipboardBoundary.evalWithReconnect = async () => {
+      clipboardEvalCalls++
+      if (clipboardEvalCalls === 1) return 'old clipboard'
+      if (clipboardEvalCalls === 2) return JSON.stringify({ clicked: true })
+      return 'new clipboard response'
+    }
+    clipboardBoundary.stripOuterFence = () => {
+      boundaryNow = 102
+      return 'new clipboard response'
+    }
+    await assert.rejects(clipboardBoundary.finalizeAnswer('fallback', 102), /タイムアウト/)
+
+    boundaryNow = 200
+    const fallbackBoundaryClient = new CopilotEdgeClient({ baseURL: '', model: '', provider: 'copilot-edge' })
+    const fallbackBoundary = fallbackBoundaryClient as unknown as ReturnBoundaryInternals
+    fallbackBoundary.bringToFront = async () => {}
+    fallbackBoundary.grantClipboard = async () => {}
+    let fallbackEvalCalls = 0
+    fallbackBoundary.evalWithReconnect = async () => {
+      fallbackEvalCalls++
+      return fallbackEvalCalls === 1 ? 'old clipboard' : JSON.stringify({ clicked: false })
+    }
+    fallbackBoundary.cleanResponse = () => {
+      boundaryNow = 202
+      return 'fallback response'
+    }
+    await assert.rejects(fallbackBoundary.finalizeAnswer('fallback', 202), /タイムアウト/)
+
+    boundaryNow = 1000
+    const waitBoundaryClient = new CopilotEdgeClient({
+      baseURL: '',
+      model: '',
+      provider: 'copilot-edge',
+      copilot: { responseTimeoutSec: 5, pollIntervalMs: 500 }
+    })
+    const waitBoundary = waitBoundaryClient as unknown as DeadlineInternals
+    let waitPolls = 0
+    waitBoundary.readScreenState = async () => {
+      waitPolls++
+      boundaryNow = waitPolls === 1 ? 1000 : 2100
+      return { text: 'complete response', generating: false, copyEnabled: true, signinRequired: false }
+    }
+    waitBoundary.finalizeAnswer = async () => {
+      boundaryNow = 6000
+      return 'complete response'
+    }
+    await assert.rejects(waitBoundary.waitResponse('baseline'), /タイムアウト/)
+  } finally {
+    Date.now = realDateNow
+  }
+
+  const orderClient = new CopilotEdgeClient({ baseURL: '', model: '', provider: 'copilot-edge' })
+  type CompleteInternals = {
+    ensureEdge: () => Promise<void>
+    ensurePage: () => Promise<void>
+    freshChat: () => Promise<void>
+    waitInputReady: () => Promise<void>
+    selectModel: () => Promise<void>
+    assertTrustedOrigin: () => Promise<void>
+    insertPrompt: () => Promise<void>
+    readScreenState: () => Promise<{ text: string; generating: boolean; copyEnabled: boolean; signinRequired: boolean }>
+    clickSend: () => Promise<void>
+    waitResponse: (baseline: string) => Promise<string>
+  }
+  const orderInternal = orderClient as unknown as CompleteInternals
+  const order: string[] = []
+  orderInternal.ensureEdge = async () => { order.push('edge') }
+  orderInternal.ensurePage = async () => { order.push('page') }
+  orderInternal.freshChat = async () => { order.push('fresh') }
+  orderInternal.waitInputReady = async () => { order.push('input') }
+  orderInternal.selectModel = async () => { order.push('model') }
+  orderInternal.assertTrustedOrigin = async () => { order.push('origin') }
+  orderInternal.insertPrompt = async () => { order.push('insert') }
+  orderInternal.readScreenState = async () => {
+    order.push('baseline')
+    return { text: 'old response', generating: false, copyEnabled: true, signinRequired: false }
+  }
+  orderInternal.clickSend = async () => { order.push('send') }
+  orderInternal.waitResponse = async (baseline) => { order.push(`wait:${baseline}`); return 'done' }
+  assert.strictEqual(await orderClient.complete('prompt'), 'done')
+  assert.ok(order.indexOf('baseline') < order.indexOf('send'))
+  assert.strictEqual(order[order.length - 1], 'wait:old response')
+  console.log('PASS copilot-response-completion')
+}
 async function testCopilotChunkFallback(): Promise<void> {
   const client = new CopilotEdgeClient({ baseURL: '', model: '', provider: 'copilot-edge', copilot: { maxPromptChars: 5000 } })
   type Internals = {
@@ -789,6 +1044,7 @@ async function testUiContract(): Promise<void> {
   await testCopilotChoosesFirstAction()
   await testModeBoundaries()
   await testCopilotEdgeIsolation()
+  await testCopilotResponseCompletion()
   await testCopilotChunkFallback()
   await testCopilotLoop()
   await testCopilotToolResultBudgets()
