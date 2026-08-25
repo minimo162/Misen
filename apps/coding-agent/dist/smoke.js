@@ -5642,11 +5642,13 @@ function parseStrictCandidate(candidate) {
     parsedValue = JSON.parse(candidate.text);
   } catch {
     if (!/"tool"\s*:\s*"(?:host\.)?write_file"/i.test(candidate.text)) return null;
+    const observedRepair = repairObservedWriteContent(candidate.text);
+    if (observedRepair === null) return null;
     try {
-      parsedValue = JSON.parse((0, import_jsonrepair.jsonrepair)(candidate.text));
+      const libraryRepair = JSON.parse((0, import_jsonrepair.jsonrepair)(candidate.text));
+      parsedValue = JSON.stringify(libraryRepair) === JSON.stringify(observedRepair) ? libraryRepair : observedRepair;
     } catch {
-      parsedValue = repairObservedWriteContent(candidate.text);
-      if (parsedValue === null) return null;
+      parsedValue = observedRepair;
     }
   }
   return validateProtocolObject(parsedValue);
@@ -5752,9 +5754,9 @@ function toolRequestKey(name, args) {
   return `${name}:${JSON.stringify(copy)}`;
 }
 function formatHostResult(tool, output, metadata, status, callId, runId) {
-  const max = 2e3;
-  const truncated = output.length > max;
   const bare = bareToolName(tool);
+  const max = bare === "read_files" ? 8e4 : 8e3;
+  const truncated = output.length > max;
   const commandLike = bare === "run_command" || bare === "start_process" || bare === "stop_process";
   const writeLike = bare === "write_file" || bare === "edit_file";
   const sideEffectState = status === "succeeded" ? metadata?.changed ? "committed" : "none" : status === "denied" ? "none" : commandLike ? "unknown" : writeLike ? "possible" : "none";
@@ -7458,6 +7460,10 @@ async function testProtocolParsing() {
 ${nestedWriteRaw}`), null);
   import_node_assert.default.strictEqual(extractJsonReply(`${nestedWriteRaw}
 {"answer":"\u4F59\u5206"}`), null);
+  import_node_assert.default.strictEqual(extractJsonReply('{"tool":"write_file","path":"x.txt",content:"x","AGENT_END":true}'), null);
+  import_node_assert.default.strictEqual(extractJsonReply('{"tool":"write_file","path":"x.txt",,"content":"x","AGENT_END":true}'), null);
+  import_node_assert.default.strictEqual(extractJsonReply('{"tool":"write_file" "path":"x.txt","content":"x","AGENT_END":true}'), null);
+  import_node_assert.default.strictEqual(extractJsonReply('{"tool":"write_file","path":"x.txt",/*comment*/"content":"x","AGENT_END":true}'), null);
   import_node_assert.default.strictEqual(extractJsonReply('{"answer":"a"}\n{"answer":"b"}'), null);
   import_node_assert.default.strictEqual(extractJsonReply('{"answer":"a","tool":"host.list_files"}'), null);
   import_node_assert.default.strictEqual(extractJsonReply('{"answer":"a","extra":1}'), null);
@@ -7544,6 +7550,56 @@ async function testCopilotLoop() {
   import_node_fs3.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS copilot-loop");
 }
+async function testCopilotToolResultBudgets() {
+  const readRoot = import_node_fs3.default.mkdtempSync(import_node_path4.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
+  import_node_fs3.default.writeFileSync(import_node_path4.default.join(readRoot, "a-long.txt"), `${"x".repeat(3500)}
+LATE_TEXT_MARKER`);
+  import_node_fs3.default.writeFileSync(import_node_path4.default.join(readRoot, "z-final.xlsx"), Buffer.from("xlsx-placeholder"));
+  const readBackend = new FakeBackend([
+    '{"tool":"host.read_files","args":{"patterns":["a-long.txt","z-final.xlsx"]}}\nAGENT_END',
+    '{"answer":"read complete"}\nAGENT_END'
+  ]);
+  const readResult = await runAgentTurn({
+    cfg: { baseURL: "", model: "", provider: "copilot-edge", copilot: { agentMode: true } },
+    messages: [],
+    userInput: "read all evidence",
+    ctx: makeCtx(readRoot),
+    io: ioStub(true),
+    backend: readBackend
+  });
+  import_node_assert.default.strictEqual(readResult.reply, "read complete");
+  import_node_assert.default.ok(readBackend.prompts[1].includes("LATE_TEXT_MARKER"), "read_files late text must reach the next prompt");
+  import_node_assert.default.ok(readBackend.prompts[1].includes("z-final.xlsx"), "final xlsx entry must reach the next prompt");
+  import_node_assert.default.ok(readBackend.prompts[1].includes("tools/Read-Xlsx.ps1"), "xlsx guidance must reach the next prompt");
+  import_node_fs3.default.rmSync(readRoot, { recursive: true, force: true });
+  const commandRoot = import_node_fs3.default.mkdtempSync(import_node_path4.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
+  const emitterPath = import_node_path4.default.join(commandRoot, "emit-long.cjs");
+  import_node_fs3.default.writeFileSync(emitterPath, "process.stdout.write('A'.repeat(3500) + '\\nlast.xlsx FINAL_WORKBOOK_MARKER')");
+  const command = `"${process.execPath}" "${emitterPath}"`;
+  const commandBackend = new FakeBackend([
+    JSON.stringify({ tool: "host.run_command", args: { command } }) + "\nAGENT_END",
+    '{"answer":"command complete"}\nAGENT_END'
+  ]);
+  const commandResult = await runAgentTurn({
+    cfg: {
+      baseURL: "",
+      model: "",
+      provider: "copilot-edge",
+      allowArbitraryCommands: true,
+      autoApprove: { command: true },
+      copilot: { agentMode: true }
+    },
+    messages: [],
+    userInput: "read all workbooks",
+    ctx: makeCtx(commandRoot),
+    io: ioStub(true),
+    backend: commandBackend
+  });
+  import_node_assert.default.strictEqual(commandResult.reply, "command complete");
+  import_node_assert.default.ok(commandBackend.prompts[1].includes("last.xlsx FINAL_WORKBOOK_MARKER"), "final command workbook must reach the next prompt");
+  import_node_fs3.default.rmSync(commandRoot, { recursive: true, force: true });
+  console.log("PASS copilot-tool-result-budgets");
+}
 async function testMaxIterationHistory() {
   const root = import_node_fs3.default.mkdtempSync(import_node_path4.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
   const backend = new FakeBackend(['{"tool":"host.list_files","args":{}}']);
@@ -7611,6 +7667,7 @@ async function testUiContract() {
   await testCopilotEdgeIsolation();
   await testCopilotChunkFallback();
   await testCopilotLoop();
+  await testCopilotToolResultBudgets();
   await testMaxIterationHistory();
   await testCopilotPlainMode();
   await testCopilotFenceMode();

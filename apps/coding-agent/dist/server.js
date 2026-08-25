@@ -5712,11 +5712,13 @@ function parseStrictCandidate(candidate) {
     parsedValue = JSON.parse(candidate.text);
   } catch {
     if (!/"tool"\s*:\s*"(?:host\.)?write_file"/i.test(candidate.text)) return null;
+    const observedRepair = repairObservedWriteContent(candidate.text);
+    if (observedRepair === null) return null;
     try {
-      parsedValue = JSON.parse((0, import_jsonrepair.jsonrepair)(candidate.text));
+      const libraryRepair = JSON.parse((0, import_jsonrepair.jsonrepair)(candidate.text));
+      parsedValue = JSON.stringify(libraryRepair) === JSON.stringify(observedRepair) ? libraryRepair : observedRepair;
     } catch {
-      parsedValue = repairObservedWriteContent(candidate.text);
-      if (parsedValue === null) return null;
+      parsedValue = observedRepair;
     }
   }
   return validateProtocolObject(parsedValue);
@@ -5819,9 +5821,9 @@ function toolRequestKey(name, args) {
   return `${name}:${JSON.stringify(copy)}`;
 }
 function formatHostResult(tool, output, metadata, status, callId, runId) {
-  const max = 2e3;
-  const truncated = output.length > max;
   const bare = bareToolName(tool);
+  const max = bare === "read_files" ? 8e4 : 8e3;
+  const truncated = output.length > max;
   const commandLike = bare === "run_command" || bare === "start_process" || bare === "stop_process";
   const writeLike = bare === "write_file" || bare === "edit_file";
   const sideEffectState = status === "succeeded" ? metadata?.changed ? "committed" : "none" : status === "denied" ? "none" : commandLike ? "unknown" : writeLike ? "possible" : "none";

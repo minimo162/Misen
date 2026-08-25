@@ -102,11 +102,15 @@ function parseStrictCandidate(candidate: Candidate): ParsedReply | null {
     // unescaped. Repair only that one known shape; all other malformed commands
     // remain rejected, and the repaired value still passes the full protocol gate.
     if (!/"tool"\s*:\s*"(?:host\.)?write_file"/i.test(candidate.text)) return null
+    const observedRepair = repairObservedWriteContent(candidate.text)
+    if (observedRepair === null) return null
+    // jsonrepair is advisory only after the exact observed envelope has passed.
+    // Never let its general-purpose repairs broaden the accepted protocol.
     try {
-      parsedValue = JSON.parse(jsonrepair(candidate.text)) as unknown
+      const libraryRepair = JSON.parse(jsonrepair(candidate.text)) as unknown
+      parsedValue = JSON.stringify(libraryRepair) === JSON.stringify(observedRepair) ? libraryRepair : observedRepair
     } catch {
-      parsedValue = repairObservedWriteContent(candidate.text)
-      if (parsedValue === null) return null
+      parsedValue = observedRepair
     }
   }
   return validateProtocolObject(parsedValue)
@@ -291,9 +295,11 @@ function toolRequestKey(name: string, args: Record<string, unknown>): string {
   return `${name}:${JSON.stringify(copy)}`
 }
 function formatHostResult(tool: string, output: string, metadata: Record<string, unknown> | null, status: 'succeeded' | 'failed' | 'denied', callId?: string, runId?: string): string {
-  const max = 2000
-  const truncated = output.length > max
   const bare = bareToolName(tool)
+  // read_files has its own aggregate 80k contract. Other host tools already
+  // cap their output at 8k, including run_command/Read-Xlsx.
+  const max = bare === 'read_files' ? 80_000 : 8_000
+  const truncated = output.length > max
   const commandLike = bare === 'run_command' || bare === 'start_process' || bare === 'stop_process'
   const writeLike = bare === 'write_file' || bare === 'edit_file'
   const sideEffectState = status === 'succeeded'
