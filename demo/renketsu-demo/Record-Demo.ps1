@@ -169,9 +169,13 @@ try {
         if ($isInputRenderFailure -and -not [string]::IsNullOrWhiteSpace($initialRunId)) {
             $inputRetryUsed = $true
             Start-Sleep -Seconds 3
-            $retryBody = @{ message = $fixedInstruction } | ConvertTo-Json -Compress
-            $retryUri = $AgentUrl + '/api/runs/' + [Uri]::EscapeDataString($initialRunId) + '/retry'
-            $runResponse = Invoke-RestMethod -Uri $retryUri -Method Post -ContentType 'application/json; charset=utf-8' -Body $retryBody
+            $retrySessionResponse = Invoke-RestMethod -Uri ($AgentUrl + '/api/sessions') -Method Post -ContentType 'application/json; charset=utf-8' -Body '{}'
+            $sessionId = [string]$retrySessionResponse.id
+            if ([string]::IsNullOrWhiteSpace($sessionId)) {
+                throw 'coding-agent did not create a fresh session for the input retry.'
+            }
+            $retryBody = @{ message = $fixedInstruction; mode = 'work' } | ConvertTo-Json -Compress
+            $runResponse = Invoke-RestMethod -Uri ($AgentUrl + '/api/turn') -Method Post -ContentType 'application/json; charset=utf-8' -Body $retryBody
         }
     }
     $savedAt = Get-Date

@@ -447,11 +447,11 @@ try {
     $recordDemoPath = Join-Path $RepoPath 'demo\renketsu-demo\Record-Demo.ps1'
     if (Test-Path -LiteralPath $recordDemoPath -PathType Leaf) {
         $recordDemoText = [System.IO.File]::ReadAllText($recordDemoPath, [System.Text.Encoding]::UTF8)
-        if ($recordDemoText.Contains("'/api/sessions'") -and $recordDemoText.Contains('sessionId = $sessionId')) {
-            Write-DemoOk 'recording script creates and records a fresh session'
+        if ($recordDemoText.Contains("'/api/sessions'") -and $recordDemoText.Contains('sessionId = $sessionId') -and $recordDemoText.Contains('$retrySessionResponse') -and -not $recordDemoText.Contains("'/retry'")) {
+            Write-DemoOk 'recording script creates fresh sessions for take and input retry'
         }
         else {
-            Write-DemoNg 'recording script does not require a fresh session'
+            Write-DemoNg 'recording script does not require fresh sessions for take and input retry'
         }
     }
     else {
