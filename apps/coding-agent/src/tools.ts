@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import { exec } from 'node:child_process'
 import crypto from 'node:crypto'
 import fsp from 'node:fs/promises'
@@ -18,6 +19,8 @@ export interface ToolContext {
   restrictToWorkspace: boolean
   weatherDefaultLocation?: string
   signal?: AbortSignal
+  /** Run-scoped journal key. Tests and REPL may omit it. */
+  runId?: string
 }
 
 export interface ToolDef {
@@ -34,6 +37,7 @@ export interface ToolResultMeta {
   changed?: boolean
   status?: FileChangeStatus
   path?: string
+  existedBefore?: boolean
   count?: number
   beforeHash?: string
   afterHash?: string
@@ -68,7 +72,8 @@ function formatFileChangeResult(
   relativePath: string,
   before: string,
   after: string,
-  count: number
+  count: number,
+  existedBefore = true
 ): string {
   const changed = before !== after
   const delta = lineDelta(before, after)
@@ -76,6 +81,7 @@ function formatFileChangeResult(
     changed,
     status: changed ? 'applied_unverified' : 'no_op',
     path: relativePath,
+    existedBefore,
     count,
     beforeHash: sha256(before),
     afterHash: sha256(after),
@@ -107,6 +113,7 @@ interface FileSnapshot {
   before: string
   after: string
   afterHash: string
+  existedBefore: boolean
   createdAt: number
 }
 
@@ -115,33 +122,74 @@ export interface FileSnapshotInfo {
   before: string
   after: string
   afterHash: string
+  existedBefore: boolean
   createdAt: number
 }
 
 const fileSnapshots = new Map<string, FileSnapshot>()
 
+function snapshotKey(abs: string, ctx: ToolContext): string {
+  return `${ctx.runId ?? 'default'}:${abs}`
+}
+
+function recordFileSnapshot(abs: string, ctx: ToolContext, before: string, existedBefore: boolean, after: string): FileSnapshot {
+  const key = snapshotKey(abs, ctx)
+  const previous = fileSnapshots.get(key)
+  const snapshot: FileSnapshot = {
+    before: previous?.before ?? before,
+    after,
+    afterHash: sha256(after),
+    existedBefore: previous?.existedBefore ?? existedBefore,
+    createdAt: previous?.createdAt ?? Date.now()
+  }
+  fileSnapshots.set(key, snapshot)
+  return snapshot
+}
+
+export async function getFilePrecondition(p: string, ctx: ToolContext): Promise<{ existedBefore: boolean; beforeHash?: string }> {
+  const abs = resolveInWorkspace(p, ctx)
+  try {
+    const content = await fsp.readFile(abs, 'utf8')
+    return { existedBefore: true, beforeHash: sha256(content) }
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException
+    if (e.code === 'ENOENT') return { existedBefore: false }
+    throw err
+  }
+}
+
 export function getFileSnapshot(p: string, ctx: ToolContext): FileSnapshotInfo | null {
   const abs = resolveInWorkspace(p, ctx)
-  const snapshot = fileSnapshots.get(abs)
+  const snapshot = fileSnapshots.get(snapshotKey(abs, ctx))
   return snapshot ? { path: p, ...snapshot } : null
 }
 
 export async function rollbackFileChange(
-  change: Pick<ToolResultMeta, 'path' | 'afterHash'>,
+  change: Pick<ToolResultMeta, 'path' | 'afterHash' | 'existedBefore'> & { beforeContent?: string },
   ctx: ToolContext
 ): Promise<{ path: string; status: 'rolled_back'; hash: string }> {
   if (!change.path || !change.afterHash) throw new Error('ロールバック対象のハッシュがありません')
   const abs = resolveInWorkspace(change.path, ctx)
-  const snapshot = fileSnapshots.get(abs)
-  const before = snapshot?.before ?? (typeof (change as { beforeContent?: unknown }).beforeContent === 'string' ? String((change as { beforeContent?: unknown }).beforeContent) : null)
+  const snapshot = fileSnapshots.get(snapshotKey(abs, ctx))
+  const beforeContent = typeof change.beforeContent === 'string' ? change.beforeContent : null
+  const before = snapshot?.before ?? beforeContent
+  const existedBefore = snapshot?.existedBefore ?? change.existedBefore ?? before !== null
   const expected = snapshot?.afterHash ?? change.afterHash
   if (before === null || expected !== change.afterHash) throw new Error('このRunに変更前スナップショットがありません')
-  const current = await fsp.readFile(abs, 'utf8')
+  let current = ''
+  try { current = await fsp.readFile(abs, 'utf8') } catch (err) {
+    const e = err as NodeJS.ErrnoException
+    if (e.code !== 'ENOENT') throw err
+  }
   if (sha256(current) !== change.afterHash) throw new Error('変更後の内容からファイルが変更されています。競合を確認してください')
-  await fsp.writeFile(abs, before, 'utf8')
-  const restored = await fsp.readFile(abs, 'utf8')
+  if (existedBefore) {
+    await fsp.writeFile(abs, before, 'utf8')
+  } else {
+    await fsp.rm(abs, { force: true })
+  }
+  const restored = existedBefore ? await fsp.readFile(abs, 'utf8') : ''
   const hash = sha256(restored)
-  fileSnapshots.delete(abs)
+  fileSnapshots.delete(snapshotKey(abs, ctx))
   return { path: change.path, status: 'rolled_back', hash }
 }
 
@@ -157,11 +205,34 @@ function wildcardToRegExp(pattern: string): RegExp {
   return new RegExp(`^${escaped}$`, 'i')
 }
 
+function realPathWithMissingTail(abs: string): string {
+  let cursor = abs
+  const tail: string[] = []
+  while (!fs.existsSync(cursor)) {
+    const parent = path.dirname(cursor)
+    if (parent === cursor) return abs
+    tail.unshift(path.basename(cursor))
+    cursor = parent
+  }
+  const real = fs.realpathSync.native(cursor)
+  return path.resolve(real, ...tail)
+}
+
+function isWithin(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate)
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
+}
+
 function resolveInWorkspace(p: string, ctx: ToolContext): string {
   if (!p) throw new Error('パスが空です')
-  const abs = path.isAbsolute(p) ? path.normalize(p) : path.resolve(ctx.workspace, p)
-  if (ctx.restrictToWorkspace && path.relative(ctx.workspace, abs).startsWith('..')) {
-    throw new Error(`ワークスペース外のパスは許可されていません: ${p}`)
+  const workspaceAbs = path.resolve(ctx.workspace)
+  const abs = path.isAbsolute(p) ? path.normalize(p) : path.resolve(workspaceAbs, p)
+  if (ctx.restrictToWorkspace) {
+    const rootReal = realPathWithMissingTail(workspaceAbs)
+    const candidateReal = realPathWithMissingTail(abs)
+    if (!isWithin(rootReal, candidateReal)) {
+      throw new Error(`ワークスペース外のパスは許可されていません: ${p}`)
+    }
   }
   return abs
 }
@@ -180,6 +251,59 @@ async function walk(dir: string, cb: (file: string) => void, depth = 0): Promise
     if (e.isDirectory()) await walk(full, cb, depth + 1)
     else if (e.isFile()) cb(full)
   }
+}
+
+export const HOST_TOOL_PREFIX = 'host.'
+
+export function qualifiedToolName(name: string): string {
+  return name.startsWith(HOST_TOOL_PREFIX) ? name : `${HOST_TOOL_PREFIX}${name}`
+}
+
+export function bareToolName(name: string): string {
+  return name.startsWith(HOST_TOOL_PREFIX) ? name.slice(HOST_TOOL_PREFIX.length) : name
+}
+
+export function findHostTool(name: string): ToolDef | undefined {
+  if (!name.startsWith(HOST_TOOL_PREFIX)) return undefined
+  return TOOL_DEFS.find((tool) => tool.name === bareToolName(name))
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function schemaTypeMatches(value: unknown, type: unknown): boolean {
+  if (type === 'string') return typeof value === 'string'
+  if (type === 'number') return typeof value === 'number' && Number.isFinite(value)
+  if (type === 'integer') return typeof value === 'number' && Number.isInteger(value)
+  if (type === 'boolean') return typeof value === 'boolean'
+  if (type === 'object') return isRecord(value)
+  if (type === 'array') return Array.isArray(value)
+  return true
+}
+
+export function validateToolArgs(def: ToolDef, args: unknown): string | null {
+  if (!isRecord(args)) return 'args はJSONオブジェクトで指定してください'
+  const schema = def.parameters as { properties?: Record<string, { type?: string; maxLength?: number; minimum?: number; maximum?: number }>; required?: string[] }
+  const properties = schema.properties ?? {}
+  const unknown = Object.keys(args).filter((key) => !(key in properties))
+  if (unknown.length) return `未許可の引数です: ${unknown.join(', ')}`
+  for (const required of schema.required ?? []) {
+    if (!(required in args)) return `必須引数がありません: ${required}`
+  }
+  for (const [key, value] of Object.entries(args)) {
+    const rule = properties[key] ?? {}
+    if (!schemaTypeMatches(value, rule.type)) return `${key} の型が不正です（期待: ${rule.type ?? 'unknown'}）`
+    if (typeof value === 'string') {
+      const maxLength = rule.maxLength ?? (key === 'content' ? 1_000_000 : key === 'command' ? 20_000 : 8_000)
+      if (value.length > maxLength) return `${key} が長すぎます（上限 ${maxLength} 文字）`
+    }
+    if (typeof value === 'number') {
+      if (rule.minimum !== undefined && value < rule.minimum) return `${key} が小さすぎます`
+      if (rule.maximum !== undefined && value > rule.maximum) return `${key} が大きすぎます`
+    }
+  }
+  return null
 }
 
 export const TOOL_DEFS: ToolDef[] = [
@@ -264,17 +388,19 @@ export const TOOL_DEFS: ToolDef[] = [
       const content = String(args.content ?? '')
       if (!content.trim()) throw new Error('content が空です。JSON 直後のコードフェンスに内容を記述してください')
       let before = ''
+      let existedBefore = true
       try {
         before = await fsp.readFile(abs, 'utf8')
       } catch (err) {
         const e = err as NodeJS.ErrnoException
         if (e.code !== 'ENOENT') throw err
+        existedBefore = false
       }
       await fsp.mkdir(path.dirname(abs), { recursive: true })
       await fsp.writeFile(abs, content, 'utf8')
       const readBack = await fsp.readFile(abs, 'utf8')
-      fileSnapshots.set(abs, { before, after: readBack, afterHash: sha256(readBack), createdAt: Date.now() })
-      const result = formatFileChangeResult('書き込み', path.relative(ctx.workspace, abs), before, readBack, 1)
+      recordFileSnapshot(abs, ctx, before, existedBefore, readBack)
+      const result = formatFileChangeResult('書き込み', path.relative(ctx.workspace, abs), before, readBack, 1, existedBefore)
       return `${result}\nサイズ: ${Buffer.byteLength(readBack)} bytes`
     }
   },
@@ -297,18 +423,19 @@ export const TOOL_DEFS: ToolDef[] = [
       const oldStr = String(args.old_string ?? '')
       const newStr = String(args.new_string ?? '')
       if (!oldStr) throw new Error('old_string が空です')
-      const replaceAll = Boolean(args.replace_all)
+      const replaceAll = args.replace_all === undefined ? false : args.replace_all
+      if (typeof replaceAll !== 'boolean') throw new Error('replace_all はbooleanで指定してください')
       const src = await fsp.readFile(abs, 'utf8')
       const count = src.split(oldStr).length - 1
       if (count === 0) throw new Error('old_string が見つかりません')
       if (count > 1 && !replaceAll) throw new Error(`${count} 件一致しました。replace_all=true を指定するか対象範囲を狭めてください`)
       const next = replaceAll ? src.split(oldStr).join(newStr) : src.replace(oldStr, newStr)
-      if (next === src) { fileSnapshots.set(abs, { before: src, after: src, afterHash: sha256(src), createdAt: Date.now() }); return formatFileChangeResult('編集', path.relative(ctx.workspace, abs), src, src, count) }
+      if (next === src) { recordFileSnapshot(abs, ctx, src, true, src); return formatFileChangeResult('編集', path.relative(ctx.workspace, abs), src, src, count, true) }
       await fsp.writeFile(abs, next, 'utf8')
       const readBack = await fsp.readFile(abs, 'utf8')
       if (readBack !== next) throw new Error('編集後の再読込内容が一致しません')
-      fileSnapshots.set(abs, { before: src, after: readBack, afterHash: sha256(readBack), createdAt: Date.now() })
-      return formatFileChangeResult('編集', path.relative(ctx.workspace, abs), src, readBack, count)
+      recordFileSnapshot(abs, ctx, src, true, readBack)
+      return formatFileChangeResult('編集', path.relative(ctx.workspace, abs), src, readBack, count, true)
     }
   },
   {
@@ -460,9 +587,10 @@ export const TOOL_DEFS: ToolDef[] = [
   }
 ]
 
-export function openAITools(): OpenAIToolSchema[] {
-  return TOOL_DEFS.map((t) => ({
+export function openAITools(options: { allowArbitraryCommands?: boolean } = {}): OpenAIToolSchema[] {
+  const defs = options.allowArbitraryCommands ? TOOL_DEFS : TOOL_DEFS.filter((tool) => tool.name !== 'run_command')
+  return defs.map((t) => ({
     type: 'function' as const,
-    function: { name: t.name, description: t.description, parameters: t.parameters }
+    function: { name: qualifiedToolName(t.name), description: t.description, parameters: { ...t.parameters, additionalProperties: false } }
   }))
 }

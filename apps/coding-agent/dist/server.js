@@ -24,11 +24,11 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 
 // src/server.ts
 var import_node_http2 = __toESM(require("node:http"));
-var import_node_crypto2 = __toESM(require("node:crypto"));
+var import_node_crypto3 = __toESM(require("node:crypto"));
 var import_node_child_process4 = require("node:child_process");
 var import_node_util2 = __toESM(require("node:util"));
-var import_node_fs3 = __toESM(require("node:fs"));
-var import_node_path4 = __toESM(require("node:path"));
+var import_node_fs4 = __toESM(require("node:fs"));
+var import_node_path5 = __toESM(require("node:path"));
 
 // src/config.ts
 var import_node_fs = __toESM(require("node:fs"));
@@ -37,7 +37,14 @@ var DEFAULT_CONFIG = {
   baseURL: "",
   model: "",
   provider: "copilot-edge",
-  copilot: { displayMode: "foreground" }
+  maxToolIterations: 10,
+  maxToolExecutions: 8,
+  maxWriteExecutions: 3,
+  maxCommandExecutions: 2,
+  maxNoProgress: 2,
+  allowArbitraryCommands: false,
+  autoApprove: { write: false, command: false },
+  copilot: { displayMode: "foreground", agentMode: true }
 };
 function appDataConfigPath() {
   return import_node_path.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent", "config.json");
@@ -48,7 +55,29 @@ function parseConfig(found) {
   if (provider === "openai" && (!raw.baseURL || !raw.model)) {
     throw new Error(`provider=openai \u306B\u306F baseURL / model \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
   }
-  return { ...raw, provider };
+  return {
+    ...DEFAULT_CONFIG,
+    ...raw,
+    provider,
+    autoApprove: { ...DEFAULT_CONFIG.autoApprove, ...raw.autoApprove ?? {} },
+    copilot: { ...DEFAULT_CONFIG.copilot, ...raw.copilot ?? {} }
+  };
+}
+function capabilityPolicy(cfg2, mode = cfg2.turnMode ?? "work") {
+  return {
+    mode,
+    hostTools: mode === "work" ? "all" : "none",
+    nativeSearch: mode === "research",
+    nativeOffice: false,
+    maxModelDecisions: Math.max(1, cfg2.maxToolIterations ?? 10),
+    maxHostExecutions: Math.max(1, cfg2.maxToolExecutions ?? 8),
+    maxWriteExecutions: Math.max(0, cfg2.maxWriteExecutions ?? 3),
+    maxCommandExecutions: Math.max(0, cfg2.maxCommandExecutions ?? 2),
+    maxNoProgress: Math.max(1, cfg2.maxNoProgress ?? 2),
+    autoApproveWrite: cfg2.autoApprove?.write === true,
+    autoApproveCommand: cfg2.autoApprove?.command === true,
+    allowArbitraryCommands: cfg2.allowArbitraryCommands === true
+  };
 }
 function loadConfig(explicitPath) {
   if (explicitPath) {
@@ -69,6 +98,10 @@ function resolveApiKey(cfg2) {
   if (cfg2.apiKey) return cfg2.apiKey;
   return process.env[cfg2.apiKeyEnv ?? "COMPANY_LLM_API_KEY"];
 }
+
+// src/agent.ts
+var import_node_crypto2 = __toESM(require("node:crypto"));
+var import_node_path3 = __toESM(require("node:path"));
 
 // src/llm.ts
 var import_node_http = __toESM(require("node:http"));
@@ -130,6 +163,7 @@ async function chat(cfg2, messages, tools, signal) {
 }
 
 // src/tools.ts
+var import_node_fs2 = __toESM(require("node:fs"));
 var import_node_child_process2 = require("node:child_process");
 var import_node_crypto = __toESM(require("node:crypto"));
 var import_promises = __toESM(require("node:fs/promises"));
@@ -478,13 +512,14 @@ function lineDelta(before, after) {
     addedLines: Math.max(0, afterLines.length - prefix - suffix)
   };
 }
-function formatFileChangeResult(action, relativePath, before, after, count) {
+function formatFileChangeResult(action, relativePath, before, after, count, existedBefore = true) {
   const changed = before !== after;
   const delta = lineDelta(before, after);
   const meta = {
     changed,
     status: changed ? "applied_unverified" : "no_op",
     path: relativePath,
+    existedBefore,
     count,
     beforeHash: sha256(before),
     afterHash: sha256(after),
@@ -511,24 +546,63 @@ function parseToolResultMeta(output) {
   }
 }
 var fileSnapshots = /* @__PURE__ */ new Map();
+function snapshotKey(abs, ctx2) {
+  return `${ctx2.runId ?? "default"}:${abs}`;
+}
+function recordFileSnapshot(abs, ctx2, before, existedBefore, after) {
+  const key = snapshotKey(abs, ctx2);
+  const previous = fileSnapshots.get(key);
+  const snapshot2 = {
+    before: previous?.before ?? before,
+    after,
+    afterHash: sha256(after),
+    existedBefore: previous?.existedBefore ?? existedBefore,
+    createdAt: previous?.createdAt ?? Date.now()
+  };
+  fileSnapshots.set(key, snapshot2);
+  return snapshot2;
+}
+async function getFilePrecondition(p, ctx2) {
+  const abs = resolveInWorkspace(p, ctx2);
+  try {
+    const content = await import_promises.default.readFile(abs, "utf8");
+    return { existedBefore: true, beforeHash: sha256(content) };
+  } catch (err) {
+    const e = err;
+    if (e.code === "ENOENT") return { existedBefore: false };
+    throw err;
+  }
+}
 function getFileSnapshot(p, ctx2) {
   const abs = resolveInWorkspace(p, ctx2);
-  const snapshot2 = fileSnapshots.get(abs);
+  const snapshot2 = fileSnapshots.get(snapshotKey(abs, ctx2));
   return snapshot2 ? { path: p, ...snapshot2 } : null;
 }
 async function rollbackFileChange(change, ctx2) {
   if (!change.path || !change.afterHash) throw new Error("\u30ED\u30FC\u30EB\u30D0\u30C3\u30AF\u5BFE\u8C61\u306E\u30CF\u30C3\u30B7\u30E5\u304C\u3042\u308A\u307E\u305B\u3093");
   const abs = resolveInWorkspace(change.path, ctx2);
-  const snapshot2 = fileSnapshots.get(abs);
-  const before = snapshot2?.before ?? (typeof change.beforeContent === "string" ? String(change.beforeContent) : null);
+  const snapshot2 = fileSnapshots.get(snapshotKey(abs, ctx2));
+  const beforeContent = typeof change.beforeContent === "string" ? change.beforeContent : null;
+  const before = snapshot2?.before ?? beforeContent;
+  const existedBefore = snapshot2?.existedBefore ?? change.existedBefore ?? before !== null;
   const expected = snapshot2?.afterHash ?? change.afterHash;
   if (before === null || expected !== change.afterHash) throw new Error("\u3053\u306ERun\u306B\u5909\u66F4\u524D\u30B9\u30CA\u30C3\u30D7\u30B7\u30E7\u30C3\u30C8\u304C\u3042\u308A\u307E\u305B\u3093");
-  const current = await import_promises.default.readFile(abs, "utf8");
+  let current = "";
+  try {
+    current = await import_promises.default.readFile(abs, "utf8");
+  } catch (err) {
+    const e = err;
+    if (e.code !== "ENOENT") throw err;
+  }
   if (sha256(current) !== change.afterHash) throw new Error("\u5909\u66F4\u5F8C\u306E\u5185\u5BB9\u304B\u3089\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u3066\u3044\u307E\u3059\u3002\u7AF6\u5408\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044");
-  await import_promises.default.writeFile(abs, before, "utf8");
-  const restored = await import_promises.default.readFile(abs, "utf8");
+  if (existedBefore) {
+    await import_promises.default.writeFile(abs, before, "utf8");
+  } else {
+    await import_promises.default.rm(abs, { force: true });
+  }
+  const restored = existedBefore ? await import_promises.default.readFile(abs, "utf8") : "";
   const hash = sha256(restored);
-  fileSnapshots.delete(abs);
+  fileSnapshots.delete(snapshotKey(abs, ctx2));
   return { path: change.path, status: "rolled_back", hash };
 }
 function truncate(s, max = 8e3) {
@@ -539,11 +613,32 @@ function wildcardToRegExp(pattern) {
   const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
   return new RegExp(`^${escaped}$`, "i");
 }
+function realPathWithMissingTail(abs) {
+  let cursor = abs;
+  const tail = [];
+  while (!import_node_fs2.default.existsSync(cursor)) {
+    const parent = import_node_path2.default.dirname(cursor);
+    if (parent === cursor) return abs;
+    tail.unshift(import_node_path2.default.basename(cursor));
+    cursor = parent;
+  }
+  const real = import_node_fs2.default.realpathSync.native(cursor);
+  return import_node_path2.default.resolve(real, ...tail);
+}
+function isWithin(root, candidate) {
+  const relative = import_node_path2.default.relative(root, candidate);
+  return relative === "" || !relative.startsWith("..") && !import_node_path2.default.isAbsolute(relative);
+}
 function resolveInWorkspace(p, ctx2) {
   if (!p) throw new Error("\u30D1\u30B9\u304C\u7A7A\u3067\u3059");
-  const abs = import_node_path2.default.isAbsolute(p) ? import_node_path2.default.normalize(p) : import_node_path2.default.resolve(ctx2.workspace, p);
-  if (ctx2.restrictToWorkspace && import_node_path2.default.relative(ctx2.workspace, abs).startsWith("..")) {
-    throw new Error(`\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u306E\u30D1\u30B9\u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093: ${p}`);
+  const workspaceAbs = import_node_path2.default.resolve(ctx2.workspace);
+  const abs = import_node_path2.default.isAbsolute(p) ? import_node_path2.default.normalize(p) : import_node_path2.default.resolve(workspaceAbs, p);
+  if (ctx2.restrictToWorkspace) {
+    const rootReal = realPathWithMissingTail(workspaceAbs);
+    const candidateReal = realPathWithMissingTail(abs);
+    if (!isWithin(rootReal, candidateReal)) {
+      throw new Error(`\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u306E\u30D1\u30B9\u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093: ${p}`);
+    }
   }
   return abs;
 }
@@ -561,6 +656,52 @@ async function walk(dir, cb, depth = 0) {
     if (e.isDirectory()) await walk(full, cb, depth + 1);
     else if (e.isFile()) cb(full);
   }
+}
+var HOST_TOOL_PREFIX = "host.";
+function qualifiedToolName(name) {
+  return name.startsWith(HOST_TOOL_PREFIX) ? name : `${HOST_TOOL_PREFIX}${name}`;
+}
+function bareToolName(name) {
+  return name.startsWith(HOST_TOOL_PREFIX) ? name.slice(HOST_TOOL_PREFIX.length) : name;
+}
+function findHostTool(name) {
+  if (!name.startsWith(HOST_TOOL_PREFIX)) return void 0;
+  return TOOL_DEFS.find((tool) => tool.name === bareToolName(name));
+}
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function schemaTypeMatches(value, type) {
+  if (type === "string") return typeof value === "string";
+  if (type === "number") return typeof value === "number" && Number.isFinite(value);
+  if (type === "integer") return typeof value === "number" && Number.isInteger(value);
+  if (type === "boolean") return typeof value === "boolean";
+  if (type === "object") return isRecord(value);
+  if (type === "array") return Array.isArray(value);
+  return true;
+}
+function validateToolArgs(def, args) {
+  if (!isRecord(args)) return "args \u306FJSON\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044";
+  const schema = def.parameters;
+  const properties = schema.properties ?? {};
+  const unknown = Object.keys(args).filter((key) => !(key in properties));
+  if (unknown.length) return `\u672A\u8A31\u53EF\u306E\u5F15\u6570\u3067\u3059: ${unknown.join(", ")}`;
+  for (const required of schema.required ?? []) {
+    if (!(required in args)) return `\u5FC5\u9808\u5F15\u6570\u304C\u3042\u308A\u307E\u305B\u3093: ${required}`;
+  }
+  for (const [key, value] of Object.entries(args)) {
+    const rule = properties[key] ?? {};
+    if (!schemaTypeMatches(value, rule.type)) return `${key} \u306E\u578B\u304C\u4E0D\u6B63\u3067\u3059\uFF08\u671F\u5F85: ${rule.type ?? "unknown"}\uFF09`;
+    if (typeof value === "string") {
+      const maxLength = rule.maxLength ?? (key === "content" ? 1e6 : key === "command" ? 2e4 : 8e3);
+      if (value.length > maxLength) return `${key} \u304C\u9577\u3059\u304E\u307E\u3059\uFF08\u4E0A\u9650 ${maxLength} \u6587\u5B57\uFF09`;
+    }
+    if (typeof value === "number") {
+      if (rule.minimum !== void 0 && value < rule.minimum) return `${key} \u304C\u5C0F\u3055\u3059\u304E\u307E\u3059`;
+      if (rule.maximum !== void 0 && value > rule.maximum) return `${key} \u304C\u5927\u304D\u3059\u304E\u307E\u3059`;
+    }
+  }
+  return null;
 }
 var TOOL_DEFS = [
   {
@@ -644,17 +785,19 @@ var TOOL_DEFS = [
       const content = String(args.content ?? "");
       if (!content.trim()) throw new Error("content \u304C\u7A7A\u3067\u3059\u3002JSON \u76F4\u5F8C\u306E\u30B3\u30FC\u30C9\u30D5\u30A7\u30F3\u30B9\u306B\u5185\u5BB9\u3092\u8A18\u8FF0\u3057\u3066\u304F\u3060\u3055\u3044");
       let before = "";
+      let existedBefore = true;
       try {
         before = await import_promises.default.readFile(abs, "utf8");
       } catch (err) {
         const e = err;
         if (e.code !== "ENOENT") throw err;
+        existedBefore = false;
       }
       await import_promises.default.mkdir(import_node_path2.default.dirname(abs), { recursive: true });
       await import_promises.default.writeFile(abs, content, "utf8");
       const readBack = await import_promises.default.readFile(abs, "utf8");
-      fileSnapshots.set(abs, { before, after: readBack, afterHash: sha256(readBack), createdAt: Date.now() });
-      const result = formatFileChangeResult("\u66F8\u304D\u8FBC\u307F", import_node_path2.default.relative(ctx2.workspace, abs), before, readBack, 1);
+      recordFileSnapshot(abs, ctx2, before, existedBefore, readBack);
+      const result = formatFileChangeResult("\u66F8\u304D\u8FBC\u307F", import_node_path2.default.relative(ctx2.workspace, abs), before, readBack, 1, existedBefore);
       return `${result}
 \u30B5\u30A4\u30BA: ${Buffer.byteLength(readBack)} bytes`;
     }
@@ -678,21 +821,22 @@ var TOOL_DEFS = [
       const oldStr = String(args.old_string ?? "");
       const newStr = String(args.new_string ?? "");
       if (!oldStr) throw new Error("old_string \u304C\u7A7A\u3067\u3059");
-      const replaceAll = Boolean(args.replace_all);
+      const replaceAll = args.replace_all === void 0 ? false : args.replace_all;
+      if (typeof replaceAll !== "boolean") throw new Error("replace_all \u306Fboolean\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
       const src = await import_promises.default.readFile(abs, "utf8");
       const count = src.split(oldStr).length - 1;
       if (count === 0) throw new Error("old_string \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
       if (count > 1 && !replaceAll) throw new Error(`${count} \u4EF6\u4E00\u81F4\u3057\u307E\u3057\u305F\u3002replace_all=true \u3092\u6307\u5B9A\u3059\u308B\u304B\u5BFE\u8C61\u7BC4\u56F2\u3092\u72ED\u3081\u3066\u304F\u3060\u3055\u3044`);
       const next = replaceAll ? src.split(oldStr).join(newStr) : src.replace(oldStr, newStr);
       if (next === src) {
-        fileSnapshots.set(abs, { before: src, after: src, afterHash: sha256(src), createdAt: Date.now() });
-        return formatFileChangeResult("\u7DE8\u96C6", import_node_path2.default.relative(ctx2.workspace, abs), src, src, count);
+        recordFileSnapshot(abs, ctx2, src, true, src);
+        return formatFileChangeResult("\u7DE8\u96C6", import_node_path2.default.relative(ctx2.workspace, abs), src, src, count, true);
       }
       await import_promises.default.writeFile(abs, next, "utf8");
       const readBack = await import_promises.default.readFile(abs, "utf8");
       if (readBack !== next) throw new Error("\u7DE8\u96C6\u5F8C\u306E\u518D\u8AAD\u8FBC\u5185\u5BB9\u304C\u4E00\u81F4\u3057\u307E\u305B\u3093");
-      fileSnapshots.set(abs, { before: src, after: readBack, afterHash: sha256(readBack), createdAt: Date.now() });
-      return formatFileChangeResult("\u7DE8\u96C6", import_node_path2.default.relative(ctx2.workspace, abs), src, readBack, count);
+      recordFileSnapshot(abs, ctx2, src, true, readBack);
+      return formatFileChangeResult("\u7DE8\u96C6", import_node_path2.default.relative(ctx2.workspace, abs), src, readBack, count, true);
     }
   },
   {
@@ -840,10 +984,11 @@ var TOOL_DEFS = [
     }
   }
 ];
-function openAITools() {
-  return TOOL_DEFS.map((t) => ({
+function openAITools(options = {}) {
+  const defs = options.allowArbitraryCommands ? TOOL_DEFS : TOOL_DEFS.filter((tool) => tool.name !== "run_command");
+  return defs.map((t) => ({
     type: "function",
-    function: { name: t.name, description: t.description, parameters: t.parameters }
+    function: { name: qualifiedToolName(t.name), description: t.description, parameters: { ...t.parameters, additionalProperties: false } }
   }));
 }
 
@@ -869,47 +1014,56 @@ function scanCandidates(text) {
     } else if (ch === "}") {
       if (depth > 0) {
         depth--;
-        if (depth === 0 && start >= 0) candidates.push({ text: text.slice(start, i + 1), end: i + 1 });
+        if (depth === 0 && start >= 0) candidates.push({ text: text.slice(start, i + 1), start, end: i + 1 });
       }
     }
   }
   return candidates;
 }
-function pickReply(candidates) {
-  let found = null;
-  for (const cand of candidates) {
-    try {
-      const obj = JSON.parse(cand.text);
-      if (typeof obj.tool === "string") {
-        found = { parsed: { tool: obj.tool, args: obj.args ?? {} }, end: cand.end };
-      } else if (typeof obj.answer === "string") {
-        found = { parsed: { answer: obj.answer }, end: cand.end };
-      }
-    } catch {
-      const repaired = repairWriteFileCandidate(cand.text);
-      if (repaired) found = repaired;
-    }
-  }
-  return found;
+function unwrapProtocolText(text) {
+  return text.replace(/```(?:json)?/gi, "").replace(/```/g, "").replace(/AGENT_END/g, "").trim();
 }
-function repairWriteFileCandidate(c) {
-  const m = c.match(/"tool"\s*:\s*"write_file"[\s\S]*?"path"\s*:\s*"((?:[^"\\]|\\.)*)"[\s\S]*?"content"\s*:\s*"([\s\S]*)/);
-  if (!m) return null;
-  let content = m[2].replace(/\s*"?\s*\}\s*$/, "").split(END_MARKER)[0];
+function parseStrictCandidate(candidate) {
+  let parsedValue;
   try {
-    content = JSON.parse(`"${content}"`);
+    parsedValue = JSON.parse(candidate.text);
   } catch {
-    content = content.replace(/\\n/g, "\n").replace(/\\t/g, "	").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+    return null;
   }
-  return { parsed: { tool: "write_file", args: { path: m[1], content } }, end: c.length };
+  if (!parsedValue || typeof parsedValue !== "object" || Array.isArray(parsedValue)) return null;
+  const obj = parsedValue;
+  const keys = Object.keys(obj);
+  const hasToolKey = Object.prototype.hasOwnProperty.call(obj, "tool");
+  const hasAnswerKey = Object.prototype.hasOwnProperty.call(obj, "answer");
+  const hasTool = typeof obj.tool === "string";
+  const hasAnswer = typeof obj.answer === "string";
+  if (hasToolKey !== hasTool || hasAnswerKey !== hasAnswer) return null;
+  if (hasTool === hasAnswer || keys.some((key) => key !== "tool" && key !== "args" && key !== "answer")) return null;
+  if (hasAnswer) {
+    if (keys.length !== 1) return null;
+    return { answer: obj.answer };
+  }
+  if (keys.some((key) => key !== "tool" && key !== "args")) return null;
+  if (obj.args !== void 0 && (typeof obj.args !== "object" || obj.args === null || Array.isArray(obj.args))) return null;
+  return { tool: obj.tool, args: obj.args ?? {} };
 }
 function extractReplyAndEnd(raw) {
   const text = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-  return pickReply(scanCandidates(text));
+  const allCandidates = scanCandidates(text);
+  if (allCandidates.length === 0) return null;
+  const candidate = allCandidates[0];
+  const parsed = parseStrictCandidate(candidate);
+  if (!parsed) return null;
+  if (allCandidates.length !== 1 && !(bareToolName(parsed.tool ?? "") === "write_file" && /(?:CONTENT|内容)\s*[:：]|```/i.test(text.slice(candidate.end)))) return null;
+  const before = unwrapProtocolText(text.slice(0, candidate.start));
+  const after = unwrapProtocolText(text.slice(candidate.end));
+  if (before || after && bareToolName(parsed.tool ?? "") !== "write_file" && !/^AGENT_END$/i.test(after)) return null;
+  return { parsed, end: candidate.end };
 }
 function attachFenceContent(raw, end, parsed) {
-  if (parsed.tool !== "write_file" || typeof parsed.args?.content === "string") return;
-  const rest = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").slice(end);
+  if (bareToolName(parsed.tool ?? "") !== "write_file" || typeof parsed.args?.content === "string") return;
+  const normalized = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+  const rest = normalized.slice(end);
   const cm = rest.match(/^\s*(?:CONTENT|内容)\s*[:：]\s*\r?\n?([\s\S]+)$/i);
   if (cm) {
     const body = cm[1].split(END_MARKER)[0].replace(/\s+$/, "").replace(/＜/g, "<").replace(/＞/g, ">").replace(/｀/g, String.fromCharCode(96)).replace(/¶/g, "\n");
@@ -919,108 +1073,120 @@ function attachFenceContent(raw, end, parsed) {
   const fm = rest.match(/```[\w+-]*[ \t]*\r?\n?([\s\S]*?)```/);
   if (fm) {
     parsed.args = { ...parsed.args ?? {}, content: fm[1].replace(/^\r?\n/, "").trim() };
-    return;
   }
-  const numbered = stripLineNumbered(rest);
-  if (numbered !== null) {
-    parsed.args = { ...parsed.args ?? {}, content: numbered };
-    return;
-  }
-  console.log("[debug-fence-miss] rest=" + JSON.stringify(rest.slice(0, 300)));
 }
-function stripLineNumbered(rest) {
-  if (!/^\s*\d+\s*\r?\n/.test(rest) && !/^\s*\n?[A-Za-z][\w+#.-]*[ \t]*\r?\n\d+\s*\r?\n/.test(rest)) return null;
-  const bodyMatch = rest.match(/^\s*\n?(?:[A-Za-z][\w+#.-]*[ \t]*\r?\n)?([\s\S]+)$/);
-  const body = bodyMatch ? bodyMatch[1] : rest;
-  const markers = (body.match(/(?:^|\r?\n)\d+[ \t]*(?:\r?\n|$)/g) || []).length;
-  if (markers < 2) return null;
-  const out = body.replace(/(?:^|\r?\n)\d+[ \t]*(?:\r?\n)/g, "\n").replace(/\r?\n$/, "");
-  return out;
+function buildResearchBundle(question, summary, retrievedAt = (/* @__PURE__ */ new Date()).toISOString()) {
+  const urls = [...summary.matchAll(/https?:\/\/[^\s<>()\[\]"'（）【】、。]+/g)].map((match) => match[0].replace(/[.,;:!?、。]+$/, ""));
+  const uniqueUrls = [...new Set(urls)];
+  const sources = uniqueUrls.map((url) => ({ url, retrievedAt }));
+  const claims = summary.split(/\r?\n+/).map((text) => text.trim()).filter(Boolean).map((text) => ({ text, citations: sources }));
+  const contentHash = import_node_crypto2.default.createHash("sha256").update(summary, "utf8").digest("hex");
+  return { researchId: `research-${contentHash.slice(0, 16)}`, question, summary, claims, sources, retrievedAt, contentHash };
 }
 var END_MARKER = "AGENT_END";
 function shouldCancel(io) {
   return io.signal?.aborted === true || io.isCanceled?.() === true;
 }
-function pausedResult(messages, userInput, steps) {
-  return {
-    reply: "",
-    messages: [...messages, { role: "user", content: userInput }, { role: "assistant", content: "[\u4E00\u6642\u505C\u6B62] \u30C1\u30A7\u30C3\u30AF\u30DD\u30A4\u30F3\u30C8\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F\u3002\u518D\u958B\u3059\u308B\u3068\u7D9A\u304D\u304B\u3089\u78BA\u8A8D\u3057\u307E\u3059\u3002" }],
-    aborted: true,
-    paused: true,
-    checkpoint: steps.slice(-20)
-  };
-}
-function buildProtocolRules() {
-  const toolDocs = TOOL_DEFS.map((t) => {
+function buildProtocolRules(mode = "work", allowArbitraryCommands = false) {
+  const toolDocs = TOOL_DEFS.filter((t) => allowArbitraryCommands || t.name !== "run_command").map((t) => {
     const req = t.parameters.required ?? [];
     const props = Object.keys(t.parameters.properties ?? {});
-    return `- ${t.name}(${props.join(", ")}):${req.length ? ` \u5FC5\u9808=${req.join(",")};` : ""} ${t.description}`;
+    return `- ${qualifiedToolName(t.name)}(${props.join(", ")}):${req.length ? ` \u5FC5\u9808=${req.join(",")};` : ""} ${t.description}`;
   }).join("\n");
+  const commandRule = allowArbitraryCommands ? "\u660E\u793A\u8A2D\u5B9A\u306B\u3088\u308A\u4EFB\u610F\u306Ehost\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u304C\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u3059\u3002\u5B9F\u884C\u524D\u306B\u627F\u8A8D\u3092\u53D6\u5F97\u3057\u3066\u304F\u3060\u3055\u3044\u3002" : "\u4EFB\u610F\u306E\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u3053\u306ERun\u3067\u306F\u7121\u52B9\u3067\u3059\u3002\u65E2\u77E5\u306E\u691C\u8A3C\u624B\u9806\u3084\u7BA1\u7406\u30D7\u30ED\u30BB\u30B9\u3092\u4F7F\u3044\u3001\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u3092\u8981\u6C42\u3057\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002";
+  if (mode !== "work") {
+    const label = mode === "research" ? "\u8ABF\u67FB" : "\u901A\u5E38\u56DE\u7B54";
+    return [
+      `\u3042\u306A\u305F\u306F\u793E\u5185\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u306E${label}\u30E2\u30FC\u30C9\u3067\u3059\u3002`,
+      "\u3053\u306E\u30E2\u30FC\u30C9\u3067\u306F\u30ED\u30FC\u30AB\u30EB\u30DB\u30B9\u30C8\u30C4\u30FC\u30EB\u3001\u30D5\u30A1\u30A4\u30EB\u64CD\u4F5C\u3001\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u3092\u8981\u6C42\u3057\u3066\u306F\u3044\u3051\u307E\u305B\u3093\u3002",
+      mode === "research" ? "\u5FC5\u8981\u306A\u3089Copilot\u5185\u8535\u306E\u691C\u7D22\u3092\u4F7F\u3044\u3001\u56DE\u7B54\u306B\u53C2\u7167\u5148\u3068\u53D6\u5F97\u6642\u523B\u3092\u542B\u3081\u3066\u304F\u3060\u3055\u3044\u3002" : "\u901A\u5E38\u306E\u56DE\u7B54\u3060\u3051\u3092\u8FD4\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+      "\u3053\u306E\u56DE\u7B54\u306F\u30A2\u30D7\u30EA\u306E\u30DB\u30B9\u30C8\u5B9F\u884C\u7D50\u679C\u3067\u306F\u3042\u308A\u307E\u305B\u3093\u3002\u30ED\u30FC\u30AB\u30EB\u5909\u66F4\u3084\u5B9F\u884C\u6210\u529F\u3092\u4E3B\u5F35\u3057\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002"
+    ].join("\n");
+  }
   return [
-    "\u3042\u306A\u305F\u306F\u793E\u5185\u30B3\u30FC\u30C7\u30A3\u30F3\u30B0\u652F\u63F4\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u3067\u3059\u3002\u4F9D\u983C\u5185\u5BB9\u3092\u8AAD\u307F\u3001\u30ED\u30FC\u30AB\u30EB\u958B\u767A\u30C4\u30FC\u30EB\u304C\u5FC5\u8981\u304B\u3069\u3046\u304B\u3092\u81EA\u5206\u3067\u5224\u65AD\u3057\u307E\u3059\u3002\u5FC5\u8981\u306A\u5834\u5408\u3060\u3051\u3001\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u3078\u6E21\u3059\u69CB\u9020\u5316 JSON \u3092\u8FD4\u3057\u307E\u3059\u3002",
-    "\u3042\u306A\u305F\u306E\u5FDC\u7B54\u306F\u5B9F\u884C\u7D50\u679C\u3067\u306F\u306A\u304F\u3001\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u304C\u89E3\u91C8\u3059\u308B\u300C\u6B21\u306E1\u624B\u300D\u3067\u3059\u3002\u3042\u306A\u305F\u304C\u76F4\u63A5\u30D5\u30A1\u30A4\u30EB\u3092\u64CD\u4F5C\u3067\u304D\u308B\u304B\u3069\u3046\u304B\u3092\u8AAC\u660E\u3059\u308B\u5FC5\u8981\u306F\u3042\u308A\u307E\u305B\u3093\u3002",
-    "\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u306F JSON \u306E tool \u3092\u53D7\u3051\u53D6\u308B\u3068\u3001\u6307\u5B9A\u3055\u308C\u305F\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5185\u3067\u5B9F\u884C\u3057\u3001\u305D\u306E\u7D50\u679C\u3092\u6B21\u306E\u5165\u529B\u306B TOOL_RESULT \u3068\u3057\u3066\u6E21\u3057\u307E\u3059\u3002",
-    "\u300C\u30C4\u30FC\u30EB\u3092\u4F7F\u3048\u307E\u305B\u3093\u300D\u300C\u5B9F\u884C\u3067\u304D\u307E\u305B\u3093\u300D\u3068\u3044\u3063\u305F\u62D2\u5426\u3084\u8AAC\u660E\u306F\u7981\u6B62\u3067\u3059\u3002\u30ED\u30FC\u30AB\u30EB\u60C5\u5831\u304C\u5FC5\u8981\u306A\u3089\u3001\u6307\u5B9A\u5F62\u5F0F\u306E JSON \u3067\u6B21\u306E1\u624B\u3092\u8FD4\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
-    "\u4F9D\u983C\u304B\u3089\u5FC5\u8981\u6027\u3092\u5224\u65AD\u3057\u3001\u30ED\u30FC\u30AB\u30EB\u306E\u72B6\u614B\u30FB\u30D5\u30A1\u30A4\u30EB\u30FB\u30B3\u30DE\u30F3\u30C9\u7D50\u679C\u304C\u5FC5\u8981\u306A\u5834\u5408\u3060\u3051 tool \u3092\u9078\u3073\u307E\u3059\u3002\u30ED\u30FC\u30AB\u30EB\u64CD\u4F5C\u304C\u4E0D\u8981\u306A\u3089 answer \u3092\u8FD4\u3057\u307E\u3059\u3002",
-    "\u5929\u6C17\u30FB\u6C17\u6E29\u30FB\u964D\u6C34\u91CF\u3092\u5C0B\u306D\u3089\u308C\u305F\u5834\u5408\u306F get_weather \u3092\u4F7F\u3044\u307E\u3059\u3002run_command \u3067 wttr.in \u306A\u3069\u306E\u5916\u90E8\u5929\u6C17\u30B5\u30A4\u30C8\u3092\u76F4\u63A5\u547C\u3093\u3067\u306F\u3044\u3051\u307E\u305B\u3093\u3002",
-    "get_weather \u306E location \u3092\u7701\u7565\u3059\u308B\u3068\u8A2D\u5B9A\u3055\u308C\u305F\u65E2\u5B9A\u5730\u57DF\u3092\u4F7F\u3044\u307E\u3059\u3002\u65E2\u5B9A\u5730\u57DF\u304C\u306A\u3044\u5834\u5408\u3060\u3051\u3001\u5730\u57DF\u540D\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
-    "\u30C4\u30FC\u30EB\u3092\u5148\u56DE\u308A\u3067\u5B9F\u884C\u3057\u3066\u306F\u3044\u3051\u307E\u305B\u3093\u3002\u6700\u521D\u306E\u5165\u529B\u3067 list_files \u3092\u81EA\u52D5\u5B9F\u884C\u305B\u305A\u3001\u3042\u306A\u305F\u304C\u5FC5\u8981\u3068\u5224\u65AD\u3057\u305F\u3068\u304D\u3060\u3051 tool \u3092\u6307\u5B9A\u3057\u307E\u3059\u3002",
+    "\u3042\u306A\u305F\u306F\u793E\u5185\u30B3\u30FC\u30C7\u30A3\u30F3\u30B0\u652F\u63F4\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u3067\u3059\u3002work\u30E2\u30FC\u30C9\u3067\u306F\u3001\u30A2\u30D7\u30EA\u304C\u7BA1\u7406\u3059\u308Bhost.*\u30C4\u30FC\u30EB\u3060\u3051\u3092\u4F7F\u3048\u307E\u3059\u3002",
+    "Copilot\u5185\u8535\u306EWeb\u691C\u7D22\u3001Excel\u3001Word\u3001PowerPoint\u3001\u305D\u306E\u4ED6\u306Enative\u6A5F\u80FD\u3092\u30A2\u30D7\u30EA\u306E\u30C4\u30FC\u30EB\u3068\u3057\u3066\u8981\u6C42\u30FB\u5831\u544A\u3057\u3066\u306F\u3044\u3051\u307E\u305B\u3093\u3002",
+    "\u3042\u306A\u305F\u306E\u5FDC\u7B54\u306F\u5B9F\u884C\u7D50\u679C\u3067\u306F\u306A\u304F\u3001\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u304C\u89E3\u91C8\u3059\u308B\u300C\u6B21\u306E1\u624B\u300D\u3067\u3059\u3002",
+    "\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u306F host.* \u306EJSON\u3060\u3051\u3092\u691C\u8A3C\u3057\u30661\u56DE\u305A\u3064\u5B9F\u884C\u3057\u3001\u7D50\u679C\u3092\u6B21\u306E\u5165\u529B\u306Bhost_result\u3068\u3057\u3066\u6E21\u3057\u307E\u3059\u3002",
+    "\u30ED\u30FC\u30AB\u30EB\u64CD\u4F5C\u304C\u4E0D\u8981\u306A\u3089answer\u3092\u8FD4\u3057\u307E\u3059\u3002\u5148\u56DE\u308A\u306Elist_files\u3084\u3001\u540C\u3058\u64CD\u4F5C\u306E\u7E70\u308A\u8FD4\u3057\u306F\u7981\u6B62\u3067\u3059\u3002",
+    allowArbitraryCommands ? "\u5929\u6C17\u30FB\u6C17\u6E29\u30FB\u964D\u6C34\u91CF\u306Fhost.get_weather\u3092\u4F7F\u3044\u3001\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u3067\u5916\u90E8\u5929\u6C17\u30B5\u30A4\u30C8\u3092\u547C\u3093\u3067\u306F\u3044\u3051\u307E\u305B\u3093\u3002" : "\u5929\u6C17\u30FB\u6C17\u6E29\u30FB\u964D\u6C34\u91CF\u306Fhost.get_weather\u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044\u3002",
+    "\u30C4\u30FC\u30EB\u304C\u62D2\u5426\u3055\u308C\u305F\u3001\u307E\u305F\u306F\u60C5\u5831\u304C\u4E0D\u8DB3\u3057\u3066\u3044\u308B\u5834\u5408\u306F\u3001\u6B21\u306E\u64CD\u4F5C\u3092\u63A8\u6E2C\u305B\u305Aanswer\u3067\u5229\u7528\u8005\u306B\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
     "",
-    "\u9078\u629E\u3067\u304D\u308B\u30A2\u30AF\u30B7\u30E7\u30F3:",
+    "\u9078\u629E\u3067\u304D\u308Bhost\u30A2\u30AF\u30B7\u30E7\u30F3:",
     toolDocs,
-    "\u9577\u6642\u9593\u306E\u30ED\u30FC\u30AB\u30EB\u958B\u767A\u30B5\u30FC\u30D0\u30FC\u306Frun_command\u3067\u306F\u306A\u304F\u3001start_process\u2192read_process_log\u2192stop_process\u306E\u9806\u3067\u7BA1\u7406\u3059\u308B\u3002",
-    "\u30D7\u30EC\u30D3\u30E5\u30FCURL\u304C\u5206\u304B\u308B\u5834\u5408\u306Fstart_process\u306Eurl\u306Bhttp/https\u3092\u6307\u5B9A\u3057\u3001\u8D77\u52D5\u5F8C\u306B\u30ED\u30B0\u3067\u5F85\u53D7\u72B6\u614B\u3092\u78BA\u8A8D\u3059\u308B\u3002",
+    commandRule,
+    allowArbitraryCommands ? "\u9577\u6642\u9593\u306E\u30ED\u30FC\u30AB\u30EB\u958B\u767A\u30B5\u30FC\u30D0\u30FC\u306Fhost.start_process\u2192host.read_process_log\u2192host.stop_process\u306E\u9806\u3067\u7BA1\u7406\u3059\u308B\u3002" : "\u9577\u6642\u9593\u306E\u30ED\u30FC\u30AB\u30EB\u958B\u767A\u30B5\u30FC\u30D0\u30FC\u306Fhost.start_process\u2192host.read_process_log\u2192host.stop_process\u306E\u9806\u3067\u7BA1\u7406\u3057\u3001\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u306F\u4F7F\u308F\u306A\u3044\u3002",
     "",
-    "\u3053\u306E\u4F1A\u8A71\u306F\u30ED\u30FC\u30AB\u30EB\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u3068\u9023\u643A\u3057\u3066\u3044\u307E\u3059\u3002tool JSON \u3092\u8FD4\u3059\u3068\u3001\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u304C\u53D6\u5F97\u3057\u305F\u4E00\u89A7\u304C\u6B21\u306E\u5165\u529B\u306B TOOL_RESULT \u3068\u3057\u3066\u5C4A\u304D\u307E\u3059\u3002",
-    "TOOL_RESULT \u306F\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u304C\u53D6\u5F97\u3057\u305F\u5B9F\u969B\u306E\u7D50\u679C\u3067\u3059\u3002\u7D50\u679C\u3092\u60F3\u50CF\u305B\u305A\u3001\u53D7\u3051\u53D6\u3063\u305F\u5185\u5BB9\u3060\u3051\u3092\u6839\u62E0\u306B\u6B21\u306E1\u624B\u3092\u9078\u3073\u307E\u3059\u3002",
-    "TOOL_RESULT\u3092\u53D7\u3051\u53D6\u3063\u305F\u3089\u3001\u305D\u306E\u7D50\u679C\u3092\u4F7F\u3063\u3066\u6B21\u3092\u5224\u65AD\u3057\u3001\u540C\u3058 tool \u3068\u540C\u3058\u5F15\u6570\u3092\u7E70\u308A\u8FD4\u3057\u307E\u305B\u3093\u3002",
-    "\u5B9F\u969B\u306B\u306F\u5B58\u5728\u3057\u306A\u3044\u74B0\u5883\u30FB\u30D5\u30A1\u30A4\u30EB\u30FB\u5B9F\u884C\u7D50\u679C\u3092\u60F3\u50CF\u3057\u3066\u7B54\u3048\u308B\u3053\u3068\u306F\u7981\u6B62\u3067\u3059\u3002",
+    "TOOL_RESULT\u3067\u306F\u306A\u304Fhost_result\u3060\u3051\u3092\u5B9F\u969B\u306E\u30DB\u30B9\u30C8\u7D50\u679C\u3068\u3057\u3066\u6271\u3044\u307E\u3059\u3002\u7D50\u679C\u3092\u60F3\u50CF\u305B\u305A\u3001\u53D7\u3051\u53D6\u3063\u305F\u5185\u5BB9\u3060\u3051\u3092\u6839\u62E0\u306B\u6B21\u306E1\u624B\u3092\u9078\u3073\u307E\u3059\u3002",
     "",
-    "\u5BFE\u8A71\u306E\u6D41\u308C:",
-    '  1. \u3042\u306A\u305F\u304C {"tool":"..."} \u3092\u8FD4\u3059',
-    "  2. \u30B7\u30B9\u30C6\u30E0\u304C\u5B9F\u969B\u306B\u5B9F\u884C\u3057\u3001\u6B21\u306E\u5165\u529B\u306B TOOL_RESULT(...) \u3068\u3057\u3066\u7D50\u679C\u3092\u63D0\u793A\u3059\u308B",
-    "  3. \u305D\u308C\u3092\u53D7\u3051\u3066\u3042\u306A\u305F\u304C\u6B21\u306E JSON \u3092\u8FD4\u3059(\u7E70\u308A\u8FD4\u3057)",
-    '  4. \u5B8C\u4E86\u3057\u305F\u3089 {"answer":"..."} \u3067\u7DE0\u3081\u308B',
-    "",
-    "\u51FA\u529B\u30EB\u30FC\u30EB(\u53B3\u5B88): \u6BCE\u56DE\u3001\u6B21\u306E\u3069\u3061\u3089\u304B\u306E JSON \u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u300C1\u3064\u3060\u3051\u300D\u3092\u51FA\u529B\u3059\u308B\u3002",
-    '  {"tool":"<\u30A2\u30AF\u30B7\u30E7\u30F3\u540D>","args":{...}}',
+    "\u51FA\u529B\u30EB\u30FC\u30EB(\u53B3\u5B88): \u6BCE\u56DE\u3001\u6B21\u306E\u3069\u3061\u3089\u304B\u306EJSON\u30AA\u30D6\u30B8\u30A7\u30AF\u30C81\u3064\u3060\u3051\u3092\u51FA\u529B\u3059\u308B\u3002",
+    '  {"tool":"host.<\u30A2\u30AF\u30B7\u30E7\u30F3\u540D>","args":{...}}',
     '  {"answer":"<\u30E6\u30FC\u30B6\u30FC\u3078\u306E\u6700\u7D42\u56DE\u7B54(\u65E5\u672C\u8A9E)>"}',
-    "JSON \u4EE5\u5916\u306E\u6587\u7AE0\u30FB\u898B\u51FA\u3057\u30FB\u6328\u62F6\u306F\u4E00\u5207\u51FA\u529B\u3057\u306A\u3044\u3002",
-    "write_file \u3067\u30D5\u30A1\u30A4\u30EB\u5185\u5BB9\u3092\u6E21\u3059\u3068\u304D\u306F\u3001content \u3092 JSON \u5185\u306B\u66F8\u304B\u305A\u3001JSON \u306E\u76F4\u5F8C\u306B\u300CCONTENT:\u300D\u306E\u884C\u3068\u672C\u6587\u3092\u7D9A\u3051\u3066\u304F\u3060\u3055\u3044:",
-    '  {"tool":"write_file","args":{"path":"index.html"}}',
-    "  CONTENT:",
-    "  <p>\u3053\u3053\u306B\u30D5\u30A1\u30A4\u30EB\u672C\u6587</p>",
-    "  AGENT_END",
-    "\u26A0\uFE0F \u5FDC\u7B54\u306F\u5FC5\u305A\u300C\u4E00\u3064\u306E\u30B3\u30FC\u30C9\u30D5\u30A7\u30F3\u30B9\u30D6\u30ED\u30C3\u30AF ``` \u301C ``` \u300D\u306E\u4E2D\u306B\u3001JSON\u30FBCONTENT \u672C\u6587\u30FBAGENT_END \u306E\u3059\u3079\u3066\u3092\u542B\u3081\u3066\u304F\u3060\u3055\u3044\u3002\u30D6\u30ED\u30C3\u30AF\u5185\u3067\u306F\u30BF\u30B0 < > \u3084\u30D0\u30C3\u30AF\u30AF\u30A9\u30FC\u30C8 ` \u3082\u305D\u306E\u307E\u307E\u66F8\u3044\u3066\u69CB\u3044\u307E\u305B\u3093(\u30B7\u30B9\u30C6\u30E0\u304C\u30D6\u30ED\u30C3\u30AF\u5358\u4F4D\u3067\u539F\u6587\u3092\u53D7\u3051\u53D6\u308A\u307E\u3059)\u3002\u30D6\u30ED\u30C3\u30AF\u306E\u5916\u306B\u306F\u4F55\u3082\u66F8\u304B\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002",
-    `\u51FA\u529B\u306E\u6700\u5F8C\u306B\u3001${END_MARKER} \u3068\u3044\u3046\u6587\u5B57\u5217\u3060\u3051\u306E\u884C\u3092\u5FC5\u305A\u4ED8\u3051\u308B\u3002`,
-    "",
-    "\u51FA\u529B\u4F8B:",
-    '  \u30ED\u30FC\u30AB\u30EB\u72B6\u614B\u304C\u5FC5\u8981\u306A\u4F9D\u983C: {"tool":"list_files","args":{}}',
-    '  \u30ED\u30FC\u30AB\u30EB\u64CD\u4F5C\u304C\u4E0D\u8981\u306A\u4F9D\u983C: {"answer":"\u627F\u77E5\u3057\u307E\u3057\u305F"}',
-    END_MARKER,
-    "",
-    "\u305D\u308C\u3067\u306F\u958B\u59CB\u3067\u3059\u3002"
+    "JSON\u4EE5\u5916\u306E\u8AAC\u660E\u6587\u3001\u898B\u51FA\u3057\u3001\u6328\u62F6\u3001\u8907\u6570JSON\u306F\u51FA\u529B\u3057\u306A\u3044\u3002",
+    "write_file\u306E\u672C\u6587\u304C\u9577\u3044\u5834\u5408\u3060\u3051\u3001JSON\u306E\u76F4\u5F8C\u306BCONTENT:\u3068\u672C\u6587\u3092\u7D9A\u3051\u3001\u6700\u5F8C\u306BAGENT_END\u3092\u7F6E\u304F\u3002",
+    `\u6700\u5F8C\u306B ${END_MARKER} \u3060\u3051\u306E\u884C\u3092\u4ED8\u3051\u308B\u3002`
   ].join("\n");
 }
-function unwrapAnswer(raw) {
-  const cleaned = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-  const m = cleaned.match(/"answer"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-  if (m) {
-    try {
-      return JSON.parse(`"${m[1]}"`);
-    } catch {
-      return m[1];
-    }
-  }
-  return cleaned.replace(new RegExp(`"?${END_MARKER}"?`, "g"), "").trim();
+function normalizeForKey(value) {
+  if (Array.isArray(value)) return value.map(normalizeForKey);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, normalizeForKey(item)]));
+  return value;
 }
 function toolRequestKey(name, args) {
-  const normalized = Object.entries(args).filter(([key, value]) => !(name === "list_files" && (key === "path" && (value === "." || value === "") || key === "glob" && (value === "*" || value === "**/*" || value === "**")))).sort(([a], [b]) => a.localeCompare(b));
-  return `${name}:${JSON.stringify(normalized)}`;
+  const normalized = normalizeForKey(args);
+  if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) return `${name}:${JSON.stringify(normalized)}`;
+  const copy = { ...normalized };
+  const bare = bareToolName(name);
+  if (typeof copy.path === "string") copy.path = import_node_path3.default.normalize(copy.path).replaceAll("\\", "/");
+  if (bare === "list_files") {
+    if (copy.path === "" || copy.path === ".") delete copy.path;
+    if (copy.glob === "*" || copy.glob === "**" || copy.glob === "**/*") delete copy.glob;
+  }
+  return `${name}:${JSON.stringify(copy)}`;
 }
-function composeCopilotPrompt(userInput, steps, budget = 12e4, history = []) {
+function formatHostResult(tool, output, metadata, status, callId, runId) {
+  const max = 2e3;
+  const truncated = output.length > max;
+  const bare = bareToolName(tool);
+  const commandLike = bare === "run_command" || bare === "start_process" || bare === "stop_process";
+  const writeLike = bare === "write_file" || bare === "edit_file";
+  const sideEffectState = status === "succeeded" ? metadata?.changed ? "committed" : "none" : status === "denied" ? "none" : commandLike ? "unknown" : writeLike ? "possible" : "none";
+  const payload = {
+    kind: "host_result",
+    schemaVersion: "1",
+    ...runId ? { runId } : {},
+    ...callId ? { callId } : {},
+    tool,
+    status,
+    data: { summary: output.slice(0, max) },
+    evidence: metadata ? { ...metadata, retrievedAt: (/* @__PURE__ */ new Date()).toISOString() } : { retrievedAt: (/* @__PURE__ */ new Date()).toISOString() },
+    effects: metadata?.changed ? [{ type: "workspace_change", path: metadata.path ?? null, beforeHash: metadata.beforeHash ?? null, afterHash: metadata.afterHash ?? null }] : [],
+    sideEffectState,
+    truncation: { truncated },
+    security: { contentIsUntrusted: true },
+    error: status === "succeeded" ? null : {
+      code: status === "denied" ? "host_call_denied" : "host_call_failed",
+      stage: status === "denied" ? "approval" : "execution",
+      retryable: status === "failed" && !commandLike && !writeLike,
+      sideEffectState,
+      message: output.slice(0, 600)
+    }
+  };
+  return ["[BEGIN_UNTRUSTED_HOST_RESULT]", JSON.stringify(payload), "[END_UNTRUSTED_HOST_RESULT]"].join("\n");
+}
+async function captureFileBinding(def, args, ctx2) {
+  if (def.kind !== "write" || typeof args.path !== "string") return {};
+  const state = await getFilePrecondition(args.path, ctx2);
+  return { path: args.path, ...state };
+}
+async function approvalPreconditionChanged(binding, ctx2) {
+  if (!binding.path || binding.existedBefore === void 0) return false;
+  const state = await getFilePrecondition(binding.path, ctx2);
+  return state.existedBefore !== binding.existedBefore || state.beforeHash !== binding.beforeHash;
+}
+function composeCopilotPrompt(mode, userInput, steps, budget = 12e4, history = [], allowArbitraryCommands = false) {
   const histBlock = history.length > 0 ? ["", "[\u3053\u308C\u307E\u3067\u306E\u3084\u308A\u3068\u308A]", ...history.map((h) => `${h.role}: ${h.content.replace(/\r?\n+/g, " ")}`)] : [];
-  const head = [buildProtocolRules(), ...histBlock, "", "[\u4F9D\u983C]", userInput];
+  const head = [buildProtocolRules(mode, allowArbitraryCommands), ...histBlock, "", "[\u4F9D\u983C]", userInput];
   const tail = [
     "",
     "[\u6307\u793A]",
@@ -1038,24 +1204,36 @@ function composeCopilotPrompt(userInput, steps, budget = 12e4, history = []) {
 }
 async function runCopilotTurn(opts) {
   const { cfg: cfg2, ctx: ctx2, io, backend } = opts;
+  const mode = cfg2.turnMode ?? (cfg2.copilot?.agentMode === true ? "work" : "chat");
+  const policy = capabilityPolicy(cfg2, mode);
   const history = opts.messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role === "assistant" ? "\u30A2\u30B7\u30B9\u30BF\u30F3\u30C8" : "\u30E6\u30FC\u30B6\u30FC", content: String(m.content ?? "").slice(0, 400) })).slice(-12);
   const turnMessages = (assistantContent) => [
     ...opts.messages,
     { role: "user", content: opts.userInput },
     { role: "assistant", content: assistantContent }
   ];
-  const canceled = () => ({
-    reply: "",
-    messages: turnMessages("[\u4E2D\u65AD] \u30E6\u30FC\u30B6\u30FC\u304C\u30AD\u30E3\u30F3\u30BB\u30EB\u3057\u307E\u3057\u305F"),
-    aborted: true
-  });
-  const paused = () => pausedResult(opts.messages, opts.userInput, steps);
+  const canceled = () => ({ reply: "", messages: turnMessages("[\u4E2D\u65AD] \u30E6\u30FC\u30B6\u30FC\u304C\u30AD\u30E3\u30F3\u30BB\u30EB\u3057\u307E\u3057\u305F"), aborted: true });
   const stopRequested = () => shouldCancel(io) || io.isPaused?.() === true;
-  if (cfg2.copilot?.agentMode !== true) {
-    const prompt = [cfg2.systemPrompt, opts.userInput].filter((s) => s && s.trim()).join("\n\n");
+  if (mode !== "work") {
+    const modePrompt = buildProtocolRules(mode);
+    const prompt = [cfg2.systemPrompt, modePrompt, opts.userInput].filter((s) => s && s.trim()).join("\n\n");
     try {
       const text = (await backend.complete(prompt, io.signal)).trim();
-      return { reply: text, messages: [...opts.messages, { role: "user", content: opts.userInput }, { role: "assistant", content: text }], aborted: false };
+      io.event?.({ type: "model.decision", summary: "Copilot\u306E\u56DE\u7B54\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: "copilot", namespace: "native", authority: "claimed" });
+      io.event?.({ type: "plan.created", summary: mode === "research" ? "Copilot\u8ABF\u67FB\u30E2\u30FC\u30C9\u3092\u958B\u59CB\u3057\u307E\u3057\u305F" : "\u901A\u5E38\u56DE\u7B54\u30E2\u30FC\u30C9\u3092\u958B\u59CB\u3057\u307E\u3057\u305F", origin: "orchestrator", namespace: "none", authority: "derived" });
+      if (mode === "research") {
+        const research = buildResearchBundle(opts.userInput, text);
+        if (research.sources.length === 0) {
+          const message = "\u8ABF\u67FB\u7D50\u679C\u3092\u78BA\u5B9A\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u51FA\u5178URL\u4ED8\u304D\u3067\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
+          io.print(`[warn] ${message}`);
+          io.event?.({ type: "run.warning", error: message, origin: "orchestrator", namespace: "none", authority: "authoritative" });
+          return { reply: "", messages: turnMessages(`[\u4E2D\u65AD] ${message}`), aborted: true };
+        }
+        io.event?.({ type: "step.completed", summary: `Copilot\u8ABF\u67FB\u306E\u56DE\u7B54\u3092\u53D7\u3051\u53D6\u308A\u307E\u3057\u305F\uFF08\u51FA\u5178${research.sources.length}\u4EF6\uFF09`, origin: "copilot", namespace: "native", authority: "claimed" });
+        return { reply: text, messages: turnMessages(text), aborted: false, research };
+      }
+      io.event?.({ type: "step.completed", summary: "\u56DE\u7B54\u3092\u53D7\u3051\u53D6\u308A\u307E\u3057\u305F", origin: "copilot", namespace: "native", authority: "claimed" });
+      return { reply: text, messages: turnMessages(text), aborted: false };
     } catch (err) {
       const msg = err.message;
       io.print(`[error] ${msg}`);
@@ -1063,108 +1241,150 @@ async function runCopilotTurn(opts) {
     }
   }
   const steps = [];
-  io.event?.({ type: "plan.created", summary: "Run\u306E\u8A08\u753B\u3068\u691C\u8A3C\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F" });
+  io.event?.({ type: "plan.created", summary: "Run\u306E\u8A08\u753B\u3068\u691C\u8A3C\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F", origin: "orchestrator", namespace: "none", authority: "derived" });
   let parseRetried = false;
-  let refusals = 0;
+  let invalidDecisions = 0;
   const actionCounts = /* @__PURE__ */ new Map();
-  const maxIter = cfg2.maxToolIterations ?? 15;
+  const requestHistory = [];
+  const maxIter = policy.maxModelDecisions;
+  const maxExecutions = policy.maxHostExecutions;
+  const maxWrites = policy.maxWriteExecutions;
+  const maxCommands = policy.maxCommandExecutions;
+  const maxNoProgress = policy.maxNoProgress;
+  let executions = 0;
+  let writes = 0;
+  let commands = 0;
+  let noProgress = 0;
+  let lastResultKey = "";
+  const stopWithWarning = (message) => {
+    io.print(`[warn] ${message}`);
+    io.event?.({ type: "run.warning", error: message, origin: "orchestrator", namespace: "none", authority: "authoritative" });
+    return { reply: "", messages: turnMessages(`[\u4E2D\u65AD] ${message}`), aborted: true, checkpoint: steps.slice(-20) };
+  };
   for (let i = 0; i < maxIter; i++) {
     if (shouldCancel(io)) return canceled();
-    if (io.isPaused?.()) return paused();
+    if (io.isPaused?.()) return { reply: "", messages: turnMessages("[\u4E00\u6642\u505C\u6B62] \u30C1\u30A7\u30C3\u30AF\u30DD\u30A4\u30F3\u30C8\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F"), aborted: true, paused: true, checkpoint: steps.slice(-20) };
     let raw;
     try {
-      raw = await backend.complete(composeCopilotPrompt(opts.userInput, steps, opts.cfg.copilot?.maxPromptChars ?? 12e4, history), io.signal);
-      raw = raw.replace(/＜/g, "<").replace(/＞/g, ">").replace(new RegExp(String.fromCharCode(65312) === "" ? "" : "\uFF40", "g"), String.fromCharCode(96));
+      raw = await backend.complete(composeCopilotPrompt("work", opts.userInput, steps, cfg2.copilot?.maxPromptChars ?? 12e4, history, policy.allowArbitraryCommands), io.signal);
+      raw = raw.replace(/＜/g, "<").replace(/＞/g, ">").replace(/｀/g, String.fromCharCode(96));
+      io.event?.({ type: "model.decision", summary: "Copilot\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: "copilot", namespace: "native", authority: "claimed" });
     } catch (err) {
-      io.print(`[error] ${err.message}`);
-      return { reply: "", messages: turnMessages(`[error] ${err.message}`), aborted: true };
+      const msg = err.message;
+      io.print(`[error] ${msg}`);
+      return { reply: "", messages: turnMessages(`[error] ${msg}`), aborted: true };
     }
     const pe = extractReplyAndEnd(raw);
     let parsed = pe?.parsed ?? null;
-    if (parsed && parsed.tool === "write_file") attachFenceContent(raw, pe.end, parsed);
+    if (parsed && bareToolName(parsed.tool ?? "") === "write_file") attachFenceContent(raw, pe.end, parsed);
     if (!parsed) {
       if (!parseRetried) {
         parseRetried = true;
-        steps.push('SYSTEM: \u76F4\u524D\u306E\u5FDC\u7B54\u306F\u6307\u5B9A\u5F62\u5F0F\u306B\u9055\u53CD\u3057\u307E\u3057\u305F\u3002\u8AAC\u660E\u6587\u3092\u7701\u304D\u3001{"tool":...} \u307E\u305F\u306F {"answer":"..."} \u306E JSON \u30AA\u30D6\u30B8\u30A7\u30AF\u30C81\u3064\u3060\u3051\u3092\u51FA\u529B\u3057\u3066\u304F\u3060\u3055\u3044\u3002');
+        steps.push("SYSTEM: \u76F4\u524D\u306E\u5FDC\u7B54\u306F\u53B3\u683C\u306A\u5358\u4E00JSON\u5951\u7D04\u306B\u9055\u53CD\u3057\u307E\u3057\u305F\u3002JSON\u30AA\u30D6\u30B8\u30A7\u30AF\u30C81\u3064\u3060\u3051\u3092\u8FD4\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
         continue;
       }
-      const fallback = unwrapAnswer(raw);
-      return { reply: fallback, messages: turnMessages(fallback), aborted: false };
-    }
-    if (parsed.answer !== void 0 && refusals < 3 && /使用でき|実行できません|共有して|確認できません|アップロードして/.test(parsed.answer)) {
-      refusals++;
-      if (refusals >= 2) steps.push("SYSTEM: read_file \u3084 run_command \u306F\u5B9F\u969B\u306B\u52D5\u4F5C\u3057\u307E\u3059\u3002\u65AD\u3089\u305A JSON \u3067\u30A2\u30AF\u30B7\u30E7\u30F3\u3092\u8FD4\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
-      continue;
+      return stopWithWarning("Copilot\u306E\u5FDC\u7B54\u5F62\u5F0F\u3092\u691C\u8A3C\u3067\u304D\u306A\u3044\u305F\u3081\u3001\u5B89\u5168\u306E\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
     }
     if (parsed.answer !== void 0) {
       const reply = parsed.answer.trim();
-      steps.push(`assistant: {"answer":"..."}`);
+      steps.push('assistant: {"answer":"..."}');
       return { reply, messages: turnMessages(reply), aborted: false };
     }
-    const def = TOOL_DEFS.find((d) => d.name === parsed.tool);
-    if (!def) {
-      steps.push(`TOOL_RESULT: [error] \u672A\u77E5\u306E\u30C4\u30FC\u30EB "${parsed.tool}"\u3002tool \u306F\u6B63\u78BA\u306A\u540D\u524D\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
+    if (!parsed.tool || !parsed.tool.startsWith("host.")) {
+      io.event?.({ type: "copilot.native.observed", tool: parsed.tool, summary: "Copilot\u5185\u8535/native\u30C4\u30FC\u30EB\u8981\u6C42\u3092\u89B3\u6E2C\u3057\u307E\u3057\u305F\uFF08\u5B9F\u884C\u3057\u3066\u3044\u307E\u305B\u3093\uFF09", origin: "copilot", namespace: "native", authority: "observed" });
+      invalidDecisions++;
+      steps.push(`SYSTEM: \u8A31\u53EF\u3055\u308C\u3066\u3044\u308B\u306E\u306Fhost.*\u3060\u3051\u3067\u3059\u3002\u53D7\u4FE1\u3057\u305Ftool=${parsed.tool ?? "(\u306A\u3057)"}`);
+      if (invalidDecisions >= 2) return stopWithWarning("\u8A31\u53EF\u3055\u308C\u3066\u3044\u306A\u3044Copilot\u5185\u8535\u30C4\u30FC\u30EB\u307E\u305F\u306F\u4E0D\u660E\u306A\u30C4\u30FC\u30EB\u304C\u8981\u6C42\u3055\u308C\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
       continue;
     }
-    const requestKey = toolRequestKey(def.name, parsed.args ?? {});
+    const def = findHostTool(parsed.tool);
+    if (!def) {
+      invalidDecisions++;
+      steps.push(`host_result: [policy_error] \u672A\u77E5\u306Ehost\u30C4\u30FC\u30EB ${parsed.tool}`);
+      if (invalidDecisions >= 2) return stopWithWarning(`\u672A\u77E5\u306Ehost\u30C4\u30FC\u30EB ${parsed.tool} \u304C\u8981\u6C42\u3055\u308C\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`);
+      continue;
+    }
+    if (bareToolName(def.name) === "run_command" && !policy.allowArbitraryCommands) return stopWithWarning("\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u8A2D\u5B9A\u3067\u660E\u793A\u7684\u306B\u6709\u52B9\u5316\u3055\u308C\u3066\u3044\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
+    const args = parsed.args ?? {};
+    const argError = validateToolArgs(def, args);
+    if (argError) {
+      invalidDecisions++;
+      steps.push(`host_result(${parsed.tool}): [validation_error] ${argError}`);
+      if (invalidDecisions >= 2) return stopWithWarning(`host\u30C4\u30FC\u30EB\u306E\u5F15\u6570\u3092\u691C\u8A3C\u3067\u304D\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F: ${argError}`);
+      continue;
+    }
+    invalidDecisions = 0;
+    const requestKey = toolRequestKey(parsed.tool, args);
     const previousCount = actionCounts.get(requestKey) ?? 0;
+    requestHistory.push(requestKey);
+    if (requestHistory.length >= 4) {
+      const n = requestHistory.length;
+      if (requestHistory[n - 4] === requestHistory[n - 2] && requestHistory[n - 3] === requestHistory[n - 1]) return stopWithWarning("\u540C\u3058host\u64CD\u4F5C\u306E\u5FAA\u74B0\u304C\u691C\u51FA\u3055\u308C\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
+    }
     if (previousCount > 0) {
-      if (previousCount >= 2) {
-        const reply = "\u540C\u3058\u30C4\u30FC\u30EB\u64CD\u4F5C\u304C\u7E70\u308A\u8FD4\u3055\u308C\u305F\u305F\u3081\u3001\u8FFD\u52A0\u5B9F\u884C\u3092\u505C\u6B62\u3057\u307E\u3057\u305F\u3002\u76F4\u524D\u306E\u7D50\u679C\u3092\u78BA\u8A8D\u3057\u3066\u3001\u5FC5\u8981\u306A\u3089\u5225\u306E\u6307\u793A\u3092\u304F\u3060\u3055\u3044\u3002";
-        return { reply, messages: turnMessages(reply), aborted: false };
-      }
+      if (previousCount >= 2) return stopWithWarning("\u540C\u3058host\u64CD\u4F5C\u304C\u7E70\u308A\u8FD4\u3055\u308C\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
       actionCounts.set(requestKey, previousCount + 1);
-      steps.push(`SYSTEM: ${def.name} \u306E\u540C\u3058\u64CD\u4F5C\u306F\u76F4\u524D\u306B\u5B9F\u884C\u6E08\u307F\u3067\u3059\u3002\u524D\u56DE\u306E TOOL_RESULT \u3092\u4F7F\u3044\u3001\u5225\u306E\u64CD\u4F5C\u304C\u5FC5\u8981\u306A\u5834\u5408\u3060\u3051\u5225\u306E tool \u3092\u9078\u3076\u304B answer \u3067\u5B8C\u4E86\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
+      steps.push(`SYSTEM: ${parsed.tool} \u306F\u76F4\u524D\u306B\u5B9F\u884C\u6E08\u307F\u3067\u3059\u3002\u524D\u56DE\u306Ehost_result\u3092\u4F7F\u3044\u3001\u5225\u306E\u64CD\u4F5C\u304C\u5FC5\u8981\u306A\u5834\u5408\u3060\u3051\u9078\u3093\u3067\u304F\u3060\u3055\u3044\u3002`);
       continue;
     }
     actionCounts.set(requestKey, 1);
-    if (stopRequested()) return io.isPaused?.() ? paused() : canceled();
-    const summary = summarize(def.name, parsed.args ?? {});
-    io.event?.({ type: "tool.requested", tool: def.name, summary });
-    io.event?.({ type: "step.started", tool: def.name, summary });
+    if (executions >= maxExecutions) return stopWithWarning(`host\u30C4\u30FC\u30EB\u5B9F\u884C\u4E0A\u9650(${maxExecutions}\u56DE)\u306B\u9054\u3057\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`);
+    if (def.kind === "write" && writes >= maxWrites) return stopWithWarning(`\u66F8\u304D\u8FBC\u307F\u5B9F\u884C\u4E0A\u9650(${maxWrites}\u56DE)\u306B\u9054\u3057\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`);
+    if (def.kind === "command" && commands >= maxCommands) return stopWithWarning(`\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u4E0A\u9650(${maxCommands}\u56DE)\u306B\u9054\u3057\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`);
+    if (stopRequested()) return canceled();
+    const qualified = qualifiedToolName(def.name);
+    const callId = `host-call-${executions + 1}`;
+    const summary = summarize(qualified, args);
+    io.event?.({ type: "tool.requested", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
+    io.event?.({ type: "step.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
     if (def.kind !== "read") {
-      const auto = def.kind === "write" ? cfg2.autoApprove?.write ?? true : cfg2.autoApprove?.command ?? false;
+      const auto = def.kind === "write" ? policy.autoApproveWrite : policy.autoApproveCommand;
+      const fileBinding = await captureFileBinding(def, args, ctx2);
+      const approvalBinding = { ...fileBinding, toolName: qualified, argsHash: JSON.stringify(normalizeForKey(args)), command: typeof args.command === "string" ? args.command : void 0, network: def.kind === "command", callId };
       if (!auto) {
         const ok = await io.askYesNo(`\u5B9F\u884C\u3092\u8A31\u53EF\u3057\u307E\u3059\u304B\uFF1F
-${summary}`);
-        if (ok) io.event?.({ type: "tool.approved", tool: def.name, summary, approved: true });
+${summary}`, approvalBinding);
+        if (ok) io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, origin: "host", namespace: "app", authority: "authoritative", callId });
+        if (ok && await approvalPreconditionChanged(approvalBinding, ctx2)) {
+          io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u627F\u8A8D\u3092\u7121\u52B9\u5316\u3057\u307E\u3057\u305F", origin: "host", namespace: "app", authority: "authoritative", callId });
+          steps.push(formatHostResult(qualified, "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u5B9F\u884C\u3057\u307E\u305B\u3093\u3067\u3057\u305F", null, "denied", callId, ctx2.runId));
+          continue;
+        }
         if (!ok) {
-          io.event?.({ type: "tool.denied", tool: def.name, summary });
-          steps.push(`TOOL_RESULT(${def.name}): (\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)`);
+          io.event?.({ type: "tool.denied", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
+          steps.push(formatHostResult(qualified, "\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F", null, "denied", callId, ctx2.runId));
           continue;
         }
       } else {
-        io.event?.({ type: "tool.approved", tool: def.name, summary, approved: true, metadata: { automatic: true } });
+        io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, metadata: { automatic: true }, origin: "host", namespace: "app", authority: "authoritative", callId });
       }
     }
-    io.event?.({ type: "tool.started", tool: def.name, summary });
+    executions++;
+    if (def.kind === "write") writes++;
+    if (def.kind === "command") commands++;
+    io.event?.({ type: "tool.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
     io.print(`[tool] ${summary}`);
-    if (stopRequested()) return io.isPaused?.() ? paused() : canceled();
+    if (stopRequested()) return canceled();
     const startedAt = Date.now();
     let output;
     try {
-      output = await def.run(parsed.args ?? {}, ctx2);
+      output = await def.run(args, ctx2);
     } catch (err) {
       output = `[tool error] ${err.message}`;
     }
     const failed = output.startsWith("[tool error]");
     const durationMs = Date.now() - startedAt;
     const metadata = parseToolResultMeta(output);
-    io.event?.({
-      type: failed ? "tool.failed" : "tool.succeeded",
-      tool: def.name,
-      summary,
-      output: output.slice(0, 1200),
-      durationMs,
-      metadata
-    });
-    io.event?.({ type: failed ? "step.failed" : "step.completed", tool: def.name, summary, output: output.slice(0, 800), durationMs, metadata });
-    steps.push(`TOOL_RESULT(${def.name}): ${output.slice(0, 2e3)}`);
-    steps.push(`SYSTEM: ${def.name} \u306F\u76F4\u524D\u306E1\u624B\u3068\u3057\u3066\u5B9F\u884C\u6E08\u307F\u3067\u3059\u3002\u7D50\u679C\u3092\u6839\u62E0\u306B\u6B21\u306E1\u624B\u3092\u5224\u65AD\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
+    const resultKey = `${qualified}:${metadata?.afterHash ?? output.slice(0, 1600)}`;
+    noProgress = failed || resultKey === lastResultKey ? noProgress + 1 : 0;
+    lastResultKey = resultKey;
+    io.event?.({ type: failed ? "tool.failed" : "tool.succeeded", tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId });
+    io.event?.({ type: failed ? "step.failed" : "step.completed", tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId });
+    steps.push(formatHostResult(qualified, output, metadata, failed ? "failed" : "succeeded", callId, ctx2.runId));
+    steps.push(`SYSTEM: ${qualified} \u306F\u5B9F\u884C\u6E08\u307F\u3067\u3059\u3002\u7D50\u679C\u3092\u6839\u62E0\u306B\u6B21\u306E1\u624B\u3092\u5224\u65AD\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
+    if (noProgress >= maxNoProgress) return stopWithWarning(`host\u30C4\u30FC\u30EB\u7D50\u679C\u306B\u9032\u5C55\u304C\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F\uFF08${maxNoProgress}\u56DE\u9023\u7D9A\uFF09`);
   }
-  io.print("[warn] \u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F");
-  io.event?.({ type: "run.warning", error: "\u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F" });
-  return { reply: "", messages: turnMessages("[\u4E2D\u65AD] \u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F\u3002\u5B8C\u4E86\u6E08\u307F\u306E\u5C65\u6B74\u3092\u4FDD\u6301\u3057\u3066\u3044\u307E\u3059\u3002"), aborted: true };
+  return stopWithWarning("\u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F");
 }
 async function runAgentTurn(opts) {
   if (opts.backend || opts.cfg.provider === "copilot-edge") {
@@ -1172,87 +1392,168 @@ async function runAgentTurn(opts) {
     if (!backend) throw new Error("provider=copilot-edge \u306B\u306F backend \u304C\u5FC5\u8981\u3067\u3059");
     return runCopilotTurn({ cfg: opts.cfg, messages: opts.messages, backend, userInput: opts.userInput, ctx: opts.ctx, io: opts.io });
   }
+  if ((opts.cfg.turnMode ?? "work") !== "work") return runPlainOpenAITurn(opts);
   return runOpenAITurn(opts);
+}
+async function runPlainOpenAITurn(opts) {
+  const mode = opts.cfg.turnMode ?? "chat";
+  const prompt = mode === "research" ? `${opts.userInput}
+
+\u8ABF\u67FB\u30E2\u30FC\u30C9\u3067\u3059\u3002\u5FC5\u8981\u306A\u3089\u691C\u7D22\u3092\u4F7F\u3044\u3001\u51FA\u5178URL\u3068\u53D6\u5F97\u6642\u523B\u3092\u6DFB\u3048\u3066\u304F\u3060\u3055\u3044\u3002\u30ED\u30FC\u30AB\u30EB\u30D5\u30A1\u30A4\u30EB\u5909\u66F4\u3084\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u884C\u3044\u307E\u305B\u3093\u3002` : opts.userInput;
+  const messages = [...opts.messages, { role: "user", content: prompt }];
+  try {
+    const assistant = await chat(opts.cfg, messages, [], opts.io.signal);
+    const reply = assistant.content ?? "";
+    opts.io.event?.({ type: "model.decision", summary: "\u30E2\u30C7\u30EB\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: "copilot", namespace: "none", authority: "claimed" });
+    messages.push(assistant);
+    opts.io.event?.({ type: "plan.created", summary: mode === "research" ? "\u8ABF\u67FB\u30E2\u30FC\u30C9\u3092\u958B\u59CB\u3057\u307E\u3057\u305F" : "\u901A\u5E38\u56DE\u7B54\u30E2\u30FC\u30C9\u3092\u958B\u59CB\u3057\u307E\u3057\u305F", origin: "orchestrator", namespace: "none", authority: "derived" });
+    if (mode === "research") {
+      const research = buildResearchBundle(opts.userInput, reply);
+      if (research.sources.length === 0) {
+        const message = "\u8ABF\u67FB\u7D50\u679C\u3092\u78BA\u5B9A\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u51FA\u5178URL\u4ED8\u304D\u3067\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
+        opts.io.print(`[warn] ${message}`);
+        opts.io.event?.({ type: "run.warning", error: message, origin: "orchestrator", namespace: "none", authority: "authoritative" });
+        return { reply: "", messages: [...messages, { role: "assistant", content: `[\u4E2D\u65AD] ${message}` }], aborted: true };
+      }
+      opts.io.event?.({ type: "step.completed", summary: `\u8ABF\u67FB\u7D50\u679C\u3092\u53D7\u3051\u53D6\u308A\u307E\u3057\u305F\uFF08\u51FA\u5178${research.sources.length}\u4EF6\uFF09`, origin: "copilot", namespace: "native", authority: "claimed" });
+      return { reply, messages, aborted: false, research };
+    }
+    opts.io.event?.({ type: "step.completed", summary: "\u56DE\u7B54\u3092\u53D7\u3051\u53D6\u308A\u307E\u3057\u305F", origin: "orchestrator", namespace: "none", authority: "derived" });
+    return { reply, messages, aborted: false };
+  } catch (err) {
+    const msg = err.message;
+    opts.io.print(`[error] ${msg}`);
+    return { reply: "", messages, aborted: true };
+  }
 }
 async function runOpenAITurn(opts) {
   const { cfg: cfg2, ctx: ctx2, io } = opts;
+  const policy = capabilityPolicy(cfg2, "work");
   const messages = [...opts.messages, { role: "user", content: opts.userInput }];
-  io.event?.({ type: "plan.created", summary: "Run\u306E\u8A08\u753B\u3068\u691C\u8A3C\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F" });
-  const maxIter = cfg2.maxToolIterations ?? 15;
+  io.event?.({ type: "plan.created", summary: "Run\u306E\u8A08\u753B\u3068\u691C\u8A3C\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F", origin: "orchestrator", namespace: "none", authority: "derived" });
+  const maxIter = policy.maxModelDecisions;
+  const maxExecutions = policy.maxHostExecutions;
+  const maxWrites = policy.maxWriteExecutions;
+  const maxCommands = policy.maxCommandExecutions;
+  const maxNoProgress = policy.maxNoProgress;
+  const actionCounts = /* @__PURE__ */ new Map();
+  let executions = 0;
+  let writes = 0;
+  let commands = 0;
+  let noProgress = 0;
+  let lastResultKey = "";
+  const warning = (message) => {
+    io.print(`[warn] ${message}`);
+    io.event?.({ type: "run.warning", error: message, origin: "orchestrator", namespace: "none", authority: "authoritative" });
+    return { reply: "", messages, aborted: true };
+  };
   for (let i = 0; i < maxIter; i++) {
     if (shouldCancel(io)) return { reply: "", messages, aborted: true };
     if (io.isPaused?.()) return { reply: "", messages, aborted: true, paused: true };
     let assistant;
     try {
-      assistant = await chat(cfg2, messages, openAITools(), io.signal);
+      assistant = await chat(cfg2, messages, openAITools({ allowArbitraryCommands: policy.allowArbitraryCommands }), io.signal);
     } catch (err) {
       const msg = err.message;
       io.print(`[error] ${msg}`);
       return { reply: "", messages, aborted: true };
     }
+    io.event?.({ type: "model.decision", summary: "\u30E2\u30C7\u30EB\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: "copilot", namespace: "none", authority: "claimed" });
     messages.push(assistant);
     const calls = assistant.tool_calls ?? [];
-    if (calls.length === 0) {
-      return { reply: assistant.content ?? "", messages, aborted: false };
+    if (calls.length === 0) return { reply: assistant.content ?? "", messages, aborted: false };
+    if (calls.length !== 1) return warning("1\u56DE\u306E\u5224\u65AD\u3067\u8907\u6570\u306Ehost\u30C4\u30FC\u30EB\u304C\u8981\u6C42\u3055\u308C\u305F\u305F\u3081\u3001\u5B89\u5168\u306E\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
+    if (executions >= maxExecutions) return warning(`host\u30C4\u30FC\u30EB\u5B9F\u884C\u4E0A\u9650(${maxExecutions}\u56DE)\u306B\u9054\u3057\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`);
+    const call = calls[0];
+    const def = findHostTool(call.function.name);
+    if (!def) return warning(`\u8A31\u53EF\u3055\u308C\u3066\u3044\u306A\u3044host\u30C4\u30FC\u30EB ${call.function.name} \u304C\u8981\u6C42\u3055\u308C\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`);
+    if (bareToolName(def.name) === "run_command" && !policy.allowArbitraryCommands) return warning("\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u8A2D\u5B9A\u3067\u660E\u793A\u7684\u306B\u6709\u52B9\u5316\u3055\u308C\u3066\u3044\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
+    if (def.kind === "write" && writes >= maxWrites) return warning(`\u66F8\u304D\u8FBC\u307F\u5B9F\u884C\u4E0A\u9650(${maxWrites}\u56DE)\u306B\u9054\u3057\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`);
+    if (def.kind === "command" && commands >= maxCommands) return warning(`\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u4E0A\u9650(${maxCommands}\u56DE)\u306B\u9054\u3057\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`);
+    let argsForKey = {};
+    try {
+      argsForKey = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+    } catch {
     }
-    for (const call of calls) {
-      if (shouldCancel(io)) return { reply: "", messages, aborted: true };
-      if (io.isPaused?.()) return { reply: "", messages, aborted: true, paused: true };
-      const output = await executeCall(call, cfg2, ctx2, io);
-      messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: output });
-    }
+    const key = toolRequestKey(call.function.name, argsForKey && typeof argsForKey === "object" && !Array.isArray(argsForKey) ? argsForKey : {});
+    if ((actionCounts.get(key) ?? 0) > 0) return warning("\u540C\u3058host\u30C4\u30FC\u30EB\u64CD\u4F5C\u304C\u7E70\u308A\u8FD4\u3055\u308C\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
+    actionCounts.set(key, 1);
+    const output = await executeCall(call, cfg2, ctx2, io);
+    executions++;
+    if (def.kind === "write") writes++;
+    if (def.kind === "command") commands++;
+    if (output.startsWith("[policy error]") || output.startsWith("[validation error]")) return warning(output);
+    const metadata = parseToolResultMeta(output);
+    const resultKey = `${call.function.name}:${metadata?.afterHash ?? output.slice(0, 1600)}`;
+    noProgress = resultKey === lastResultKey ? noProgress + 1 : 0;
+    lastResultKey = resultKey;
+    const status = output === "(\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)" ? "denied" : output.startsWith("[tool error]") ? "failed" : "succeeded";
+    messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: formatHostResult(call.function.name, output, metadata, status, call.id, ctx2.runId) });
+    if (noProgress >= maxNoProgress) return warning(`host\u30C4\u30FC\u30EB\u7D50\u679C\u306B\u9032\u5C55\u304C\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F\uFF08${maxNoProgress}\u56DE\u9023\u7D9A\uFF09`);
   }
-  io.print("[warn] \u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F");
-  io.event?.({ type: "run.warning", error: "\u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F" });
-  return { reply: "", messages, aborted: true };
+  return warning("\u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F");
 }
 async function executeCall(call, cfg2, ctx2, io) {
-  const def = TOOL_DEFS.find((d) => d.name === call.function.name);
-  if (!def) return `\u672A\u77E5\u306E\u30C4\u30FC\u30EB: ${call.function.name}`;
-  let args = {};
+  const policy = capabilityPolicy(cfg2, "work");
+  if (!call.function.name.startsWith("host.")) return "[policy error] host.* \u4EE5\u5916\u306E\u30C4\u30FC\u30EB\u306Fwork\u30E2\u30FC\u30C9\u3067\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093";
+  const def = findHostTool(call.function.name);
+  if (!def) return `[policy error] \u672A\u77E5\u306Ehost\u30C4\u30FC\u30EB: ${call.function.name}`;
+  if (bareToolName(def.name) === "run_command" && !policy.allowArbitraryCommands) return "[policy error] \u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u8A2D\u5B9A\u3067\u660E\u793A\u7684\u306B\u6709\u52B9\u5316\u3055\u308C\u3066\u3044\u307E\u305B\u3093";
+  let args;
   try {
-    args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
-  } catch {
-    return "\u5F15\u6570\u306E JSON \u30D1\u30FC\u30B9\u306B\u5931\u6557\u3057\u307E\u3057\u305F";
+    const parsed = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("args\u306FJSON\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
+    args = parsed;
+  } catch (err) {
+    return `[validation error] ${err.message}`;
   }
-  const summary = summarize(def.name, args);
-  io.event?.({ type: "tool.requested", tool: def.name, summary });
-  io.event?.({ type: "step.started", tool: def.name, summary });
+  const argError = validateToolArgs(def, args);
+  if (argError) return `[validation error] ${argError}`;
+  const qualified = qualifiedToolName(def.name);
+  const summary = summarize(qualified, args);
+  io.event?.({ type: "tool.requested", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+  io.event?.({ type: "step.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
   if (def.kind !== "read") {
-    const auto = def.kind === "write" ? cfg2.autoApprove?.write ?? true : cfg2.autoApprove?.command ?? false;
+    const auto = def.kind === "write" ? policy.autoApproveWrite : policy.autoApproveCommand;
+    const fileBinding = await captureFileBinding(def, args, ctx2);
+    const approvalBinding = { ...fileBinding, toolName: qualified, argsHash: JSON.stringify(normalizeForKey(args)), command: typeof args.command === "string" ? args.command : void 0, network: def.kind === "command", callId: call.id };
     if (!auto) {
       const ok = await io.askYesNo(`\u5B9F\u884C\u3092\u8A31\u53EF\u3057\u307E\u3059\u304B\uFF1F
-${summary}`);
-      if (ok) io.event?.({ type: "tool.approved", tool: def.name, summary, approved: true });
+${summary}`, approvalBinding);
+      if (ok) io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+      if (ok && await approvalPreconditionChanged(approvalBinding, ctx2)) {
+        io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u627F\u8A8D\u3092\u7121\u52B9\u5316\u3057\u307E\u3057\u305F", origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+        return "(\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)";
+      }
       if (!ok) {
-        io.event?.({ type: "tool.denied", tool: def.name, summary });
-        io.event?.({ type: "step.failed", tool: def.name, summary, error: "\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F" });
+        io.event?.({ type: "tool.denied", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
         return "(\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)";
       }
     } else {
-      io.event?.({ type: "tool.approved", tool: def.name, summary, approved: true, metadata: { automatic: true } });
+      io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, metadata: { automatic: true }, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
     }
   }
-  io.event?.({ type: "tool.started", tool: def.name, summary });
+  io.event?.({ type: "tool.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
   io.print(`[tool] ${summary}`);
   const startedAt = Date.now();
   try {
     const output = await def.run(args, ctx2);
     const durationMs = Date.now() - startedAt;
     const metadata = parseToolResultMeta(output);
-    io.event?.({ type: "tool.succeeded", tool: def.name, summary, output: output.slice(0, 1200), durationMs, metadata });
-    io.event?.({ type: "step.completed", tool: def.name, summary, output: output.slice(0, 800), durationMs, metadata });
+    io.event?.({ type: "tool.succeeded", tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+    io.event?.({ type: "step.completed", tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
     return output;
   } catch (err) {
     const output = `[tool error] ${err.message}`;
     const durationMs = Date.now() - startedAt;
-    io.event?.({ type: "tool.failed", tool: def.name, summary, output, error: output, durationMs });
-    io.event?.({ type: "step.failed", tool: def.name, summary, output, error: output, durationMs });
+    io.event?.({ type: "tool.failed", tool: qualified, summary, output, error: output, durationMs, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+    io.event?.({ type: "step.failed", tool: qualified, summary, output, error: output, durationMs, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
     return output;
   }
 }
 function summarize(name, args) {
-  switch (name) {
+  const bare = bareToolName(name);
+  switch (bare) {
     case "run_command":
       return `run_command: ${args.command}`;
     case "get_weather":
@@ -1269,8 +1570,8 @@ function summarize(name, args) {
 // src/copilot.ts
 var import_node_child_process3 = require("node:child_process");
 var import_node_net = __toESM(require("node:net"));
-var import_node_fs2 = __toESM(require("node:fs"));
-var import_node_path3 = __toESM(require("node:path"));
+var import_node_fs3 = __toESM(require("node:fs"));
+var import_node_path4 = __toESM(require("node:path"));
 function resolveCopilotSettings(cfg2) {
   const c = cfg2.copilot ?? {};
   const reuseExistingEdge = c.reuseExistingEdge === true;
@@ -1288,6 +1589,7 @@ function resolveCopilotSettings(cfg2) {
     displayMode: c.displayMode === "foreground" ? "foreground" : "minimized",
     endMarker: c.endMarker ?? "AGENT_END",
     agentMode: c.agentMode === true,
+    profileName: c.profileName,
     modelPriority: Array.isArray(c.modelPriority) ? c.modelPriority.filter((s) => s && s.trim()) : ["GPT 5.6 Think Deeper", "Opus", "Think Deeper"]
   };
 }
@@ -1587,10 +1889,10 @@ async function findFreePort() {
   });
 }
 function profileIsInUse(profileDir) {
-  if (["SingletonLock", "SingletonCookie", "SingletonSocket"].some((name) => import_node_fs2.default.existsSync(import_node_path3.default.join(profileDir, name)))) return true;
+  if (["SingletonLock", "SingletonCookie", "SingletonSocket"].some((name) => import_node_fs3.default.existsSync(import_node_path4.default.join(profileDir, name)))) return true;
   if (process.platform !== "win32") return false;
   try {
-    const needle = import_node_path3.default.resolve(profileDir).replace(/[\\/]+$/, "").toLowerCase();
+    const needle = import_node_path4.default.resolve(profileDir).replace(/[\\/]+$/, "").toLowerCase();
     const marker = `--user-data-dir=${needle}`;
     const output = (0, import_node_child_process3.execFileSync)("powershell.exe", [
       "-NoProfile",
@@ -1610,8 +1912,8 @@ function profileIsInUse(profileDir) {
 function findEdgePath() {
   const roots = [process.env["ProgramFiles(x86)"], process.env.ProgramFiles, process.env.LOCALAPPDATA].filter(Boolean);
   for (const root of roots) {
-    const p = import_node_path3.default.join(root, "Microsoft", "Edge", "Application", "msedge.exe");
-    if (import_node_fs2.default.existsSync(p)) return p;
+    const p = import_node_path4.default.join(root, "Microsoft", "Edge", "Application", "msedge.exe");
+    if (import_node_fs3.default.existsSync(p)) return p;
   }
   throw new Error("Microsoft Edge \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3002Edge \u3092\u30A4\u30F3\u30B9\u30C8\u30FC\u30EB\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
 }
@@ -1684,23 +1986,24 @@ var CopilotEdgeClient = class {
   }
   hardenPreferences(profileDir) {
     try {
-      const prefPath = import_node_path3.default.join(profileDir, "Default", "Preferences");
-      if (!import_node_fs2.default.existsSync(prefPath)) return;
-      const j = JSON.parse(import_node_fs2.default.readFileSync(prefPath, "utf8"));
+      const prefPath = import_node_path4.default.join(profileDir, "Default", "Preferences");
+      if (!import_node_fs3.default.existsSync(prefPath)) return;
+      const j = JSON.parse(import_node_fs3.default.readFileSync(prefPath, "utf8"));
       if (!j.session) j.session = {};
       j.session.restore_on_startup = 4;
       j.session.startup_urls = [];
       if (j.profile) j.profile.exit_type = "Normal";
-      import_node_fs2.default.writeFileSync(prefPath, JSON.stringify(j), "utf8");
+      import_node_fs3.default.writeFileSync(prefPath, JSON.stringify(j), "utf8");
     } catch {
     }
   }
   chooseEdgeProfile() {
-    const root = import_node_path3.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent");
-    import_node_fs2.default.mkdirSync(root, { recursive: true });
-    const stable = import_node_path3.default.join(root, "edge-profile");
+    const root = import_node_path4.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent");
+    import_node_fs3.default.mkdirSync(root, { recursive: true });
+    const suffix = (this.s.profileName ?? "default").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "default";
+    const stable = import_node_path4.default.join(root, suffix === "default" ? "edge-profile" : "edge-profile-" + suffix);
     if (!profileIsInUse(stable)) return stable;
-    return import_node_fs2.default.mkdtempSync(import_node_path3.default.join(root, "edge-profile-session-"));
+    return import_node_fs3.default.mkdtempSync(import_node_path4.default.join(root, "edge-profile-" + suffix + "-session-"));
   }
   async ensureEdge() {
     if (this.s.reuseExistingEdge) {
@@ -2111,21 +2414,21 @@ function argValue(flag) {
 }
 var cfg = loadConfig(argValue("--config"));
 var workspaceArg = argValue("--workspace");
-var workspace = workspaceArg ? import_node_path4.default.resolve(workspaceArg) : process.cwd();
+var workspace = workspaceArg ? import_node_path5.default.resolve(workspaceArg) : process.cwd();
 var ctx = { workspace, restrictToWorkspace: cfg.restrictToWorkspace ?? true, weatherDefaultLocation: cfg.weather?.defaultLocation };
-var here = typeof __dirname !== "undefined" ? __dirname : import_node_path4.default.dirname(process.argv[1] ?? ".");
+var here = typeof __dirname !== "undefined" ? __dirname : import_node_path5.default.dirname(process.argv[1] ?? ".");
 var indexCandidates = [
   process.env.INDEX_HTML,
-  import_node_path4.default.join(here, "..", "public", "index.html"),
-  import_node_path4.default.join(process.cwd(), "public", "index.html")
+  import_node_path5.default.join(here, "..", "public", "index.html"),
+  import_node_path5.default.join(process.cwd(), "public", "index.html")
 ];
-var indexHtmlPath = indexCandidates.find((p) => typeof p === "string" && import_node_fs3.default.existsSync(p));
-var distributionStatePath = import_node_path4.default.join(process.env.LOCALAPPDATA ?? import_node_path4.default.dirname(here), "CompanyApps", "state", "coding-agent.json");
-var persistencePath = import_node_path4.default.join(process.env.APPDATA ?? process.env.LOCALAPPDATA ?? import_node_path4.default.dirname(here), "CompanyApps", "coding-agent", "state.json");
+var indexHtmlPath = indexCandidates.find((p) => typeof p === "string" && import_node_fs4.default.existsSync(p));
+var distributionStatePath = import_node_path5.default.join(process.env.LOCALAPPDATA ?? import_node_path5.default.dirname(here), "CompanyApps", "state", "coding-agent.json");
+var persistencePath = import_node_path5.default.join(process.env.APPDATA ?? process.env.LOCALAPPDATA ?? import_node_path5.default.dirname(here), "CompanyApps", "coding-agent", "state.json");
 function readDistributionState() {
   try {
-    if (!import_node_fs3.default.existsSync(distributionStatePath)) return { phase: "unknown", message: "\u30E9\u30F3\u30C1\u30E3\u30FC\u306E\u72B6\u614B\u306F\u672A\u53D6\u5F97\u3067\u3059", sharedVersion: null, localVersion: null, verified: false };
-    return JSON.parse(import_node_fs3.default.readFileSync(distributionStatePath, "utf8"));
+    if (!import_node_fs4.default.existsSync(distributionStatePath)) return { phase: "unknown", message: "\u30E9\u30F3\u30C1\u30E3\u30FC\u306E\u72B6\u614B\u306F\u672A\u53D6\u5F97\u3067\u3059", sharedVersion: null, localVersion: null, verified: false };
+    return JSON.parse(import_node_fs4.default.readFileSync(distributionStatePath, "utf8"));
   } catch (err) {
     return { phase: "failed", message: err.message, sharedVersion: null, localVersion: null, verified: false };
   }
@@ -2138,7 +2441,7 @@ var activeId = "";
 var activeRunId = null;
 var recoveredRunId = null;
 var runControllers = /* @__PURE__ */ new Map();
-var copilotBackend = null;
+var copilotBackends = /* @__PURE__ */ new Map();
 var lastLogSeen = 0;
 var logLines = [];
 function newSession() {
@@ -2152,10 +2455,16 @@ function activeSession() {
   return sessions.get(activeId) ?? newSession();
 }
 newSession();
-function getBackend() {
+function getBackend(mode) {
   if (cfg.provider !== "copilot-edge") return void 0;
-  if (!copilotBackend) copilotBackend = new CopilotEdgeClient(cfg);
-  return copilotBackend;
+  const existing = copilotBackends.get(mode);
+  if (existing) return existing;
+  const backend = new CopilotEdgeClient({
+    ...cfg,
+    copilot: { ...cfg.copilot ?? {}, profileName: "mode-" + mode }
+  });
+  copilotBackends.set(mode, backend);
+  return backend;
 }
 function makeRunId() {
   return `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -2177,6 +2486,13 @@ function createRun(session, request, mode, parentRunId) {
     title: request.slice(0, 40) || "\u65B0\u3057\u3044\u5B9F\u884C",
     request,
     mode,
+    capabilities: {
+      hostTools: mode === "work",
+      nativeSearch: mode === "research",
+      nativeOffice: false
+    },
+    policy: capabilityPolicy(cfg, mode),
+    budget: { modelDecisions: 0, hostExecutions: 0, writeExecutions: 0, commandExecutions: 0 },
     status: "queued",
     phase: "request",
     currentStep: "\u4F9D\u983C\u3092\u53D7\u3051\u4ED8\u3051\u307E\u3057\u305F",
@@ -2188,6 +2504,8 @@ function createRun(session, request, mode, parentRunId) {
     changedFiles: [],
     artifacts: [],
     events: [],
+    auditEvents: [],
+    nextSequence: 1,
     verification: {
       profile: "auto",
       checks: [
@@ -2208,15 +2526,21 @@ function createRun(session, request, mode, parentRunId) {
 }
 function addRunEvent(run, event) {
   run.updatedAt = Date.now();
-  const sequence3 = run.events.length + 1;
+  const sequence3 = run.nextSequence ?? (run.auditEvents ?? run.events).reduce((max, entry) => Math.max(max, entry.sequence), 0) + 1;
+  run.nextSequence = sequence3 + 1;
   const eventId = `${run.id}-event-${sequence3}`;
-  run.events.push({ ...event, eventId, runId: run.id, stepId: run.phase, toolEventId: eventId, sequence: sequence3, at: run.updatedAt });
+  const nextEvent = { ...event, origin: event.origin ?? "orchestrator", namespace: event.namespace ?? "none", authority: event.authority ?? "derived", eventId, runId: run.id, stepId: run.phase, toolEventId: eventId, sequence: sequence3, at: run.updatedAt };
+  run.auditEvents ??= [];
+  run.auditEvents.push(nextEvent);
+  run.events.push(nextEvent);
   if (run.events.length > 200) run.events.splice(0, run.events.length - 200);
   persistState();
 }
 function runSnapshot(run) {
+  const { auditEvents: _auditEvents, nextSequence: _nextSequence, ...publicRun } = run;
   return {
-    ...run,
+    ...publicRun,
+    auditEventCount: run.auditEvents?.length ?? run.events.length,
     plan: run.plan.map((step) => ({ ...step })),
     events: run.events.slice(-120).map((event) => ({ ...event })),
     changedFiles: run.changedFiles.map((change) => ({ ...change, diff: change.diff.map((line) => ({ ...line })) })),
@@ -2226,9 +2550,10 @@ function runSnapshot(run) {
   };
 }
 function phaseForTool(tool) {
-  if (tool === "read_file" || tool === "list_files" || tool === "search_files") return "inspect";
-  if (tool === "write_file" || tool === "edit_file") return "edit";
-  if (tool === "start_process" || tool === "read_process_log" || tool === "stop_process" || tool === "run_command") return "execute";
+  const bare = bareToolName(tool ?? "");
+  if (bare === "read_file" || bare === "list_files" || bare === "search_files" || bare === "get_weather") return "inspect";
+  if (bare === "write_file" || bare === "edit_file") return "edit";
+  if (bare === "start_process" || bare === "read_process_log" || bare === "stop_process" || bare === "run_command" || bare === "list_processes") return "execute";
   return "plan";
 }
 function buildDiff(before, after, maxLines = 600) {
@@ -2251,28 +2576,39 @@ function buildDiff(before, after, maxLines = 600) {
 }
 function changeFromEvent(run, event) {
   const metadata = event.metadata;
+  const bare = bareToolName(event.tool ?? "");
   const pathValue = typeof metadata?.path === "string" ? metadata.path : event.summary?.match(/:\s*(.+)$/)?.[1];
-  if (!pathValue || event.tool !== "edit_file" && event.tool !== "write_file") return null;
-  const snapshot2 = getFileSnapshot(pathValue, ctx);
+  if (!pathValue || bare !== "edit_file" && bare !== "write_file") return null;
+  const snapshot2 = getFileSnapshot(pathValue, { ...ctx, runId: run.id });
   const before = snapshot2?.before ?? "";
   const after = snapshot2?.after ?? "";
   const changed = metadata?.changed !== false;
+  const previous = run.changedFiles.find((entry) => entry.path === pathValue);
   return {
-    changeId: `${run.id}-change-${run.changedFiles.length + 1}`,
+    changeId: previous?.changeId ?? `${run.id}-change-${run.changedFiles.length + 1}`,
     path: pathValue,
     changed,
     status: metadata?.status === "no_op" ? "no_op" : "applied_unverified",
-    beforeHash: typeof metadata?.beforeHash === "string" ? metadata.beforeHash : before ? import_node_crypto2.default.createHash("sha256").update(before, "utf8").digest("hex") : void 0,
+    existedBefore: snapshot2?.existedBefore ?? previous?.existedBefore ?? metadata?.existedBefore === true,
+    beforeHash: previous?.beforeHash ?? (typeof metadata?.beforeHash === "string" ? metadata.beforeHash : before ? import_node_crypto3.default.createHash("sha256").update(before, "utf8").digest("hex") : void 0),
     afterHash: typeof metadata?.afterHash === "string" ? metadata.afterHash : snapshot2?.afterHash,
     readBack: metadata?.readBack === true,
     addedLines: typeof metadata?.addedLines === "number" ? metadata.addedLines : void 0,
     removedLines: typeof metadata?.removedLines === "number" ? metadata.removedLines : void 0,
-    beforeContent: before.slice(0, 25e4),
-    afterContent: after.slice(0, 25e4),
-    diff: buildDiff(before, after)
+    beforeContent: previous?.beforeContent ?? before,
+    afterContent: after,
+    diff: buildDiff(previous?.beforeContent ?? before, after)
   };
 }
 function updateRunFromEvent(run, event) {
+  run.budget ??= { modelDecisions: 0, hostExecutions: 0, writeExecutions: 0, commandExecutions: 0 };
+  if (event.type === "model.decision") run.budget.modelDecisions++;
+  if (event.type === "tool.started" && event.origin === "host") {
+    run.budget.hostExecutions++;
+    const tool = bareToolName(event.tool ?? "");
+    if (tool === "write_file" || tool === "edit_file") run.budget.writeExecutions++;
+    if (tool === "run_command" || tool === "start_process" || tool === "read_process_log" || tool === "stop_process") run.budget.commandExecutions++;
+  }
   const summary = event.summary ?? event.tool ?? "";
   switch (event.type) {
     case "plan.created":
@@ -2371,7 +2707,7 @@ function updateRunFromEvent(run, event) {
         } else {
           run.nextAction = "\u5909\u66F4\u306A\u3057\uFF08no-op\uFF09\u3092\u8A18\u9332\u3057\u307E\u3057\u305F";
         }
-      } else if (event.tool === "start_process") {
+      } else if (bareToolName(event.tool ?? "") === "start_process") {
         try {
           const process2 = JSON.parse(event.output ?? "");
           const artifact = {
@@ -2401,8 +2737,8 @@ function updateRunFromEvent(run, event) {
       run.status = "failed";
       run.phase = "finalize";
       run.error = event.error;
-      run.currentStep = "\u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F";
-      run.nextAction = "\u5B8C\u4E86\u6E08\u307F\u306E\u5C65\u6B74\u304B\u3089\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044";
+      run.currentStep = `\u5B89\u5168\u4E0A\u9650\u3067\u505C\u6B62\u3057\u307E\u3057\u305F: ${event.error ?? "\u5B9F\u884C\u4E88\u7B97\u307E\u305F\u306F\u9032\u5C55\u6761\u4EF6\u3092\u6E80\u305F\u3057\u307E\u305B\u3093\u3067\u3057\u305F"}`;
+      run.nextAction = "\u5DEE\u5206\u30FB\u5B9F\u884C\u5C65\u6B74\u3092\u78BA\u8A8D\u3057\u3001\u5FC5\u8981\u306A\u3089\u6761\u4EF6\u3092\u5909\u3048\u3066\u518D\u8A66\u884C\u307E\u305F\u306F\u30ED\u30FC\u30EB\u30D0\u30C3\u30AF\u3057\u3066\u304F\u3060\u3055\u3044";
       run.checkpoint = { createdAt: Date.now(), reason: event.error ?? "\u53CD\u5FA9\u4E0A\u9650", messages: [], steps: [] };
       addRunEvent(run, { type: "checkpoint.created", message: "\u53CD\u5FA9\u4E0A\u9650\u6642\u70B9\u306E\u30C1\u30A7\u30C3\u30AF\u30DD\u30A4\u30F3\u30C8\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F", metadata: { checkpointAt: run.checkpoint.createdAt } });
       break;
@@ -2415,7 +2751,11 @@ function updateRunFromEvent(run, event) {
     output: event.output,
     approved: event.approved,
     durationMs: event.durationMs,
-    metadata: event.metadata
+    metadata: event.metadata,
+    origin: event.origin,
+    namespace: event.namespace,
+    authority: event.authority,
+    callId: event.callId
   });
 }
 function updateRunFromLog(run, text) {
@@ -2450,8 +2790,8 @@ function finalizeRun(run, result) {
     addRunEvent(run, { type: "run.canceled", message: "\u30E6\u30FC\u30B6\u30FC\u304C\u5B9F\u884C\u3092\u30AD\u30E3\u30F3\u30BB\u30EB\u3057\u307E\u3057\u305F" });
   } else if (result.aborted) {
     run.status = "failed";
-    run.currentStep = run.error ? "\u30A8\u30E9\u30FC\u3067\u7D42\u4E86\u3057\u307E\u3057\u305F" : "\u5B9F\u884C\u304C\u4E2D\u65AD\u3055\u308C\u307E\u3057\u305F";
-    run.nextAction = "\u5931\u6557\u7B87\u6240\u304B\u3089\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044";
+    run.currentStep = run.error ? `\u505C\u6B62\u7406\u7531: ${run.error}` : "\u5B9F\u884C\u304C\u4E2D\u65AD\u3055\u308C\u307E\u3057\u305F";
+    run.nextAction = run.error ? "\u5DEE\u5206\u30FB\u5B9F\u884C\u5C65\u6B74\u3092\u78BA\u8A8D\u3057\u3001\u5FC5\u8981\u306A\u3089\u6761\u4EF6\u3092\u5909\u3048\u3066\u518D\u8A66\u884C\u307E\u305F\u306F\u30ED\u30FC\u30EB\u30D0\u30C3\u30AF\u3057\u3066\u304F\u3060\u3055\u3044" : "\u5931\u6557\u7B87\u6240\u304B\u3089\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044";
     run.checkpoint = { createdAt: run.checkpoint?.createdAt ?? Date.now(), reason: run.checkpoint?.reason ?? (run.error ?? "\u5B9F\u884C\u304C\u4E2D\u65AD\u3055\u308C\u307E\u3057\u305F"), messages: result.messages ?? run.checkpoint?.messages ?? [], steps: result.checkpoint ?? run.checkpoint?.steps ?? [] };
     addRunEvent(run, { type: "run.failed", message: run.error ?? "\u5B9F\u884C\u304C\u4E2D\u65AD\u3055\u308C\u307E\u3057\u305F", metadata: { checkpointAt: run.checkpoint.createdAt } });
     addRunEvent(run, { type: "checkpoint.created", message: "\u5931\u6557\u6642\u70B9\u306E\u30C1\u30A7\u30C3\u30AF\u30DD\u30A4\u30F3\u30C8\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F", metadata: { checkpointAt: run.checkpoint.createdAt, reason: run.checkpoint.reason } });
@@ -2481,16 +2821,16 @@ function persistState() {
       sessions: [...sessions.values()],
       runs: [...runs.values()]
     };
-    import_node_fs3.default.mkdirSync(import_node_path4.default.dirname(persistencePath), { recursive: true });
-    import_node_fs3.default.writeFileSync(persistencePath, JSON.stringify(state), "utf8");
+    import_node_fs4.default.mkdirSync(import_node_path5.default.dirname(persistencePath), { recursive: true });
+    import_node_fs4.default.writeFileSync(persistencePath, JSON.stringify(state), "utf8");
   } catch (err) {
     console.warn(`[state] \u6C38\u7D9A\u5316\u3092\u30B9\u30AD\u30C3\u30D7\u3057\u307E\u3057\u305F: ${err.message}`);
   }
 }
 function restoreState() {
   try {
-    if (!import_node_fs3.default.existsSync(persistencePath)) return;
-    const raw = JSON.parse(import_node_fs3.default.readFileSync(persistencePath, "utf8"));
+    if (!import_node_fs4.default.existsSync(persistencePath)) return;
+    const raw = JSON.parse(import_node_fs4.default.readFileSync(persistencePath, "utf8"));
     if (!Array.isArray(raw.sessions) || !raw.sessions.length) return;
     sessions.clear();
     runs.clear();
@@ -2501,10 +2841,17 @@ function restoreState() {
     for (const rawRun of raw.runs ?? []) {
       const run = rawRun;
       if (!run.id || !run.sessionId) continue;
+      run.mode = run.mode === "chat" || run.mode === "research" || run.mode === "work" ? run.mode : "work";
+      run.capabilities = run.capabilities ?? { hostTools: run.mode === "work", nativeSearch: run.mode === "research", nativeOffice: false };
+      run.policy = run.policy ?? capabilityPolicy(cfg, run.mode);
+      run.budget = run.budget ?? { modelDecisions: 0, hostExecutions: 0, writeExecutions: 0, commandExecutions: 0 };
       run.plan = Array.isArray(run.plan) ? run.plan : DEFAULT_PLAN.map((step) => ({ ...step }));
       run.changedFiles = Array.isArray(run.changedFiles) ? run.changedFiles.map((change) => ({ ...change, changeId: change.changeId ?? `${run.id}-change-${Math.random().toString(36).slice(2, 7)}`, diff: Array.isArray(change.diff) ? change.diff : [] })) : [];
       run.artifacts = Array.isArray(run.artifacts) ? run.artifacts : [];
       run.events = Array.isArray(run.events) ? run.events : [];
+      run.auditEvents = Array.isArray(run.auditEvents) ? run.auditEvents : run.events.map((event) => ({ ...event }));
+      const maxSequence = (run.auditEvents ?? []).reduce((max, event) => Math.max(max, Number(event.sequence) || 0), 0);
+      run.nextSequence = Math.max(Number(run.nextSequence ?? 0), maxSequence + 1, 1);
       if (!run.verification || !Array.isArray(run.verification.checks) || run.verification.checks.length === 0) run.verification = { profile: "auto", checks: [{ id: "file-readback", label: "\u5909\u66F4\u5F8C\u30D5\u30A1\u30A4\u30EB\u306E\u518D\u8AAD\u8FBC", status: "pending" }, { id: "syntax-tests", label: "\u69CB\u6587\u30FB\u30C6\u30B9\u30C8", status: "pending" }, { id: "user-confirmation", label: "\u5B9F\u6A5F\u64CD\u4F5C\u30FB\u8AAD\u307F\u4E0A\u3052\u78BA\u8A8D", status: "todo" }], machinePassed: false, userConfirmed: false };
       run.pauseRequested = run.pauseRequested === true;
       run.resumeCount = Number(run.resumeCount ?? 0);
@@ -2515,7 +2862,12 @@ function restoreState() {
         run.error = "\u30B5\u30FC\u30D0\u30FC\u304C\u518D\u8D77\u52D5\u3057\u305F\u305F\u3081\u3001\u5B9F\u884C\u306F\u518D\u958B\u3055\u308C\u3066\u3044\u307E\u305B\u3093";
         run.endedAt = Date.now();
         run.events = Array.isArray(run.events) ? run.events : [];
-        run.events.push({ sequence: run.events.length + 1, type: "run.paused", at: Date.now(), message: run.error });
+        const sequence3 = run.nextSequence ?? (run.auditEvents ?? run.events).reduce((max, entry) => Math.max(max, entry.sequence), 0) + 1;
+        const event = { sequence: sequence3, type: "run.paused", at: Date.now(), message: run.error, eventId: `${run.id}-event-${sequence3}`, runId: run.id, stepId: "finalize", toolEventId: `${run.id}-event-${sequence3}`, origin: "orchestrator", namespace: "none", authority: "derived" };
+        run.nextSequence = sequence3 + 1;
+        run.auditEvents ??= [];
+        run.auditEvents.push(event);
+        run.events.push(event);
         recoveredRunId = run.id;
       }
       runs.set(run.id, run);
@@ -2534,16 +2886,17 @@ function makeRunIO(run, controller) {
       console.log(t);
       updateRunFromLog(run, t);
     },
-    askYesNo: async (question) => {
+    askYesNo: async (question, binding) => {
       const stepId = `${run.phase}-${Math.max(1, run.completedSteps + 1)}`;
       const approvalRequest = {
         question,
         runId: run.id,
         stepId,
-        toolName: run.currentStep.split(":")[0],
+        toolName: binding?.toolName ?? run.currentStep.split(":")[0],
         risk: "medium",
         scope: ctx.workspace,
-        expiresAt: Date.now() + 10 * 60 * 1e3
+        expiresAt: Date.now() + 10 * 60 * 1e3,
+        binding: { ...binding, runId: run.id }
       };
       const pending2 = requestApproval(approvalRequest);
       const snapshot2 = listApprovals().find((entry) => entry.runId === run.id && entry.question === question);
@@ -2577,21 +2930,22 @@ async function executeRun(run, session, input, mode) {
   run.currentStep = "\u4F5C\u696D\u8A08\u753B\u3092\u4F5C\u6210\u3057\u3066\u3044\u307E\u3059";
   run.nextAction = "\u6700\u521D\u306E\u8ABF\u67FB\u30B9\u30C6\u30C3\u30D7\u3092\u9078\u3093\u3067\u3044\u307E\u3059";
   addRunEvent(run, { type: "run.started", message: "Run\u3092\u5B9F\u884C\u3057\u3066\u3044\u307E\u3059" });
-  const effCfg = mode === "chat" ? { ...cfg, copilot: { ...cfg.copilot ?? {}, agentMode: false } } : cfg;
+  const effCfg = { ...cfg, turnMode: mode, copilot: { ...cfg.copilot ?? {}, agentMode: mode === "work" && (cfg.copilot?.agentMode ?? true) } };
   try {
-    const backend = getBackend();
+    const backend = getBackend(mode);
     const result = await runAgentTurn({
       cfg: effCfg,
       messages: session.messages,
       userInput: input,
-      ctx: { ...ctx, signal: controller.signal },
+      ctx: { ...ctx, runId: run.id, signal: controller.signal },
       io: makeRunIO(run, controller),
       backend
     });
     session.messages = result.messages;
+    if (result.research) run.research = result.research;
     finalizeRun(run, result);
     persistState();
-    return { reply: result.reply, aborted: result.aborted, ...result.paused ? { paused: true } : {}, logs: logLines.slice(startIdx) };
+    return { reply: result.reply, aborted: result.aborted, ...result.paused ? { paused: true } : {}, ...result.research ? { research: result.research } : {}, logs: logLines.slice(startIdx) };
   } catch (err) {
     const message = err.message;
     run.error = message;
@@ -2635,7 +2989,7 @@ var server = import_node_http2.default.createServer(async (req, res) => {
   if (req.method === "GET" && url.pathname === "/") {
     if (indexHtmlPath) {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-      res.end(import_node_fs3.default.readFileSync(indexHtmlPath));
+      res.end(import_node_fs4.default.readFileSync(indexHtmlPath));
     } else {
       res.writeHead(500);
       res.end("public/index.html \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
@@ -2643,7 +2997,7 @@ var server = import_node_http2.default.createServer(async (req, res) => {
     return;
   }
   if (req.method === "GET" && url.pathname === "/api/info") {
-    json(res, 200, { model: cfg.model || (cfg.provider ?? ""), provider: cfg.provider ?? "openai", workspace, project: import_node_path4.default.basename(workspace), version: "0.10.8", distribution: readDistributionState() });
+    json(res, 200, { model: cfg.model || (cfg.provider ?? ""), provider: cfg.provider ?? "openai", workspace, project: import_node_path5.default.basename(workspace), version: "0.10.8", distribution: readDistributionState() });
     return;
   }
   if (req.method === "GET" && url.pathname === "/api/distribution") {
@@ -2675,7 +3029,7 @@ var server = import_node_http2.default.createServer(async (req, res) => {
       json(res, 404, { error: "session not found" });
       return;
     }
-    const mode = body.mode === "chat" ? "chat" : "work";
+    const mode = body.mode === "chat" || body.mode === "research" || body.mode === "work" ? body.mode : "work";
     const run = createRun(session, input, mode);
     addRunEvent(run, { type: "run.created", message: `Run\u3092\u30AD\u30E5\u30FC\u3078\u8FFD\u52A0\u3057\u307E\u3057\u305F: ${run.title}` });
     persistState();
@@ -2818,7 +3172,7 @@ var server = import_node_http2.default.createServer(async (req, res) => {
     const restored = [];
     addRunEvent(run, { type: "rollback.started", message: `${targets.length}\u4EF6\u306E\u5909\u66F4\u3092\u30ED\u30FC\u30EB\u30D0\u30C3\u30AF\u3057\u307E\u3059`, metadata: { paths: targets.map((change) => change.path) } });
     try {
-      for (const change of targets) restored.push(await rollbackFileChange(change, ctx));
+      for (const change of targets) restored.push(await rollbackFileChange(change, { ...ctx, runId: run.id }));
     } catch (err) {
       addRunEvent(run, { type: "rollback.failed", message: err.message });
       json(res, 409, { error: err.message, run: runSnapshot(run) });
@@ -3086,7 +3440,7 @@ var server = import_node_http2.default.createServer(async (req, res) => {
     try {
       const b = JSON.parse(await readBody(req));
       input = String(b.message ?? "").trim();
-      if (b.mode === "chat") mode = "chat";
+      if (b.mode === "chat" || b.mode === "research" || b.mode === "work") mode = b.mode;
       requestedParentRunId = typeof b.parentRunId === "string" ? b.parentRunId : void 0;
     } catch {
     }
@@ -3131,10 +3485,23 @@ function verificationProfileFor(run, requested) {
   if (paths.some((p) => p.endsWith(".ps1"))) return "powershell";
   return "generic";
 }
+function realPathWithMissingTail2(abs) {
+  let cursor = abs;
+  const tail = [];
+  while (!import_node_fs4.default.existsSync(cursor)) {
+    const parent = import_node_path5.default.dirname(cursor);
+    if (parent === cursor) return abs;
+    tail.unshift(import_node_path5.default.basename(cursor));
+    cursor = parent;
+  }
+  return import_node_path5.default.resolve(import_node_fs4.default.realpathSync.native(cursor), ...tail);
+}
 function safeChangedPath(change) {
-  const abs = import_node_path4.default.resolve(workspace, change.path);
-  const relative = import_node_path4.default.relative(workspace, abs);
-  if (relative.startsWith("..") || import_node_path4.default.isAbsolute(relative)) throw new Error("\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u306E\u5909\u66F4\u3067\u3059");
+  const rootReal = realPathWithMissingTail2(import_node_path5.default.resolve(workspace));
+  const abs = import_node_path5.default.resolve(workspace, change.path);
+  const candidateReal = realPathWithMissingTail2(abs);
+  const relative = import_node_path5.default.relative(rootReal, candidateReal);
+  if (relative.startsWith("..") || import_node_path5.default.isAbsolute(relative)) throw new Error("\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u306E\u5909\u66F4\u3067\u3059");
   return abs;
 }
 async function performVerification(run, requested) {
@@ -3148,8 +3515,8 @@ async function performVerification(run, requested) {
     const check = checks[0];
     try {
       const abs = safeChangedPath(change);
-      const current = import_node_fs3.default.readFileSync(abs, "utf8");
-      const currentHash = import_node_crypto2.default.createHash("sha256").update(current, "utf8").digest("hex");
+      const current = import_node_fs4.default.readFileSync(abs, "utf8");
+      const currentHash = import_node_crypto3.default.createHash("sha256").update(current, "utf8").digest("hex");
       if (!change.afterHash || currentHash !== change.afterHash) {
         check.status = "fail";
         check.evidence = `${change.path}: \u5909\u66F4\u5F8C\u30CF\u30C3\u30B7\u30E5\u304C\u4E00\u81F4\u3057\u307E\u305B\u3093`;
@@ -3177,13 +3544,13 @@ async function performVerification(run, requested) {
       if (lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".cjs")) {
         await execFileAsync(process.execPath, ["--check", abs], { timeout: 15e3, windowsHide: true });
       } else if (lower.endsWith(".json")) {
-        JSON.parse(import_node_fs3.default.readFileSync(abs, "utf8"));
+        JSON.parse(import_node_fs4.default.readFileSync(abs, "utf8"));
       } else if (lower.endsWith(".html")) {
-        const text = import_node_fs3.default.readFileSync(abs, "utf8");
+        const text = import_node_fs4.default.readFileSync(abs, "utf8");
         if (!/<html[\s>]/i.test(text) || !/<\/html>/i.test(text)) throw new Error(`${change.path}: html\u306E\u30EB\u30FC\u30C8\u8981\u7D20\u304C\u4E0D\u5B8C\u5168\u3067\u3059`);
       } else if (lower.endsWith(".ts") || lower.endsWith(".tsx")) {
-        const tsc = import_node_path4.default.join(workspace, "node_modules", ".bin", process.platform === "win32" ? "tsc.cmd" : "tsc");
-        if (import_node_fs3.default.existsSync(tsc)) await execFileAsync(tsc, ["--noEmit", "--pretty", "false"], { cwd: workspace, timeout: 6e4, windowsHide: true });
+        const tsc = import_node_path5.default.join(workspace, "node_modules", ".bin", process.platform === "win32" ? "tsc.cmd" : "tsc");
+        if (import_node_fs4.default.existsSync(tsc)) await execFileAsync(tsc, ["--noEmit", "--pretty", "false"], { cwd: workspace, timeout: 6e4, windowsHide: true });
         else throw new Error("TypeScript\u30B3\u30F3\u30D1\u30A4\u30E9\u304C\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306B\u3042\u308A\u307E\u305B\u3093");
       } else if (lower.endsWith(".ps1")) {
         syntax.status = "todo";
@@ -3216,13 +3583,19 @@ function diagnosticForRun(run) {
       parentRunId: run.parentRunId,
       status: run.status,
       phase: run.phase,
+      mode: run.mode,
+      capabilities: run.capabilities,
+      policy: run.policy,
+      budget: run.budget,
+      research: run.research ? { researchId: run.research.researchId, question: run.research.question, sources: run.research.sources, retrievedAt: run.research.retrievedAt, contentHash: run.research.contentHash, claimsCount: run.research.claims.length } : void 0,
       startedAt: run.startedAt,
       updatedAt: run.updatedAt,
       endedAt: run.endedAt,
       error: run.error ? replaceWorkspace(run.error) : void 0,
       changedFiles: run.changedFiles.map((change) => ({ changeId: change.changeId, path: replaceWorkspace(change.path), status: change.status, addedLines: change.addedLines, removedLines: change.removedLines })),
       verification: run.verification,
-      events: run.events.map((event) => ({ sequence: event.sequence, type: event.type, at: event.at, tool: event.tool, summary: event.summary, message: replaceWorkspace(event.message).slice(0, 1e3), durationMs: event.durationMs }))
+      auditEventCount: run.auditEvents?.length ?? run.events.length,
+      events: (run.auditEvents ?? run.events).map((event) => ({ sequence: event.sequence, type: event.type, at: event.at, tool: event.tool, summary: event.summary, message: replaceWorkspace(event.message).slice(0, 1e3), durationMs: event.durationMs, origin: event.origin, namespace: event.namespace, authority: event.authority, callId: event.callId }))
     }
   };
 }

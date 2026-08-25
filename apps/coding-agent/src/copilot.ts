@@ -28,6 +28,7 @@ export interface CopilotSettings {
   displayMode: 'minimized' | 'foreground'
   endMarker: string
   agentMode: boolean
+  profileName?: string
   modelPriority: string[]
 }
 
@@ -48,6 +49,7 @@ export function resolveCopilotSettings(cfg: AgentConfig): CopilotSettings {
     displayMode: c.displayMode === 'foreground' ? 'foreground' : 'minimized',
     endMarker: c.endMarker ?? 'AGENT_END',
     agentMode: c.agentMode === true,
+    profileName: c.profileName,
     modelPriority: Array.isArray(c.modelPriority)
       ? c.modelPriority.filter((s) => s && s.trim())
       : ['GPT 5.6 Think Deeper', 'Opus', 'Think Deeper']
@@ -471,9 +473,10 @@ export class CopilotEdgeClient {
   private chooseEdgeProfile(): string {
     const root = path.join(process.env.APPDATA ?? process.env.USERPROFILE ?? '.', 'CompanyApps', 'coding-agent')
     fs.mkdirSync(root, { recursive: true })
-    const stable = path.join(root, 'edge-profile')
+    const suffix = (this.s.profileName ?? 'default').replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'default'
+    const stable = path.join(root, suffix === 'default' ? 'edge-profile' : 'edge-profile-' + suffix)
     if (!profileIsInUse(stable)) return stable
-    return fs.mkdtempSync(path.join(root, 'edge-profile-session-'))
+    return fs.mkdtempSync(path.join(root, 'edge-profile-' + suffix + '-session-'))
   }
 
   private async ensureEdge(): Promise<void> {

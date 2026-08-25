@@ -4,13 +4,13 @@ import { execFile } from 'node:child_process'
 import util from 'node:util'
 import fs from 'node:fs'
 import path from 'node:path'
-import { loadConfig, type AgentConfig } from './config'
-import { runAgentTurn, type AgentEvent, type AgentIO, type TextBackend } from './agent'
+import { capabilityPolicy, loadConfig, type AgentConfig, type CapabilityPolicy, type TurnMode } from './config'
+import { runAgentTurn, type AgentEvent, type AgentIO, type ResearchBundle, type TextBackend } from './agent'
 import { CopilotEdgeClient } from './copilot'
 import type { ChatMessage } from './llm'
-import { getFileSnapshot, rollbackFileChange, type ToolContext } from './tools'
+import { bareToolName, getFileSnapshot, rollbackFileChange, type ToolContext } from './tools'
 import { killAllManagedProcesses, listManagedProcesses, readManagedProcessLog, stopManagedProcess } from './processes'
-import { clearApprovals, getApprovalResolution, listApprovals, requestApproval, resolveApproval, type ApprovalRisk } from './approvals'
+import { clearApprovals, getApprovalResolution, listApprovals, requestApproval, resolveApproval, type ApprovalBinding, type ApprovalRisk } from './approvals'
 
 const PORT = Number(process.env.PORT ?? 3948)
 const execFileAsync = util.promisify(execFile)
@@ -71,6 +71,7 @@ interface RunChange {
   path: string
   changed: boolean
   status: 'no_op' | 'applied_unverified'
+  existedBefore?: boolean
   beforeHash?: string
   afterHash?: string
   readBack?: boolean
@@ -124,6 +125,7 @@ interface RunApproval {
   toolName?: string
   risk: ApprovalRisk
   scope: string
+  binding?: ApprovalBinding
   expiresAt: number
   approved?: boolean
   reason?: string
@@ -144,6 +146,10 @@ interface RunEvent {
   approved?: boolean
   durationMs?: number
   metadata?: Record<string, unknown> | null
+  origin?: 'host' | 'orchestrator' | 'copilot'
+  namespace?: 'app' | 'native' | 'none'
+  authority?: 'authoritative' | 'observed' | 'claimed' | 'derived'
+  callId?: string
 }
 
 interface RunData {
@@ -152,7 +158,11 @@ interface RunData {
   parentRunId?: string
   title: string
   request: string
-  mode: 'chat' | 'work'
+  mode: TurnMode
+  capabilities: { hostTools: boolean; nativeSearch: boolean; nativeOffice: boolean }
+  policy: CapabilityPolicy
+  budget: { modelDecisions: number; hostExecutions: number; writeExecutions: number; commandExecutions: number }
+  research?: ResearchBundle
   status: RunStatus
   phase: RunPhase
   currentStep: string
@@ -165,6 +175,9 @@ interface RunData {
   changedFiles: RunChange[]
   artifacts: RunArtifact[]
   events: RunEvent[]
+  auditEvents?: RunEvent[]
+  nextSequence?: number
+  auditEventCount?: number
   verification: RunVerification
   checkpoint?: RunCheckpoint
   cancelRequested: boolean
@@ -189,7 +202,7 @@ let activeId = ''
 let activeRunId: string | null = null
 let recoveredRunId: string | null = null
 const runControllers = new Map<string, AbortController>()
-let copilotBackend: TextBackend | null = null
+const copilotBackends = new Map<TurnMode, TextBackend>()
 let lastLogSeen = 0
 const logLines: string[] = []
 
@@ -207,10 +220,16 @@ function activeSession(): SessionData {
 
 newSession()
 
-function getBackend(): TextBackend | undefined {
+function getBackend(mode: TurnMode): TextBackend | undefined {
   if (cfg.provider !== 'copilot-edge') return undefined
-  if (!copilotBackend) copilotBackend = new CopilotEdgeClient(cfg)
-  return copilotBackend
+  const existing = copilotBackends.get(mode)
+  if (existing) return existing
+  const backend = new CopilotEdgeClient({
+    ...cfg,
+    copilot: { ...(cfg.copilot ?? {}), profileName: 'mode-' + mode }
+  })
+  copilotBackends.set(mode, backend)
+  return backend
 }
 
 function makeRunId(): string {
@@ -226,7 +245,7 @@ const DEFAULT_PLAN: PlanStep[] = [
   { id: 'confirm', title: '実機確認と完了を確定', status: 'pending' }
 ]
 
-function createRun(session: SessionData, request: string, mode: 'chat' | 'work', parentRunId?: string): RunData {
+function createRun(session: SessionData, request: string, mode: TurnMode, parentRunId?: string): RunData {
   const now = Date.now()
   const run: RunData = {
     id: makeRunId(),
@@ -235,6 +254,13 @@ function createRun(session: SessionData, request: string, mode: 'chat' | 'work',
     title: request.slice(0, 40) || '新しい実行',
     request,
     mode,
+    capabilities: {
+      hostTools: mode === 'work',
+      nativeSearch: mode === 'research',
+      nativeOffice: false
+    },
+    policy: capabilityPolicy(cfg, mode),
+    budget: { modelDecisions: 0, hostExecutions: 0, writeExecutions: 0, commandExecutions: 0 },
     status: 'queued',
     phase: 'request',
     currentStep: '依頼を受け付けました',
@@ -246,6 +272,8 @@ function createRun(session: SessionData, request: string, mode: 'chat' | 'work',
     changedFiles: [],
     artifacts: [],
     events: [],
+    auditEvents: [],
+    nextSequence: 1,
     verification: {
       profile: 'auto',
       checks: [
@@ -267,16 +295,22 @@ function createRun(session: SessionData, request: string, mode: 'chat' | 'work',
 
 function addRunEvent(run: RunData, event: Omit<RunEvent, 'sequence' | 'at'>): void {
   run.updatedAt = Date.now()
-  const sequence = run.events.length + 1
+  const sequence = run.nextSequence ?? ((run.auditEvents ?? run.events).reduce((max, entry) => Math.max(max, entry.sequence), 0) + 1)
+  run.nextSequence = sequence + 1
   const eventId = `${run.id}-event-${sequence}`
-  run.events.push({ ...event, eventId, runId: run.id, stepId: run.phase, toolEventId: eventId, sequence, at: run.updatedAt })
+  const nextEvent: RunEvent = { ...event, origin: event.origin ?? 'orchestrator', namespace: event.namespace ?? 'none', authority: event.authority ?? 'derived', eventId, runId: run.id, stepId: run.phase, toolEventId: eventId, sequence, at: run.updatedAt }
+  run.auditEvents ??= []
+  run.auditEvents.push(nextEvent)
+  run.events.push(nextEvent)
   if (run.events.length > 200) run.events.splice(0, run.events.length - 200)
   persistState()
 }
 
 function runSnapshot(run: RunData): RunData {
+  const { auditEvents: _auditEvents, nextSequence: _nextSequence, ...publicRun } = run
   return {
-    ...run,
+    ...publicRun,
+    auditEventCount: run.auditEvents?.length ?? run.events.length,
     plan: run.plan.map((step) => ({ ...step })),
     events: run.events.slice(-120).map((event) => ({ ...event })),
     changedFiles: run.changedFiles.map((change) => ({ ...change, diff: change.diff.map((line) => ({ ...line })) })),
@@ -287,12 +321,12 @@ function runSnapshot(run: RunData): RunData {
 }
 
 function phaseForTool(tool?: string): RunPhase {
-  if (tool === 'read_file' || tool === 'list_files' || tool === 'search_files') return 'inspect'
-  if (tool === 'write_file' || tool === 'edit_file') return 'edit'
-  if (tool === 'start_process' || tool === 'read_process_log' || tool === 'stop_process' || tool === 'run_command') return 'execute'
+  const bare = bareToolName(tool ?? '')
+  if (bare === 'read_file' || bare === 'list_files' || bare === 'search_files' || bare === 'get_weather') return 'inspect'
+  if (bare === 'write_file' || bare === 'edit_file') return 'edit'
+  if (bare === 'start_process' || bare === 'read_process_log' || bare === 'stop_process' || bare === 'run_command' || bare === 'list_processes') return 'execute'
   return 'plan'
 }
-
 function buildDiff(before: string, after: string, maxLines = 600): DiffLine[] {
   const b = before.split(/\r?\n/)
   const a = after.split(/\r?\n/)
@@ -314,29 +348,39 @@ function buildDiff(before: string, after: string, maxLines = 600): DiffLine[] {
 
 function changeFromEvent(run: RunData, event: AgentEvent): RunChange | null {
   const metadata = event.metadata
+  const bare = bareToolName(event.tool ?? '')
   const pathValue = typeof metadata?.path === 'string' ? metadata.path : event.summary?.match(/:\s*(.+)$/)?.[1]
-  if (!pathValue || (event.tool !== 'edit_file' && event.tool !== 'write_file')) return null
-  const snapshot = getFileSnapshot(pathValue, ctx)
+  if (!pathValue || (bare !== 'edit_file' && bare !== 'write_file')) return null
+  const snapshot = getFileSnapshot(pathValue, { ...ctx, runId: run.id })
   const before = snapshot?.before ?? ''
   const after = snapshot?.after ?? ''
   const changed = metadata?.changed !== false
+  const previous = run.changedFiles.find((entry) => entry.path === pathValue)
   return {
-    changeId: `${run.id}-change-${run.changedFiles.length + 1}`,
+    changeId: previous?.changeId ?? `${run.id}-change-${run.changedFiles.length + 1}`,
     path: pathValue,
     changed,
     status: metadata?.status === 'no_op' ? 'no_op' : 'applied_unverified',
-    beforeHash: typeof metadata?.beforeHash === 'string' ? metadata.beforeHash : (before ? crypto.createHash('sha256').update(before, 'utf8').digest('hex') : undefined),
+    existedBefore: snapshot?.existedBefore ?? previous?.existedBefore ?? metadata?.existedBefore === true,
+    beforeHash: previous?.beforeHash ?? (typeof metadata?.beforeHash === 'string' ? metadata.beforeHash : (before ? crypto.createHash('sha256').update(before, 'utf8').digest('hex') : undefined)),
     afterHash: typeof metadata?.afterHash === 'string' ? metadata.afterHash : snapshot?.afterHash,
     readBack: metadata?.readBack === true,
     addedLines: typeof metadata?.addedLines === 'number' ? metadata.addedLines : undefined,
     removedLines: typeof metadata?.removedLines === 'number' ? metadata.removedLines : undefined,
-    beforeContent: before.slice(0, 250000),
-    afterContent: after.slice(0, 250000),
-    diff: buildDiff(before, after)
+    beforeContent: previous?.beforeContent ?? before,
+    afterContent: after,
+    diff: buildDiff(previous?.beforeContent ?? before, after)
   }
 }
-
 function updateRunFromEvent(run: RunData, event: AgentEvent): void {
+  run.budget ??= { modelDecisions: 0, hostExecutions: 0, writeExecutions: 0, commandExecutions: 0 }
+  if (event.type === 'model.decision') run.budget.modelDecisions++
+  if (event.type === 'tool.started' && event.origin === 'host') {
+    run.budget.hostExecutions++
+    const tool = bareToolName(event.tool ?? '')
+    if (tool === 'write_file' || tool === 'edit_file') run.budget.writeExecutions++
+    if (tool === 'run_command' || tool === 'start_process' || tool === 'read_process_log' || tool === 'stop_process') run.budget.commandExecutions++
+  }
   const summary = event.summary ?? event.tool ?? ''
   switch (event.type) {
     case 'plan.created':
@@ -432,7 +476,7 @@ function updateRunFromEvent(run: RunData, event: AgentEvent): void {
         } else {
           run.nextAction = '変更なし（no-op）を記録しました'
         }
-      } else if (event.tool === 'start_process') {
+      } else if (bareToolName(event.tool ?? '') === 'start_process') {
         try {
           const process = JSON.parse(event.output ?? '') as { id?: string; url?: string; label?: string }
           const artifact: RunArtifact = {
@@ -461,8 +505,8 @@ function updateRunFromEvent(run: RunData, event: AgentEvent): void {
       run.status = 'failed'
       run.phase = 'finalize'
       run.error = event.error
-      run.currentStep = '最大反復回数に達しました'
-      run.nextAction = '完了済みの履歴から再試行してください'
+      run.currentStep = `安全上限で停止しました: ${event.error ?? '実行予算または進展条件を満たしませんでした'}`
+      run.nextAction = '差分・実行履歴を確認し、必要なら条件を変えて再試行またはロールバックしてください'
       run.checkpoint = { createdAt: Date.now(), reason: event.error ?? '反復上限', messages: [], steps: [] }
       addRunEvent(run, { type: 'checkpoint.created', message: '反復上限時点のチェックポイントを保存しました', metadata: { checkpointAt: run.checkpoint.createdAt } })
       break
@@ -475,7 +519,11 @@ function updateRunFromEvent(run: RunData, event: AgentEvent): void {
     output: event.output,
     approved: event.approved,
     durationMs: event.durationMs,
-    metadata: event.metadata
+    metadata: event.metadata,
+    origin: event.origin,
+    namespace: event.namespace,
+    authority: event.authority,
+    callId: event.callId
   })
 }
 
@@ -512,8 +560,8 @@ function finalizeRun(run: RunData, result: { reply: string; aborted: boolean; pa
     addRunEvent(run, { type: 'run.canceled', message: 'ユーザーが実行をキャンセルしました' })
   } else if (result.aborted) {
     run.status = 'failed'
-    run.currentStep = run.error ? 'エラーで終了しました' : '実行が中断されました'
-    run.nextAction = '失敗箇所から再試行してください'
+    run.currentStep = run.error ? `停止理由: ${run.error}` : '実行が中断されました'
+    run.nextAction = run.error ? '差分・実行履歴を確認し、必要なら条件を変えて再試行またはロールバックしてください' : '失敗箇所から再試行してください'
     run.checkpoint = { createdAt: run.checkpoint?.createdAt ?? Date.now(), reason: run.checkpoint?.reason ?? (run.error ?? '実行が中断されました'), messages: result.messages ?? run.checkpoint?.messages ?? [], steps: result.checkpoint ?? run.checkpoint?.steps ?? [] }
     addRunEvent(run, { type: 'run.failed', message: run.error ?? '実行が中断されました', metadata: { checkpointAt: run.checkpoint.createdAt } })
     addRunEvent(run, { type: 'checkpoint.created', message: '失敗時点のチェックポイントを保存しました', metadata: { checkpointAt: run.checkpoint.createdAt, reason: run.checkpoint.reason } })
@@ -565,10 +613,17 @@ function restoreState(): void {
     for (const rawRun of raw.runs ?? []) {
       const run = rawRun as RunData
       if (!run.id || !run.sessionId) continue
+      run.mode = run.mode === 'chat' || run.mode === 'research' || run.mode === 'work' ? run.mode : 'work'
+      run.capabilities = run.capabilities ?? { hostTools: run.mode === 'work', nativeSearch: run.mode === 'research', nativeOffice: false }
+      run.policy = run.policy ?? capabilityPolicy(cfg, run.mode)
+      run.budget = run.budget ?? { modelDecisions: 0, hostExecutions: 0, writeExecutions: 0, commandExecutions: 0 }
       run.plan = Array.isArray(run.plan) ? run.plan : DEFAULT_PLAN.map((step) => ({ ...step }))
       run.changedFiles = Array.isArray(run.changedFiles) ? run.changedFiles.map((change) => ({ ...change, changeId: change.changeId ?? `${run.id}-change-${Math.random().toString(36).slice(2, 7)}`, diff: Array.isArray(change.diff) ? change.diff : [] })) : []
       run.artifacts = Array.isArray(run.artifacts) ? run.artifacts : []
       run.events = Array.isArray(run.events) ? run.events : []
+      run.auditEvents = Array.isArray(run.auditEvents) ? run.auditEvents : run.events.map((event) => ({ ...event }))
+      const maxSequence = (run.auditEvents ?? []).reduce((max, event) => Math.max(max, Number(event.sequence) || 0), 0)
+      run.nextSequence = Math.max(Number(run.nextSequence ?? 0), maxSequence + 1, 1)
       if (!run.verification || !Array.isArray(run.verification.checks) || run.verification.checks.length === 0) run.verification = { profile: 'auto', checks: [{ id: 'file-readback', label: '変更後ファイルの再読込', status: 'pending' }, { id: 'syntax-tests', label: '構文・テスト', status: 'pending' }, { id: 'user-confirmation', label: '実機操作・読み上げ確認', status: 'todo' }], machinePassed: false, userConfirmed: false }
       run.pauseRequested = run.pauseRequested === true
       run.resumeCount = Number(run.resumeCount ?? 0)
@@ -579,7 +634,12 @@ function restoreState(): void {
         run.error = 'サーバーが再起動したため、実行は再開されていません'
         run.endedAt = Date.now()
         run.events = Array.isArray(run.events) ? run.events : []
-        run.events.push({ sequence: run.events.length + 1, type: 'run.paused', at: Date.now(), message: run.error })
+        const sequence = run.nextSequence ?? ((run.auditEvents ?? run.events).reduce((max, entry) => Math.max(max, entry.sequence), 0) + 1)
+        const event: RunEvent = { sequence, type: 'run.paused', at: Date.now(), message: run.error, eventId: `${run.id}-event-${sequence}`, runId: run.id, stepId: 'finalize', toolEventId: `${run.id}-event-${sequence}`, origin: 'orchestrator', namespace: 'none', authority: 'derived' }
+        run.nextSequence = sequence + 1
+        run.auditEvents ??= []
+        run.auditEvents.push(event)
+        run.events.push(event)
         recoveredRunId = run.id
       }
       runs.set(run.id, run)
@@ -598,16 +658,17 @@ function makeRunIO(run: RunData, controller: AbortController): AgentIO {
       console.log(t)
       updateRunFromLog(run, t)
     },
-    askYesNo: async (question) => {
+    askYesNo: async (question, binding) => {
       const stepId = `${run.phase}-${Math.max(1, run.completedSteps + 1)}`
       const approvalRequest = {
         question,
         runId: run.id,
         stepId,
-        toolName: run.currentStep.split(':')[0],
+        toolName: binding?.toolName ?? run.currentStep.split(':')[0],
         risk: 'medium' as ApprovalRisk,
         scope: ctx.workspace,
-        expiresAt: Date.now() + 10 * 60 * 1000
+        expiresAt: Date.now() + 10 * 60 * 1000,
+        binding: { ...binding, runId: run.id }
       }
       const pending = requestApproval(approvalRequest)
       const snapshot = listApprovals().find((entry) => entry.runId === run.id && entry.question === question)
@@ -632,7 +693,7 @@ function makeRunIO(run: RunData, controller: AbortController): AgentIO {
   }
 }
 
-async function executeRun(run: RunData, session: SessionData, input: string, mode: 'chat' | 'work'): Promise<{ reply: string; aborted: boolean; paused?: boolean; logs: string[] }> {
+async function executeRun(run: RunData, session: SessionData, input: string, mode: TurnMode): Promise<{ reply: string; aborted: boolean; paused?: boolean; logs: string[]; research?: ResearchBundle }> {
   const startIdx = logLines.length
   const controller = new AbortController()
   runControllers.set(run.id, controller)
@@ -642,21 +703,22 @@ async function executeRun(run: RunData, session: SessionData, input: string, mod
   run.currentStep = '作業計画を作成しています'
   run.nextAction = '最初の調査ステップを選んでいます'
   addRunEvent(run, { type: 'run.started', message: 'Runを実行しています' })
-  const effCfg: AgentConfig = mode === 'chat' ? { ...cfg, copilot: { ...(cfg.copilot ?? {}), agentMode: false } } : cfg
+  const effCfg: AgentConfig = { ...cfg, turnMode: mode, copilot: { ...(cfg.copilot ?? {}), agentMode: mode === 'work' && (cfg.copilot?.agentMode ?? true) } }
   try {
-    const backend = getBackend()
+    const backend = getBackend(mode)
     const result = await runAgentTurn({
       cfg: effCfg,
       messages: session.messages,
       userInput: input,
-      ctx: { ...ctx, signal: controller.signal },
+      ctx: { ...ctx, runId: run.id, signal: controller.signal },
       io: makeRunIO(run, controller),
       backend
     })
     session.messages = result.messages
+    if (result.research) run.research = result.research
     finalizeRun(run, result)
     persistState()
-    return { reply: result.reply, aborted: result.aborted, ...(result.paused ? { paused: true } : {}), logs: logLines.slice(startIdx) }
+    return { reply: result.reply, aborted: result.aborted, ...(result.paused ? { paused: true } : {}), ...(result.research ? { research: result.research } : {}), logs: logLines.slice(startIdx) }
   } catch (err) {
     const message = (err as Error).message
     run.error = message
@@ -737,7 +799,7 @@ const server = http.createServer(async (req, res) => {
     if (!input) { json(res, 400, { error: 'message が空です' }); return }
     const session = body.sessionId ? sessions.get(body.sessionId) : activeSession()
     if (!session) { json(res, 404, { error: 'session not found' }); return }
-    const mode = body.mode === 'chat' ? 'chat' : 'work'
+    const mode: TurnMode = body.mode === 'chat' || body.mode === 'research' || body.mode === 'work' ? body.mode : 'work'
     const run = createRun(session, input, mode)
     addRunEvent(run, { type: 'run.created', message: `Runをキューへ追加しました: ${run.title}` })
     persistState()
@@ -850,7 +912,7 @@ const server = http.createServer(async (req, res) => {
     const restored: Array<{ path: string; status: string; hash: string }> = []
     addRunEvent(run, { type: 'rollback.started', message: `${targets.length}件の変更をロールバックします`, metadata: { paths: targets.map((change) => change.path) } })
     try {
-      for (const change of targets) restored.push(await rollbackFileChange(change, ctx))
+      for (const change of targets) restored.push(await rollbackFileChange(change, { ...ctx, runId: run.id }))
     } catch (err) {
       addRunEvent(run, { type: 'rollback.failed', message: (err as Error).message })
       json(res, 409, { error: (err as Error).message, run: runSnapshot(run) })
@@ -1070,12 +1132,12 @@ const server = http.createServer(async (req, res) => {
       return
     }
     let input = ''
-    let mode: 'chat' | 'work' = 'work'
+    let mode: TurnMode = 'work'
     let requestedParentRunId: string | undefined
     try {
       const b = JSON.parse(await readBody(req)) as { message?: string; mode?: string; parentRunId?: string }
       input = String(b.message ?? '').trim()
-      if (b.mode === 'chat') mode = 'chat'
+      if (b.mode === 'chat' || b.mode === 'research' || b.mode === 'work') mode = b.mode
       requestedParentRunId = typeof b.parentRunId === 'string' ? b.parentRunId : undefined
     } catch {}
     if (!input) { json(res, 400, { error: 'message が空です' }); return }
@@ -1116,9 +1178,23 @@ function verificationProfileFor(run: RunData, requested?: string): RunVerificati
   return 'generic'
 }
 
+function realPathWithMissingTail(abs: string): string {
+  let cursor = abs
+  const tail: string[] = []
+  while (!fs.existsSync(cursor)) {
+    const parent = path.dirname(cursor)
+    if (parent === cursor) return abs
+    tail.unshift(path.basename(cursor))
+    cursor = parent
+  }
+  return path.resolve(fs.realpathSync.native(cursor), ...tail)
+}
+
 function safeChangedPath(change: RunChange): string {
+  const rootReal = realPathWithMissingTail(path.resolve(workspace))
   const abs = path.resolve(workspace, change.path)
-  const relative = path.relative(workspace, abs)
+  const candidateReal = realPathWithMissingTail(abs)
+  const relative = path.relative(rootReal, candidateReal)
   if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('ワークスペース外の変更です')
   return abs
 }
@@ -1204,13 +1280,19 @@ function diagnosticForRun(run: RunData): Record<string, unknown> {
       parentRunId: run.parentRunId,
       status: run.status,
       phase: run.phase,
+      mode: run.mode,
+      capabilities: run.capabilities,
+      policy: run.policy,
+      budget: run.budget,
+      research: run.research ? { researchId: run.research.researchId, question: run.research.question, sources: run.research.sources, retrievedAt: run.research.retrievedAt, contentHash: run.research.contentHash, claimsCount: run.research.claims.length } : undefined,
       startedAt: run.startedAt,
       updatedAt: run.updatedAt,
       endedAt: run.endedAt,
       error: run.error ? replaceWorkspace(run.error) : undefined,
       changedFiles: run.changedFiles.map((change) => ({ changeId: change.changeId, path: replaceWorkspace(change.path), status: change.status, addedLines: change.addedLines, removedLines: change.removedLines })),
       verification: run.verification,
-      events: run.events.map((event) => ({ sequence: event.sequence, type: event.type, at: event.at, tool: event.tool, summary: event.summary, message: replaceWorkspace(event.message).slice(0, 1000), durationMs: event.durationMs }))
+      auditEventCount: run.auditEvents?.length ?? run.events.length,
+      events: (run.auditEvents ?? run.events).map((event) => ({ sequence: event.sequence, type: event.type, at: event.at, tool: event.tool, summary: event.summary, message: replaceWorkspace(event.message).slice(0, 1000), durationMs: event.durationMs, origin: event.origin, namespace: event.namespace, authority: event.authority, callId: event.callId }))
     }
   }
 }

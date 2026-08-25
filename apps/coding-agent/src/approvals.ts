@@ -1,5 +1,17 @@
 export type ApprovalRisk = 'low' | 'medium' | 'high'
 
+export interface ApprovalBinding {
+  runId?: string
+  callId?: string
+  toolName?: string
+  argsHash?: string
+  path?: string
+  beforeHash?: string
+  existedBefore?: boolean
+  command?: string
+  network?: boolean
+}
+
 export interface ApprovalRequest {
   question: string
   runId?: string
@@ -8,6 +20,7 @@ export interface ApprovalRequest {
   risk?: ApprovalRisk
   scope?: string
   expiresAt?: number
+  binding?: ApprovalBinding
 }
 
 export interface ApprovalSnapshot extends ApprovalRequest {
