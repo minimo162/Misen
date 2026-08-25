@@ -9,6 +9,7 @@ import { capabilityPolicy, type AgentConfig } from '../src/config'
 import type { ChatMessage } from '../src/llm'
 import {
   COPILOT_CLICK_COPY_JS,
+  isResponseCopyControl,
   COPILOT_SCREEN_STATE_JS,
   CopilotEdgeClient,
   assertResponseDeadline,
@@ -710,13 +711,38 @@ async function testCopilotResponseCompletion(): Promise<void> {
   assert.strictEqual(isStopGenerationControl({ label: '応答の生成を停止する', selector: '[aria-label*="停止"]' }), true)
   assert.strictEqual(isStopGenerationControl({ label: 'Stop generating', selector: '[aria-label*="Stop"]' }), true)
   assert.strictEqual(isStopGenerationControl({ label: 'コピー', selector: 'button' }), false)
-  for (const required of ['shadowRoot', 'contentDocument', 'stopGeneratingButton', 'stop-button', 'fai-SendButton__stopBackground']) {
+  const responseCopy = { label: '応答のコピー', testId: 'CopyButtonTestId', inResponseToolbar: true, inCodeBlock: false, disabled: false, ariaDisabled: false }
+  const codeCopy = { label: 'コードをコピー', testId: 'CodeCopyButtonTestId', inResponseToolbar: false, inCodeBlock: true, disabled: false, ariaDisabled: false }
+  assert.strictEqual(isResponseCopyControl(responseCopy), true)
+  assert.strictEqual(isResponseCopyControl(codeCopy), false)
+  assert.strictEqual(isResponseCopyControl({ ...responseCopy, testId: '', label: 'Copy response' }), true)
+  assert.strictEqual(isResponseCopyControl({ ...responseCopy, testId: '', label: 'Copy', inResponseToolbar: true }), true)
+  assert.strictEqual(isResponseCopyControl({ ...responseCopy, disabled: true }), false)
+  const latestWithCodeCopyOnly = selectLatestResponseCandidate([
+    { text: 'old', bottom: 100, order: 0, copyEnabled: isResponseCopyControl(responseCopy) },
+    { text: 'latest', bottom: 200, order: 1, copyEnabled: isResponseCopyControl(codeCopy) }
+  ])
+  assert.strictEqual(latestWithCodeCopyOnly?.text, 'latest')
+  assert.strictEqual(latestWithCodeCopyOnly?.copyEnabled, false)
+  const latestWithResponseCopy = selectLatestResponseCandidate([
+    { text: 'old', bottom: 100, order: 0, copyEnabled: isResponseCopyControl(responseCopy) },
+    { text: 'latest', bottom: 200, order: 1, copyEnabled: isResponseCopyControl(responseCopy) }
+  ])
+  assert.strictEqual(latestWithResponseCopy?.copyEnabled, true)
+  for (const required of ['shadowRoot', 'contentDocument', 'stopGeneratingButton', 'stop-button', 'fai-SendButton__stopBackground', '[role="article"][class*="CopilotMessage" i]', '[data-testid="copilot-message-div"]']) {
     assert.ok(COPILOT_SCREEN_STATE_JS.includes(required), `screen-state detector missing ${required}`)
+    if (required.includes('CopilotMessage') || required.includes('copilot-message-div')) {
+      assert.ok(COPILOT_CLICK_COPY_JS.includes(required), `copy detector missing ${required}`)
+    }
   }
   new Function('document', 'window', `return ${COPILOT_SCREEN_STATE_JS}`)
   new Function('document', 'window', `return ${COPILOT_CLICK_COPY_JS}`)
   assert.ok(COPILOT_CLICK_COPY_JS.includes('scope=latest'))
   assert.ok(COPILOT_CLICK_COPY_JS.includes('others.length>0'))
+  for (const required of ['CopyButtonTestId', 'CopyButtonContainerTestId', 'pre,code', 'copy\\s*(?:response|answer)']) {
+    assert.ok(COPILOT_SCREEN_STATE_JS.includes(required), `screen-state response-copy detector missing ${required}`)
+    assert.ok(COPILOT_CLICK_COPY_JS.includes(required), `click response-copy detector missing ${required}`)
+  }
 
   const deadlineClient = new CopilotEdgeClient({
     baseURL: '',

@@ -6500,6 +6500,12 @@ function isStopGenerationControl(candidate) {
   const semantic = /stop\s*(?:generating|response)|cancel\s*(?:generation|response)|生成を停止|応答を停止|停止する/i.test(candidate.label);
   return structural || semantic;
 }
+function isResponseCopyControl(candidate) {
+  if (candidate.disabled || candidate.ariaDisabled || candidate.inCodeBlock) return false;
+  if (/^CopyButtonTestId$/i.test(candidate.testId)) return true;
+  if (/(?:応答|回答).{0,8}コピー|コピー.{0,8}(?:応答|回答)|copy\s*(?:response|answer)|(?:response|answer)\s*copy/i.test(candidate.label)) return true;
+  return candidate.inResponseToolbar && /^(?:コピー|copy)$/i.test(candidate.label.trim());
+}
 function updateResponseCompletionState(previous, sample) {
   if (sample.generating || !sample.copyEnabled || sample.textLength <= 0) {
     return { state: { stableLength: null, stableSinceMs: null }, ready: false };
@@ -6556,12 +6562,12 @@ var COPILOT_SCREEN_STATE_JS = `(() => {
   for (const d of __docs) { input = sels.map(s => ({ s, el: d.querySelector(s) })).find(x => __vis(x.el)); if (input) break; }
   const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button,[role="button"],a')));
   const responseSelectors = ['[data-testid="markdown-reply"]','[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
-  const responseRootSelectors = ['[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
+  const responseRootSelectors = ['[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][class*="CopilotMessage" i]','[data-testid="copilot-message-div"]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
   const responseSelectorText = responseSelectors.join(',');const responseRootSelectorText=responseRootSelectors.join(',');
   const responseRoot = node => {try{return node.closest(responseRootSelectorText)||node;}catch(e){return node;}};
   const topBottom = node => {const rect=node.getBoundingClientRect();let bottom=Number(rect.bottom)||0;let win=node.ownerDocument&&node.ownerDocument.defaultView;try{while(win&&win!==win.parent&&win.frameElement){bottom+=win.frameElement.getBoundingClientRect().top;win=win.parent;}}catch(e){}return bottom;};
   const controlLabel = el => [el.getAttribute('aria-label'),el.title,el.getAttribute('data-testid'),el.getAttribute('data-automation-id'),el.id,el.className,el.innerText,el.textContent].filter(Boolean).join(' ').trim();
-  const enabledCopy = el => __vis(el) && /\u30B3\u30D4\u30FC|copy/i.test(controlLabel(el)) && !el.disabled && el.getAttribute('aria-disabled') !== 'true';
+  const enabledCopy = el => {const label=[el.getAttribute('aria-label'),el.title,el.innerText,el.textContent].filter(Boolean).join(' ').trim();const testId=el.getAttribute('data-testid')||'';let inCode=false,inToolbar=false;try{inCode=!!el.closest('pre,code,[data-testid*="code" i]');inToolbar=!!el.closest('[role="toolbar"],.fai-CopilotMessage__actions,[data-testid="CopyButtonContainerTestId"]');}catch(e){}const identity=/^CopyButtonTestId$/i.test(testId)||/(?:\u5FDC\u7B54|\u56DE\u7B54).{0,8}\u30B3\u30D4\u30FC|\u30B3\u30D4\u30FC.{0,8}(?:\u5FDC\u7B54|\u56DE\u7B54)|copy\\s*(?:response|answer)|(?:response|answer)\\s*copy/i.test(label)||(inToolbar&&/^(?:\u30B3\u30D4\u30FC|copy)$/i.test(label));return __vis(el)&&!inCode&&identity&&!el.disabled&&el.getAttribute('aria-disabled')!=='true';};
   const copyForResponse = sourceNode => {
     const ownRoot=responseRoot(sourceNode);let scope=ownRoot;
     for(let depth=0;scope&&depth<6;depth++){
@@ -6722,12 +6728,12 @@ var COPILOT_CLICK_COPY_JS = `(() => {
   ${VISIBLE_JS}
   ${DOCS_JS}
   const responseSelectors=['[data-testid="markdown-reply"]','[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
-  const responseRootSelectors=['[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
+  const responseRootSelectors=['[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][class*="CopilotMessage" i]','[data-testid="copilot-message-div"]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
   const responseSelectorText=responseSelectors.join(',');const responseRootSelectorText=responseRootSelectors.join(',');
   const responseRoot=node=>{try{return node.closest(responseRootSelectorText)||node;}catch(e){return node;}};
   const topBottom=node=>{const rect=node.getBoundingClientRect();let bottom=Number(rect.bottom)||0;let win=node.ownerDocument&&node.ownerDocument.defaultView;try{while(win&&win!==win.parent&&win.frameElement){bottom+=win.frameElement.getBoundingClientRect().top;win=win.parent;}}catch(e){}return bottom;};
   const labelOf=el=>[el.getAttribute('aria-label'),el.title,el.getAttribute('data-testid'),el.getAttribute('data-automation-id'),el.id,el.className,el.innerText,el.textContent].filter(Boolean).join(' ').trim();
-  const enabledCopy=el=>__vis(el)&&/\u30B3\u30D4\u30FC|copy/i.test(labelOf(el))&&!el.disabled&&el.getAttribute('aria-disabled')!=='true';
+  const enabledCopy=el=>{const label=[el.getAttribute('aria-label'),el.title,el.innerText,el.textContent].filter(Boolean).join(' ').trim();const testId=el.getAttribute('data-testid')||'';let inCode=false,inToolbar=false;try{inCode=!!el.closest('pre,code,[data-testid*="code" i]');inToolbar=!!el.closest('[role="toolbar"],.fai-CopilotMessage__actions,[data-testid="CopyButtonContainerTestId"]');}catch(e){}const identity=/^CopyButtonTestId$/i.test(testId)||/(?:\u5FDC\u7B54|\u56DE\u7B54).{0,8}\u30B3\u30D4\u30FC|\u30B3\u30D4\u30FC.{0,8}(?:\u5FDC\u7B54|\u56DE\u7B54)|copy\\s*(?:response|answer)|(?:response|answer)\\s*copy/i.test(label)||(inToolbar&&/^(?:\u30B3\u30D4\u30FC|copy)$/i.test(label));return __vis(el)&&!inCode&&identity&&!el.disabled&&el.getAttribute('aria-disabled')!=='true';};
   const responses=[];const seenResponses=new Set();let order=0;
   for(const d of __docs)for(const selector of responseSelectors){let nodes=[];try{nodes=Array.from(d.querySelectorAll(selector));}catch(e){}for(const node of nodes){const root=responseRoot(node);if(seenResponses.has(root)||!__vis(node))continue;const text=((node.innerText||'')||(node.textContent||'')).trim();if(!text)continue;seenResponses.add(root);responses.push({node:root,bottom:topBottom(root),order:order++});}}
   responses.sort((a,b)=>(a.bottom-b.bottom)||(a.order-b.order));
@@ -8091,13 +8097,38 @@ async function testCopilotResponseCompletion() {
   import_node_assert.default.strictEqual(isStopGenerationControl({ label: "\u5FDC\u7B54\u306E\u751F\u6210\u3092\u505C\u6B62\u3059\u308B", selector: '[aria-label*="\u505C\u6B62"]' }), true);
   import_node_assert.default.strictEqual(isStopGenerationControl({ label: "Stop generating", selector: '[aria-label*="Stop"]' }), true);
   import_node_assert.default.strictEqual(isStopGenerationControl({ label: "\u30B3\u30D4\u30FC", selector: "button" }), false);
-  for (const required of ["shadowRoot", "contentDocument", "stopGeneratingButton", "stop-button", "fai-SendButton__stopBackground"]) {
+  const responseCopy = { label: "\u5FDC\u7B54\u306E\u30B3\u30D4\u30FC", testId: "CopyButtonTestId", inResponseToolbar: true, inCodeBlock: false, disabled: false, ariaDisabled: false };
+  const codeCopy = { label: "\u30B3\u30FC\u30C9\u3092\u30B3\u30D4\u30FC", testId: "CodeCopyButtonTestId", inResponseToolbar: false, inCodeBlock: true, disabled: false, ariaDisabled: false };
+  import_node_assert.default.strictEqual(isResponseCopyControl(responseCopy), true);
+  import_node_assert.default.strictEqual(isResponseCopyControl(codeCopy), false);
+  import_node_assert.default.strictEqual(isResponseCopyControl({ ...responseCopy, testId: "", label: "Copy response" }), true);
+  import_node_assert.default.strictEqual(isResponseCopyControl({ ...responseCopy, testId: "", label: "Copy", inResponseToolbar: true }), true);
+  import_node_assert.default.strictEqual(isResponseCopyControl({ ...responseCopy, disabled: true }), false);
+  const latestWithCodeCopyOnly = selectLatestResponseCandidate([
+    { text: "old", bottom: 100, order: 0, copyEnabled: isResponseCopyControl(responseCopy) },
+    { text: "latest", bottom: 200, order: 1, copyEnabled: isResponseCopyControl(codeCopy) }
+  ]);
+  import_node_assert.default.strictEqual(latestWithCodeCopyOnly?.text, "latest");
+  import_node_assert.default.strictEqual(latestWithCodeCopyOnly?.copyEnabled, false);
+  const latestWithResponseCopy = selectLatestResponseCandidate([
+    { text: "old", bottom: 100, order: 0, copyEnabled: isResponseCopyControl(responseCopy) },
+    { text: "latest", bottom: 200, order: 1, copyEnabled: isResponseCopyControl(responseCopy) }
+  ]);
+  import_node_assert.default.strictEqual(latestWithResponseCopy?.copyEnabled, true);
+  for (const required of ["shadowRoot", "contentDocument", "stopGeneratingButton", "stop-button", "fai-SendButton__stopBackground", '[role="article"][class*="CopilotMessage" i]', '[data-testid="copilot-message-div"]']) {
     import_node_assert.default.ok(COPILOT_SCREEN_STATE_JS.includes(required), `screen-state detector missing ${required}`);
+    if (required.includes("CopilotMessage") || required.includes("copilot-message-div")) {
+      import_node_assert.default.ok(COPILOT_CLICK_COPY_JS.includes(required), `copy detector missing ${required}`);
+    }
   }
   new Function("document", "window", `return ${COPILOT_SCREEN_STATE_JS}`);
   new Function("document", "window", `return ${COPILOT_CLICK_COPY_JS}`);
   import_node_assert.default.ok(COPILOT_CLICK_COPY_JS.includes("scope=latest"));
   import_node_assert.default.ok(COPILOT_CLICK_COPY_JS.includes("others.length>0"));
+  for (const required of ["CopyButtonTestId", "CopyButtonContainerTestId", "pre,code", "copy\\s*(?:response|answer)"]) {
+    import_node_assert.default.ok(COPILOT_SCREEN_STATE_JS.includes(required), `screen-state response-copy detector missing ${required}`);
+    import_node_assert.default.ok(COPILOT_CLICK_COPY_JS.includes(required), `click response-copy detector missing ${required}`);
+  }
   const deadlineClient = new CopilotEdgeClient({
     baseURL: "",
     model: "",

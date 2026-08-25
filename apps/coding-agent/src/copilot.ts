@@ -56,6 +56,15 @@ export interface CopilotStopCandidate {
   selector: string
 }
 
+export interface CopilotCopyCandidate {
+  label: string
+  testId: string
+  inResponseToolbar: boolean
+  inCodeBlock: boolean
+  disabled: boolean
+  ariaDisabled: boolean
+}
+
 export const RESPONSE_STABILITY_MS = 1000
 
 export function assertResponseDeadline(deadlineMs: number, responseTimeoutSec: number, nowMs = Date.now()): void {
@@ -72,6 +81,13 @@ export function isStopGenerationControl(candidate: CopilotStopCandidate): boolea
   const structural = /fai-SendButton__stopBackground|stopGeneratingButton|stop-button/i.test(candidate.selector)
   const semantic = /stop\s*(?:generating|response)|cancel\s*(?:generation|response)|生成を停止|応答を停止|停止する/i.test(candidate.label)
   return structural || semantic
+}
+
+export function isResponseCopyControl(candidate: CopilotCopyCandidate): boolean {
+  if (candidate.disabled || candidate.ariaDisabled || candidate.inCodeBlock) return false
+  if (/^CopyButtonTestId$/i.test(candidate.testId)) return true
+  if (/(?:応答|回答).{0,8}コピー|コピー.{0,8}(?:応答|回答)|copy\s*(?:response|answer)|(?:response|answer)\s*copy/i.test(candidate.label)) return true
+  return candidate.inResponseToolbar && /^(?:コピー|copy)$/i.test(candidate.label.trim())
 }
 
 export function updateResponseCompletionState(
@@ -138,12 +154,12 @@ export const COPILOT_SCREEN_STATE_JS = `(() => {
   for (const d of __docs) { input = sels.map(s => ({ s, el: d.querySelector(s) })).find(x => __vis(x.el)); if (input) break; }
   const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button,[role="button"],a')));
   const responseSelectors = ['[data-testid="markdown-reply"]','[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
-  const responseRootSelectors = ['[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
+  const responseRootSelectors = ['[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][class*="CopilotMessage" i]','[data-testid="copilot-message-div"]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
   const responseSelectorText = responseSelectors.join(',');const responseRootSelectorText=responseRootSelectors.join(',');
   const responseRoot = node => {try{return node.closest(responseRootSelectorText)||node;}catch(e){return node;}};
   const topBottom = node => {const rect=node.getBoundingClientRect();let bottom=Number(rect.bottom)||0;let win=node.ownerDocument&&node.ownerDocument.defaultView;try{while(win&&win!==win.parent&&win.frameElement){bottom+=win.frameElement.getBoundingClientRect().top;win=win.parent;}}catch(e){}return bottom;};
   const controlLabel = el => [el.getAttribute('aria-label'),el.title,el.getAttribute('data-testid'),el.getAttribute('data-automation-id'),el.id,el.className,el.innerText,el.textContent].filter(Boolean).join(' ').trim();
-  const enabledCopy = el => __vis(el) && /コピー|copy/i.test(controlLabel(el)) && !el.disabled && el.getAttribute('aria-disabled') !== 'true';
+  const enabledCopy = el => {const label=[el.getAttribute('aria-label'),el.title,el.innerText,el.textContent].filter(Boolean).join(' ').trim();const testId=el.getAttribute('data-testid')||'';let inCode=false,inToolbar=false;try{inCode=!!el.closest('pre,code,[data-testid*="code" i]');inToolbar=!!el.closest('[role="toolbar"],.fai-CopilotMessage__actions,[data-testid="CopyButtonContainerTestId"]');}catch(e){}const identity=/^CopyButtonTestId$/i.test(testId)||/(?:応答|回答).{0,8}コピー|コピー.{0,8}(?:応答|回答)|copy\\s*(?:response|answer)|(?:response|answer)\\s*copy/i.test(label)||(inToolbar&&/^(?:コピー|copy)$/i.test(label));return __vis(el)&&!inCode&&identity&&!el.disabled&&el.getAttribute('aria-disabled')!=='true';};
   const copyForResponse = sourceNode => {
     const ownRoot=responseRoot(sourceNode);let scope=ownRoot;
     for(let depth=0;scope&&depth<6;depth++){
@@ -311,12 +327,12 @@ export const COPILOT_CLICK_COPY_JS = `(() => {
   ${VISIBLE_JS}
   ${DOCS_JS}
   const responseSelectors=['[data-testid="markdown-reply"]','[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
-  const responseRootSelectors=['[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
+  const responseRootSelectors=['[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][class*="CopilotMessage" i]','[data-testid="copilot-message-div"]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
   const responseSelectorText=responseSelectors.join(',');const responseRootSelectorText=responseRootSelectors.join(',');
   const responseRoot=node=>{try{return node.closest(responseRootSelectorText)||node;}catch(e){return node;}};
   const topBottom=node=>{const rect=node.getBoundingClientRect();let bottom=Number(rect.bottom)||0;let win=node.ownerDocument&&node.ownerDocument.defaultView;try{while(win&&win!==win.parent&&win.frameElement){bottom+=win.frameElement.getBoundingClientRect().top;win=win.parent;}}catch(e){}return bottom;};
   const labelOf=el=>[el.getAttribute('aria-label'),el.title,el.getAttribute('data-testid'),el.getAttribute('data-automation-id'),el.id,el.className,el.innerText,el.textContent].filter(Boolean).join(' ').trim();
-  const enabledCopy=el=>__vis(el)&&/コピー|copy/i.test(labelOf(el))&&!el.disabled&&el.getAttribute('aria-disabled')!=='true';
+  const enabledCopy=el=>{const label=[el.getAttribute('aria-label'),el.title,el.innerText,el.textContent].filter(Boolean).join(' ').trim();const testId=el.getAttribute('data-testid')||'';let inCode=false,inToolbar=false;try{inCode=!!el.closest('pre,code,[data-testid*="code" i]');inToolbar=!!el.closest('[role="toolbar"],.fai-CopilotMessage__actions,[data-testid="CopyButtonContainerTestId"]');}catch(e){}const identity=/^CopyButtonTestId$/i.test(testId)||/(?:応答|回答).{0,8}コピー|コピー.{0,8}(?:応答|回答)|copy\\s*(?:response|answer)|(?:response|answer)\\s*copy/i.test(label)||(inToolbar&&/^(?:コピー|copy)$/i.test(label));return __vis(el)&&!inCode&&identity&&!el.disabled&&el.getAttribute('aria-disabled')!=='true';};
   const responses=[];const seenResponses=new Set();let order=0;
   for(const d of __docs)for(const selector of responseSelectors){let nodes=[];try{nodes=Array.from(d.querySelectorAll(selector));}catch(e){}for(const node of nodes){const root=responseRoot(node);if(seenResponses.has(root)||!__vis(node))continue;const text=((node.innerText||'')||(node.textContent||'')).trim();if(!text)continue;seenResponses.add(root);responses.push({node:root,bottom:topBottom(root),order:order++});}}
   responses.sort((a,b)=>(a.bottom-b.bottom)||(a.order-b.order));
