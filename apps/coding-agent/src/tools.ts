@@ -4,6 +4,7 @@ import crypto from 'node:crypto'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import util from 'node:util'
+import iconv from '../vendor/npm/node_modules/iconv-lite'
 import type { OpenAIToolSchema } from './llm'
 import { listManagedProcesses, readManagedProcessLog, startManagedProcess, stopManagedProcess } from './processes'
 import { getWeather } from './weather'
@@ -13,6 +14,7 @@ const execAsync = util.promisify(exec)
 const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', '.tmp'])
 const MAX_LIST = 500
 const MAX_SEARCH_RESULTS = 200
+const MAX_READ_FILES_CHARS = 80_000
 
 export interface ToolContext {
   workspace: string
@@ -205,6 +207,52 @@ function wildcardToRegExp(pattern: string): RegExp {
   return new RegExp(`^${escaped}$`, 'i')
 }
 
+function workspaceGlobToRegExp(pattern: string): RegExp {
+  const normalized = pattern.replaceAll('\\', '/').replace(/^\.\//, '')
+  let source = ''
+  for (let i = 0; i < normalized.length; i++) {
+    const ch = normalized[i]
+    if (ch === '*') {
+      if (normalized[i + 1] === '*') {
+        i++
+        if (normalized[i + 1] === '/') {
+          i++
+          source += '(?:.*/)?'
+        } else {
+          source += '.*'
+        }
+      } else {
+        source += '[^/]*'
+      }
+    } else if (ch === '?') {
+      source += '[^/]'
+    } else {
+      source += ch.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    }
+  }
+  return new RegExp(`^${source}$`, 'i')
+}
+
+function normalizeWorkspaceGlob(pattern: string): string {
+  const normalized = pattern.trim().replaceAll('\\', '/').replace(/^\.\//, '')
+  if (!normalized) throw new Error('pattern が空です')
+  if (path.isAbsolute(normalized) || /^[A-Za-z]:/.test(normalized) || normalized.split('/').includes('..')) {
+    throw new Error(`ワークスペース外を指すpatternは許可されていません: ${pattern}`)
+  }
+  return normalized
+}
+
+function decodeWorkspaceText(bytes: Buffer): string {
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    return bytes.subarray(3).toString('utf8')
+  }
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  } catch {
+    return iconv.decode(bytes, 'cp932')
+  }
+}
+
 function realPathWithMissingTail(abs: string): string {
   let cursor = abs
   const tail: string[] = []
@@ -369,6 +417,122 @@ export const TOOL_DEFS: ToolDef[] = [
       const slice = lines.slice(offset - 1, offset - 1 + limit)
       const body = slice.map((l, i) => `${offset + i}: ${l}`).join('\n')
       return truncate(body, 100_000)
+    }
+  },
+  {
+    name: 'read_files',
+    description: 'ワークスペース相対のglobまたは複数パスに一致するテキストファイルをまとめて読む。xlsxはRead-Xlsx.ps1の利用方法を返す',
+    kind: 'read',
+    parameters: {
+      type: 'object',
+      properties: {
+        pattern: { type: 'string', description: 'ワークスペース相対glob。例: reports/*' },
+        patterns: { type: 'array', description: 'ワークスペース相対globの配列' },
+        paths: { type: 'array', description: 'ワークスペース相対ファイルパスの配列' },
+        maxChars: { type: 'integer', description: '合計文字数予算（既定・最大 80000）', minimum: 1, maximum: MAX_READ_FILES_CHARS }
+      },
+      required: []
+    },
+    async run(args, ctx) {
+      const patterns: string[] = []
+      if (args.pattern !== undefined) {
+        if (typeof args.pattern !== 'string') throw new Error('pattern は文字列で指定してください')
+        patterns.push(normalizeWorkspaceGlob(args.pattern))
+      }
+      if (args.patterns !== undefined) {
+        if (!Array.isArray(args.patterns) || args.patterns.some((item) => typeof item !== 'string')) throw new Error('patterns は文字列配列で指定してください')
+        patterns.push(...args.patterns.map((item) => normalizeWorkspaceGlob(String(item))))
+      }
+      let requestedPaths: string[] = []
+      if (args.paths !== undefined) {
+        if (!Array.isArray(args.paths) || args.paths.some((item) => typeof item !== 'string' || !item.trim())) throw new Error('paths は空でない文字列の配列で指定してください')
+        requestedPaths = args.paths.map(String)
+      }
+      if (patterns.length === 0 && requestedPaths.length === 0) throw new Error('pattern、patterns、paths のいずれかを指定してください')
+      const maxChars = args.maxChars === undefined ? MAX_READ_FILES_CHARS : Number(args.maxChars)
+      if (!Number.isInteger(maxChars) || maxChars < 1 || maxChars > MAX_READ_FILES_CHARS) throw new Error(`maxChars は1以上${MAX_READ_FILES_CHARS}以下の整数で指定してください`)
+
+      const selected = new Map<string, { abs: string; relative: string }>()
+      const addFile = (abs: string, displayPath?: string): void => {
+        const checked = resolveInWorkspace(abs, ctx)
+        const relative = (displayPath ?? path.relative(ctx.workspace, checked)).replaceAll('\\', '/')
+        selected.set(checked.toLowerCase(), { abs: checked, relative })
+      }
+      for (const requested of requestedPaths) addFile(resolveInWorkspace(requested, ctx), requested.replaceAll('\\', '/'))
+      if (patterns.length > 0) {
+        const matchers = patterns.map(workspaceGlobToRegExp)
+        await walk(ctx.workspace, (file) => {
+          const relative = path.relative(ctx.workspace, file).replaceAll('\\', '/')
+          if (matchers.some((matcher) => matcher.test(relative))) addFile(file, relative)
+        })
+      }
+      const files = [...selected.values()].sort((a, b) => a.relative < b.relative ? -1 : a.relative > b.relative ? 1 : 0)
+      if (files.length === 0) return '(該当なし)'
+
+      const sections: string[] = []
+      const unread: string[] = []
+      // Reserve enough room to name every skipped/partial file. The character
+      // ceiling applies to the complete result, including headings and the list.
+      const unreadReserve = Math.min(maxChars, 50 + files.reduce((sum, file) => sum + file.relative.length + 100, 0))
+      const bodyBudget = maxChars - unreadReserve
+      let used = 0
+      let exhausted = false
+      for (const file of files) {
+        if (exhausted) {
+          unread.push(`${file.relative}: 文字数予算を使い切ったため未読`)
+          continue
+        }
+        let stat
+        try {
+          stat = await fsp.stat(file.abs)
+        } catch (err) {
+          unread.push(`${file.relative}: 読み取り失敗 (${(err as Error).message})`)
+          continue
+        }
+        if (!stat.isFile()) {
+          unread.push(`${file.relative}: ファイルではありません`)
+          continue
+        }
+        const heading = `===== ${file.relative} =====\n`
+        const xlsxHint = `run_commandで tools/Read-Xlsx.ps1 ${file.relative} を使ってください`
+        if (path.extname(file.relative).toLowerCase() === '.xlsx') {
+          const section = `${heading}${xlsxHint}\n`
+          if (used + section.length <= bodyBudget) {
+            sections.push(section)
+            used += section.length
+          } else {
+            unread.push(`${file.relative}: 文字数予算を超えるためヒントを出力できませんでした`)
+            exhausted = true
+          }
+          continue
+        }
+        let content: string
+        try {
+          content = decodeWorkspaceText(await fsp.readFile(file.abs))
+        } catch (err) {
+          unread.push(`${file.relative}: 読み取り失敗 (${(err as Error).message})`)
+          continue
+        }
+        const available = bodyBudget - used
+        const suffix = '\n'
+        if (heading.length + content.length + suffix.length <= available) {
+          sections.push(`${heading}${content}${suffix}`)
+          used += heading.length + content.length + suffix.length
+          continue
+        }
+        const marker = '\n...(文字数予算により途中打切り)\n'
+        const take = Math.max(0, available - heading.length - marker.length)
+        if (take > 0) {
+          sections.push(`${heading}${content.slice(0, take)}${marker}`)
+          used += heading.length + take + marker.length
+        }
+        unread.push(`${file.relative}: ${content.length - take}文字を文字数予算により未読`)
+        exhausted = true
+      }
+      if (unread.length > 0) {
+        sections.push(['===== 読めなかった/途中打切り一覧 =====', ...unread.map((item) => `- ${item}`), ''].join('\n'))
+      }
+      return sections.join('').slice(0, maxChars)
     }
   },
   {

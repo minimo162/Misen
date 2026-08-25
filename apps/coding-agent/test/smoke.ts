@@ -98,6 +98,35 @@ async function testTools(): Promise<void> {
   const list = await get('list_files').run({ glob: '*.txt' }, ctx)
   assert.ok(list.includes('hello.txt'))
 
+  fs.mkdirSync(path.join(root, 'batch'), { recursive: true })
+  fs.mkdirSync(path.join(root, 'other'), { recursive: true })
+  fs.writeFileSync(path.join(root, 'batch', 'utf8.txt'), 'UTF-8本文')
+  fs.writeFileSync(path.join(root, 'batch', 'bom.txt'), Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('BOM本文')]))
+  fs.writeFileSync(path.join(root, 'batch', 'cp932.txt'), Buffer.from([0x43, 0x50, 0x39, 0x33, 0x32, 0x3a, 0x93, 0xfa, 0x96, 0x7b]))
+  fs.writeFileSync(path.join(root, 'batch', 'empty.txt'), Buffer.alloc(0))
+  fs.writeFileSync(path.join(root, 'batch', 'ledger.xlsx'), Buffer.from('not-read-as-text'))
+  fs.writeFileSync(path.join(root, 'other', 'note.md'), '別glob')
+  const batch = await get('read_files').run({ patterns: ['batch/*.txt', 'other/*.md'] }, ctx)
+  assert.ok(batch.includes('UTF-8本文') && batch.includes('BOM本文') && batch.includes('CP932:日本') && batch.includes('別glob'))
+  assert.ok(batch.includes('===== batch/empty.txt ====='), 'empty files must be successful results')
+  assert.ok(batch.indexOf('batch/bom.txt') < batch.indexOf('batch/cp932.txt'), 'read_files ordering must be stable')
+  const xlsx = await get('read_files').run({ paths: ['batch/ledger.xlsx', 'batch/utf8.txt', 'batch/utf8.txt'] }, ctx)
+  assert.ok(xlsx.includes('run_commandで tools/Read-Xlsx.ps1 batch/ledger.xlsx を使ってください'))
+  assert.strictEqual((xlsx.match(/===== batch\/utf8\.txt =====/g) ?? []).length, 1, 'duplicate paths must be removed')
+  fs.writeFileSync(path.join(root, 'batch', 'large-a.txt'), 'A'.repeat(90_000))
+  fs.writeFileSync(path.join(root, 'batch', 'large-b.txt'), 'B'.repeat(100))
+  const limited = await get('read_files').run({ paths: ['batch/large-a.txt', 'batch/large-b.txt'] }, ctx)
+  assert.ok(limited.includes('途中打切り') && limited.includes('batch/large-b.txt: 文字数予算を使い切ったため未読'))
+  assert.ok(limited.length <= 80_000, 'read_files complete result must stay within the character budget')
+  assert.strictEqual(await get('read_files').run({ pattern: 'missing/**/*.txt' }, ctx), '(該当なし)')
+  let readFilesOutsideThrew = false
+  try {
+    await get('read_files').run({ paths: ['../outside.txt'] }, ctx)
+  } catch {
+    readFilesOutsideThrew = true
+  }
+  assert.ok(readFilesOutsideThrew, 'read_files must reject workspace escape')
+
   const cmd = await get('run_command').run({ command: 'echo smoke-ok' }, ctx)
   assert.ok(cmd.includes('smoke-ok'))
 
@@ -257,6 +286,7 @@ async function testDenial(): Promise<void> {
 
 async function testCopilotChoosesFirstAction(): Promise<void> {
   const answerRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-'))
+  fs.writeFileSync(path.join(answerRoot, 'evidence.txt'), 'bootstrap evidence')
   const answerBackend = new FakeBackend(['{"answer":"こんにちは！"}\nAGENT_END'])
   const answerEvents: string[] = []
   const cfg = { baseURL: '', model: '', provider: 'copilot-edge' as const, copilot: { agentMode: true } }
@@ -271,10 +301,12 @@ async function testCopilotChoosesFirstAction(): Promise<void> {
   assert.strictEqual(answer.reply, 'こんにちは！')
   assert.strictEqual(answer.aborted, false)
   assert.strictEqual(answerBackend.calls, 1)
-  assert.deepStrictEqual(answerEvents, [])
-  assert.ok(!answerBackend.prompts[0].includes('BEGIN_UNTRUSTED_HOST_RESULT'))
+  assert.deepStrictEqual(answerEvents, ['tool.requested', 'tool.succeeded'])
+  assert.ok(answerBackend.prompts[0].includes('TOOL_RESULT (第0ターン自動実行'))
+  assert.ok(answerBackend.prompts[0].includes('BEGIN_UNTRUSTED_HOST_RESULT'))
+  assert.ok(answerBackend.prompts[0].includes('evidence.txt'))
   assert.ok(answerBackend.prompts[0].includes('host.get_weather') && !answerBackend.prompts[0].includes('host.run_command(command)'))
-  assert.deepStrictEqual(fs.readdirSync(answerRoot), [])
+  assert.deepStrictEqual(fs.readdirSync(answerRoot), ['evidence.txt'])
   fs.rmSync(answerRoot, { recursive: true, force: true })
 
   const toolRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-'))
@@ -295,7 +327,7 @@ async function testCopilotChoosesFirstAction(): Promise<void> {
   assert.strictEqual(toolResult.aborted, false)
   assert.strictEqual(toolBackend.calls, 2)
   assert.ok(toolEvents.includes('tool.requested'))
-  assert.ok(!toolBackend.prompts[0].includes('BEGIN_UNTRUSTED_HOST_RESULT'))
+  assert.ok(toolBackend.prompts[0].includes('TOOL_RESULT (第0ターン自動実行'))
   assert.ok(toolBackend.prompts[1].includes('BEGIN_UNTRUSTED_HOST_RESULT'))
   fs.rmSync(toolRoot, { recursive: true, force: true })
 
@@ -317,7 +349,7 @@ async function testCopilotChoosesFirstAction(): Promise<void> {
   assert.strictEqual(repeat.aborted, true)
   assert.ok(repeat.messages.some((message) => String(message.content).includes('同じhost操作')))
   assert.strictEqual(repeatBackend.calls, 3)
-  assert.strictEqual(repeatEvents.filter((type) => type === 'tool.requested').length, 1)
+  assert.strictEqual(repeatEvents.filter((type) => type === 'tool.requested').length, 2)
   fs.rmSync(repeatRoot, { recursive: true, force: true })
   console.log('PASS copilot-tool-choice')
 }
@@ -338,6 +370,7 @@ async function testModeBoundaries(): Promise<void> {
   assert.ok(research.research?.contentHash)
   assert.ok(researchBackend.prompts[0].includes('Copilot内蔵の検索'))
   assert.ok(!researchBackend.prompts[0].includes('host.get_weather'))
+  assert.ok(!researchBackend.prompts[0].includes('TOOL_RESULT (第0ターン自動実行'))
   const sourceRequired = await runAgentTurn({
     cfg: { baseURL: '', model: '', provider: 'copilot-edge' as const, turnMode: 'research', copilot: { agentMode: false } },
     messages: [], userInput: '調べて', ctx: makeCtx(os.tmpdir(), false), io: ioStub(true), backend: new FakeBackend(['検索結果はありません'])
@@ -352,6 +385,7 @@ async function testModeBoundaries(): Promise<void> {
   })
   assert.strictEqual(chat.reply, 'こんにちは')
   assert.ok(!chatBackend.prompts[0].includes('host.'))
+  assert.ok(!chatBackend.prompts[0].includes('TOOL_RESULT (第0ターン自動実行'))
 
   const nativeBackend = new FakeBackend([
     '{"tool":"copilot.search","args":{}}\nAGENT_END',
@@ -403,9 +437,21 @@ async function testProtocolParsing(): Promise<void> {
 
   const toolNoArgs = extractJsonReply('{"tool":"host.list_files"}')
   assert.ok(toolNoArgs && toolNoArgs.tool === 'host.list_files' && toolNoArgs.args)
+  const flattened = extractJsonReply('{"tool":"read_files","pattern":"reports/*","AGENT_END":true}')
+  assert.deepStrictEqual(flattened, { tool: 'read_files', args: { pattern: 'reports/*' } })
+  const repairedWrite = extractJsonReply('{"tool":"write_file","path":"quote.txt","content":"He said "hello" today","AGENT_END":true}')
+  assert.deepStrictEqual(repairedWrite, { tool: 'write_file', args: { path: 'quote.txt', content: 'He said "hello" today' } })
+  const nestedJsonContent = '{"companies":[{"id":"JP01","values":{"revenue":123}}]}'
+  const nestedWriteRaw = `{"tool":"write_file","path":"work/extracted.json","content":"${nestedJsonContent}","AGENT_END":true}`
+  const repairedNestedWrite = extractJsonReply(nestedWriteRaw)
+  assert.deepStrictEqual(repairedNestedWrite, { tool: 'write_file', args: { path: 'work/extracted.json', content: nestedJsonContent } })
+  assert.strictEqual(extractJsonReply(`前置き\n${nestedWriteRaw}`), null)
+  assert.strictEqual(extractJsonReply(`${nestedWriteRaw}\n{"answer":"余分"}`), null)
   assert.strictEqual(extractJsonReply('{"answer":"a"}\n{"answer":"b"}'), null)
   assert.strictEqual(extractJsonReply('{"answer":"a","tool":"host.list_files"}'), null)
   assert.strictEqual(extractJsonReply('{"answer":"a","extra":1}'), null)
+  assert.strictEqual(extractJsonReply('{"tool":"read_files","args":{},"pattern":"reports/*"}'), null)
+  assert.strictEqual(extractJsonReply('{"tool":"read_files","AGENT_END":false}'), null)
   assert.strictEqual(extractJsonReply('{"answer":1}'), null)
   assert.strictEqual(extractJsonReply('null'), null)
   assert.strictEqual(extractJsonReply('{"tool":"host.write_file","args":{"path":"x","content":"unterminated}}'), null)
@@ -469,8 +515,9 @@ async function testCopilotChunkFallback(): Promise<void> {
 }
 async function testCopilotLoop(): Promise<void> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-'))
+  const extractedJson = '{"companies":[{"id":"JP01","values":{"revenue":123}}]}'
   const backend = new FakeBackend([
-    '```json\n{"tool":"host.write_file","args":{"path":"b.txt","content":"from copilot"}}\n```\nAGENT_END',
+    `{"tool":"write_file","path":"work/extracted.json","content":"${extractedJson}","AGENT_END":true}`,
     '{"answer":"完了しました"}\nAGENT_END'
   ])
   const cfg = { baseURL: '', model: '', provider: 'copilot-edge' as const, autoApprove: { write: true }, copilot: { agentMode: true } }
@@ -484,7 +531,7 @@ async function testCopilotLoop(): Promise<void> {
   })
   assert.strictEqual(result.reply, '完了しました')
   assert.strictEqual(result.aborted, false)
-  assert.ok(fs.readFileSync(path.join(root, 'b.txt'), 'utf8').includes('from copilot'))
+  assert.strictEqual(fs.readFileSync(path.join(root, 'work', 'extracted.json'), 'utf8'), extractedJson)
   assert.strictEqual(backend.calls, 2)
   assert.ok(backend.prompts[1].includes('BEGIN_UNTRUSTED_HOST_RESULT'))
   assert.ok(backend.prompts[0].includes('AGENT_END'))
