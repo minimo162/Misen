@@ -125,7 +125,7 @@ Update-Ledger の一行目は少なくとも次のキーを含む JSON です。
 - [ ] **1. Test-DemoSetup** — workspace の通常ターミナルで `powershell.exe -NoProfile -File tools\Test-DemoSetup.ps1` を実行する。`workspace`、`reports/`、`rates/`、`tools/Read-Xlsx.ps1`、`tools/Update-Ledger.ps1`、`集計台帳.xlsx`、ImportExcel DLL、Node、Edgeを診断し、テンプレートの一時コピーに正解fixtureを転記して `validation/expected.json` と一致することまで確認する。`RESULT ALL OK` と時刻を記録する。
 - [ ] **2. fallback end-to-end** — LLM を使わず、既知の extracted fixture を `work/` に置く scripted insurance → Update-Ledger → Excel の会社別／確認事項を最後まで通す。
 - [ ] **3. Copilot lightweight connectivity** — Edge の Copilot 接続、`agentMode=true`、foreground 表示、最初の軽量な `list_files` までを確認する。ここで拒否・#0・タイムアウトなら中止。
-- [ ] **4. full rehearsal** — 同じ固定指示を変更せず **3 回連続**、各 Run **8 ターン以下**で実施する。各 Run の extracted values が、人だけが参照する `validation` の真値と全項目一致し、counts・quotes・ledger の一行 JSON が記録されることを合格条件にする。エージェントは validation を読まない。
+- [ ] **4. full rehearsal** — config変更後や各 Run の開始前に、UIの「新しいセッション」または `POST /api/sessions` で必ず新規セッションを作る（`Record-Demo.ps1` は自動実行）。そのうえで同じ固定指示を変更せず **3 回連続**、各 Run **8 ターン以下**で実施する。各 Run の extracted values が、人だけが参照する `validation` の真値と全項目一致し、counts・quotes・ledger の一行 JSON が記録されることを合格条件にする。エージェントは validation を読まない。
 - [ ] **5. record** — 録画を開始してから固定リクエストを貼り付ける。Run ID、session ID、時刻、turn 数、host 操作、count、hash、停止理由、Excel 表示結果を記録し、無加工版を保存する。Clipchamp で待ち時間の速度調整と字幕を加え、上記構成の 60 秒版を書き出す。機械的な back-check が無い／形式が壊れている場合は「未確認」と書く。
 - [ ] **6. go/no-go** — 1–5 の証跡が全て pass なら 60 秒動画を主役として披露する。ライブは上司から求められ、かつ同じ朝の全ゲートが pass している場合だけアンコールで行う。どれか一つでも fail／未確認ならライブを中止し、過去の pass 証跡に対応する録画があれば動画、なければ概念説明・進捗共有に切り替える。
 
