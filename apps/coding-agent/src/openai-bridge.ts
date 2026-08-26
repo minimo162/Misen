@@ -25,7 +25,7 @@ export interface OpenAIChatRequest {
   model?: string
   messages: OpenAIMessage[]
   tools?: OpenAITool[]
-  tool_choice?: unknown
+  tool_choice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } }
   stream?: boolean
 }
 
@@ -35,6 +35,7 @@ export interface BridgeCompletionOptions {
 }
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024
+const MAX_PENDING_REQUESTS = 8
 const TOOL_NAME = /^[A-Za-z0-9_-]{1,64}$/u
 const ANNOTATION_KEYWORDS = new Set(['description', 'title', 'default', 'examples', 'deprecated', 'readOnly', 'writeOnly', '$comment', '$schema', '$id', '$defs', 'definitions'])
 
@@ -72,6 +73,24 @@ function assertTools(value: unknown): OpenAITool[] {
   })
 }
 
+function assertToolChoice(value: unknown, tools: OpenAITool[]): OpenAIChatRequest['tool_choice'] {
+  if (value === undefined) return undefined
+  if (value === 'auto' || value === 'none' || value === 'required') {
+    if (value === 'required' && tools.length === 0) throw new Error('tool_choice=required にはtoolsが必要です')
+    return value
+  }
+  if (!isObject(value) || value.type !== 'function') {
+    throw new Error('tool_choice は auto/none/required またはfunction名で指定してください')
+  }
+  const choiceFunction = value.function
+  if (!isObject(choiceFunction) || typeof choiceFunction.name !== 'string') {
+    throw new Error('tool_choice は auto/none/required またはfunction名で指定してください')
+  }
+  const functionName = choiceFunction.name
+  if (!tools.some((tool) => tool.function.name === functionName)) throw new Error(`tool_choice のfunctionがtoolsにありません: ${functionName}`)
+  return { type: 'function', function: { name: functionName } }
+}
+
 export function parseOpenAIChatRequest(value: unknown): OpenAIChatRequest {
   if (!isObject(value)) throw new Error('request bodyはJSON objectで指定してください')
   if (!Array.isArray(value.messages) || value.messages.length === 0 || value.messages.length > 200) throw new Error('messages は1〜200件で指定してください')
@@ -80,15 +99,26 @@ export function parseOpenAIChatRequest(value: unknown): OpenAIChatRequest {
     messageContent(candidate.content)
     return candidate as unknown as OpenAIMessage
   })
+  const tools = assertTools(value.tools)
   const stream = value.stream
   if (stream !== undefined && typeof stream !== 'boolean') throw new Error('stream はbooleanで指定してください')
   return {
     model: typeof value.model === 'string' ? value.model : undefined,
     messages,
-    tools: assertTools(value.tools),
-    tool_choice: value.tool_choice,
+    tools,
+    tool_choice: assertToolChoice(value.tool_choice, tools),
     stream
   }
+}
+
+function requestTools(request: OpenAIChatRequest): OpenAITool[] {
+  const tools = request.tools ?? []
+  if (request.tool_choice === 'none') return []
+  const choice = request.tool_choice
+  if (typeof choice === 'object' && choice?.type === 'function') {
+    return tools.filter((tool) => tool.function.name === choice.function.name)
+  }
+  return tools
 }
 
 export function buildBridgePrompt(request: OpenAIChatRequest): string {
@@ -97,12 +127,14 @@ export function buildBridgePrompt(request: OpenAIChatRequest): string {
     const calls = message.tool_calls === undefined ? '' : `\ntool_calls=${JSON.stringify(message.tool_calls)}`
     return `[${index + 1}:${message.role.toUpperCase()}${meta ? ` ${meta}` : ''}]\n${messageContent(message.content)}${calls}`
   }).join('\n\n')
-  if (!request.tools?.length) return [
+  const selectedTools = requestTools(request)
+  if (!selectedTools.length) return [
     '以下の会話に対する次のassistant回答を生成してください。簡潔に答えてください。',
+    request.tool_choice === 'none' ? 'この応答では関数を呼び出さず、通常の回答だけを返してください。' : '',
     transcript
-  ].join('\n\n')
+  ].filter(Boolean).join('\n\n')
 
-  const tools = request.tools.map((tool) => ({
+  const tools = selectedTools.map((tool) => ({
     name: tool.function.name,
     description: tool.function.description ?? '',
     parameters: tool.function.parameters ?? { type: 'object', properties: {} }
@@ -113,10 +145,12 @@ export function buildBridgePrompt(request: OpenAIChatRequest): string {
     '関数が不要なら通常の回答だけを返してください。値・パス・事実を推測しないでください。並列関数呼び出しはしません。',
     '利用者の「ここ」「この場所」「直下」はホストの現在の作業ディレクトリを指します。関数が相対パスを許す場合は、その基準を表す . を使ってください。',
     '利用者がファイルを「開く」と頼んだ場合は内容の読み取りで代用せず、利用可能なコマンド実行関数で既定アプリを起動する1手を選んでください。',
+    'Windowsのコマンド実行関数で相対ファイルを開く場合は Start-Process -FilePath \'./相対パス\' を使ってください。Start-Processに存在しない -LiteralPath は使わず、JSON内のWindowsパスは / 区切りにしてください。',
     '新規ファイルの親フォルダと名前が利用者の依頼から一意なら、親フォルダを検索せず、指定を相対パスへ忠実に組み立てて書き込み関数を呼んでください。',
+    request.tool_choice === 'required' || isObject(request.tool_choice) ? 'この応答ではAVAILABLE_FUNCTIONSから必ず1つを選び、JSONの関数呼び出しだけを返してください。' : '',
     `AVAILABLE_FUNCTIONS=${JSON.stringify(tools)}`,
     transcript
-  ].join('\n\n')
+  ].filter(Boolean).join('\n\n')
 }
 
 type ValidationResult = { ok: true } | { ok: false; error: string }
@@ -234,13 +268,16 @@ export function interpretBridgeResponse(raw: string, tools: OpenAITool[]): { con
 
 export async function completeOpenAIChat(request: OpenAIChatRequest, options: BridgeCompletionOptions, signal?: AbortSignal): Promise<JsonObject> {
   const raw = await options.complete(buildBridgePrompt(request), signal)
-  const interpreted = interpretBridgeResponse(raw, request.tools ?? [])
+  const interpreted = interpretBridgeResponse(raw, requestTools(request))
+  if ((request.tool_choice === 'required' || isObject(request.tool_choice)) && !interpreted.toolCalls?.length) {
+    throw new BridgeRequestError(422, 'tool_choiceで要求された有効な関数呼び出しを生成できませんでした', 'tool_choice_not_satisfied')
+  }
   console.log('[bridge-decision] ' + JSON.stringify({
     interpretation: interpreted.method,
     repairs: interpreted.repairs,
     tool: interpreted.toolCalls?.[0]?.function && isObject(interpreted.toolCalls[0].function) ? interpreted.toolCalls[0].function.name : null,
     diagnostic: interpreted.diagnostic ?? null,
-    toolCount: request.tools?.length ?? 0
+    toolCount: requestTools(request).length
   }))
   const created = Math.floor((options.now?.() ?? Date.now()) / 1000)
   const toolCalls = interpreted.toolCalls
@@ -267,6 +304,7 @@ function authorized(header: string | undefined, token: string): boolean {
 }
 
 function sendJson(response: http.ServerResponse, status: number, value: unknown): void {
+  if (response.destroyed || response.writableEnded) return
   const body = JSON.stringify(value)
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(body) })
   response.end(body)
@@ -295,10 +333,11 @@ function openAIError(response: http.ServerResponse, status: number, message: str
   sendJson(response, status, { error: { message, type: status >= 500 ? 'server_error' : 'invalid_request_error', param: null, code } })
 }
 
-async function readJsonBody(request: http.IncomingMessage): Promise<unknown> {
+async function readJsonBody(request: http.IncomingMessage, signal?: AbortSignal): Promise<unknown> {
   let size = 0
   const chunks: Buffer[] = []
   for await (const chunk of request) {
+    if (signal?.aborted) throw new BridgeRequestError(499, 'requestがキャンセルされました', 'request_cancelled')
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     size += buffer.length
     if (size > MAX_BODY_BYTES) throw new Error('request bodyが2MBを超えています')
@@ -307,27 +346,61 @@ async function readJsonBody(request: http.IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown
 }
 
-export function createOpenAICompatibleBridgeServer(token: string, options: BridgeCompletionOptions): http.Server {
+class BridgeRequestError extends Error {
+  constructor(readonly status: number, message: string, readonly code: string) {
+    super(message)
+  }
+}
+
+export interface OpenAICompatibleBridgeServer extends http.Server {
+  abortAll(): void
+}
+
+export function createOpenAICompatibleBridgeServer(token: string, options: BridgeCompletionOptions): OpenAICompatibleBridgeServer {
   if (token.length < 16) throw new Error('COPILOT_BRIDGE_TOKEN は16文字以上で固定してください')
   let queue: Promise<void> = Promise.resolve()
-  const schedule = <T>(work: () => Promise<T>): Promise<T> => {
-    const next = queue.then(work, work)
+  let pendingRequests = 0
+  const controllers = new Set<AbortController>()
+  const schedule = <T>(work: () => Promise<T>, signal: AbortSignal): Promise<T> => {
+    if (pendingRequests >= MAX_PENDING_REQUESTS) return Promise.reject(new BridgeRequestError(429, 'bridgeの待機要求が上限に達しました', 'queue_full'))
+    pendingRequests++
+    const run = async (): Promise<T> => {
+      if (signal.aborted) throw new BridgeRequestError(499, 'requestがキャンセルされました', 'request_cancelled')
+      return work()
+    }
+    const next = queue.then(run, run)
     queue = next.then(() => undefined, () => undefined)
-    return next
+    return next.finally(() => { pendingRequests-- })
   }
-  return http.createServer(async (request, response) => {
-    if (!authorized(request.headers.authorization, token)) return openAIError(response, 401, 'Bearer tokenが不正です', 'invalid_api_key')
-    if (request.method !== 'POST' || request.url !== '/v1/chat/completions') return openAIError(response, 404, 'POST /v1/chat/completions だけ対応しています', 'not_found')
+  const server = http.createServer(async (request, response) => {
+    const controller = new AbortController()
+    controllers.add(controller)
+    const abortDisconnected = (): void => {
+      if (!response.writableEnded) controller.abort()
+    }
+    request.once('aborted', abortDisconnected)
+    response.once('close', abortDisconnected)
     try {
-      const parsed = parseOpenAIChatRequest(await readJsonBody(request))
-      const controller = new AbortController()
-      request.once('aborted', () => controller.abort())
-      const result = await schedule(() => completeOpenAIChat(parsed, options, controller.signal))
+      if (!authorized(request.headers.authorization, token)) return openAIError(response, 401, 'Bearer tokenが不正です', 'invalid_api_key')
+      if (request.method !== 'POST' || request.url !== '/v1/chat/completions') return openAIError(response, 404, 'POST /v1/chat/completions だけ対応しています', 'not_found')
+      const parsed = parseOpenAIChatRequest(await readJsonBody(request, controller.signal))
+      const result = await schedule(() => completeOpenAIChat(parsed, options, controller.signal), controller.signal)
       if (parsed.stream === true) sendSingleChunkSse(response, result)
       else sendJson(response, 200, result)
     } catch (error) {
+      if (response.destroyed || response.writableEnded) return
       const message = error instanceof SyntaxError ? 'request bodyが正しいJSONではありません' : (error as Error).message
-      openAIError(response, error instanceof SyntaxError ? 400 : 422, message, 'bridge_request_failed')
+      const status = error instanceof SyntaxError ? 400 : error instanceof BridgeRequestError ? error.status : 422
+      const code = error instanceof BridgeRequestError ? error.code : 'bridge_request_failed'
+      openAIError(response, status, message, code)
+    } finally {
+      controllers.delete(controller)
+      request.off('aborted', abortDisconnected)
+      response.off('close', abortDisconnected)
     }
-  })
+  }) as OpenAICompatibleBridgeServer
+  server.abortAll = (): void => {
+    for (const controller of controllers) controller.abort()
+  }
+  return server
 }

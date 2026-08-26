@@ -17,11 +17,17 @@ const client = new CopilotEdgeClient(cfg)
 const server = createOpenAICompatibleBridgeServer(token, { complete: (prompt, signal) => client.complete(prompt, signal) })
 server.listen(port, '127.0.0.1', () => console.log(`copilot-openai-bridge listening on http://127.0.0.1:${port}/v1`))
 
+let closing = false
 const close = (): void => {
+  if (closing) return
+  closing = true
+  server.abortAll()
+  client.close()
   server.close(() => {
-    client.close()
     process.exit(0)
   })
+  const forcedExit = setTimeout(() => process.exit(1), 5000)
+  forcedExit.unref()
 }
 process.on('SIGINT', close)
 process.on('SIGTERM', close)

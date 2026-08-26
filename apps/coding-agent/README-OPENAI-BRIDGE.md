@@ -14,6 +14,8 @@ node .\dist\openai-bridge.js --config .\config.flex.json --port 3952
 
 Each request uses a fresh Copilot UI session. The complete OSS `messages` transcript is folded into one prompt for every request. This costs about 0.5 seconds per warm request in the preparation-PC run, but prevents stale Copilot session history and makes retries independent. `stream:true` is implemented as a compatibility stream: the completed answer is emitted as one SSE chunk followed by `[DONE]`; it is not token streaming.
 
+Requests are serialized because they share one visible Copilot Edge surface. Up to eight active or queued requests are accepted; additional requests fail with HTTP 429. If the caller disconnects, queued work is skipped and active Copilot work is aborted. `tool_choice` supports `auto`, `none`, `required`, and a named function. A required or named choice that cannot be recovered and schema-validated fails with HTTP 422 instead of inventing a call.
+
 ## Curl checks
 
 Normal chat:
@@ -49,7 +51,7 @@ C:\path\to\repo\apps\coding-agent\vendor\opencode\opencode.exe run 'ここ直下
 
 Do not commit the copied `opencode.json` when it contains local policy changes. The example asks before write, edit, or shell execution. For an automated disposable-fixture test only, those permissions were temporarily set to `allow`.
 
-The preparation-PC binary was `opencode 1.18.21`, 179,463,208 bytes, SHA-256 `EA4F4D4BEC95CD41BAF0FC53ADC4E34B31E1C8676DC5B2507C8797AB1884AF18`. The morning company-PC gate is: download and hash, run `--version`, then run the five tasks below. Company-PC EDR and proxy behavior remain unverified.
+The preparation-PC binary was `opencode 1.18.21`, 179,463,208 bytes, SHA-256 `EA4F4D4BEC95CD41BAF0FC53ADC4E34B31E1C8676DC5B2507C8797AB1884AF18`. It is the byte-for-byte executable extracted from the official `anomalyco/opencode` v1.18.21 `opencode-windows-x64.zip`; the checked-in manifest records the upstream URL, ZIP size/SHA-256, extraction recipe, and final executable SHA-256. The morning company-PC gate is: download and hash, run `--version`, then run the five tasks below. Company-PC EDR and proxy behavior remain unverified.
 
 ## Measured five-task gate
 
@@ -57,13 +59,13 @@ On 2026-08-27, OpenCode through the bridge completed 5/5 on a disposable mixed w
 
 | Task | Result | Turns | End-to-end |
 | --- | --- | ---: | ---: |
-| List current folder | PASS | 2 | 28.45 s |
-| Read CSV and answer | PASS | 3 | 28.67 s |
-| Cross-file search | PASS | 2 | 18.67 s |
-| Create a new file | PASS | 2 | 20.50 s |
-| Open a text file | PASS | 3 | 31.08 s |
+| List current folder | PASS | 2 | 19.350 s |
+| Read CSV and answer an absent field honestly | PASS | 3 | 25.941 s |
+| Cross-file search | PASS | 2 | 27.344 s |
+| Create a new file | PASS | 2 | 19.979 s |
+| Open a CSV in its default application | PASS | 2 | 20.038 s |
 
-The open task first emitted an invalid PowerShell parameter and then corrected itself to `Start-Process "概要.txt"`; a new Notepad PID was observed. Across the 12 Copilot responses, seven tool calls were recovered by layer 1, four normal answers used the plain-answer path, and one post-tool answer was returned unchanged through the raw-content fallback. Layer 2 was invoked zero times; schema rejection and failed responses were both zero. Average phase time per Copilot response was 7.073 seconds generation, 0.755 seconds fresh UI session creation, 0.608 seconds prompt write (0.336–0.368 seconds after the cold retry), 0.121 seconds connection, 0.062 seconds send, and 0 seconds DOM completion retrieval. Service generation was the dominant interval.
+This is the full rerun after repairing an observed unescaped `\.\日本語名` in Copilot's JSON command and teaching the generic bridge prompt to use `Start-Process -FilePath './相対パス'`. Immediately before the set, that same Japanese text file opened on the first command and produced a new Notepad PID. The final set's new-file content was read back exactly; its open command completed without an error. Across its 11 Copilot responses, six tool calls and five normal answers were resolved by layer 1. Layer 2, raw-content fallback, schema rejection, and failed responses were all zero. Service generation remained the dominant interval.
 
 ## Kickoff fallback chain
 

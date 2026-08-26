@@ -4736,6 +4736,20 @@ function repairWindowsPathBackslashes(source) {
   });
   return changed ? repaired : null;
 }
+function repairInvalidJsonBackslashes(source) {
+  let changed = false;
+  const repaired = source.replace(/\\+/gu, (slashes, offset, full) => {
+    if (slashes.length % 2 === 0) return slashes;
+    const nextOffset = offset + slashes.length;
+    const next = full[nextOffset] ?? "";
+    const validSimpleEscape = /^["\\/bfnrt]$/u.test(next);
+    const validUnicodeEscape = next === "u" && /^[0-9a-f]{4}$/iu.test(full.slice(nextOffset + 1, nextOffset + 5));
+    if (validSimpleEscape || validUnicodeEscape) return slashes;
+    changed = true;
+    return `${slashes}\\`;
+  });
+  return changed ? repaired : null;
+}
 function jsonDecisionCandidates(rawResponse, tools) {
   const clean = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, "").replace(/```(?:json)?/giu, "").replace(/```/gu, "").replace(/\bAGENT_END\b/giu, "").trim();
   const sources = scanJsonObjects(clean).map((candidate) => ({ text: candidate.text, offset: candidate.position }));
@@ -4760,6 +4774,13 @@ function jsonDecisionCandidates(rawResponse, tools) {
     if (windowsPath !== null) {
       try {
         attempts.push({ text: (0, import_jsonrepair.jsonrepair)(windowsPath), repairs: ["windows-path-backslash", "jsonrepair"], semanticBonus: 40 });
+      } catch {
+      }
+    }
+    const invalidBackslash = repairInvalidJsonBackslashes(source.text);
+    if (invalidBackslash !== null) {
+      try {
+        attempts.push({ text: (0, import_jsonrepair.jsonrepair)(invalidBackslash), repairs: ["invalid-json-backslash", "jsonrepair"], semanticBonus: 35 });
       } catch {
       }
     }
@@ -4801,10 +4822,19 @@ function captureLabeledValue(raw, key) {
   if (/^-?\d+$/u.test(rest)) return Number(rest);
   return rest || void 0;
 }
+function hasNegatedToolIntent(rawResponse) {
+  const text = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, "").trim();
+  if (/(?:例[:：]|たとえば|例えば|今回は[^。\n]*(?:しません|しない)|拒否され|呼び出せません|操作しません)/u.test(text)) return true;
+  const japaneseAction = "(?:\u5B9F\u884C|\u64CD\u4F5C|\u51E6\u7406|\u547C\u3073\u51FA\u3057?|\u8D77\u52D5|\u958B\u304F|\u66F8\u304D\u8FBC(?:\u307F|\u3080)?|\u8AAD\u307F\u53D6(?:\u308A|\u308B)?|\u691C\u7D22|\u4F7F\u7528|\u4F7F\u3046)";
+  const japaneseNegation = "(?:\u3057\u306A\u3044\u3067|\u3057\u306A\u3044|\u3057\u307E\u305B\u3093|\u3057\u306A\u304F\u3066|\u3057\u3066\u306F\u3044\u3051|\u7981\u6B62|\u4E0D\u53EF|\u4E0D\u8981|\u3084\u3081)";
+  if (new RegExp(`${japaneseAction}.{0,32}${japaneseNegation}|${japaneseNegation}.{0,32}${japaneseAction}`, "iu").test(text)) return true;
+  const englishAction = "(?:execute|run|call|invoke|use|open|write|read|search)";
+  const englishNegation = `(?:do\\s+not|don't|never|must\\s+not|should\\s+not|shall\\s+not)`;
+  return new RegExp(`\\b${englishNegation}\\b.{0,64}\\b${englishAction}\\b|\\b${englishAction}\\b.{0,64}\\b${englishNegation}\\b`, "iu").test(text);
+}
 function explicitToolDecision(rawResponse, tools) {
   const text = rawResponse.trim();
-  const negative = /(?:例[:：]|たとえば|例えば|今回は[^。\n]*(?:しません|しない)|拒否され|呼び出せません|まだ[^。\n]*(?:できません|呼べません)|操作しません)/u.test(text);
-  if (negative) return null;
+  if (hasNegatedToolIntent(text) || /まだ[^。\n]*(?:できません|呼べません)/u.test(text)) return null;
   const matched = [...tools].sort((a, b) => b.name.length - a.name.length).find((tool) => {
     const bare2 = tool.name.startsWith("host.") ? tool.name.slice(5) : tool.name;
     return text.toLowerCase().includes(tool.name.toLowerCase()) || text.toLowerCase().includes(bare2.toLowerCase());
@@ -4845,7 +4875,7 @@ function explicitToolDecision(rawResponse, tools) {
 }
 function interpretCopilotResponseDeterministically(rawResponse, tools) {
   const candidates = jsonDecisionCandidates(rawResponse, tools);
-  const negativeContext = /(?:例[:：]|たとえば|例えば|今回は[^。\n]*(?:しません|しない)|操作しません|拒否され|呼び出せません)/u.test(rawResponse);
+  const negativeContext = hasNegatedToolIntent(rawResponse);
   if (candidates.length > 0 && !negativeContext) return { content: candidates[0].text, method: "json-candidate", repairs: candidates[0].repairs };
   const explicit = explicitToolDecision(rawResponse, tools);
   if (explicit) return { content: explicit, method: "explicit-tool-text", repairs: [] };
@@ -7196,7 +7226,7 @@ var COPILOT_CLICK_SEND_JS = `(() => {
   const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button, [role="button"]')));
   const exclude = /stop|cancel|\u505C\u6B62|\u30AD\u30E3\u30F3\u30BB\u30EB|regenerate|\u518D\u751F\u6210|attach|\u6DFB\u4ED8|microphone|voice|\u30DC\u30A4\u30B9|\u97F3\u58F0|new chat|\u65B0\u3057\u3044\u30C1\u30E3\u30C3\u30C8|clear|\u30AF\u30EA\u30A2|close|\u9589\u3058\u308B|search|\u691C\u7D22|library|\u30E9\u30A4\u30D6\u30E9\u30EA|file|\u30D5\u30A1\u30A4\u30EB/;
   const structural = b => b.matches('button[type="submit"],.fai-SendButton,[class*="SendButton" i],[data-testid*="send" i],[data-automation-id*="send" i]');
-  const inventory = b => ({ariaLabel:b.getAttribute('aria-label')||'',title:b.title||'',testId:b.getAttribute('data-testid')||'',automationId:b.getAttribute('data-automation-id')||'',className:typeof b.className==='string'?b.className:'',type:b.getAttribute('type')||'',disabled:!!b.disabled,ariaDisabled:b.getAttribute('aria-disabled')||'',visible:__vis(b)});
+  const inventory = b => { const r=b.getBoundingClientRect(); let x=r.x,y=r.y,w=b.ownerDocument&&b.ownerDocument.defaultView; try{while(w&&w!==w.top){const f=w.frameElement;if(!f)break;const fr=f.getBoundingClientRect();x+=fr.x;y+=fr.y;w=f.ownerDocument&&f.ownerDocument.defaultView;}}catch(e){} return {ariaLabel:b.getAttribute('aria-label')||'',title:b.title||'',testId:b.getAttribute('data-testid')||'',automationId:b.getAttribute('data-automation-id')||'',className:typeof b.className==='string'?b.className:'',type:b.getAttribute('type')||'',disabled:!!b.disabled,ariaDisabled:b.getAttribute('aria-disabled')||'',visible:__vis(b),rect:{x,y,width:r.width,height:r.height,cx:x+r.width/2,cy:y+r.height/2}}; };
   const clickable = [];
   for (const b of buttons) {
     const label = (b.getAttribute('aria-label') || b.title || b.textContent || '').trim();
@@ -7788,14 +7818,31 @@ var CopilotEdgeClient = class {
     }
     throw new Error("Copilot \u306E\u5165\u529B\u6B04\u304C\u6E96\u5099\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F (\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8)\u3002");
   }
-  async freshChat() {
-    const raw = await this.evalWithReconnect(FRESH_CHAT_JS);
-    if (!JSON.parse(String(raw)).clicked) {
-      await this.cdpMethod("Page.navigate", { url: this.s.url });
-      await sleep(3e3);
-    } else {
-      await sleep(450);
+  async freshSurfaceReady() {
+    try {
+      const raw = await this.evalWithReconnect(COPILOT_SCREEN_STATE_JS, 5e3);
+      const state = JSON.parse(String(raw));
+      const inputLength = await this.editorLength();
+      return state.inputReady === true && Array.isArray(state.responseCandidates) && state.responseCandidates.length === 0 && inputLength >= 0 && inputLength <= 2;
+    } catch {
+      return false;
     }
+  }
+  async waitFreshSurface(timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    do {
+      if (await this.freshSurfaceReady()) return true;
+      if (Date.now() < deadline) await sleep(200);
+    } while (Date.now() < deadline);
+    return false;
+  }
+  async freshChat() {
+    if (await this.freshSurfaceReady()) return;
+    const raw = await this.evalWithReconnect(FRESH_CHAT_JS);
+    const clicked = JSON.parse(String(raw)).clicked;
+    if (clicked && await this.waitFreshSurface(5e3)) return;
+    await this.cdpMethod("Page.navigate", { url: this.s.url });
+    if (!await this.waitFreshSurface(3e4)) throw new Error("\u65B0\u898FCopilot\u30BB\u30C3\u30B7\u30E7\u30F3\u306E\u7A7A\u753B\u9762\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
   }
   async stampVisibleSessionMarker(sessionId) {
     const marker = makeVisibleSessionMarker(sessionId);
@@ -7949,7 +7996,7 @@ var CopilotEdgeClient = class {
       }
     }
     const final = await this.editorState();
-    if (!final.found || !final.text.startsWith(prompt)) {
+    if (!final.found || final.text !== prompt) {
       throw new Error(`\u4F9D\u983C\u6587\u306E\u5165\u529B\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F (\u671F\u5F85 ${prompt.length} / \u5B9F\u969B ${final.text.length})`);
     }
   }

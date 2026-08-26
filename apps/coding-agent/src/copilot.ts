@@ -262,7 +262,7 @@ export const COPILOT_CLICK_SEND_JS = `(() => {
   const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button, [role="button"]')));
   const exclude = /stop|cancel|停止|キャンセル|regenerate|再生成|attach|添付|microphone|voice|ボイス|音声|new chat|新しいチャット|clear|クリア|close|閉じる|search|検索|library|ライブラリ|file|ファイル/;
   const structural = b => b.matches('button[type="submit"],.fai-SendButton,[class*="SendButton" i],[data-testid*="send" i],[data-automation-id*="send" i]');
-  const inventory = b => ({ariaLabel:b.getAttribute('aria-label')||'',title:b.title||'',testId:b.getAttribute('data-testid')||'',automationId:b.getAttribute('data-automation-id')||'',className:typeof b.className==='string'?b.className:'',type:b.getAttribute('type')||'',disabled:!!b.disabled,ariaDisabled:b.getAttribute('aria-disabled')||'',visible:__vis(b)});
+  const inventory = b => { const r=b.getBoundingClientRect(); let x=r.x,y=r.y,w=b.ownerDocument&&b.ownerDocument.defaultView; try{while(w&&w!==w.top){const f=w.frameElement;if(!f)break;const fr=f.getBoundingClientRect();x+=fr.x;y+=fr.y;w=f.ownerDocument&&f.ownerDocument.defaultView;}}catch(e){} return {ariaLabel:b.getAttribute('aria-label')||'',title:b.title||'',testId:b.getAttribute('data-testid')||'',automationId:b.getAttribute('data-automation-id')||'',className:typeof b.className==='string'?b.className:'',type:b.getAttribute('type')||'',disabled:!!b.disabled,ariaDisabled:b.getAttribute('aria-disabled')||'',visible:__vis(b),rect:{x,y,width:r.width,height:r.height,cx:x+r.width/2,cy:y+r.height/2}}; };
   const clickable = [];
   for (const b of buttons) {
     const label = (b.getAttribute('aria-label') || b.title || b.textContent || '').trim();
@@ -885,14 +885,33 @@ export class CopilotEdgeClient {
     throw new Error('Copilot の入力欄が準備できませんでした (タイムアウト)。')
   }
 
-  private async freshChat(): Promise<void> {
-    const raw = await this.evalWithReconnect(FRESH_CHAT_JS)
-    if (!(JSON.parse(String(raw)) as { clicked: boolean }).clicked) {
-      await this.cdpMethod('Page.navigate', { url: this.s.url })
-      await sleep(3000)
-    } else {
-      await sleep(450)
+  private async freshSurfaceReady(): Promise<boolean> {
+    try {
+      const raw = await this.evalWithReconnect(COPILOT_SCREEN_STATE_JS, 5000)
+      const state = JSON.parse(String(raw)) as { inputReady?: boolean; responseCandidates?: unknown[] }
+      const inputLength = await this.editorLength()
+      return state.inputReady === true && Array.isArray(state.responseCandidates) && state.responseCandidates.length === 0 && inputLength >= 0 && inputLength <= 2
+    } catch {
+      return false
     }
+  }
+
+  private async waitFreshSurface(timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs
+    do {
+      if (await this.freshSurfaceReady()) return true
+      if (Date.now() < deadline) await sleep(200)
+    } while (Date.now() < deadline)
+    return false
+  }
+
+  private async freshChat(): Promise<void> {
+    if (await this.freshSurfaceReady()) return
+    const raw = await this.evalWithReconnect(FRESH_CHAT_JS)
+    const clicked = (JSON.parse(String(raw)) as { clicked: boolean }).clicked
+    if (clicked && await this.waitFreshSurface(5000)) return
+    await this.cdpMethod('Page.navigate', { url: this.s.url })
+    if (!await this.waitFreshSurface(30000)) throw new Error('新規Copilotセッションの空画面を確認できませんでした')
   }
 
   private async stampVisibleSessionMarker(sessionId: string): Promise<void> {
@@ -1063,7 +1082,7 @@ export class CopilotEdgeClient {
       }
     }
     const final = await this.editorState()
-    if (!final.found || !final.text.startsWith(prompt)) {
+    if (!final.found || final.text !== prompt) {
       throw new Error(`依頼文の入力を確認できませんでした (期待 ${prompt.length} / 実際 ${final.text.length})`)
     }
   }

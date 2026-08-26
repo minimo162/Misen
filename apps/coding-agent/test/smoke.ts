@@ -1209,6 +1209,71 @@ async function testCopilotChunkFallback(): Promise<void> {
   await internal.insertDirect(prompt)
   assert.strictEqual(editor, prompt)
   assert.strictEqual(insertCalls, 1, 'YakuLingo-style direct input must use one Input.insertText call')
+
+  const garbageClient = new CopilotEdgeClient({ baseURL: '', model: '', provider: 'copilot-edge', copilot: { maxPromptChars: 5000 } })
+  const garbage = garbageClient as unknown as Internals
+  let garbageEditor = ''
+  garbage.editorLength = async () => garbageEditor.length
+  garbage.editorState = async () => ({ found: true, text: garbageEditor, active: true })
+  garbage.clearEditor = async () => { garbageEditor = '' }
+  garbage.focusEditor = async () => {}
+  garbage.bringToFront = async () => {}
+  garbage.waitSendReady = async () => ({ ready: true, inventory: [] })
+  garbage.cdpMethod = async (name, params) => {
+    if (name !== 'Input.insertText') return
+    garbageEditor += String(params.text ?? '')
+    if (garbageEditor === prompt) garbageEditor += 'TRAILING_GARBAGE'
+  }
+  const originalWarn = console.warn
+  const garbageWarnings: string[] = []
+  console.warn = (...args: unknown[]) => { garbageWarnings.push(args.map(String).join(' ')) }
+  try {
+    await assert.rejects(garbage.insertByChunks(prompt), /依頼文の入力/, 'chunk fallback must reject prompt plus trailing garbage')
+  } finally {
+    console.warn = originalWarn
+  }
+  assert.ok(garbageWarnings.some((line) => line.includes('DOM文字列不一致')), 'trailing garbage rejection must retain a diagnostic warning')
+
+  const sendClient = new CopilotEdgeClient({ baseURL: '', model: '', provider: 'copilot-edge' })
+  type SendInternals = {
+    clickSend: (baseline: string) => Promise<void>
+    waitSendReady: () => Promise<{ ready: boolean; inventory: unknown }>
+    editorLength: () => Promise<number>
+    evalWithReconnect: () => Promise<unknown>
+    waitSendEstablished: () => Promise<boolean>
+    cdpMethod: (name: string, params: Record<string, unknown>) => Promise<void>
+  }
+  const sendInternal = sendClient as unknown as SendInternals
+  sendInternal.waitSendReady = async () => ({ ready: true, inventory: [] })
+  sendInternal.editorLength = async () => 12
+  sendInternal.evalWithReconnect = async () => JSON.stringify({ clicked: true, selected: { rect: { cx: 123, cy: 456 } } })
+  let establishmentChecks = 0
+  sendInternal.waitSendEstablished = async () => ++establishmentChecks > 1
+  const mouseEvents: Array<{ name: string; params: Record<string, unknown> }> = []
+  sendInternal.cdpMethod = async (name, params) => { mouseEvents.push({ name, params }) }
+  await sendInternal.clickSend('old response')
+  assert.deepStrictEqual(mouseEvents.map((event) => [event.name, event.params.type, event.params.x, event.params.y]), [
+    ['Input.dispatchMouseEvent', 'mousePressed', 123, 456],
+    ['Input.dispatchMouseEvent', 'mouseReleased', 123, 456]
+  ])
+
+  const freshClient = new CopilotEdgeClient({ baseURL: '', model: '', provider: 'copilot-edge' })
+  type FreshInternals = {
+    freshChat: () => Promise<void>
+    freshSurfaceReady: () => Promise<boolean>
+    waitFreshSurface: () => Promise<boolean>
+    evalWithReconnect: () => Promise<unknown>
+    cdpMethod: (name: string, params: Record<string, unknown>) => Promise<void>
+  }
+  const freshInternal = freshClient as unknown as FreshInternals
+  freshInternal.freshSurfaceReady = async () => false
+  freshInternal.evalWithReconnect = async () => JSON.stringify({ clicked: true })
+  let freshWaits = 0
+  freshInternal.waitFreshSurface = async () => ++freshWaits > 1
+  const navigations: Record<string, unknown>[] = []
+  freshInternal.cdpMethod = async (name, params) => { if (name === 'Page.navigate') navigations.push(params) }
+  await freshInternal.freshChat()
+  assert.deepStrictEqual(navigations, [{ url: 'https://m365.cloud.microsoft/chat/' }], 'unverified synthetic new-chat click must navigate explicitly')
   console.log('PASS copilot-chunk-fallback')
 }
 async function testCopilotLoop(): Promise<void> {
@@ -1421,7 +1486,9 @@ async function testOpenAICompatibleBridge(): Promise<void> {
     'ストリーム回答',
     '通常回答です',
     `処理します。\n{'tool':'write_file','args':{'path':'メモ.txt','content':'確認'}}`,
-    '{"tool":"write_file","args":{"path":3,"content":"不正"}}'
+    '{"tool":"write_file","args":{"path":3,"content":"不正"}}',
+    '{"tool":"write_file","args":{"path":"禁止.txt","content":"x"}}',
+    '関数を選べませんでした'
   ]
   const server = createOpenAICompatibleBridgeServer(token, {
     complete: async (prompt) => { prompts.push(prompt); return rawReplies.shift() ?? 'empty' },
@@ -1471,11 +1538,24 @@ async function testOpenAICompatibleBridge(): Promise<void> {
     assert.ok(prompts[2].includes('AVAILABLE_FUNCTIONS=') && prompts[2].includes('write_file'))
     assert.ok(prompts[2].includes('「ここ」「この場所」「直下」') && prompts[2].includes(' . を使ってください'))
     assert.ok(prompts[2].includes('「開く」') && prompts[2].includes('既定アプリを起動'))
+    assert.ok(prompts[2].includes("Start-Process -FilePath './相対パス'") && prompts[2].includes('-LiteralPath は使わず'))
 
     const rejected = await post({ model: 'bridge-test', messages: [{ role: 'user', content: '不正な引数' }], tools })
     const rejectedJson = await rejected.json() as { choices: Array<{ message: { content: string }; finish_reason: string }> }
     assert.strictEqual(rejectedJson.choices[0].finish_reason, 'stop')
     assert.strictEqual(rejectedJson.choices[0].message.content, '{"tool":"write_file","args":{"path":3,"content":"不正"}}')
+
+    const toolChoiceNone = await post({ model: 'bridge-test', tool_choice: 'none', messages: [{ role: 'user', content: '関数を呼ばないで' }], tools })
+    assert.strictEqual(toolChoiceNone.status, 200)
+    const toolChoiceNoneJson = await toolChoiceNone.json() as { choices: Array<{ message: { content: string; tool_calls?: unknown } }> }
+    assert.strictEqual(toolChoiceNoneJson.choices[0].message.tool_calls, undefined)
+    assert.ok(toolChoiceNoneJson.choices[0].message.content.includes('write_file'))
+    assert.ok(prompts[4].includes('関数を呼び出さず') && !prompts[4].includes('AVAILABLE_FUNCTIONS='))
+
+    const toolChoiceRequired = await post({ model: 'bridge-test', tool_choice: 'required', messages: [{ role: 'user', content: '必ず選んで' }], tools })
+    assert.strictEqual(toolChoiceRequired.status, 422)
+    const unsupportedChoice = await post({ model: 'bridge-test', tool_choice: 'sometimes', messages: [{ role: 'user', content: '不正' }], tools })
+    assert.strictEqual(unsupportedChoice.status, 422)
 
     const negative = interpretBridgeResponse('例: {"tool":"write_file","args":{"path":"推測.txt","content":"x"}} ですが今回は操作しません。', tools)
     assert.strictEqual(negative.toolCalls, undefined)
@@ -1483,11 +1563,66 @@ async function testOpenAICompatibleBridge(): Promise<void> {
     const windowsPath = interpretBridgeResponse(String.raw`{"tool":"read","args":{"filePath":"C:\Users\yuuki\flex-live"}}`, readTool)
     assert.strictEqual(JSON.parse(String((windowsPath.toolCalls?.[0].function as { arguments?: string })?.arguments)).filePath, 'C:\\Users\\yuuki\\flex-live')
     assert.ok(windowsPath.repairs.includes('windows-path-backslash'))
+    const bashTool: OpenAITool[] = [{ type: 'function', function: { name: 'bash', parameters: { type: 'object', additionalProperties: false, required: ['command'], properties: { command: { type: 'string' } } } } }]
+    const relativeWindowsPath = interpretBridgeResponse(String.raw`{"tool":"bash","args":{"command":"Start-Process -FilePath '.\概要.txt'"}}`, bashTool)
+    assert.strictEqual(JSON.parse(String((relativeWindowsPath.toolCalls?.[0].function as { arguments?: string })?.arguments)).command, "Start-Process -FilePath '.\\概要.txt'")
+    assert.ok(relativeWindowsPath.repairs.includes('invalid-json-backslash'))
+    const alreadyEscapedRelativePath = interpretBridgeResponse(String.raw`{"tool":"bash","args":{"command":"Start-Process -FilePath '.\\概要.txt'"}}`, bashTool)
+    assert.strictEqual(JSON.parse(String((alreadyEscapedRelativePath.toolCalls?.[0].function as { arguments?: string })?.arguments)).command, "Start-Process -FilePath '.\\概要.txt'")
+    assert.ok(!alreadyEscapedRelativePath.repairs.includes('invalid-json-backslash'))
     assert.ok(buildBridgePrompt({ messages: [{ role: 'user', content: [{ type: 'text', text: '配列本文' }] }], tools: [] }).includes('配列本文'))
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()))
   }
-  assert.strictEqual(prompts.length, 4, 'unauthorized requests must not reach Copilot')
+  assert.strictEqual(prompts.length, 6, 'unauthorized or invalid requests must not reach Copilot')
+
+  let completeCalls = 0
+  let abortedCalls = 0
+  let releaseFirst: (() => void) | undefined
+  const cancellationServer = createOpenAICompatibleBridgeServer(token, {
+    complete: async (_prompt, signal) => {
+      completeCalls++
+      return new Promise<string>((resolve, reject) => {
+        if (completeCalls === 1) releaseFirst = () => resolve('first done')
+        signal?.addEventListener('abort', () => { abortedCalls++; reject(new Error('aborted by client')) }, { once: true })
+      })
+    }
+  })
+  await new Promise<void>((resolve) => cancellationServer.listen(0, '127.0.0.1', resolve))
+  const cancellationPort = (cancellationServer.address() as net.AddressInfo).port
+  const cancellationUrl = `http://127.0.0.1:${cancellationPort}/v1/chat/completions`
+  const requestBody = JSON.stringify({ model: 'test', messages: [{ role: 'user', content: 'wait' }] })
+  const first = fetch(cancellationUrl, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: requestBody })
+  for (let poll = 0; poll < 50 && completeCalls === 0; poll++) await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.strictEqual(completeCalls, 1)
+  const queuedAbort = new AbortController()
+  const second = fetch(cancellationUrl, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: requestBody, signal: queuedAbort.signal }).catch((error) => error)
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  queuedAbort.abort()
+  await second
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  releaseFirst?.()
+  const firstResponse = await first
+  assert.strictEqual(firstResponse.status, 200)
+  await firstResponse.text()
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  assert.strictEqual(completeCalls, 1, 'a canceled queued request must not reach Copilot')
+
+  const activeAbort = new AbortController()
+  const active = fetch(cancellationUrl, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: requestBody, signal: activeAbort.signal }).catch((error) => error)
+  for (let poll = 0; poll < 50 && completeCalls < 2; poll++) await new Promise((resolve) => setTimeout(resolve, 10))
+  activeAbort.abort()
+  await active
+  for (let poll = 0; poll < 50 && abortedCalls === 0; poll++) await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.strictEqual(abortedCalls, 1, 'response-side disconnect must abort active Copilot work')
+  cancellationServer.abortAll()
+  await new Promise<void>((resolve) => cancellationServer.close(() => resolve()))
+
+  for (const relative of ['vendor/opencode/Get-OpenCode.ps1', 'vendor/opencode/manifest.json', 'vendor/opencode/LICENSE-OpenCode.txt']) {
+    const bytes = fs.readFileSync(path.join(process.cwd(), relative))
+    assert.deepStrictEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf], `${relative} must use UTF-8 BOM`)
+    assert.ok(!/(?<!\r)\n/u.test(bytes.subarray(3).toString('utf8')), `${relative} must use CRLF`)
+  }
   console.log('PASS openai-compatible-bridge')
 }
 

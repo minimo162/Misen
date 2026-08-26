@@ -154,6 +154,21 @@ function repairWindowsPathBackslashes(source: string): string | null {
   return changed ? repaired : null
 }
 
+function repairInvalidJsonBackslashes(source: string): string | null {
+  let changed = false
+  const repaired = source.replace(/\\+/gu, (slashes: string, offset: number, full: string) => {
+    if (slashes.length % 2 === 0) return slashes
+    const nextOffset = offset + slashes.length
+    const next = full[nextOffset] ?? ''
+    const validSimpleEscape = /^["\\/bfnrt]$/u.test(next)
+    const validUnicodeEscape = next === 'u' && /^[0-9a-f]{4}$/iu.test(full.slice(nextOffset + 1, nextOffset + 5))
+    if (validSimpleEscape || validUnicodeEscape) return slashes
+    changed = true
+    return `${slashes}\\`
+  })
+  return changed ? repaired : null
+}
+
 function jsonDecisionCandidates(rawResponse: string, tools: ConverterToolDefinition[]): JsonCandidate[] {
   const clean = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, '').replace(/```(?:json)?/giu, '').replace(/```/gu, '').replace(/\bAGENT_END\b/giu, '').trim()
   const sources: Array<{ text: string; offset: number }> = scanJsonObjects(clean).map((candidate) => ({ text: candidate.text, offset: candidate.position }))
@@ -174,6 +189,10 @@ function jsonDecisionCandidates(rawResponse: string, tools: ConverterToolDefinit
     const windowsPath = repairWindowsPathBackslashes(source.text)
     if (windowsPath !== null) {
       try { attempts.push({ text: jsonrepair(windowsPath), repairs: ['windows-path-backslash', 'jsonrepair'], semanticBonus: 40 }) } catch {}
+    }
+    const invalidBackslash = repairInvalidJsonBackslashes(source.text)
+    if (invalidBackslash !== null) {
+      try { attempts.push({ text: jsonrepair(invalidBackslash), repairs: ['invalid-json-backslash', 'jsonrepair'], semanticBonus: 35 }) } catch {}
     }
     for (const attempt of attempts) {
       try {
@@ -210,10 +229,20 @@ function captureLabeledValue(raw: string, key: string): unknown {
   return rest || undefined
 }
 
+function hasNegatedToolIntent(rawResponse: string): boolean {
+  const text = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, '').trim()
+  if (/(?:例[:：]|たとえば|例えば|今回は[^。\n]*(?:しません|しない)|拒否され|呼び出せません|操作しません)/u.test(text)) return true
+  const japaneseAction = '(?:実行|操作|処理|呼び出し?|起動|開く|書き込(?:み|む)?|読み取(?:り|る)?|検索|使用|使う)'
+  const japaneseNegation = '(?:しないで|しない|しません|しなくて|してはいけ|禁止|不可|不要|やめ)'
+  if (new RegExp(`${japaneseAction}.{0,32}${japaneseNegation}|${japaneseNegation}.{0,32}${japaneseAction}`, 'iu').test(text)) return true
+  const englishAction = '(?:execute|run|call|invoke|use|open|write|read|search)'
+  const englishNegation = `(?:do\\s+not|don't|never|must\\s+not|should\\s+not|shall\\s+not)`
+  return new RegExp(`\\b${englishNegation}\\b.{0,64}\\b${englishAction}\\b|\\b${englishAction}\\b.{0,64}\\b${englishNegation}\\b`, 'iu').test(text)
+}
+
 function explicitToolDecision(rawResponse: string, tools: ConverterToolDefinition[]): string | null {
   const text = rawResponse.trim()
-  const negative = /(?:例[:：]|たとえば|例えば|今回は[^。\n]*(?:しません|しない)|拒否され|呼び出せません|まだ[^。\n]*(?:できません|呼べません)|操作しません)/u.test(text)
-  if (negative) return null
+  if (hasNegatedToolIntent(text) || /まだ[^。\n]*(?:できません|呼べません)/u.test(text)) return null
   const matched = [...tools]
     .sort((a, b) => b.name.length - a.name.length)
     .find((tool) => {
@@ -248,7 +277,7 @@ function explicitToolDecision(rawResponse: string, tools: ConverterToolDefinitio
 
 export function interpretCopilotResponseDeterministically(rawResponse: string, tools: ConverterToolDefinition[]): DeterministicConversion | null {
   const candidates = jsonDecisionCandidates(rawResponse, tools)
-  const negativeContext = /(?:例[:：]|たとえば|例えば|今回は[^。\n]*(?:しません|しない)|操作しません|拒否され|呼び出せません)/u.test(rawResponse)
+  const negativeContext = hasNegatedToolIntent(rawResponse)
   if (candidates.length > 0 && !negativeContext) return { content: candidates[0].text, method: 'json-candidate', repairs: candidates[0].repairs }
   const explicit = explicitToolDecision(rawResponse, tools)
   if (explicit) return { content: explicit, method: 'explicit-tool-text', repairs: [] }

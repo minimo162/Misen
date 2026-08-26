@@ -4662,6 +4662,20 @@ function repairWindowsPathBackslashes(source) {
   });
   return changed ? repaired : null;
 }
+function repairInvalidJsonBackslashes(source) {
+  let changed = false;
+  const repaired = source.replace(/\\+/gu, (slashes, offset, full) => {
+    if (slashes.length % 2 === 0) return slashes;
+    const nextOffset = offset + slashes.length;
+    const next = full[nextOffset] ?? "";
+    const validSimpleEscape = /^["\\/bfnrt]$/u.test(next);
+    const validUnicodeEscape = next === "u" && /^[0-9a-f]{4}$/iu.test(full.slice(nextOffset + 1, nextOffset + 5));
+    if (validSimpleEscape || validUnicodeEscape) return slashes;
+    changed = true;
+    return `${slashes}\\`;
+  });
+  return changed ? repaired : null;
+}
 function jsonDecisionCandidates(rawResponse, tools) {
   const clean = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, "").replace(/```(?:json)?/giu, "").replace(/```/gu, "").replace(/\bAGENT_END\b/giu, "").trim();
   const sources = scanJsonObjects(clean).map((candidate) => ({ text: candidate.text, offset: candidate.position }));
@@ -4686,6 +4700,13 @@ function jsonDecisionCandidates(rawResponse, tools) {
     if (windowsPath !== null) {
       try {
         attempts.push({ text: (0, import_jsonrepair.jsonrepair)(windowsPath), repairs: ["windows-path-backslash", "jsonrepair"], semanticBonus: 40 });
+      } catch {
+      }
+    }
+    const invalidBackslash = repairInvalidJsonBackslashes(source.text);
+    if (invalidBackslash !== null) {
+      try {
+        attempts.push({ text: (0, import_jsonrepair.jsonrepair)(invalidBackslash), repairs: ["invalid-json-backslash", "jsonrepair"], semanticBonus: 35 });
       } catch {
       }
     }
@@ -4727,10 +4748,19 @@ function captureLabeledValue(raw, key) {
   if (/^-?\d+$/u.test(rest)) return Number(rest);
   return rest || void 0;
 }
+function hasNegatedToolIntent(rawResponse) {
+  const text = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, "").trim();
+  if (/(?:例[:：]|たとえば|例えば|今回は[^。\n]*(?:しません|しない)|拒否され|呼び出せません|操作しません)/u.test(text)) return true;
+  const japaneseAction = "(?:\u5B9F\u884C|\u64CD\u4F5C|\u51E6\u7406|\u547C\u3073\u51FA\u3057?|\u8D77\u52D5|\u958B\u304F|\u66F8\u304D\u8FBC(?:\u307F|\u3080)?|\u8AAD\u307F\u53D6(?:\u308A|\u308B)?|\u691C\u7D22|\u4F7F\u7528|\u4F7F\u3046)";
+  const japaneseNegation = "(?:\u3057\u306A\u3044\u3067|\u3057\u306A\u3044|\u3057\u307E\u305B\u3093|\u3057\u306A\u304F\u3066|\u3057\u3066\u306F\u3044\u3051|\u7981\u6B62|\u4E0D\u53EF|\u4E0D\u8981|\u3084\u3081)";
+  if (new RegExp(`${japaneseAction}.{0,32}${japaneseNegation}|${japaneseNegation}.{0,32}${japaneseAction}`, "iu").test(text)) return true;
+  const englishAction = "(?:execute|run|call|invoke|use|open|write|read|search)";
+  const englishNegation = `(?:do\\s+not|don't|never|must\\s+not|should\\s+not|shall\\s+not)`;
+  return new RegExp(`\\b${englishNegation}\\b.{0,64}\\b${englishAction}\\b|\\b${englishAction}\\b.{0,64}\\b${englishNegation}\\b`, "iu").test(text);
+}
 function explicitToolDecision(rawResponse, tools) {
   const text = rawResponse.trim();
-  const negative = /(?:例[:：]|たとえば|例えば|今回は[^。\n]*(?:しません|しない)|拒否され|呼び出せません|まだ[^。\n]*(?:できません|呼べません)|操作しません)/u.test(text);
-  if (negative) return null;
+  if (hasNegatedToolIntent(text) || /まだ[^。\n]*(?:できません|呼べません)/u.test(text)) return null;
   const matched = [...tools].sort((a, b) => b.name.length - a.name.length).find((tool2) => {
     const bare2 = tool2.name.startsWith("host.") ? tool2.name.slice(5) : tool2.name;
     return text.toLowerCase().includes(tool2.name.toLowerCase()) || text.toLowerCase().includes(bare2.toLowerCase());
@@ -4771,7 +4801,7 @@ function explicitToolDecision(rawResponse, tools) {
 }
 function interpretCopilotResponseDeterministically(rawResponse, tools) {
   const candidates = jsonDecisionCandidates(rawResponse, tools);
-  const negativeContext = /(?:例[:：]|たとえば|例えば|今回は[^。\n]*(?:しません|しない)|操作しません|拒否され|呼び出せません)/u.test(rawResponse);
+  const negativeContext = hasNegatedToolIntent(rawResponse);
   if (candidates.length > 0 && !negativeContext) return { content: candidates[0].text, method: "json-candidate", repairs: candidates[0].repairs };
   const explicit = explicitToolDecision(rawResponse, tools);
   if (explicit) return { content: explicit, method: "explicit-tool-text", repairs: [] };
@@ -6389,7 +6419,9 @@ var NEGATIVE_CASES = [
   '{"tool":"host.unknown_tool","args":{"path":"\u63A8\u6E2C.txt"}}',
   "\u958B\u304F\u5BFE\u8C61\u304C\u5206\u304B\u308A\u307E\u305B\u3093\u3002\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
   '\u4F8B: {"tool":"host.list_files","args":{"path":"reports"}} \u3067\u3059\u304C\u4ECA\u56DE\u306F\u64CD\u4F5C\u3057\u307E\u305B\u3093\u3002',
-  String.raw`例: {"tool":"host.read_file","args":{"path":"C:\Users\demo\資料.txt"}} ですが今回は操作しません。`
+  String.raw`例: {"tool":"host.read_file","args":{"path":"C:\Users\demo\資料.txt"}} ですが今回は操作しません。`,
+  '\u3053\u306E\u64CD\u4F5C\u306F\u5B9F\u884C\u3057\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002{"tool":"host.read_file","args":{"path":"secret.txt"}}',
+  'Do not execute this operation. {"tool":"host.write_file","args":{"path":"unsafe.txt","content":"x"}}'
 ];
 var LAYER_DEFS = TOOL_DEFS.map((entry) => ({ name: qualifiedToolName(entry.name), description: entry.description, parameters: entry.parameters }));
 function validatedDecision(output, expectedTool, expectedArgs = {}) {

@@ -4666,6 +4666,20 @@ function repairWindowsPathBackslashes(source) {
   });
   return changed ? repaired : null;
 }
+function repairInvalidJsonBackslashes(source) {
+  let changed = false;
+  const repaired = source.replace(/\\+/gu, (slashes, offset, full) => {
+    if (slashes.length % 2 === 0) return slashes;
+    const nextOffset = offset + slashes.length;
+    const next = full[nextOffset] ?? "";
+    const validSimpleEscape = /^["\\/bfnrt]$/u.test(next);
+    const validUnicodeEscape = next === "u" && /^[0-9a-f]{4}$/iu.test(full.slice(nextOffset + 1, nextOffset + 5));
+    if (validSimpleEscape || validUnicodeEscape) return slashes;
+    changed = true;
+    return `${slashes}\\`;
+  });
+  return changed ? repaired : null;
+}
 function jsonDecisionCandidates(rawResponse, tools) {
   const clean = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, "").replace(/```(?:json)?/giu, "").replace(/```/gu, "").replace(/\bAGENT_END\b/giu, "").trim();
   const sources = scanJsonObjects(clean).map((candidate) => ({ text: candidate.text, offset: candidate.position }));
@@ -4690,6 +4704,13 @@ function jsonDecisionCandidates(rawResponse, tools) {
     if (windowsPath !== null) {
       try {
         attempts.push({ text: (0, import_jsonrepair.jsonrepair)(windowsPath), repairs: ["windows-path-backslash", "jsonrepair"], semanticBonus: 40 });
+      } catch {
+      }
+    }
+    const invalidBackslash = repairInvalidJsonBackslashes(source.text);
+    if (invalidBackslash !== null) {
+      try {
+        attempts.push({ text: (0, import_jsonrepair.jsonrepair)(invalidBackslash), repairs: ["invalid-json-backslash", "jsonrepair"], semanticBonus: 35 });
       } catch {
       }
     }
@@ -4731,10 +4752,19 @@ function captureLabeledValue(raw, key) {
   if (/^-?\d+$/u.test(rest)) return Number(rest);
   return rest || void 0;
 }
+function hasNegatedToolIntent(rawResponse) {
+  const text = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, "").trim();
+  if (/(?:例[:：]|たとえば|例えば|今回は[^。\n]*(?:しません|しない)|拒否され|呼び出せません|操作しません)/u.test(text)) return true;
+  const japaneseAction = "(?:\u5B9F\u884C|\u64CD\u4F5C|\u51E6\u7406|\u547C\u3073\u51FA\u3057?|\u8D77\u52D5|\u958B\u304F|\u66F8\u304D\u8FBC(?:\u307F|\u3080)?|\u8AAD\u307F\u53D6(?:\u308A|\u308B)?|\u691C\u7D22|\u4F7F\u7528|\u4F7F\u3046)";
+  const japaneseNegation = "(?:\u3057\u306A\u3044\u3067|\u3057\u306A\u3044|\u3057\u307E\u305B\u3093|\u3057\u306A\u304F\u3066|\u3057\u3066\u306F\u3044\u3051|\u7981\u6B62|\u4E0D\u53EF|\u4E0D\u8981|\u3084\u3081)";
+  if (new RegExp(`${japaneseAction}.{0,32}${japaneseNegation}|${japaneseNegation}.{0,32}${japaneseAction}`, "iu").test(text)) return true;
+  const englishAction = "(?:execute|run|call|invoke|use|open|write|read|search)";
+  const englishNegation = `(?:do\\s+not|don't|never|must\\s+not|should\\s+not|shall\\s+not)`;
+  return new RegExp(`\\b${englishNegation}\\b.{0,64}\\b${englishAction}\\b|\\b${englishAction}\\b.{0,64}\\b${englishNegation}\\b`, "iu").test(text);
+}
 function explicitToolDecision(rawResponse, tools) {
   const text = rawResponse.trim();
-  const negative = /(?:例[:：]|たとえば|例えば|今回は[^。\n]*(?:しません|しない)|拒否され|呼び出せません|まだ[^。\n]*(?:できません|呼べません)|操作しません)/u.test(text);
-  if (negative) return null;
+  if (hasNegatedToolIntent(text) || /まだ[^。\n]*(?:できません|呼べません)/u.test(text)) return null;
   const matched = [...tools].sort((a, b) => b.name.length - a.name.length).find((tool) => {
     const bare2 = tool.name.startsWith("host.") ? tool.name.slice(5) : tool.name;
     return text.toLowerCase().includes(tool.name.toLowerCase()) || text.toLowerCase().includes(bare2.toLowerCase());
@@ -4775,7 +4805,7 @@ function explicitToolDecision(rawResponse, tools) {
 }
 function interpretCopilotResponseDeterministically(rawResponse, tools) {
   const candidates = jsonDecisionCandidates(rawResponse, tools);
-  const negativeContext = /(?:例[:：]|たとえば|例えば|今回は[^。\n]*(?:しません|しない)|操作しません|拒否され|呼び出せません)/u.test(rawResponse);
+  const negativeContext = hasNegatedToolIntent(rawResponse);
   if (candidates.length > 0 && !negativeContext) return { content: candidates[0].text, method: "json-candidate", repairs: candidates[0].repairs };
   const explicit = explicitToolDecision(rawResponse, tools);
   if (explicit) return { content: explicit, method: "explicit-tool-text", repairs: [] };
@@ -7190,7 +7220,7 @@ var COPILOT_CLICK_SEND_JS = `(() => {
   const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button, [role="button"]')));
   const exclude = /stop|cancel|\u505C\u6B62|\u30AD\u30E3\u30F3\u30BB\u30EB|regenerate|\u518D\u751F\u6210|attach|\u6DFB\u4ED8|microphone|voice|\u30DC\u30A4\u30B9|\u97F3\u58F0|new chat|\u65B0\u3057\u3044\u30C1\u30E3\u30C3\u30C8|clear|\u30AF\u30EA\u30A2|close|\u9589\u3058\u308B|search|\u691C\u7D22|library|\u30E9\u30A4\u30D6\u30E9\u30EA|file|\u30D5\u30A1\u30A4\u30EB/;
   const structural = b => b.matches('button[type="submit"],.fai-SendButton,[class*="SendButton" i],[data-testid*="send" i],[data-automation-id*="send" i]');
-  const inventory = b => ({ariaLabel:b.getAttribute('aria-label')||'',title:b.title||'',testId:b.getAttribute('data-testid')||'',automationId:b.getAttribute('data-automation-id')||'',className:typeof b.className==='string'?b.className:'',type:b.getAttribute('type')||'',disabled:!!b.disabled,ariaDisabled:b.getAttribute('aria-disabled')||'',visible:__vis(b)});
+  const inventory = b => { const r=b.getBoundingClientRect(); let x=r.x,y=r.y,w=b.ownerDocument&&b.ownerDocument.defaultView; try{while(w&&w!==w.top){const f=w.frameElement;if(!f)break;const fr=f.getBoundingClientRect();x+=fr.x;y+=fr.y;w=f.ownerDocument&&f.ownerDocument.defaultView;}}catch(e){} return {ariaLabel:b.getAttribute('aria-label')||'',title:b.title||'',testId:b.getAttribute('data-testid')||'',automationId:b.getAttribute('data-automation-id')||'',className:typeof b.className==='string'?b.className:'',type:b.getAttribute('type')||'',disabled:!!b.disabled,ariaDisabled:b.getAttribute('aria-disabled')||'',visible:__vis(b),rect:{x,y,width:r.width,height:r.height,cx:x+r.width/2,cy:y+r.height/2}}; };
   const clickable = [];
   for (const b of buttons) {
     const label = (b.getAttribute('aria-label') || b.title || b.textContent || '').trim();
@@ -7782,14 +7812,31 @@ var CopilotEdgeClient = class {
     }
     throw new Error("Copilot \u306E\u5165\u529B\u6B04\u304C\u6E96\u5099\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F (\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8)\u3002");
   }
-  async freshChat() {
-    const raw = await this.evalWithReconnect(FRESH_CHAT_JS);
-    if (!JSON.parse(String(raw)).clicked) {
-      await this.cdpMethod("Page.navigate", { url: this.s.url });
-      await sleep(3e3);
-    } else {
-      await sleep(450);
+  async freshSurfaceReady() {
+    try {
+      const raw = await this.evalWithReconnect(COPILOT_SCREEN_STATE_JS, 5e3);
+      const state = JSON.parse(String(raw));
+      const inputLength = await this.editorLength();
+      return state.inputReady === true && Array.isArray(state.responseCandidates) && state.responseCandidates.length === 0 && inputLength >= 0 && inputLength <= 2;
+    } catch {
+      return false;
     }
+  }
+  async waitFreshSurface(timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    do {
+      if (await this.freshSurfaceReady()) return true;
+      if (Date.now() < deadline) await sleep(200);
+    } while (Date.now() < deadline);
+    return false;
+  }
+  async freshChat() {
+    if (await this.freshSurfaceReady()) return;
+    const raw = await this.evalWithReconnect(FRESH_CHAT_JS);
+    const clicked = JSON.parse(String(raw)).clicked;
+    if (clicked && await this.waitFreshSurface(5e3)) return;
+    await this.cdpMethod("Page.navigate", { url: this.s.url });
+    if (!await this.waitFreshSurface(3e4)) throw new Error("\u65B0\u898FCopilot\u30BB\u30C3\u30B7\u30E7\u30F3\u306E\u7A7A\u753B\u9762\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
   }
   async stampVisibleSessionMarker(sessionId) {
     const marker = makeVisibleSessionMarker(sessionId);
@@ -7943,7 +7990,7 @@ var CopilotEdgeClient = class {
       }
     }
     const final = await this.editorState();
-    if (!final.found || !final.text.startsWith(prompt)) {
+    if (!final.found || final.text !== prompt) {
       throw new Error(`\u4F9D\u983C\u6587\u306E\u5165\u529B\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F (\u671F\u5F85 ${prompt.length} / \u5B9F\u969B ${final.text.length})`);
     }
   }
@@ -8221,6 +8268,7 @@ function resolveApproval(id, approved, reason = approved ? "\u5229\u7528\u8005\u
 var import_node_crypto3 = __toESM(require("node:crypto"));
 var import_node_http3 = __toESM(require("node:http"));
 var MAX_BODY_BYTES = 2 * 1024 * 1024;
+var MAX_PENDING_REQUESTS = 8;
 var TOOL_NAME = /^[A-Za-z0-9_-]{1,64}$/u;
 var ANNOTATION_KEYWORDS = /* @__PURE__ */ new Set(["description", "title", "default", "examples", "deprecated", "readOnly", "writeOnly", "$comment", "$schema", "$id", "$defs", "definitions"]);
 function isObject(value) {
@@ -8254,6 +8302,23 @@ function assertTools(value) {
     return { type: "function", function: { name, description, parameters } };
   });
 }
+function assertToolChoice(value, tools) {
+  if (value === void 0) return void 0;
+  if (value === "auto" || value === "none" || value === "required") {
+    if (value === "required" && tools.length === 0) throw new Error("tool_choice=required \u306B\u306Ftools\u304C\u5FC5\u8981\u3067\u3059");
+    return value;
+  }
+  if (!isObject(value) || value.type !== "function") {
+    throw new Error("tool_choice \u306F auto/none/required \u307E\u305F\u306Ffunction\u540D\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
+  }
+  const choiceFunction = value.function;
+  if (!isObject(choiceFunction) || typeof choiceFunction.name !== "string") {
+    throw new Error("tool_choice \u306F auto/none/required \u307E\u305F\u306Ffunction\u540D\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
+  }
+  const functionName = choiceFunction.name;
+  if (!tools.some((tool) => tool.function.name === functionName)) throw new Error(`tool_choice \u306Efunction\u304Ctools\u306B\u3042\u308A\u307E\u305B\u3093: ${functionName}`);
+  return { type: "function", function: { name: functionName } };
+}
 function parseOpenAIChatRequest(value) {
   if (!isObject(value)) throw new Error("request body\u306FJSON object\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
   if (!Array.isArray(value.messages) || value.messages.length === 0 || value.messages.length > 200) throw new Error("messages \u306F1\u301C200\u4EF6\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
@@ -8262,15 +8327,25 @@ function parseOpenAIChatRequest(value) {
     messageContent(candidate.content);
     return candidate;
   });
+  const tools = assertTools(value.tools);
   const stream = value.stream;
   if (stream !== void 0 && typeof stream !== "boolean") throw new Error("stream \u306Fboolean\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
   return {
     model: typeof value.model === "string" ? value.model : void 0,
     messages,
-    tools: assertTools(value.tools),
-    tool_choice: value.tool_choice,
+    tools,
+    tool_choice: assertToolChoice(value.tool_choice, tools),
     stream
   };
+}
+function requestTools(request) {
+  const tools = request.tools ?? [];
+  if (request.tool_choice === "none") return [];
+  const choice = request.tool_choice;
+  if (typeof choice === "object" && choice?.type === "function") {
+    return tools.filter((tool) => tool.function.name === choice.function.name);
+  }
+  return tools;
 }
 function buildBridgePrompt(request) {
   const transcript = request.messages.map((message, index) => {
@@ -8280,11 +8355,13 @@ tool_calls=${JSON.stringify(message.tool_calls)}`;
     return `[${index + 1}:${message.role.toUpperCase()}${meta ? ` ${meta}` : ""}]
 ${messageContent(message.content)}${calls}`;
   }).join("\n\n");
-  if (!request.tools?.length) return [
+  const selectedTools = requestTools(request);
+  if (!selectedTools.length) return [
     "\u4EE5\u4E0B\u306E\u4F1A\u8A71\u306B\u5BFE\u3059\u308B\u6B21\u306Eassistant\u56DE\u7B54\u3092\u751F\u6210\u3057\u3066\u304F\u3060\u3055\u3044\u3002\u7C21\u6F54\u306B\u7B54\u3048\u3066\u304F\u3060\u3055\u3044\u3002",
+    request.tool_choice === "none" ? "\u3053\u306E\u5FDC\u7B54\u3067\u306F\u95A2\u6570\u3092\u547C\u3073\u51FA\u3055\u305A\u3001\u901A\u5E38\u306E\u56DE\u7B54\u3060\u3051\u3092\u8FD4\u3057\u3066\u304F\u3060\u3055\u3044\u3002" : "",
     transcript
-  ].join("\n\n");
-  const tools = request.tools.map((tool) => ({
+  ].filter(Boolean).join("\n\n");
+  const tools = selectedTools.map((tool) => ({
     name: tool.function.name,
     description: tool.function.description ?? "",
     parameters: tool.function.parameters ?? { type: "object", properties: {} }
@@ -8295,10 +8372,12 @@ ${messageContent(message.content)}${calls}`;
     "\u95A2\u6570\u304C\u4E0D\u8981\u306A\u3089\u901A\u5E38\u306E\u56DE\u7B54\u3060\u3051\u3092\u8FD4\u3057\u3066\u304F\u3060\u3055\u3044\u3002\u5024\u30FB\u30D1\u30B9\u30FB\u4E8B\u5B9F\u3092\u63A8\u6E2C\u3057\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002\u4E26\u5217\u95A2\u6570\u547C\u3073\u51FA\u3057\u306F\u3057\u307E\u305B\u3093\u3002",
     "\u5229\u7528\u8005\u306E\u300C\u3053\u3053\u300D\u300C\u3053\u306E\u5834\u6240\u300D\u300C\u76F4\u4E0B\u300D\u306F\u30DB\u30B9\u30C8\u306E\u73FE\u5728\u306E\u4F5C\u696D\u30C7\u30A3\u30EC\u30AF\u30C8\u30EA\u3092\u6307\u3057\u307E\u3059\u3002\u95A2\u6570\u304C\u76F8\u5BFE\u30D1\u30B9\u3092\u8A31\u3059\u5834\u5408\u306F\u3001\u305D\u306E\u57FA\u6E96\u3092\u8868\u3059 . \u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044\u3002",
     "\u5229\u7528\u8005\u304C\u30D5\u30A1\u30A4\u30EB\u3092\u300C\u958B\u304F\u300D\u3068\u983C\u3093\u3060\u5834\u5408\u306F\u5185\u5BB9\u306E\u8AAD\u307F\u53D6\u308A\u3067\u4EE3\u7528\u305B\u305A\u3001\u5229\u7528\u53EF\u80FD\u306A\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u95A2\u6570\u3067\u65E2\u5B9A\u30A2\u30D7\u30EA\u3092\u8D77\u52D5\u3059\u308B1\u624B\u3092\u9078\u3093\u3067\u304F\u3060\u3055\u3044\u3002",
+    "Windows\u306E\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u95A2\u6570\u3067\u76F8\u5BFE\u30D5\u30A1\u30A4\u30EB\u3092\u958B\u304F\u5834\u5408\u306F Start-Process -FilePath './\u76F8\u5BFE\u30D1\u30B9' \u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044\u3002Start-Process\u306B\u5B58\u5728\u3057\u306A\u3044 -LiteralPath \u306F\u4F7F\u308F\u305A\u3001JSON\u5185\u306EWindows\u30D1\u30B9\u306F / \u533A\u5207\u308A\u306B\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
     "\u65B0\u898F\u30D5\u30A1\u30A4\u30EB\u306E\u89AA\u30D5\u30A9\u30EB\u30C0\u3068\u540D\u524D\u304C\u5229\u7528\u8005\u306E\u4F9D\u983C\u304B\u3089\u4E00\u610F\u306A\u3089\u3001\u89AA\u30D5\u30A9\u30EB\u30C0\u3092\u691C\u7D22\u305B\u305A\u3001\u6307\u5B9A\u3092\u76F8\u5BFE\u30D1\u30B9\u3078\u5FE0\u5B9F\u306B\u7D44\u307F\u7ACB\u3066\u3066\u66F8\u304D\u8FBC\u307F\u95A2\u6570\u3092\u547C\u3093\u3067\u304F\u3060\u3055\u3044\u3002",
+    request.tool_choice === "required" || isObject(request.tool_choice) ? "\u3053\u306E\u5FDC\u7B54\u3067\u306FAVAILABLE_FUNCTIONS\u304B\u3089\u5FC5\u305A1\u3064\u3092\u9078\u3073\u3001JSON\u306E\u95A2\u6570\u547C\u3073\u51FA\u3057\u3060\u3051\u3092\u8FD4\u3057\u3066\u304F\u3060\u3055\u3044\u3002" : "",
     `AVAILABLE_FUNCTIONS=${JSON.stringify(tools)}`,
     transcript
-  ].join("\n\n");
+  ].filter(Boolean).join("\n\n");
 }
 function matchesType(value, type) {
   if (type === "null") return value === null;
@@ -8416,13 +8495,16 @@ function interpretBridgeResponse(raw, tools) {
 }
 async function completeOpenAIChat(request, options, signal) {
   const raw = await options.complete(buildBridgePrompt(request), signal);
-  const interpreted = interpretBridgeResponse(raw, request.tools ?? []);
+  const interpreted = interpretBridgeResponse(raw, requestTools(request));
+  if ((request.tool_choice === "required" || isObject(request.tool_choice)) && !interpreted.toolCalls?.length) {
+    throw new BridgeRequestError(422, "tool_choice\u3067\u8981\u6C42\u3055\u308C\u305F\u6709\u52B9\u306A\u95A2\u6570\u547C\u3073\u51FA\u3057\u3092\u751F\u6210\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F", "tool_choice_not_satisfied");
+  }
   console.log("[bridge-decision] " + JSON.stringify({
     interpretation: interpreted.method,
     repairs: interpreted.repairs,
     tool: interpreted.toolCalls?.[0]?.function && isObject(interpreted.toolCalls[0].function) ? interpreted.toolCalls[0].function.name : null,
     diagnostic: interpreted.diagnostic ?? null,
-    toolCount: request.tools?.length ?? 0
+    toolCount: requestTools(request).length
   }));
   const created = Math.floor((options.now?.() ?? Date.now()) / 1e3);
   const toolCalls = interpreted.toolCalls;
@@ -8447,6 +8529,7 @@ function authorized(header, token) {
   return supplied.length === expected.length && import_node_crypto3.default.timingSafeEqual(supplied, expected);
 }
 function sendJson(response, status, value) {
+  if (response.destroyed || response.writableEnded) return;
   const body = JSON.stringify(value);
   response.writeHead(status, { "content-type": "application/json; charset=utf-8", "content-length": Buffer.byteLength(body) });
   response.end(body);
@@ -8474,10 +8557,11 @@ function sendSingleChunkSse(response, completion) {
 function openAIError(response, status, message, code) {
   sendJson(response, status, { error: { message, type: status >= 500 ? "server_error" : "invalid_request_error", param: null, code } });
 }
-async function readJsonBody(request) {
+async function readJsonBody(request, signal) {
   let size = 0;
   const chunks = [];
   for await (const chunk of request) {
+    if (signal?.aborted) throw new BridgeRequestError(499, "request\u304C\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F", "request_cancelled");
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.length;
     if (size > MAX_BODY_BYTES) throw new Error("request body\u304C2MB\u3092\u8D85\u3048\u3066\u3044\u307E\u3059");
@@ -8485,29 +8569,62 @@ async function readJsonBody(request) {
   }
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
+var BridgeRequestError = class extends Error {
+  constructor(status, message, code) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+};
 function createOpenAICompatibleBridgeServer(token, options) {
   if (token.length < 16) throw new Error("COPILOT_BRIDGE_TOKEN \u306F16\u6587\u5B57\u4EE5\u4E0A\u3067\u56FA\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
   let queue = Promise.resolve();
-  const schedule = (work) => {
-    const next = queue.then(work, work);
+  let pendingRequests = 0;
+  const controllers = /* @__PURE__ */ new Set();
+  const schedule = (work, signal) => {
+    if (pendingRequests >= MAX_PENDING_REQUESTS) return Promise.reject(new BridgeRequestError(429, "bridge\u306E\u5F85\u6A5F\u8981\u6C42\u304C\u4E0A\u9650\u306B\u9054\u3057\u307E\u3057\u305F", "queue_full"));
+    pendingRequests++;
+    const run = async () => {
+      if (signal.aborted) throw new BridgeRequestError(499, "request\u304C\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F", "request_cancelled");
+      return work();
+    };
+    const next = queue.then(run, run);
     queue = next.then(() => void 0, () => void 0);
-    return next;
+    return next.finally(() => {
+      pendingRequests--;
+    });
   };
-  return import_node_http3.default.createServer(async (request, response) => {
-    if (!authorized(request.headers.authorization, token)) return openAIError(response, 401, "Bearer token\u304C\u4E0D\u6B63\u3067\u3059", "invalid_api_key");
-    if (request.method !== "POST" || request.url !== "/v1/chat/completions") return openAIError(response, 404, "POST /v1/chat/completions \u3060\u3051\u5BFE\u5FDC\u3057\u3066\u3044\u307E\u3059", "not_found");
+  const server = import_node_http3.default.createServer(async (request, response) => {
+    const controller = new AbortController();
+    controllers.add(controller);
+    const abortDisconnected = () => {
+      if (!response.writableEnded) controller.abort();
+    };
+    request.once("aborted", abortDisconnected);
+    response.once("close", abortDisconnected);
     try {
-      const parsed = parseOpenAIChatRequest(await readJsonBody(request));
-      const controller = new AbortController();
-      request.once("aborted", () => controller.abort());
-      const result = await schedule(() => completeOpenAIChat(parsed, options, controller.signal));
+      if (!authorized(request.headers.authorization, token)) return openAIError(response, 401, "Bearer token\u304C\u4E0D\u6B63\u3067\u3059", "invalid_api_key");
+      if (request.method !== "POST" || request.url !== "/v1/chat/completions") return openAIError(response, 404, "POST /v1/chat/completions \u3060\u3051\u5BFE\u5FDC\u3057\u3066\u3044\u307E\u3059", "not_found");
+      const parsed = parseOpenAIChatRequest(await readJsonBody(request, controller.signal));
+      const result = await schedule(() => completeOpenAIChat(parsed, options, controller.signal), controller.signal);
       if (parsed.stream === true) sendSingleChunkSse(response, result);
       else sendJson(response, 200, result);
     } catch (error) {
+      if (response.destroyed || response.writableEnded) return;
       const message = error instanceof SyntaxError ? "request body\u304C\u6B63\u3057\u3044JSON\u3067\u306F\u3042\u308A\u307E\u305B\u3093" : error.message;
-      openAIError(response, error instanceof SyntaxError ? 400 : 422, message, "bridge_request_failed");
+      const status = error instanceof SyntaxError ? 400 : error instanceof BridgeRequestError ? error.status : 422;
+      const code = error instanceof BridgeRequestError ? error.code : "bridge_request_failed";
+      openAIError(response, status, message, code);
+    } finally {
+      controllers.delete(controller);
+      request.off("aborted", abortDisconnected);
+      response.off("close", abortDisconnected);
     }
   });
+  server.abortAll = () => {
+    for (const controller of controllers) controller.abort();
+  };
+  return server;
 }
 
 // test/smoke.ts
@@ -9664,6 +9781,63 @@ async function testCopilotChunkFallback() {
   await internal.insertDirect(prompt);
   import_node_assert.default.strictEqual(editor, prompt);
   import_node_assert.default.strictEqual(insertCalls, 1, "YakuLingo-style direct input must use one Input.insertText call");
+  const garbageClient = new CopilotEdgeClient({ baseURL: "", model: "", provider: "copilot-edge", copilot: { maxPromptChars: 5e3 } });
+  const garbage = garbageClient;
+  let garbageEditor = "";
+  garbage.editorLength = async () => garbageEditor.length;
+  garbage.editorState = async () => ({ found: true, text: garbageEditor, active: true });
+  garbage.clearEditor = async () => {
+    garbageEditor = "";
+  };
+  garbage.focusEditor = async () => {
+  };
+  garbage.bringToFront = async () => {
+  };
+  garbage.waitSendReady = async () => ({ ready: true, inventory: [] });
+  garbage.cdpMethod = async (name, params) => {
+    if (name !== "Input.insertText") return;
+    garbageEditor += String(params.text ?? "");
+    if (garbageEditor === prompt) garbageEditor += "TRAILING_GARBAGE";
+  };
+  const originalWarn = console.warn;
+  const garbageWarnings = [];
+  console.warn = (...args) => {
+    garbageWarnings.push(args.map(String).join(" "));
+  };
+  try {
+    await import_node_assert.default.rejects(garbage.insertByChunks(prompt), /依頼文の入力/, "chunk fallback must reject prompt plus trailing garbage");
+  } finally {
+    console.warn = originalWarn;
+  }
+  import_node_assert.default.ok(garbageWarnings.some((line) => line.includes("DOM\u6587\u5B57\u5217\u4E0D\u4E00\u81F4")), "trailing garbage rejection must retain a diagnostic warning");
+  const sendClient = new CopilotEdgeClient({ baseURL: "", model: "", provider: "copilot-edge" });
+  const sendInternal = sendClient;
+  sendInternal.waitSendReady = async () => ({ ready: true, inventory: [] });
+  sendInternal.editorLength = async () => 12;
+  sendInternal.evalWithReconnect = async () => JSON.stringify({ clicked: true, selected: { rect: { cx: 123, cy: 456 } } });
+  let establishmentChecks = 0;
+  sendInternal.waitSendEstablished = async () => ++establishmentChecks > 1;
+  const mouseEvents = [];
+  sendInternal.cdpMethod = async (name, params) => {
+    mouseEvents.push({ name, params });
+  };
+  await sendInternal.clickSend("old response");
+  import_node_assert.default.deepStrictEqual(mouseEvents.map((event) => [event.name, event.params.type, event.params.x, event.params.y]), [
+    ["Input.dispatchMouseEvent", "mousePressed", 123, 456],
+    ["Input.dispatchMouseEvent", "mouseReleased", 123, 456]
+  ]);
+  const freshClient = new CopilotEdgeClient({ baseURL: "", model: "", provider: "copilot-edge" });
+  const freshInternal = freshClient;
+  freshInternal.freshSurfaceReady = async () => false;
+  freshInternal.evalWithReconnect = async () => JSON.stringify({ clicked: true });
+  let freshWaits = 0;
+  freshInternal.waitFreshSurface = async () => ++freshWaits > 1;
+  const navigations = [];
+  freshInternal.cdpMethod = async (name, params) => {
+    if (name === "Page.navigate") navigations.push(params);
+  };
+  await freshInternal.freshChat();
+  import_node_assert.default.deepStrictEqual(navigations, [{ url: "https://m365.cloud.microsoft/chat/" }], "unverified synthetic new-chat click must navigate explicitly");
   console.log("PASS copilot-chunk-fallback");
 }
 async function testCopilotLoop() {
@@ -9878,7 +10052,9 @@ async function testOpenAICompatibleBridge() {
     "\u901A\u5E38\u56DE\u7B54\u3067\u3059",
     `\u51E6\u7406\u3057\u307E\u3059\u3002
 {'tool':'write_file','args':{'path':'\u30E1\u30E2.txt','content':'\u78BA\u8A8D'}}`,
-    '{"tool":"write_file","args":{"path":3,"content":"\u4E0D\u6B63"}}'
+    '{"tool":"write_file","args":{"path":3,"content":"\u4E0D\u6B63"}}',
+    '{"tool":"write_file","args":{"path":"\u7981\u6B62.txt","content":"x"}}',
+    "\u95A2\u6570\u3092\u9078\u3079\u307E\u305B\u3093\u3067\u3057\u305F"
   ];
   const server = createOpenAICompatibleBridgeServer(token, {
     complete: async (prompt) => {
@@ -9931,21 +10107,87 @@ async function testOpenAICompatibleBridge() {
     import_node_assert.default.ok(prompts[2].includes("AVAILABLE_FUNCTIONS=") && prompts[2].includes("write_file"));
     import_node_assert.default.ok(prompts[2].includes("\u300C\u3053\u3053\u300D\u300C\u3053\u306E\u5834\u6240\u300D\u300C\u76F4\u4E0B\u300D") && prompts[2].includes(" . \u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044"));
     import_node_assert.default.ok(prompts[2].includes("\u300C\u958B\u304F\u300D") && prompts[2].includes("\u65E2\u5B9A\u30A2\u30D7\u30EA\u3092\u8D77\u52D5"));
+    import_node_assert.default.ok(prompts[2].includes("Start-Process -FilePath './\u76F8\u5BFE\u30D1\u30B9'") && prompts[2].includes("-LiteralPath \u306F\u4F7F\u308F\u305A"));
     const rejected = await post({ model: "bridge-test", messages: [{ role: "user", content: "\u4E0D\u6B63\u306A\u5F15\u6570" }], tools });
     const rejectedJson = await rejected.json();
     import_node_assert.default.strictEqual(rejectedJson.choices[0].finish_reason, "stop");
     import_node_assert.default.strictEqual(rejectedJson.choices[0].message.content, '{"tool":"write_file","args":{"path":3,"content":"\u4E0D\u6B63"}}');
+    const toolChoiceNone = await post({ model: "bridge-test", tool_choice: "none", messages: [{ role: "user", content: "\u95A2\u6570\u3092\u547C\u3070\u306A\u3044\u3067" }], tools });
+    import_node_assert.default.strictEqual(toolChoiceNone.status, 200);
+    const toolChoiceNoneJson = await toolChoiceNone.json();
+    import_node_assert.default.strictEqual(toolChoiceNoneJson.choices[0].message.tool_calls, void 0);
+    import_node_assert.default.ok(toolChoiceNoneJson.choices[0].message.content.includes("write_file"));
+    import_node_assert.default.ok(prompts[4].includes("\u95A2\u6570\u3092\u547C\u3073\u51FA\u3055\u305A") && !prompts[4].includes("AVAILABLE_FUNCTIONS="));
+    const toolChoiceRequired = await post({ model: "bridge-test", tool_choice: "required", messages: [{ role: "user", content: "\u5FC5\u305A\u9078\u3093\u3067" }], tools });
+    import_node_assert.default.strictEqual(toolChoiceRequired.status, 422);
+    const unsupportedChoice = await post({ model: "bridge-test", tool_choice: "sometimes", messages: [{ role: "user", content: "\u4E0D\u6B63" }], tools });
+    import_node_assert.default.strictEqual(unsupportedChoice.status, 422);
     const negative = interpretBridgeResponse('\u4F8B: {"tool":"write_file","args":{"path":"\u63A8\u6E2C.txt","content":"x"}} \u3067\u3059\u304C\u4ECA\u56DE\u306F\u64CD\u4F5C\u3057\u307E\u305B\u3093\u3002', tools);
     import_node_assert.default.strictEqual(negative.toolCalls, void 0);
     const readTool = [{ type: "function", function: { name: "read", parameters: { type: "object", additionalProperties: false, required: ["filePath"], properties: { filePath: { type: "string" } } } } }];
     const windowsPath = interpretBridgeResponse(String.raw`{"tool":"read","args":{"filePath":"C:\Users\yuuki\flex-live"}}`, readTool);
     import_node_assert.default.strictEqual(JSON.parse(String(windowsPath.toolCalls?.[0].function?.arguments)).filePath, "C:\\Users\\yuuki\\flex-live");
     import_node_assert.default.ok(windowsPath.repairs.includes("windows-path-backslash"));
+    const bashTool = [{ type: "function", function: { name: "bash", parameters: { type: "object", additionalProperties: false, required: ["command"], properties: { command: { type: "string" } } } } }];
+    const relativeWindowsPath = interpretBridgeResponse(String.raw`{"tool":"bash","args":{"command":"Start-Process -FilePath '.\概要.txt'"}}`, bashTool);
+    import_node_assert.default.strictEqual(JSON.parse(String(relativeWindowsPath.toolCalls?.[0].function?.arguments)).command, "Start-Process -FilePath '.\\\u6982\u8981.txt'");
+    import_node_assert.default.ok(relativeWindowsPath.repairs.includes("invalid-json-backslash"));
+    const alreadyEscapedRelativePath = interpretBridgeResponse(String.raw`{"tool":"bash","args":{"command":"Start-Process -FilePath '.\\概要.txt'"}}`, bashTool);
+    import_node_assert.default.strictEqual(JSON.parse(String(alreadyEscapedRelativePath.toolCalls?.[0].function?.arguments)).command, "Start-Process -FilePath '.\\\u6982\u8981.txt'");
+    import_node_assert.default.ok(!alreadyEscapedRelativePath.repairs.includes("invalid-json-backslash"));
     import_node_assert.default.ok(buildBridgePrompt({ messages: [{ role: "user", content: [{ type: "text", text: "\u914D\u5217\u672C\u6587" }] }], tools: [] }).includes("\u914D\u5217\u672C\u6587"));
   } finally {
     await new Promise((resolve) => server.close(() => resolve()));
   }
-  import_node_assert.default.strictEqual(prompts.length, 4, "unauthorized requests must not reach Copilot");
+  import_node_assert.default.strictEqual(prompts.length, 6, "unauthorized or invalid requests must not reach Copilot");
+  let completeCalls = 0;
+  let abortedCalls = 0;
+  let releaseFirst;
+  const cancellationServer = createOpenAICompatibleBridgeServer(token, {
+    complete: async (_prompt, signal) => {
+      completeCalls++;
+      return new Promise((resolve, reject) => {
+        if (completeCalls === 1) releaseFirst = () => resolve("first done");
+        signal?.addEventListener("abort", () => {
+          abortedCalls++;
+          reject(new Error("aborted by client"));
+        }, { once: true });
+      });
+    }
+  });
+  await new Promise((resolve) => cancellationServer.listen(0, "127.0.0.1", resolve));
+  const cancellationPort = cancellationServer.address().port;
+  const cancellationUrl = `http://127.0.0.1:${cancellationPort}/v1/chat/completions`;
+  const requestBody = JSON.stringify({ model: "test", messages: [{ role: "user", content: "wait" }] });
+  const first = fetch(cancellationUrl, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: requestBody });
+  for (let poll = 0; poll < 50 && completeCalls === 0; poll++) await new Promise((resolve) => setTimeout(resolve, 10));
+  import_node_assert.default.strictEqual(completeCalls, 1);
+  const queuedAbort = new AbortController();
+  const second = fetch(cancellationUrl, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: requestBody, signal: queuedAbort.signal }).catch((error) => error);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  queuedAbort.abort();
+  await second;
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  releaseFirst?.();
+  const firstResponse = await first;
+  import_node_assert.default.strictEqual(firstResponse.status, 200);
+  await firstResponse.text();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  import_node_assert.default.strictEqual(completeCalls, 1, "a canceled queued request must not reach Copilot");
+  const activeAbort = new AbortController();
+  const active = fetch(cancellationUrl, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: requestBody, signal: activeAbort.signal }).catch((error) => error);
+  for (let poll = 0; poll < 50 && completeCalls < 2; poll++) await new Promise((resolve) => setTimeout(resolve, 10));
+  activeAbort.abort();
+  await active;
+  for (let poll = 0; poll < 50 && abortedCalls === 0; poll++) await new Promise((resolve) => setTimeout(resolve, 10));
+  import_node_assert.default.strictEqual(abortedCalls, 1, "response-side disconnect must abort active Copilot work");
+  cancellationServer.abortAll();
+  await new Promise((resolve) => cancellationServer.close(() => resolve()));
+  for (const relative of ["vendor/opencode/Get-OpenCode.ps1", "vendor/opencode/manifest.json", "vendor/opencode/LICENSE-OpenCode.txt"]) {
+    const bytes = import_node_fs3.default.readFileSync(import_node_path4.default.join(process.cwd(), relative));
+    import_node_assert.default.deepStrictEqual([...bytes.subarray(0, 3)], [239, 187, 191], `${relative} must use UTF-8 BOM`);
+    import_node_assert.default.ok(!/(?<!\r)\n/u.test(bytes.subarray(3).toString("utf8")), `${relative} must use CRLF`);
+  }
   console.log("PASS openai-compatible-bridge");
 }
 async function testDemoRecordingContract() {
