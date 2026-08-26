@@ -1,4 +1,5 @@
 {
+  "agentLoop": "v1",
   "provider": "copilot-edge",
   "baseURL": "https://your-internal-endpoint/v1",
   "apiKeyEnv": "COMPANY_LLM_API_KEY",

@@ -871,6 +871,7 @@ var require_cjs = __commonJS({
 var import_node_fs = __toESM(require("node:fs"));
 var import_node_path = __toESM(require("node:path"));
 var DEFAULT_CONFIG = {
+  agentLoop: "v1",
   baseURL: "",
   model: "",
   provider: "copilot-edge",
@@ -889,6 +890,9 @@ function appDataConfigPath() {
 }
 function parseConfig(found) {
   const raw = JSON.parse(import_node_fs.default.readFileSync(found, "utf8"));
+  if (raw.agentLoop !== void 0 && raw.agentLoop !== "v1" && raw.agentLoop !== "v2") {
+    throw new Error(`agentLoop \u306F v1 \u307E\u305F\u306F v2 \u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+  }
   const provider = raw.provider ?? "openai";
   if (provider === "openai" && (!raw.baseURL || !raw.model)) {
     throw new Error(`provider=openai \u306B\u306F baseURL / model \u304C\u5FC5\u8981\u3067\u3059: ${found}`);

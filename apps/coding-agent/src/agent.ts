@@ -233,7 +233,7 @@ export interface TextBackend {
 
 const END_MARKER = 'AGENT_END'
 
-function shouldCancel(io: AgentIO): boolean {
+export function shouldCancel(io: AgentIO): boolean {
   return io.signal?.aborted === true || io.isCanceled?.() === true
 }
 
@@ -247,7 +247,7 @@ function pausedResult(messages: ChatMessage[], userInput: string, steps: string[
   }
 }
 
-function buildProtocolRules(mode: TurnMode = 'work', allowArbitraryCommands = false, autoApproveCommand = false, safeCommandOnly = false): string {
+export function buildProtocolRules(mode: TurnMode = 'work', allowArbitraryCommands = false, autoApproveCommand = false, safeCommandOnly = false): string {
   const toolDocs = toolDefsForContract({ allowArbitraryCommands, safeCommandOnly }).map((t) => {
     const req = ((t.parameters as { required?: string[] }).required ?? [])
     const props = Object.keys((t.parameters as { properties?: Record<string, unknown> }).properties ?? {})
@@ -297,13 +297,13 @@ function buildProtocolRules(mode: TurnMode = 'work', allowArbitraryCommands = fa
     `最後に ${END_MARKER} だけの行を付ける。`
   ].join('\n')
 }
-function normalizeForKey(value: unknown): unknown {
+export function normalizeForKey(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(normalizeForKey)
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, normalizeForKey(item)]))
   return value
 }
 
-function toolRequestKey(name: string, args: Record<string, unknown>): string {
+export function toolRequestKey(name: string, args: Record<string, unknown>): string {
   const normalized = normalizeForKey(args)
   if (!normalized || typeof normalized !== 'object' || Array.isArray(normalized)) return `${name}:${JSON.stringify(normalized)}`
   const copy = { ...(normalized as Record<string, unknown>) }
@@ -315,7 +315,7 @@ function toolRequestKey(name: string, args: Record<string, unknown>): string {
   }
   return `${name}:${JSON.stringify(copy)}`
 }
-function formatHostResult(tool: string, output: string, metadata: Record<string, unknown> | null, status: 'succeeded' | 'failed' | 'denied', callId?: string, runId?: string): string {
+export function formatHostResult(tool: string, output: string, metadata: Record<string, unknown> | null, status: 'succeeded' | 'failed' | 'denied', callId?: string, runId?: string): string {
   const bare = bareToolName(tool)
   // read_files has its own aggregate 80k contract. Other host tools already
   // cap their output at 8k, including run_command/Read-Xlsx.
@@ -382,13 +382,13 @@ async function bootstrapWorkspaceEvidence(ctx: ToolContext, io: AgentIO): Promis
     formatHostResult(tool, output, null, failed ? 'failed' : 'succeeded', callId, ctx.runId)
   ].join('\n')
 }
-async function captureFileBinding(def: { kind: string }, args: Record<string, unknown>, ctx: ToolContext): Promise<Pick<ApprovalBinding, 'path' | 'beforeHash' | 'existedBefore'>> {
+export async function captureFileBinding(def: { kind: string }, args: Record<string, unknown>, ctx: ToolContext): Promise<Pick<ApprovalBinding, 'path' | 'beforeHash' | 'existedBefore'>> {
   if (def.kind !== 'write' || typeof args.path !== 'string') return {}
   const state = await getFilePrecondition(args.path, ctx)
   return { path: args.path, ...state }
 }
 
-async function approvalPreconditionChanged(binding: ApprovalBinding, ctx: ToolContext): Promise<boolean> {
+export async function approvalPreconditionChanged(binding: ApprovalBinding, ctx: ToolContext): Promise<boolean> {
   if (!binding.path || binding.existedBefore === undefined) return false
   const state = await getFilePrecondition(binding.path, ctx)
   return state.existedBefore !== binding.existedBefore || state.beforeHash !== binding.beforeHash
@@ -846,7 +846,7 @@ async function executeCall(
     return output
   }
 }
-function summarize(name: string, args: Record<string, unknown>): string {
+export function summarize(name: string, args: Record<string, unknown>): string {
   const bare = bareToolName(name)
   switch (bare) {
     case 'run_command':

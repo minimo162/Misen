@@ -5,6 +5,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { extractJsonReply, runAgentTurn, type AgentIO, type TextBackend } from '../src/agent'
+import { executeV2ToolCall, runAgentTurnV2 } from '../src/agent-v2'
+import { runConfiguredAgentTurn } from '../src/agent-loop'
+import { clearToolExecuteBeforeHooks, registerToolExecuteBeforeHook } from '../src/hooks'
 import { capabilityPolicy, type AgentConfig } from '../src/config'
 import type { ChatMessage } from '../src/llm'
 import {
@@ -385,8 +388,8 @@ interface ScriptStep {
   tool_call?: { name: string; args: Record<string, unknown> }
 }
 
-function mockServer(steps: ScriptStep[]): Promise<{ server: http.Server; url: string; requests: number }> {
-  const state = { requests: 0 }
+function mockServer(steps: ScriptStep[]): Promise<{ server: http.Server; url: string; requestBodies: string[] }> {
+  const state = { requests: 0, requestBodies: [] as string[] }
   const server = http.createServer((req, res) => {
     let body = ''
     req.on('data', (c) => {
@@ -394,6 +397,7 @@ function mockServer(steps: ScriptStep[]): Promise<{ server: http.Server; url: st
     })
     req.on('end', () => {
       JSON.parse(body)
+      state.requestBodies.push(body)
       state.requests++
       const step = steps[state.requests - 1] ?? steps[steps.length - 1]
       const message: Record<string, unknown> = step.tool_call
@@ -410,26 +414,56 @@ function mockServer(steps: ScriptStep[]): Promise<{ server: http.Server; url: st
           }
         : { role: 'assistant', content: step.content ?? 'ok' }
       res.setHeader('content-type', 'application/json')
-      res.end(JSON.stringify({ choices: [{ message }] }))
+      res.end(JSON.stringify({
+        id: `chatcmpl_${state.requests}`,
+        object: 'chat.completion',
+        created: 0,
+        model: 'mock',
+        choices: [{ index: 0, message, finish_reason: step.tool_call ? 'tool_calls' : 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+      }))
     })
   })
   return new Promise((resolve) => {
     server.listen(0, '127.0.0.1', () => {
       const addr = server.address() as net.AddressInfo
-      resolve({ server, url: `http://127.0.0.1:${addr.port}/v1`, requests: state.requests })
+      resolve({ server, url: `http://127.0.0.1:${addr.port}/v1`, requestBodies: state.requestBodies })
     })
   })
 }
 
 async function withServer(
   steps: ScriptStep[],
-  fn: (cfg: AgentConfig) => Promise<void>
+  fn: (cfg: AgentConfig, requestBodies: string[]) => Promise<void>
 ): Promise<void> {
-  const { server, url } = await mockServer(steps)
+  const { server, url, requestBodies } = await mockServer(steps)
   try {
-    await fn({ baseURL: url, model: 'mock' })
+    await fn({ baseURL: url, apiKey: 'mock-key', model: 'mock' }, requestBodies)
   } finally {
     server.close()
+  }
+}
+
+async function withCopilotBridge(
+  responses: string[],
+  fn: (cfg: AgentConfig, prompts: string[]) => Promise<void>
+): Promise<void> {
+  const prompts: string[] = []
+  let index = 0
+  const token = 'v2-smoke-bridge-token'
+  const server = createOpenAICompatibleBridgeServer(token, {
+    complete: async (prompt) => {
+      prompts.push(prompt)
+      return responses[index++] ?? responses.at(-1) ?? ''
+    }
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = (server.address() as net.AddressInfo).port
+  try {
+    await fn({ baseURL: `http://127.0.0.1:${port}/v1`, apiKey: token, model: 'copilot-edge' }, prompts)
+  } finally {
+    server.abortAll()
+    await new Promise<void>((resolve) => server.close(() => resolve()))
   }
 }
 
@@ -457,6 +491,163 @@ async function testAgentLoop(): Promise<void> {
   )
   fs.rmSync(root, { recursive: true, force: true })
   console.log('PASS agent-loop')
+}
+
+async function testV2SafeExecutionOrder(): Promise<void> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-v2-order-'))
+  const def = TOOL_DEFS.find((toolDef) => toolDef.name === 'write_file')!
+  const order: string[] = []
+  const events: Array<{ type: string; origin?: string; namespace?: string; authority?: string; callId?: string }> = []
+  const io: AgentIO = {
+    print: () => {},
+    askYesNo: async () => { order.push('approval'); return true },
+    event: (event) => events.push(event)
+  }
+  const invalid = await executeV2ToolCall(
+    { toolCallId: 'invalid', toolName: 'write_file', input: { path: 'invalid.txt' } },
+    def,
+    { baseURL: '', model: '' },
+    makeCtx(root),
+    io,
+    [() => { order.push('hook-invalid') }]
+  )
+  assert.strictEqual(invalid.executed, false)
+  assert.ok(invalid.output.startsWith('[validation error]'))
+  assert.strictEqual(order.length, 0, 'validation must reject before hooks and approval')
+
+  clearToolExecuteBeforeHooks()
+  registerToolExecuteBeforeHook(() => { order.push('hook-1') })
+  registerToolExecuteBeforeHook(() => { order.push('hook-2') })
+  const executed = await executeV2ToolCall(
+    { toolCallId: 'valid', toolName: 'write_file', input: { path: 'ordered.txt', content: 'ordered' } },
+    def,
+    { baseURL: '', model: '' },
+    makeCtx(root),
+    io,
+    [({ args }) => {
+      assert.deepStrictEqual(args, { path: 'ordered.txt', content: 'ordered' })
+      assert.ok(!fs.existsSync(path.join(root, 'ordered.txt')), 'hook must run before the host guard/execution')
+      order.push('hook')
+    }]
+  )
+  assert.strictEqual(executed.status, 'succeeded')
+  assert.deepStrictEqual(order, ['hook-1', 'hook-2', 'hook', 'approval'])
+  clearToolExecuteBeforeHooks()
+  assert.strictEqual(fs.readFileSync(path.join(root, 'ordered.txt'), 'utf8'), 'ordered')
+  const eventTypes = events.map((event) => event.type)
+  assert.ok(eventTypes.indexOf('tool.requested') < eventTypes.indexOf('approval.requested'))
+  assert.ok(eventTypes.indexOf('tool.approved') < eventTypes.indexOf('tool.started'))
+  for (const event of events.filter((entry) => entry.type.startsWith('tool.') || entry.type.startsWith('step.'))) {
+    assert.deepStrictEqual({ origin: event.origin, namespace: event.namespace, authority: event.authority }, { origin: 'host', namespace: 'app', authority: 'authoritative' })
+    assert.ok(event.callId)
+  }
+  fs.rmSync(root, { recursive: true, force: true })
+  console.log('PASS v2-safe-execution-order')
+}
+
+async function testV2ToolLoopAndEventContract(): Promise<void> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-v2-loop-'))
+  await withCopilotBridge([
+    '{"tool":"host.write_file","args":{"path":"v2.txt","content":"from v2"}}',
+    '{"answer":"v2で書き込みました"}'
+  ], async (baseCfg, prompts) => {
+    const events: Array<{ type: string; origin?: string; namespace?: string; authority?: string; callId?: string }> = []
+    const logs: string[] = []
+    const result = await runConfiguredAgentTurn({
+      cfg: { ...baseCfg, agentLoop: 'v2', autoApprove: { write: true } },
+      messages: [{ role: 'system', content: 'smoke system' }],
+      userInput: '作って',
+      ctx: makeCtx(root),
+      io: { ...ioStub(true), print: (line) => logs.push(line), event: (event) => events.push(event) }
+    })
+    assert.strictEqual(result.reply, 'v2で書き込みました', JSON.stringify({ messages: result.messages, logs, events }))
+    assert.strictEqual(result.aborted, false)
+    assert.strictEqual(fs.readFileSync(path.join(root, 'v2.txt'), 'utf8'), 'from v2')
+    assert.strictEqual(prompts.length, 2)
+    assert.ok(prompts[1].includes('BEGIN_UNTRUSTED_HOST_RESULT'))
+    assert.ok(events.some((event) => event.type === 'model.decision' && event.origin === 'copilot' && event.namespace === 'none' && event.authority === 'claimed'))
+    assert.ok(events.some((event) => event.type === 'plan.created' && event.origin === 'orchestrator' && event.namespace === 'none' && event.authority === 'derived'))
+    assert.ok(events.some((event) => event.type === 'tool.succeeded' && event.origin === 'host' && event.namespace === 'app' && event.authority === 'authoritative' && event.callId))
+  })
+  fs.rmSync(root, { recursive: true, force: true })
+  console.log('PASS v2-tool-loop')
+  console.log('PASS v2-event-contract')
+}
+
+async function testV2HookDenialPropagation(): Promise<void> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-v2-hook-'))
+  let approvals = 0
+  await withServer([
+    { tool_call: { name: 'write_file', args: { path: 'denied.txt', content: 'never' } } },
+    { content: 'フック拒否を確認しました' }
+  ], async (baseCfg, requestBodies) => {
+    const events: string[] = []
+    const result = await runAgentTurnV2({
+      cfg: { ...baseCfg, agentLoop: 'v2' },
+      messages: [],
+      userInput: '拒否して',
+      ctx: makeCtx(root),
+      io: {
+        print: () => {},
+        askYesNo: async () => { approvals++; return true },
+        event: (event) => events.push(event.type)
+      },
+      beforeHooks: [() => { throw new Error('phase2-policy-denied') }]
+    })
+    assert.strictEqual(result.reply, 'フック拒否を確認しました')
+    assert.strictEqual(approvals, 0, 'hook rejection must happen before approval')
+    assert.ok(!fs.existsSync(path.join(root, 'denied.txt')))
+    assert.ok(requestBodies[1].includes('phase2-policy-denied'), 'hook rejection reason must be returned to the model')
+    assert.ok(events.includes('tool.denied') && events.includes('step.failed'))
+  })
+  fs.rmSync(root, { recursive: true, force: true })
+  console.log('PASS v2-hook-denial-propagation')
+}
+
+async function testV2LimitsAndNoProgress(): Promise<void> {
+  async function expectWarning(
+    label: string,
+    steps: ScriptStep[],
+    overrides: Partial<AgentConfig>,
+    expected: string,
+    prepare?: (root: string) => void
+  ): Promise<void> {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), `ca-smoke-v2-${label}-`))
+    prepare?.(root)
+    await withServer(steps, async (baseCfg) => {
+      const warnings: string[] = []
+      const result = await runAgentTurnV2({
+        cfg: { ...baseCfg, agentLoop: 'v2', ...overrides },
+        messages: [], userInput: label, ctx: makeCtx(root),
+        io: { ...ioStub(true), event: (event) => { if (event.type === 'run.warning') warnings.push(event.error ?? '') } }
+      })
+      assert.strictEqual(result.aborted, true, label)
+      assert.ok(warnings.some((warning) => warning.includes(expected)), `${label}: ${warnings.join(' | ')}`)
+    })
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+
+  await expectWarning('iteration', [{ tool_call: { name: 'list_files', args: {} } }], { maxToolIterations: 1 }, '最大反復回数')
+  await expectWarning('host', [
+    { tool_call: { name: 'list_files', args: { path: 'a' } } },
+    { tool_call: { name: 'list_files', args: { path: 'b' } } }
+  ], { maxToolExecutions: 1 }, 'hostツール実行上限', (root) => { fs.mkdirSync(path.join(root, 'a')); fs.mkdirSync(path.join(root, 'b')) })
+  await expectWarning('write', [{ tool_call: { name: 'write_file', args: { path: 'x.txt', content: 'x' } } }], { maxWriteExecutions: 0 }, '書き込み実行上限')
+  await expectWarning('command', [{ tool_call: { name: 'run_command', args: { command: 'echo never' } } }], { allowArbitraryCommands: true, maxCommandExecutions: 0 }, 'コマンド実行上限')
+  await expectWarning('no-progress', [
+    { tool_call: { name: 'list_files', args: { path: 'a' } } },
+    { tool_call: { name: 'list_files', args: { path: 'b' } } }
+  ], { maxNoProgress: 1 }, '進展がない', (root) => { fs.mkdirSync(path.join(root, 'a')); fs.mkdirSync(path.join(root, 'b')) })
+
+  const backend = new FakeBackend(['{"answer":"v1 default"}\nAGENT_END'])
+  const v1 = await runConfiguredAgentTurn({
+    cfg: { baseURL: '', model: '', provider: 'copilot-edge', copilot: { agentMode: false }, turnMode: 'chat' },
+    messages: [], userInput: 'default', ctx: makeCtx(os.tmpdir(), false), io: ioStub(true), backend
+  })
+  assert.strictEqual(v1.reply, '{"answer":"v1 default"}\nAGENT_END')
+  assert.strictEqual(backend.calls, 1, 'agentLoop omitted must keep the v1 route')
+  console.log('PASS v2-limits-and-no-progress')
+  console.log('PASS v1-default-route')
 }
 
 async function testDenial(): Promise<void> {
@@ -1657,6 +1848,10 @@ async function testDemoRecordingContract(): Promise<void> {
   await testApprovals()
   await testTools()
   await testAgentLoop()
+  await testV2SafeExecutionOrder()
+  await testV2ToolLoopAndEventContract()
+  await testV2HookDenialPropagation()
+  await testV2LimitsAndNoProgress()
   await testDenial()
   await testProtocolParsing()
   await testCopilotChoosesFirstAction()
