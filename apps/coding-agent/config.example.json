@@ -11,6 +11,16 @@
   "maxCommandExecutions": 2,
   "maxNoProgress": 2,
   "allowArbitraryCommands": false,
+  "permissions": [
+    { "permission": "read_file", "pattern": "*", "action": "ask" },
+    { "permission": "read_file", "pattern": "docs/**", "action": "allow" },
+    { "permission": "write_file", "pattern": "*", "action": "ask" },
+    { "permission": "write_file", "pattern": "generated/**", "action": "allow" },
+    { "permission": "write_file", "pattern": "generated/secrets/**", "action": "deny" },
+    { "permission": "run_command", "pattern": "*", "action": "ask" },
+    { "permission": "run_command", "pattern": "git status", "action": "allow" },
+    { "permission": "run_command", "pattern": "git reset*", "action": "deny" }
+  ],
   "autoApprove": { "write": false, "command": false },
   "restrictToWorkspace": true,
   "weather": { "defaultLocation": "広島市" },

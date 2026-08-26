@@ -12,10 +12,12 @@
 | jsonrepair | 3.15.0 | ISC | `apps/coding-agent/vendor/npm/node_modules/jsonrepair/` | 層1で厳密parseに失敗したJSON候補を純JSで修復し、再parse・host tool schema検証へ渡す補助。追加exeなし |
 | safer-buffer | 2.1.2 | MIT | `apps/coding-agent/vendor/npm/node_modules/safer-buffer/` | iconv-lite の依存 buffer 実装 |
 | OpenCode | 1.18.21 Windows x64 | MIT | GitHub Release `flex-runtime-v1`; manifest/script/license only in `apps/coding-agent/vendor/opencode/` | OpenAI互換bridgeへ接続する任意OSSハーネス。exeはGit履歴に入れず、取得時にサイズ・SHA-256・単独起動を検査 |
+| OpenCode permission evaluator | c2eacd72afc4a4984564c393e15ab30011057269 | MIT | `apps/coding-agent/src/vendor/opencode-permission/{evaluate,wildcard,arity}.ts` と `LICENSE` | `sst/opencode`（canonical: `anomalyco/opencode`）の `evaluate()`、wildcard `match()`、command-prefix `prefix()` の純粋部分を固定vendor。上流URLと元パスは各ファイル先頭に記録 |
 | Vercel AI SDK (`ai`) | 6.0.268 | Apache-2.0 | `apps/coding-agent/package-lock.json` / npm install | 実験的なagent loop v2のモデル・tool loop API |
 | AI SDK OpenAI-Compatible Provider (`@ai-sdk/openai-compatible`) | 2.0.72 | Apache-2.0 | `apps/coding-agent/package-lock.json` / npm install | copilot-openai-bridgeの `/v1/chat/completions` へ接続するprovider |
+| shell-quote | 1.10.0 | MIT | `apps/coding-agent/package-lock.json`; install時の `apps/coding-agent/node_modules/shell-quote/` | v2 permission hookでのshell token/operator解析。追加の `@types/shell-quote` は導入しない |
 
-`apps/coding-agent/vendor/npm/package-lock.json` の resolved/integrity と `package.json` の exact dependency も、上記 npm 3 パッケージの固定根拠です。ImportExcel の `ImportExcel.psd1` は ModuleVersion 7.8.10 と `EPPlus.dll` の required assembly を示します。
+`apps/coding-agent/vendor/npm/package-lock.json` の resolved/integrity と `package.json` の exact dependency も、上記 npm パッケージの固定根拠です。ImportExcel の `ImportExcel.psd1` は ModuleVersion 7.8.10 と `EPPlus.dll` の required assembly を示します。
 
 自作の `Build-DemoData.ps1` と `workspace/tools/` 配下4本は UTF-8 BOM付き・CRLFで固定し、Windows PowerShell 5.1 parserで検査します。一方、`vendor/` 内の第三者配布 `.ps1` は取得物の同一性を優先して上流の改行・encodingを変更しません。
 
@@ -27,8 +29,10 @@
 - jsonrepair 3.15.0 (ISC): `apps/coding-agent/vendor/npm/node_modules/jsonrepair/LICENSE.md`。同梱実物の本文は Copyright (c) 2020-2026 Jos de Jong、package.json の license も ISC と確認しています。
 - safer-buffer (MIT): `apps/coding-agent/vendor/npm/node_modules/safer-buffer/LICENSE`。
 - OpenCode 1.18.21 (MIT): `apps/coding-agent/vendor/opencode/LICENSE-OpenCode.txt`。同梱実物の本文は Copyright (c) 2025 opencode、npm package の license も MIT と確認しています。Release asset `opencode-1.18.21-windows-x64.exe` は 179,463,208 bytes、SHA-256 `EA4F4D4BEC95CD41BAF0FC53ADC4E34B31E1C8676DC5B2507C8797AB1884AF18` です。上流は `anomalyco/opencode` tag `v1.18.21` の公式 `opencode-windows-x64.zip`（60,622,013 bytes、SHA-256 `F8CC5477F478FA129ECE99B550D508363CEFF612F99D859042E526B13B951542`）。ZIPを照合後に `Expand-Archive` し、唯一の `opencode.exe` を無変更でコピーしたところ内部assetとSHA-256が一致しました。
+- OpenCode permission evaluator (MIT): `apps/coding-agent/src/vendor/opencode-permission/LICENSE`。`evaluate.ts` は `packages/opencode/src/permission/index.ts` の `evaluate()`、`wildcard.ts` は `packages/core/src/util/wildcard.ts` の `match()`、`arity.ts` は `packages/opencode/src/permission/arity.ts` の `prefix()` と辞書を、commit `c2eacd72afc4a4984564c393e15ab30011057269` から抽出しています。各vendorファイルに canonical URL・元パス・固定SHA・MIT・適応内容を記載しています。
 - Vercel AI SDK 6.0.268 (Apache-2.0): `apps/coding-agent/node_modules/ai/LICENSE`（install時）およびpackage metadata。固定解決版は `apps/coding-agent/package-lock.json` に記録します。
 - AI SDK OpenAI-Compatible Provider 2.0.72 (Apache-2.0): `apps/coding-agent/node_modules/@ai-sdk/openai-compatible/LICENSE`（install時）およびpackage metadata。固定解決版は `apps/coding-agent/package-lock.json` に記録します。
+- shell-quote 1.10.0 (MIT): `apps/coding-agent/node_modules/shell-quote/LICENSE`（install時）。固定解決版、resolved URL、integrity、license は `apps/coding-agent/package-lock.json` に記録します。`@types/shell-quote` は追加していません。
 
 ## 取得と実行の境界
 

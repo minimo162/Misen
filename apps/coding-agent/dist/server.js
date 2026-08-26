@@ -211,11 +211,11 @@ var require_stringUtils = __commonJS({
       }
       return null;
     }
-    function isDoubleQuoteEntity(match) {
-      return match !== null && match.char === '"';
+    function isDoubleQuoteEntity(match2) {
+      return match2 !== null && match2.char === '"';
     }
-    function isSingleQuoteEntity(match) {
-      return match !== null && match.char === "'";
+    function isSingleQuoteEntity(match2) {
+      return match2 !== null && match2.char === "'";
     }
     function countOccurrences(text2, char) {
       let count = 0;
@@ -2532,13 +2532,13 @@ var require_dbcs_codec = __commonJS({
       uCode = seq[seq.length - 1];
       node[uCode] = dbcsCode;
     };
-    DBCSCodec.prototype._fillEncodeTable = function(nodeIdx, prefix, skipEncodeChars) {
+    DBCSCodec.prototype._fillEncodeTable = function(nodeIdx, prefix2, skipEncodeChars) {
       var node = this.decodeTables[nodeIdx];
       var hasValues = false;
       var subNodeEmpty = {};
       for (var i2 = 0; i2 < 256; i2++) {
         var uCode = node[i2];
-        var mbCode = prefix + i2;
+        var mbCode = prefix2 + i2;
         if (skipEncodeChars[mbCode])
           continue;
         if (uCode >= 0) {
@@ -4702,7 +4702,7 @@ var require_auth_config = __commonJS({
     });
     module2.exports = __toCommonJS(auth_config_exports);
     var fs5 = __toESM2(require("fs"));
-    var path6 = __toESM2(require("path"));
+    var path7 = __toESM2(require("path"));
     var import_token_util = require_token_util();
     function getAuthConfigPath() {
       const dataDir = (0, import_token_util.getVercelDataDir)();
@@ -4711,7 +4711,7 @@ var require_auth_config = __commonJS({
           `Unable to find Vercel CLI data directory. Your platform: ${process.platform}. Supported: darwin, linux, win32.`
         );
       }
-      return path6.join(dataDir, "auth.json");
+      return path7.join(dataDir, "auth.json");
     }
     function readAuthConfig() {
       try {
@@ -4730,7 +4730,7 @@ var require_auth_config = __commonJS({
     }
     function writeAuthConfig(config2) {
       const authPath = getAuthConfigPath();
-      const authDir = path6.dirname(authPath);
+      const authDir = path7.dirname(authPath);
       if (!fs5.existsSync(authDir)) {
         fs5.mkdirSync(authDir, { mode: 504, recursive: true });
       }
@@ -4925,7 +4925,7 @@ var require_token_util = __commonJS({
       saveToken: () => saveToken
     });
     module2.exports = __toCommonJS(token_util_exports);
-    var path6 = __toESM2(require("path"));
+    var path7 = __toESM2(require("path"));
     var fs5 = __toESM2(require("fs"));
     var import_token_error = require_token_error();
     var import_token_io = require_token_io();
@@ -4938,7 +4938,7 @@ var require_token_util = __commonJS({
       if (!dataDir) {
         return null;
       }
-      return path6.join(dataDir, vercelFolder);
+      return path7.join(dataDir, vercelFolder);
     }
     async function getVercelToken2(options) {
       const authConfig = (0, import_auth_config.readAuthConfig)();
@@ -5014,7 +5014,7 @@ var require_token_util = __commonJS({
           "Unable to find project root directory. Have you linked your project with `vc link?`"
         );
       }
-      const prjPath = path6.join(dir, ".vercel", "project.json");
+      const prjPath = path7.join(dir, ".vercel", "project.json");
       if (!fs5.existsSync(prjPath)) {
         throw new import_token_error.VercelOidcTokenError(
           "project.json not found, have you linked your project with `vc link?`"
@@ -5035,9 +5035,9 @@ var require_token_util = __commonJS({
           "Unable to find user data directory. Please reach out to Vercel support."
         );
       }
-      const tokenPath = path6.join(dir, "com.vercel.token", `${projectId}.json`);
+      const tokenPath = path7.join(dir, "com.vercel.token", `${projectId}.json`);
       const tokenJson = JSON.stringify(token);
-      fs5.mkdirSync(path6.dirname(tokenPath), { mode: 504, recursive: true });
+      fs5.mkdirSync(path7.dirname(tokenPath), { mode: 504, recursive: true });
       fs5.writeFileSync(tokenPath, tokenJson);
       fs5.chmodSync(tokenPath, 432);
       return;
@@ -5049,7 +5049,7 @@ var require_token_util = __commonJS({
           "Unable to find user data directory. Please reach out to Vercel support."
         );
       }
-      const tokenPath = path6.join(dir, "com.vercel.token", `${projectId}.json`);
+      const tokenPath = path7.join(dir, "com.vercel.token", `${projectId}.json`);
       if (!fs5.existsSync(tokenPath)) {
         return null;
       }
@@ -5248,13 +5248,418 @@ var require_dist = __commonJS({
   }
 });
 
+// node_modules/shell-quote/quote.js
+var require_quote = __commonJS({
+  "node_modules/shell-quote/quote.js"(exports2, module2) {
+    "use strict";
+    var OPS = (
+      /** @type {const} */
+      [
+        "||",
+        "&&",
+        ";;",
+        "|&",
+        "<(",
+        "<<<",
+        ">>",
+        ">&",
+        "<&",
+        "&",
+        ";",
+        "(",
+        ")",
+        "|",
+        "<",
+        ">"
+      ]
+    );
+    var LINE_TERMINATORS = /[\n\r\u2028\u2029]/;
+    var GLOB_SHELL_SPECIAL = /[\s#!"$&'():;<=>@\\^`|]/g;
+    module2.exports = function quote(xs) {
+      return xs.map(function(s) {
+        if (s === "") {
+          return (
+            /** @type {const} */
+            "''"
+          );
+        }
+        if (s && typeof s === "object") {
+          if ("op" in s && s.op === "glob") {
+            if (typeof s.pattern !== "string") {
+              throw new TypeError("glob token requires a string `pattern`");
+            }
+            if (LINE_TERMINATORS.test(s.pattern)) {
+              throw new TypeError("glob `pattern` must not contain line terminators");
+            }
+            return s.pattern.replace(GLOB_SHELL_SPECIAL, "\\$&");
+          }
+          if ("op" in s && typeof s.op === "string") {
+            if (OPS.indexOf(s.op) < 0) {
+              throw new TypeError("invalid `op` value: " + JSON.stringify(s.op));
+            }
+            return s.op.replace(/[\s\S]/g, "\\$&");
+          }
+          if ("comment" in s && typeof s.comment === "string") {
+            if (LINE_TERMINATORS.test(s.comment)) {
+              throw new TypeError("`comment` must not contain line terminators");
+            }
+            return "#" + s.comment;
+          }
+          throw new TypeError("unrecognized object token shape");
+        }
+        if (/["\s\\]/.test(s) && !/'/.test(s)) {
+          return "'" + s.replace(/(['])/g, "\\$1") + "'";
+        }
+        if (/["'\s]/.test(s)) {
+          return '"' + s.replace(/(["\\$`!])/g, "\\$1") + '"';
+        }
+        return String(s).replace(/([A-Za-z]:)?([#!"$&'()*,:;<=>?@[\\\]^`{|}~])/g, "$1\\$2");
+      }).join(" ");
+    };
+  }
+});
+
+// node_modules/shell-quote/parse.js
+var require_parse = __commonJS({
+  "node_modules/shell-quote/parse.js"(exports2, module2) {
+    "use strict";
+    var CONTROL = (
+      /** @type {const} */
+      "(?:" + /** @type {const} */
+      [
+        "\\|\\|",
+        "\\&\\&",
+        ";;",
+        "\\|\\&",
+        "\\<\\(",
+        "\\<\\<\\<",
+        ">>",
+        ">\\&",
+        "<\\&",
+        "[&;()|<>]"
+      ].join(
+        /** @type {const} */
+        "|"
+      ) + /** @type {const} */
+      ")"
+    );
+    var controlRE = new RegExp("^" + CONTROL + "$");
+    var META = (
+      /** @type {const} */
+      "|&;()<> \\t"
+    );
+    var SINGLE_QUOTE = (
+      /** @type {const} */
+      "'([^']*?)'"
+    );
+    var DOUBLE_QUOTE = (
+      /** @type {const} */
+      '"((\\\\"|[^"])*?)"'
+    );
+    var hash2 = /^#$/;
+    var SQ = (
+      /** @type {const} */
+      "'"
+    );
+    var DQ = (
+      /** @type {const} */
+      '"'
+    );
+    var DS = (
+      /** @type {const} */
+      "$"
+    );
+    var TOKEN = "";
+    var mult = (
+      /** @type {const} */
+      4294967296
+    );
+    for (i = 0; i < 4; i++) {
+      TOKEN += (mult * Math.random()).toString(16);
+    }
+    var i;
+    var startsWithToken = new RegExp("^" + TOKEN);
+    function matchAll(s, r) {
+      var origIndex = r.lastIndex;
+      var matches = [];
+      var matchObj;
+      while (matchObj = r.exec(s)) {
+        matches[matches.length] = matchObj;
+        if (r.lastIndex === matchObj.index) {
+          r.lastIndex += 1;
+        }
+      }
+      r.lastIndex = origIndex;
+      return matches;
+    }
+    function getVar(env, pre, key) {
+      var r = typeof env === "function" ? env(key) : env[key];
+      if (typeof r === "undefined" && key != "") {
+        r = "";
+      } else if (typeof r === "undefined") {
+        r = "$";
+      }
+      if (typeof r === "object") {
+        return pre + TOKEN + JSON.stringify(r) + TOKEN;
+      }
+      return pre + r;
+    }
+    function parseInternal(string4, env, opts) {
+      if (!opts) {
+        opts = {};
+      }
+      var BS = opts.escape || "\\";
+      var ifs = opts.splitUnquoted === true ? " 	\n" : typeof opts.splitUnquoted === "string" ? opts.splitUnquoted : "";
+      var BAREWORD = "(\\" + BS + `['"` + META + `]|[^\\s'"` + META + "])+";
+      var chunker = new RegExp([
+        "(" + CONTROL + ")",
+        // control chars
+        "(" + BAREWORD + "|" + DOUBLE_QUOTE + "|" + SINGLE_QUOTE + ")+"
+      ].join("|"), "g");
+      var matches = matchAll(string4, chunker);
+      if (matches.length === 0) {
+        return [];
+      }
+      if (!env) {
+        env = {};
+      }
+      var commented = false;
+      return matches.map(function(match2) {
+        var s = match2[0];
+        if (!s || commented) {
+          return void 0;
+        }
+        if (controlRE.test(s)) {
+          return (
+            /** @type {ControlOperator} */
+            { op: s }
+          );
+        }
+        var quote = false;
+        var esc2 = false;
+        var out = "";
+        var words = [];
+        var sawQuote = false;
+        var pendingNw = null;
+        var isGlob = false;
+        var i2;
+        function parseEnvVar() {
+          i2 += 1;
+          var varend;
+          var varname;
+          var char = s.charAt(i2);
+          if (char === "{") {
+            i2 += 1;
+            if (s.charAt(i2) === "}") {
+              throw new Error("Bad substitution: " + s.slice(i2 - 2, i2 + 1));
+            }
+            var depth = 1;
+            varend = i2;
+            while (depth > 0 && varend < s.length) {
+              if (s.charAt(varend) === "{" && s.charAt(varend - 1) === "$") {
+                depth += 1;
+              } else if (s.charAt(varend) === "}") {
+                depth -= 1;
+              }
+              varend += 1;
+            }
+            if (depth !== 0) {
+              throw new Error("Bad substitution: " + s.slice(i2));
+            }
+            varend -= 1;
+            varname = s.slice(i2, varend);
+            i2 = varend;
+          } else if (/[*@#?$!_-]/.test(char)) {
+            varname = char;
+            i2 += 1;
+          } else {
+            var slicedFromI = s.slice(i2);
+            varend = slicedFromI.match(/[^\w\d_]/);
+            if (!varend) {
+              varname = slicedFromI;
+              i2 = s.length;
+            } else {
+              varname = slicedFromI.slice(0, varend.index);
+              i2 += /** @type {number} */
+              varend.index - 1;
+            }
+          }
+          return getVar(
+            /** @type {NonNullable<typeof env>} */
+            env,
+            "",
+            varname
+          );
+        }
+        function flushRun() {
+          if (pendingNw === null) {
+            return;
+          }
+          if (pendingNw === 0) {
+            if (out !== "") {
+              words[words.length] = out;
+              out = "";
+            }
+          } else {
+            words[words.length] = out;
+            out = "";
+            for (var fe = 1; fe < pendingNw; fe += 1) {
+              words[words.length] = "";
+            }
+          }
+          pendingNw = null;
+        }
+        for (i2 = 0; i2 < s.length; i2++) {
+          var c = s.charAt(i2);
+          if (ifs && c !== DS) {
+            flushRun();
+          }
+          isGlob = isGlob || !quote && (c === "*" || c === "?");
+          if (esc2) {
+            out += c;
+            esc2 = false;
+          } else if (quote) {
+            if (c === quote) {
+              quote = false;
+            } else if (quote == SQ) {
+              out += c;
+            } else {
+              if (c === BS) {
+                i2 += 1;
+                c = s.charAt(i2);
+                if (c === DQ || c === BS || c === DS) {
+                  out += c;
+                } else {
+                  out += BS + c;
+                }
+              } else if (c === DS) {
+                out += parseEnvVar();
+              } else {
+                out += c;
+              }
+            }
+          } else if (c === DQ || c === SQ) {
+            quote = c;
+            sawQuote = true;
+          } else if (controlRE.test(c)) {
+            return (
+              /** @type {ControlOperator} */
+              { op: s }
+            );
+          } else if (hash2.test(c)) {
+            commented = true;
+            var commentObj = { comment: string4.slice(match2.index + i2 + 1) };
+            if (out.length) {
+              return (
+                /** @type {const} */
+                [out, commentObj]
+              );
+            }
+            return (
+              /** @type {const} */
+              [commentObj]
+            );
+          } else if (c === BS) {
+            esc2 = true;
+          } else if (c === DS) {
+            var value = parseEnvVar();
+            if (!ifs) {
+              out += value;
+            } else {
+              for (var vi = 0; vi < value.length; vi += 1) {
+                var vc = value.charAt(vi);
+                if (ifs.indexOf(vc) < 0) {
+                  flushRun();
+                  out += vc;
+                } else if (pendingNw === null) {
+                  pendingNw = vc === " " || vc === "	" || vc === "\n" ? 0 : 1;
+                } else if (vc !== " " && vc !== "	" && vc !== "\n") {
+                  pendingNw += 1;
+                }
+              }
+            }
+          } else {
+            out += c;
+          }
+        }
+        if (isGlob) {
+          return (
+            /** @type {GlobPattern} */
+            { op: "glob", pattern: out }
+          );
+        }
+        if (ifs) {
+          if (pendingNw !== null && pendingNw > 0) {
+            words[words.length] = out;
+            out = "";
+            for (var te = 1; te < pendingNw; te += 1) {
+              words[words.length] = "";
+            }
+          }
+          if (out !== "" || sawQuote && words.length === 0) {
+            words[words.length] = out;
+          }
+          return words;
+        }
+        return out;
+      }).reduce(
+        function(prev, arg) {
+          if (typeof arg === "undefined") {
+            return prev;
+          }
+          [].concat(arg).forEach(function(entry) {
+            prev[prev.length] = entry;
+          });
+          return prev;
+        },
+        /** @type {ParseEntry[]} */
+        []
+      );
+    }
+    module2.exports = function parse3(s, env, opts) {
+      var mapped = parseInternal(s, env, opts);
+      if (typeof env !== "function") {
+        return mapped;
+      }
+      return mapped.reduce(
+        function(acc, s2) {
+          if (typeof s2 === "object") {
+            acc[acc.length] = s2;
+            return acc;
+          }
+          var xs = s2.split(RegExp("(" + TOKEN + ".*?" + TOKEN + ")", "g"));
+          if (xs.length === 1) {
+            acc[acc.length] = xs[0];
+            return acc;
+          }
+          xs.filter(Boolean).forEach(function(x) {
+            acc[acc.length] = startsWithToken.test(x) ? JSON.parse(x.split(TOKEN)[1]) : x;
+          });
+          return acc;
+        },
+        /** @type {ParseEntry[]} */
+        []
+      );
+    };
+  }
+});
+
+// node_modules/shell-quote/index.js
+var require_shell_quote = __commonJS({
+  "node_modules/shell-quote/index.js"(exports2) {
+    "use strict";
+    exports2.quote = require_quote();
+    exports2.parse = require_parse();
+  }
+});
+
 // src/server.ts
 var import_node_http3 = __toESM(require("node:http"));
 var import_node_crypto3 = __toESM(require("node:crypto"));
 var import_node_child_process4 = require("node:child_process");
 var import_node_util2 = __toESM(require("node:util"));
 var import_node_fs4 = __toESM(require("node:fs"));
-var import_node_path5 = __toESM(require("node:path"));
+var import_node_path6 = __toESM(require("node:path"));
 
 // src/config.ts
 var import_node_fs = __toESM(require("node:fs"));
@@ -5270,6 +5675,7 @@ var DEFAULT_CONFIG = {
   maxCommandExecutions: 2,
   maxNoProgress: 2,
   allowArbitraryCommands: false,
+  permissions: [],
   autoApprove: { write: false, command: false },
   copilot: { displayMode: "foreground", agentMode: true },
   localResponseConverter: { enabled: false, baseURL: "http://127.0.0.1:8080/v1", model: "Qwen3.5-4B-Q4_K_M.gguf", timeoutMs: 3e4, apiKey: "company-apps-flex-local" }
@@ -5286,10 +5692,29 @@ function parseConfig(found) {
   if (provider === "openai" && (!raw.baseURL || !raw.model)) {
     throw new Error(`provider=openai \u306B\u306F baseURL / model \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
   }
+  const configuredPermissions = raw.permissions;
+  let permissions;
+  if (configuredPermissions !== void 0) {
+    if (!Array.isArray(configuredPermissions)) throw new Error(`permissions \u306F\u914D\u5217\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+    permissions = configuredPermissions.map((candidate, index) => {
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+        throw new Error(`permissions[${index}] \u306F permission / pattern / action \u3092\u6301\u3064\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+      }
+      const rule = candidate;
+      if (typeof rule.permission !== "string" || typeof rule.pattern !== "string") {
+        throw new Error(`permissions[${index}] \u306E permission / pattern \u306F\u6587\u5B57\u5217\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+      }
+      if (rule.action !== "allow" && rule.action !== "ask" && rule.action !== "deny") {
+        throw new Error(`permissions[${index}].action \u306F allow / ask / deny \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+      }
+      return { permission: rule.permission, pattern: rule.pattern, action: rule.action };
+    });
+  }
   return {
     ...DEFAULT_CONFIG,
     ...raw,
     provider,
+    permissions: permissions ?? DEFAULT_CONFIG.permissions,
     autoApprove: { ...DEFAULT_CONFIG.autoApprove, ...raw.autoApprove ?? {} },
     copilot: { ...DEFAULT_CONFIG.copilot, ...raw.copilot ?? {} },
     localResponseConverter: { ...DEFAULT_CONFIG.localResponseConverter, ...raw.localResponseConverter ?? {} }
@@ -5480,10 +5905,10 @@ function repairJsonText(source) {
 }
 function repairWindowsPathBackslashes(source) {
   let changed = false;
-  const repaired = source.replace(/(:\s*")([A-Za-z]:\\[^"\r\n]*)(")/gu, (_match, prefix, pathValue, suffix) => {
+  const repaired = source.replace(/(:\s*")([A-Za-z]:\\[^"\r\n]*)(")/gu, (_match, prefix2, pathValue, suffix) => {
     const escaped = pathValue.replace(/\\+/gu, (slashes) => slashes.length % 2 === 0 ? slashes : `${slashes}\\`);
     if (escaped !== pathValue) changed = true;
-    return prefix + escaped + suffix;
+    return prefix2 + escaped + suffix;
   });
   return changed ? repaired : null;
 }
@@ -6079,14 +6504,14 @@ async function getWeather(locationName, signal, fetcher = (input, init) => fetch
   const geocodeUrl = new URL("https://geocoding-api.open-meteo.com/v1/search");
   geocodeUrl.search = new URLSearchParams({ name: location, count: "1", language: "ja", format: "json" }).toString();
   const geocoding = await fetchJson(geocodeUrl.toString(), signal, fetcher);
-  const match = geocoding.results?.[0];
-  if (!match) throw new Error(`\u5730\u57DF\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${location}`);
+  const match2 = geocoding.results?.[0];
+  if (!match2) throw new Error(`\u5730\u57DF\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${location}`);
   const resolved = {
-    name: stringValue(match.name, "\u5730\u57DF\u540D"),
-    latitude: finiteNumber(match.latitude, "\u7DEF\u5EA6"),
-    longitude: finiteNumber(match.longitude, "\u7D4C\u5EA6"),
-    ...typeof match.country === "string" && match.country ? { country: match.country } : {},
-    ...typeof match.admin1 === "string" && match.admin1 ? { admin1: match.admin1 } : {}
+    name: stringValue(match2.name, "\u5730\u57DF\u540D"),
+    latitude: finiteNumber(match2.latitude, "\u7DEF\u5EA6"),
+    longitude: finiteNumber(match2.longitude, "\u7D4C\u5EA6"),
+    ...typeof match2.country === "string" && match2.country ? { country: match2.country } : {},
+    ...typeof match2.admin1 === "string" && match2.admin1 ? { admin1: match2.admin1 } : {}
   };
   const forecastUrl = new URL("https://api.open-meteo.com/v1/forecast");
   forecastUrl.search = new URLSearchParams({
@@ -6131,13 +6556,13 @@ function sha256(text2) {
 function lineDelta(before, after) {
   const beforeLines = before === "" ? [] : before.split(/\r?\n/);
   const afterLines = after === "" ? [] : after.split(/\r?\n/);
-  let prefix = 0;
-  while (prefix < beforeLines.length && prefix < afterLines.length && beforeLines[prefix] === afterLines[prefix]) prefix++;
+  let prefix2 = 0;
+  while (prefix2 < beforeLines.length && prefix2 < afterLines.length && beforeLines[prefix2] === afterLines[prefix2]) prefix2++;
   let suffix = 0;
-  while (suffix < beforeLines.length - prefix && suffix < afterLines.length - prefix && beforeLines[beforeLines.length - 1 - suffix] === afterLines[afterLines.length - 1 - suffix]) suffix++;
+  while (suffix < beforeLines.length - prefix2 && suffix < afterLines.length - prefix2 && beforeLines[beforeLines.length - 1 - suffix] === afterLines[afterLines.length - 1 - suffix]) suffix++;
   return {
-    removedLines: Math.max(0, beforeLines.length - prefix - suffix),
-    addedLines: Math.max(0, afterLines.length - prefix - suffix)
+    removedLines: Math.max(0, beforeLines.length - prefix2 - suffix),
+    addedLines: Math.max(0, afterLines.length - prefix2 - suffix)
   };
 }
 function splitCommandWords(command) {
@@ -6171,9 +6596,9 @@ function splitCommandWords(command) {
   return { words, unsafe: unsafe || quote !== null };
 }
 function isEncodedCommandFlag(word) {
-  const match = word.match(/^[-/]([A-Za-z]+)(?=$|[:=])/u);
-  if (!match) return false;
-  const name24 = match[1].toLowerCase();
+  const match2 = word.match(/^[-/]([A-Za-z]+)(?=$|[:=])/u);
+  if (!match2) return false;
+  const name24 = match2[1].toLowerCase();
   return name24.length >= 1 && "encodedcommand".startsWith(name24);
 }
 function quoteCommandWord(value) {
@@ -6225,11 +6650,11 @@ function normalizeRunCommand(command) {
   const positional = [];
   for (let index = 0; index < rest.length; index++) {
     const token = rest[index];
-    const match = token.match(/^-(Extracted|ExtractedPath|Rates|Ledger)$/iu);
-    if (match) {
+    const match2 = token.match(/^-(Extracted|ExtractedPath|Rates|Ledger)$/iu);
+    if (match2) {
       const value = rest[++index];
       if (!value || /^-/u.test(value)) throw new Error(`Update-Ledger \u306F ${UPDATE_LEDGER_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
-      const key = /^ExtractedPath$/iu.test(match[1]) ? "extracted" : match[1].toLowerCase();
+      const key = /^ExtractedPath$/iu.test(match2[1]) ? "extracted" : match2[1].toLowerCase();
       named.set(key, value);
     } else if (/^-/u.test(token)) {
       throw new Error(`Update-Ledger \u306B\u672A\u8A31\u53EF\u306E\u5F15\u6570\u304C\u3042\u308A\u307E\u3059\u3002${UPDATE_LEDGER_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
@@ -6433,7 +6858,7 @@ function assertWorkspaceWriteTarget(target, ctx2) {
 function redirectionTargets(command) {
   const targets = [];
   const pattern = /(?:\d*)>{1,2}\s*("[^"]+"|'[^']+'|[^\s;&|]+)/gu;
-  for (const match of command.matchAll(pattern)) targets.push(match[1]);
+  for (const match2 of command.matchAll(pattern)) targets.push(match2[1]);
   return targets;
 }
 function writeOperationTargets(command) {
@@ -7329,7 +7754,7 @@ function attachFenceContent(raw, end, parsed) {
   }
 }
 function buildResearchBundle(question, summary, retrievedAt = (/* @__PURE__ */ new Date()).toISOString()) {
-  const urls = [...summary.matchAll(/https?:\/\/[^\s<>()\[\]"'（）【】、。]+/g)].map((match) => match[0].replace(/[.,;:!?、。]+$/, ""));
+  const urls = [...summary.matchAll(/https?:\/\/[^\s<>()\[\]"'（）【】、。]+/g)].map((match2) => match2[0].replace(/[.,;:!?、。]+$/, ""));
   const uniqueUrls = [...new Set(urls)];
   const sources = uniqueUrls.map((url2) => ({ url: url2, retrievedAt }));
   const claims = summary.split(/\r?\n+/).map((text2) => text2.trim()).filter(Boolean).map((text2) => ({ text: text2, citations: sources }));
@@ -8996,10 +9421,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path6) {
-  if (!path6)
+function getElementAtPath(obj, path7) {
+  if (!path7)
     return obj;
-  return path6.reduce((acc, key) => acc?.[key], obj);
+  return path7.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -9408,11 +9833,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path6, issues) {
+function prefixIssues(path7, issues) {
   return issues.map((iss) => {
     var _a24;
     (_a24 = iss).path ?? (_a24.path = []);
-    iss.path.unshift(path6);
+    iss.path.unshift(path7);
     return iss;
   });
 }
@@ -9559,16 +9984,16 @@ function flattenError(error51, mapper = (issue2) => issue2.message) {
 }
 function formatError(error51, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error52, path6 = []) => {
+  const processError = (error52, path7 = []) => {
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else {
-        const fullpath = [...path6, ...issue2.path];
+        const fullpath = [...path7, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -9595,17 +10020,17 @@ function formatError(error51, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error51, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error52, path6 = []) => {
+  const processError = (error52, path7 = []) => {
     var _a24, _b17;
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else {
-        const fullpath = [...path6, ...issue2.path];
+        const fullpath = [...path7, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -9637,8 +10062,8 @@ function treeifyError(error51, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path6 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path6) {
+  const path7 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path7) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -10814,11 +11239,11 @@ var $ZodCIDRv6 = /* @__PURE__ */ $constructor("$ZodCIDRv6", (inst, def) => {
     try {
       if (parts.length !== 2)
         throw new Error();
-      const [address, prefix] = parts;
-      if (!prefix)
+      const [address, prefix2] = parts;
+      if (!prefix2)
         throw new Error();
-      const prefixNum = Number(prefix);
-      if (`${prefixNum}` !== prefix)
+      const prefixNum = Number(prefix2);
+      if (`${prefixNum}` !== prefix2)
         throw new Error();
       if (prefixNum < 0 || prefixNum > 128)
         throw new Error();
@@ -19226,12 +19651,12 @@ function _includes(includes, params) {
   });
 }
 // @__NO_SIDE_EFFECTS__
-function _startsWith(prefix, params) {
+function _startsWith(prefix2, params) {
   return new $ZodCheckStartsWith({
     check: "string_format",
     format: "starts_with",
     ...normalizeParams(params),
-    prefix
+    prefix: prefix2
   });
 }
 // @__NO_SIDE_EFFECTS__
@@ -22330,13 +22755,13 @@ function resolveRef(ref, ctx2) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path6 = ref.slice(1).split("/").filter(Boolean);
-  if (path6.length === 0) {
+  const path7 = ref.slice(1).split("/").filter(Boolean);
+  if (path7.length === 0) {
     return ctx2.rootSchema;
   }
   const defsKey = ctx2.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path6[0] === defsKey) {
-    const key = path6[1];
+  if (path7[0] === defsKey) {
+    const key = path7[1];
     if (!key || !ctx2.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -23103,8 +23528,8 @@ function getErrorMap2() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path6, errorMaps, issueData } = params;
-  const fullPath = [...path6, ...issueData.path || []];
+  const { data, path: path7, errorMaps, issueData } = params;
+  const fullPath = [...path7, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -23219,11 +23644,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path6, key) {
+  constructor(parent, value, path7, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path6;
+    this._path = path7;
     this._key = key;
   }
   get path() {
@@ -27309,7 +27734,7 @@ async function downloadBlob(url2, options) {
   }
 }
 var createIdGenerator = ({
-  prefix,
+  prefix: prefix2,
   size = 16,
   alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
   separator = "-"
@@ -27322,7 +27747,7 @@ var createIdGenerator = ({
     }
     return chars.join("");
   };
-  if (prefix == null) {
+  if (prefix2 == null) {
     return generator;
   }
   if (alphabet.includes(separator)) {
@@ -27331,7 +27756,7 @@ var createIdGenerator = ({
       message: `The separator "${separator}" must not be part of the alphabet "${alphabet}".`
     });
   }
-  return () => `${prefix}${separator}${generator()}`;
+  return () => `${prefix2}${separator}${generator()}`;
 };
 var generateId = createIdGenerator();
 function getErrorMessage2(error51) {
@@ -30947,8 +31372,8 @@ function createOpenAICompatible(options) {
   const getHeaders = () => withUserAgentSuffix(headers, `ai-sdk/openai-compatible/${VERSION2}`);
   const getCommonModelConfig = (modelType) => ({
     provider: `${providerName}.${modelType}`,
-    url: ({ path: path6 }) => {
-      const url2 = new URL(`${baseURL}${path6}`);
+    url: ({ path: path7 }) => {
+      const url2 = new URL(`${baseURL}${path7}`);
       if (options.queryParams) {
         url2.search = new URLSearchParams(options.queryParams).toString();
       }
@@ -34511,27 +34936,27 @@ function formatWarning({
   provider,
   model
 }) {
-  const prefix = `AI SDK Warning (${provider} / ${model}):`;
+  const prefix2 = `AI SDK Warning (${provider} / ${model}):`;
   switch (warning.type) {
     case "unsupported": {
-      let message = `${prefix} The feature "${warning.feature}" is not supported.`;
+      let message = `${prefix2} The feature "${warning.feature}" is not supported.`;
       if (warning.details) {
         message += ` ${warning.details}`;
       }
       return message;
     }
     case "compatibility": {
-      let message = `${prefix} The feature "${warning.feature}" is used in a compatibility mode.`;
+      let message = `${prefix2} The feature "${warning.feature}" is used in a compatibility mode.`;
       if (warning.details) {
         message += ` ${warning.details}`;
       }
       return message;
     }
     case "other": {
-      return `${prefix} ${warning.message}`;
+      return `${prefix2} ${warning.message}`;
     }
     default: {
-      return `${prefix} ${JSON.stringify(warning, null, 2)}`;
+      return `${prefix2} ${JSON.stringify(warning, null, 2)}`;
     }
   }
 }
@@ -39269,6 +39694,432 @@ async function runToolExecuteBeforeHooks(input, perRunHooks = []) {
   for (const hook of [...registeredBeforeHooks, ...perRunHooks]) await hook(input);
 }
 
+// src/permission-hook.ts
+var import_node_path4 = __toESM(require("node:path"));
+var import_shell_quote = __toESM(require_shell_quote());
+
+// src/vendor/opencode-permission/wildcard.ts
+function match(input, pattern) {
+  const normalized = input.replaceAll("\\", "/");
+  let escaped = pattern.replaceAll("\\", "/").replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
+  if (escaped.endsWith(" .*")) escaped = escaped.slice(0, -3) + "( .*)?";
+  return new RegExp("^" + escaped + "$", process.platform === "win32" ? "si" : "s").test(normalized);
+}
+
+// src/vendor/opencode-permission/evaluate.ts
+function evaluate(permission, pattern, ...rulesets) {
+  return rulesets.flat().findLast((rule) => match(permission, rule.permission) && match(pattern, rule.pattern)) ?? {
+    action: "ask",
+    permission,
+    pattern: "*"
+  };
+}
+
+// src/vendor/opencode-permission/arity.ts
+function prefix(tokens) {
+  for (let len = tokens.length; len > 0; len--) {
+    const prefix2 = tokens.slice(0, len).join(" ");
+    const arity = ARITY[prefix2];
+    if (arity !== void 0) return tokens.slice(0, arity);
+  }
+  if (tokens.length === 0) return [];
+  return tokens.slice(0, 1);
+}
+var ARITY = {
+  cat: 1,
+  // cat file.txt
+  cd: 1,
+  // cd /path/to/dir
+  chmod: 1,
+  // chmod 755 script.sh
+  chown: 1,
+  // chown user:group file.txt
+  cp: 1,
+  // cp source.txt dest.txt
+  echo: 1,
+  // echo "hello world"
+  env: 1,
+  // env
+  export: 1,
+  // export PATH=/usr/bin
+  grep: 1,
+  // grep pattern file.txt
+  kill: 1,
+  // kill 1234
+  killall: 1,
+  // killall process
+  ln: 1,
+  // ln -s source target
+  ls: 1,
+  // ls -la
+  mkdir: 1,
+  // mkdir new-dir
+  mv: 1,
+  // mv old.txt new.txt
+  ps: 1,
+  // ps aux
+  pwd: 1,
+  // pwd
+  rm: 1,
+  // rm file.txt
+  rmdir: 1,
+  // rmdir empty-dir
+  sleep: 1,
+  // sleep 5
+  source: 1,
+  // source ~/.bashrc
+  tail: 1,
+  // tail -f log.txt
+  touch: 1,
+  // touch file.txt
+  unset: 1,
+  // unset VAR
+  which: 1,
+  // which node
+  aws: 3,
+  // aws s3 ls
+  az: 3,
+  // az storage blob list
+  bazel: 2,
+  // bazel build
+  brew: 2,
+  // brew install node
+  bun: 2,
+  // bun install
+  "bun run": 3,
+  // bun run dev
+  "bun x": 3,
+  // bun x vite
+  cargo: 2,
+  // cargo build
+  "cargo add": 3,
+  // cargo add tokio
+  "cargo run": 3,
+  // cargo run main
+  cdk: 2,
+  // cdk deploy
+  cf: 2,
+  // cf push app
+  cmake: 2,
+  // cmake build
+  composer: 2,
+  // composer require laravel
+  consul: 2,
+  // consul members
+  "consul kv": 3,
+  // consul kv get config/app
+  crictl: 2,
+  // crictl ps
+  deno: 2,
+  // deno run server.ts
+  "deno task": 3,
+  // deno task dev
+  doctl: 3,
+  // doctl kubernetes cluster list
+  docker: 2,
+  // docker run nginx
+  "docker builder": 3,
+  // docker builder prune
+  "docker compose": 3,
+  // docker compose up
+  "docker container": 3,
+  // docker container ls
+  "docker image": 3,
+  // docker image prune
+  "docker network": 3,
+  // docker network inspect
+  "docker volume": 3,
+  // docker volume ls
+  eksctl: 2,
+  // eksctl get clusters
+  "eksctl create": 3,
+  // eksctl create cluster
+  firebase: 2,
+  // firebase deploy
+  flyctl: 2,
+  // flyctl deploy
+  gcloud: 3,
+  // gcloud compute instances list
+  gh: 3,
+  // gh pr list
+  git: 2,
+  // git checkout main
+  "git config": 3,
+  // git config user.name
+  "git remote": 3,
+  // git remote add origin
+  "git stash": 3,
+  // git stash pop
+  go: 2,
+  // go build
+  gradle: 2,
+  // gradle build
+  helm: 2,
+  // helm install mychart
+  heroku: 2,
+  // heroku logs
+  hugo: 2,
+  // hugo new site blog
+  ip: 2,
+  // ip link show
+  "ip addr": 3,
+  // ip addr show
+  "ip link": 3,
+  // ip link set eth0 up
+  "ip netns": 3,
+  // ip netns exec foo bash
+  "ip route": 3,
+  // ip route add default via 1.1.1.1
+  kind: 2,
+  // kind delete cluster
+  "kind create": 3,
+  // kind create cluster
+  kubectl: 2,
+  // kubectl get pods
+  "kubectl kustomize": 3,
+  // kubectl kustomize overlays/dev
+  "kubectl rollout": 3,
+  // kubectl rollout restart deploy/api
+  kustomize: 2,
+  // kustomize build .
+  make: 2,
+  // make build
+  mc: 2,
+  // mc ls myminio
+  "mc admin": 3,
+  // mc admin info myminio
+  minikube: 2,
+  // minikube start
+  mongosh: 2,
+  // mongosh test
+  mysql: 2,
+  // mysql -u root
+  mvn: 2,
+  // mvn compile
+  ng: 2,
+  // ng generate component home
+  npm: 2,
+  // npm install
+  "npm exec": 3,
+  // npm exec vite
+  "npm init": 3,
+  // npm init vue
+  "npm run": 3,
+  // npm run dev
+  "npm view": 3,
+  // npm view react version
+  nvm: 2,
+  // nvm use 18
+  nx: 2,
+  // nx build
+  openssl: 2,
+  // openssl genrsa 2048
+  "openssl req": 3,
+  // openssl req -new -key key.pem
+  "openssl x509": 3,
+  // openssl x509 -in cert.pem
+  pip: 2,
+  // pip install numpy
+  pipenv: 2,
+  // pipenv install flask
+  pnpm: 2,
+  // pnpm install
+  "pnpm dlx": 3,
+  // pnpm dlx create-next-app
+  "pnpm exec": 3,
+  // pnpm exec vite
+  "pnpm run": 3,
+  // pnpm run dev
+  poetry: 2,
+  // poetry add requests
+  podman: 2,
+  // podman run alpine
+  "podman container": 3,
+  // podman container ls
+  "podman image": 3,
+  // podman image prune
+  psql: 2,
+  // psql -d mydb
+  pulumi: 2,
+  // pulumi up
+  "pulumi stack": 3,
+  // pulumi stack output
+  pyenv: 2,
+  // pyenv install 3.11
+  python: 2,
+  // python -m venv env
+  rake: 2,
+  // rake db:migrate
+  rbenv: 2,
+  // rbenv install 3.2.0
+  "redis-cli": 2,
+  // redis-cli ping
+  rustup: 2,
+  // rustup update
+  serverless: 2,
+  // serverless invoke
+  sfdx: 3,
+  // sfdx force:org:list
+  skaffold: 2,
+  // skaffold dev
+  sls: 2,
+  // sls deploy
+  sst: 2,
+  // sst deploy
+  swift: 2,
+  // swift build
+  systemctl: 2,
+  // systemctl restart nginx
+  terraform: 2,
+  // terraform apply
+  "terraform workspace": 3,
+  // terraform workspace select prod
+  tmux: 2,
+  // tmux new -s dev
+  turbo: 2,
+  // turbo run build
+  ufw: 2,
+  // ufw allow 22
+  vault: 2,
+  // vault login
+  "vault auth": 3,
+  // vault auth list
+  "vault kv": 3,
+  // vault kv get secret/api
+  vercel: 2,
+  // vercel deploy
+  volta: 2,
+  // volta install node
+  wp: 2,
+  // wp plugin install
+  yarn: 2,
+  // yarn add react
+  "yarn dlx": 3,
+  // yarn dlx create-react-app
+  "yarn run": 3
+  // yarn run dev
+};
+
+// src/permission-hook.ts
+function normalizeWorkspacePattern(value, ctx2) {
+  const source = value.trim().replaceAll("\\", "/");
+  if (!source) return "";
+  const workspace2 = import_node_path4.default.resolve(ctx2.workspace);
+  const absolute = import_node_path4.default.resolve(workspace2, source);
+  return import_node_path4.default.relative(workspace2, absolute).replaceAll("\\", "/") || ".";
+}
+function joinPathAndGlob(pathValue, globValue) {
+  const base = pathValue.trim();
+  const glob = globValue.trim();
+  if (!base || base === ".") return glob;
+  if (!glob) return base;
+  if (import_node_path4.default.isAbsolute(glob) || /^[A-Za-z]:[\\/]/u.test(glob)) return glob;
+  return `${base.replace(/[\\/]+$/u, "")}/${glob.replace(/^[\\/]+/u, "")}`;
+}
+function commandPermissionTarget(command) {
+  const target = command.trim();
+  if (!target || /[\r\n]/u.test(target)) return { target, allowEligible: false };
+  let parsed;
+  try {
+    parsed = (0, import_shell_quote.parse)(target);
+  } catch {
+    return { target, allowEligible: false };
+  }
+  if (parsed.length === 0 || parsed.some((entry) => typeof entry !== "string")) {
+    return { target, allowEligible: false };
+  }
+  const commandPrefix = prefix(parsed).join(" ");
+  return commandPrefix ? { target: commandPrefix, allowEligible: true } : { target, allowEligible: false };
+}
+function collectStrings(value) {
+  if (typeof value === "string") return { values: value.trim() ? [value] : [], invalid: value.trim().length === 0 };
+  if (!Array.isArray(value)) return { values: [], invalid: value !== void 0 };
+  const values = [];
+  let invalid = false;
+  for (const item of value) {
+    if (typeof item === "string" && item.trim()) values.push(item);
+    else invalid = true;
+  }
+  return { values, invalid };
+}
+function pathTarget(value, ctx2) {
+  return { pattern: normalizeWorkspacePattern(value, ctx2), allowEligible: true };
+}
+function permissionTargets(tool2, args, ctx2) {
+  const bare = bareToolName(tool2);
+  if (bare === "run_command" || bare === "start_process") {
+    if (typeof args.command === "string") {
+      const command = commandPermissionTarget(args.command);
+      return [{ pattern: command.target, allowEligible: command.allowEligible }];
+    }
+    return [{ pattern: "*", allowEligible: false }];
+  }
+  const targets = [];
+  let invalid = false;
+  if (bare === "list_files" || bare === "search_files") {
+    const baseValues = collectStrings(args.path);
+    const listValues = collectStrings(args.paths);
+    const bases = [...baseValues.values, ...listValues.values];
+    const globKey = bare === "list_files" ? "glob" : "include";
+    const globValues = collectStrings(args[globKey]);
+    invalid ||= baseValues.invalid || listValues.invalid || globValues.invalid;
+    if (bases.length > 0 && globValues.values.length > 0) {
+      for (const base of bases) for (const glob of globValues.values) targets.push(pathTarget(joinPathAndGlob(base, glob), ctx2));
+    } else {
+      for (const base of bases) targets.push(pathTarget(base, ctx2));
+      for (const glob of globValues.values) targets.push(pathTarget(glob, ctx2));
+    }
+  }
+  const pathValues = collectStrings(args.path);
+  const pathsValues = collectStrings(args.paths);
+  invalid ||= pathValues.invalid || pathsValues.invalid;
+  if (bare !== "list_files" && bare !== "search_files") {
+    for (const value of pathValues.values) targets.push(pathTarget(value, ctx2));
+    for (const value of pathsValues.values) targets.push(pathTarget(value, ctx2));
+  }
+  const patternValues = collectStrings(args.pattern);
+  const patternsValues = collectStrings(args.patterns);
+  invalid ||= patternValues.invalid || patternsValues.invalid;
+  for (const value of patternValues.values) targets.push(pathTarget(value, ctx2));
+  for (const value of patternsValues.values) targets.push(pathTarget(value, ctx2));
+  if (targets.length === 0) return [{ pattern: "*", allowEligible: !invalid }];
+  return targets;
+}
+function evaluatedTargets(tool2, args, ctx2, rules) {
+  const permission = bareToolName(tool2);
+  return permissionTargets(permission, args, ctx2).map((target) => ({
+    target,
+    action: evaluate(permission, target.pattern, rules).action
+  }));
+}
+function combineDecisions(items) {
+  let needsAsk = false;
+  for (const item of items) {
+    if (item.action === "deny") return "deny";
+    if (item.action === "ask" || item.action === "allow" && !item.target.allowEligible) needsAsk = true;
+  }
+  return needsAsk ? "ask" : "allow";
+}
+function createPermissionHook(rules) {
+  const ruleset = [...rules];
+  const decisions = /* @__PURE__ */ new WeakMap();
+  const hook = ({ tool: tool2, args, ctx: ctx2 }) => {
+    const evaluated = evaluatedTargets(tool2, args, ctx2, ruleset);
+    const decision = combineDecisions(evaluated);
+    if (decision === "deny") {
+      const denied = evaluated.filter((item) => item.action === "deny").map((item) => item.target.pattern);
+      throw new Error(`permission denied: ${bareToolName(tool2)} (${denied.join(", ") || "*"})`);
+    }
+    decisions.set(args, decision);
+  };
+  return {
+    hook,
+    takeDecision(args) {
+      return decisions.get(args);
+    }
+  };
+}
+
 // src/agent-v2.ts
 function toModelMessages(messages) {
   const converted = [];
@@ -39342,8 +40193,12 @@ async function executeV2ToolCall(call, def, cfg2, ctx2, io, beforeHooks) {
   const summary = summarize(qualified, args);
   io.event?.({ type: "tool.requested", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
   io.event?.({ type: "step.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+  const permissionController = cfg2.permissions && cfg2.permissions.length > 0 ? createPermissionHook(cfg2.permissions) : void 0;
+  const effectiveBeforeHooks = permissionController ? [...beforeHooks, permissionController.hook] : beforeHooks;
+  let permissionDecision;
   try {
-    await runToolExecuteBeforeHooks({ tool: qualified, args, ctx: ctx2 }, beforeHooks);
+    await runToolExecuteBeforeHooks({ tool: qualified, args, ctx: ctx2 }, effectiveBeforeHooks);
+    permissionDecision = permissionController?.takeDecision(args);
   } catch (err) {
     const reason = err.message || String(err);
     const output = `[hook denied] ${reason}`;
@@ -39352,8 +40207,10 @@ async function executeV2ToolCall(call, def, cfg2, ctx2, io, beforeHooks) {
     return { output, status: "denied", executed: false, metadata: null };
   }
   const policy = capabilityPolicy(cfg2, "work");
-  if (def.kind !== "read") {
-    const automatic = def.kind === "write" ? policy.autoApproveWrite : policy.autoApproveCommand;
+  const permissionAsk = permissionDecision === "ask";
+  const permissionAllow = permissionDecision === "allow";
+  if (permissionAsk || def.kind !== "read") {
+    const automatic = permissionAllow || !permissionAsk && (def.kind === "write" ? policy.autoApproveWrite : policy.autoApproveCommand);
     const fileBinding = await captureFileBinding(def, args, ctx2);
     const binding = {
       ...fileBinding,
@@ -39382,7 +40239,7 @@ ${summary}`, binding);
       }
       io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
     } else {
-      io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, metadata: { automatic: true }, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+      io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, metadata: { automatic: true, ...permissionAllow ? { permission: "allow" } : {} }, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
     }
   }
   io.event?.({ type: "tool.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
@@ -39518,7 +40375,7 @@ function runConfiguredAgentTurn(opts) {
 var import_node_child_process3 = require("node:child_process");
 var import_node_net = __toESM(require("node:net"));
 var import_node_fs3 = __toESM(require("node:fs"));
-var import_node_path4 = __toESM(require("node:path"));
+var import_node_path5 = __toESM(require("node:path"));
 function selectBrowserProcessId(processInfo) {
   if (!Array.isArray(processInfo)) return null;
   const browser = processInfo.find((item) => {
@@ -39938,10 +40795,10 @@ async function findFreePort() {
   });
 }
 function profileIsInUse(profileDir) {
-  if (["SingletonLock", "SingletonCookie", "SingletonSocket"].some((name24) => import_node_fs3.default.existsSync(import_node_path4.default.join(profileDir, name24)))) return true;
+  if (["SingletonLock", "SingletonCookie", "SingletonSocket"].some((name24) => import_node_fs3.default.existsSync(import_node_path5.default.join(profileDir, name24)))) return true;
   if (process.platform !== "win32") return false;
   try {
-    const needle = import_node_path4.default.resolve(profileDir).replace(/[\\/]+$/, "").toLowerCase();
+    const needle = import_node_path5.default.resolve(profileDir).replace(/[\\/]+$/, "").toLowerCase();
     const marker24 = `--user-data-dir=${needle}`;
     const output = (0, import_node_child_process3.execFileSync)("powershell.exe", [
       "-NoProfile",
@@ -39961,7 +40818,7 @@ function profileIsInUse(profileDir) {
 function findEdgePath() {
   const roots = [process.env["ProgramFiles(x86)"], process.env.ProgramFiles, process.env.LOCALAPPDATA].filter(Boolean);
   for (const root of roots) {
-    const p = import_node_path4.default.join(root, "Microsoft", "Edge", "Application", "msedge.exe");
+    const p = import_node_path5.default.join(root, "Microsoft", "Edge", "Application", "msedge.exe");
     if (import_node_fs3.default.existsSync(p)) return p;
   }
   throw new Error("Microsoft Edge \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3002Edge \u3092\u30A4\u30F3\u30B9\u30C8\u30FC\u30EB\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
@@ -40115,7 +40972,7 @@ var CopilotEdgeClient = class {
   }
   hardenPreferences(profileDir) {
     try {
-      const prefPath = import_node_path4.default.join(profileDir, "Default", "Preferences");
+      const prefPath = import_node_path5.default.join(profileDir, "Default", "Preferences");
       if (!import_node_fs3.default.existsSync(prefPath)) return;
       const j = JSON.parse(import_node_fs3.default.readFileSync(prefPath, "utf8"));
       if (!j.session) j.session = {};
@@ -40127,12 +40984,12 @@ var CopilotEdgeClient = class {
     }
   }
   chooseEdgeProfile() {
-    const root = import_node_path4.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent");
+    const root = import_node_path5.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent");
     import_node_fs3.default.mkdirSync(root, { recursive: true });
     const suffix = (this.s.profileName ?? "default").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "default";
-    const stable = import_node_path4.default.join(root, suffix === "default" ? "edge-profile" : "edge-profile-" + suffix);
+    const stable = import_node_path5.default.join(root, suffix === "default" ? "edge-profile" : "edge-profile-" + suffix);
     if (!profileIsInUse(stable)) return stable;
-    return import_node_fs3.default.mkdtempSync(import_node_path4.default.join(root, "edge-profile-" + suffix + "-session-"));
+    return import_node_fs3.default.mkdtempSync(import_node_path5.default.join(root, "edge-profile-" + suffix + "-session-"));
   }
   async ensureEdge() {
     if (this.s.reuseExistingEdge) {
@@ -40724,17 +41581,17 @@ function argValue(flag) {
 }
 var cfg = loadConfig(argValue("--config"));
 var workspaceArg = argValue("--workspace");
-var workspace = workspaceArg ? import_node_path5.default.resolve(workspaceArg) : process.cwd();
+var workspace = workspaceArg ? import_node_path6.default.resolve(workspaceArg) : process.cwd();
 var ctx = { workspace, restrictToWorkspace: cfg.restrictToWorkspace ?? true, safeCommandOnly: cfg.safeCommandOnly === true, weatherDefaultLocation: cfg.weather?.defaultLocation };
-var here = typeof __dirname !== "undefined" ? __dirname : import_node_path5.default.dirname(process.argv[1] ?? ".");
+var here = typeof __dirname !== "undefined" ? __dirname : import_node_path6.default.dirname(process.argv[1] ?? ".");
 var indexCandidates = [
   process.env.INDEX_HTML,
-  import_node_path5.default.join(here, "..", "public", "index.html"),
-  import_node_path5.default.join(process.cwd(), "public", "index.html")
+  import_node_path6.default.join(here, "..", "public", "index.html"),
+  import_node_path6.default.join(process.cwd(), "public", "index.html")
 ];
 var indexHtmlPath = indexCandidates.find((p) => typeof p === "string" && import_node_fs4.default.existsSync(p));
-var distributionStatePath = import_node_path5.default.join(process.env.LOCALAPPDATA ?? import_node_path5.default.dirname(here), "CompanyApps", "state", "coding-agent.json");
-var persistencePath = import_node_path5.default.join(process.env.APPDATA ?? process.env.LOCALAPPDATA ?? import_node_path5.default.dirname(here), "CompanyApps", "coding-agent", "state.json");
+var distributionStatePath = import_node_path6.default.join(process.env.LOCALAPPDATA ?? import_node_path6.default.dirname(here), "CompanyApps", "state", "coding-agent.json");
+var persistencePath = import_node_path6.default.join(process.env.APPDATA ?? process.env.LOCALAPPDATA ?? import_node_path6.default.dirname(here), "CompanyApps", "coding-agent", "state.json");
 function readDistributionState() {
   try {
     if (!import_node_fs4.default.existsSync(distributionStatePath)) return { phase: "unknown", message: "\u30E9\u30F3\u30C1\u30E3\u30FC\u306E\u72B6\u614B\u306F\u672A\u53D6\u5F97\u3067\u3059", sharedVersion: null, localVersion: null, verified: false };
@@ -40870,16 +41727,16 @@ function phaseForTool(tool2) {
 function buildDiff(before, after, maxLines = 600) {
   const b = before.split(/\r?\n/);
   const a = after.split(/\r?\n/);
-  let prefix = 0;
-  while (prefix < b.length && prefix < a.length && b[prefix] === a[prefix]) prefix++;
+  let prefix2 = 0;
+  while (prefix2 < b.length && prefix2 < a.length && b[prefix2] === a[prefix2]) prefix2++;
   let suffix = 0;
-  while (suffix < b.length - prefix && suffix < a.length - prefix && b[b.length - suffix - 1] === a[a.length - suffix - 1]) suffix++;
+  while (suffix < b.length - prefix2 && suffix < a.length - prefix2 && b[b.length - suffix - 1] === a[a.length - suffix - 1]) suffix++;
   const lines = [];
   const context2 = 2;
-  for (let i = Math.max(0, prefix - context2); i < prefix; i++) lines.push({ kind: "context", oldLine: i + 1, newLine: i + 1, text: b[i] });
-  for (let i = prefix; i < b.length - suffix && lines.length < maxLines; i++) lines.push({ kind: "remove", oldLine: i + 1, text: b[i] });
-  for (let i = prefix; i < a.length - suffix && lines.length < maxLines; i++) lines.push({ kind: "add", newLine: i + 1, text: a[i] });
-  for (let i = Math.max(prefix, b.length - suffix); i < b.length && lines.length < maxLines; i++) {
+  for (let i = Math.max(0, prefix2 - context2); i < prefix2; i++) lines.push({ kind: "context", oldLine: i + 1, newLine: i + 1, text: b[i] });
+  for (let i = prefix2; i < b.length - suffix && lines.length < maxLines; i++) lines.push({ kind: "remove", oldLine: i + 1, text: b[i] });
+  for (let i = prefix2; i < a.length - suffix && lines.length < maxLines; i++) lines.push({ kind: "add", newLine: i + 1, text: a[i] });
+  for (let i = Math.max(prefix2, b.length - suffix); i < b.length && lines.length < maxLines; i++) {
     const j = i - (b.length - a.length);
     if (j >= 0 && j < a.length) lines.push({ kind: "context", oldLine: i + 1, newLine: j + 1, text: b[i] });
   }
@@ -41132,7 +41989,7 @@ function persistState() {
       sessions: [...sessions.values()],
       runs: [...runs.values()]
     };
-    import_node_fs4.default.mkdirSync(import_node_path5.default.dirname(persistencePath), { recursive: true });
+    import_node_fs4.default.mkdirSync(import_node_path6.default.dirname(persistencePath), { recursive: true });
     import_node_fs4.default.writeFileSync(persistencePath, JSON.stringify(state), "utf8");
   } catch (err) {
     console.warn(`[state] \u6C38\u7D9A\u5316\u3092\u30B9\u30AD\u30C3\u30D7\u3057\u307E\u3057\u305F: ${err.message}`);
@@ -41308,7 +42165,7 @@ var server = import_node_http3.default.createServer(async (req, res) => {
     return;
   }
   if (req.method === "GET" && url2.pathname === "/api/info") {
-    json3(res, 200, { model: cfg.model || (cfg.provider ?? ""), provider: cfg.provider ?? "openai", workspace, project: import_node_path5.default.basename(workspace), version: "0.10.8", distribution: readDistributionState() });
+    json3(res, 200, { model: cfg.model || (cfg.provider ?? ""), provider: cfg.provider ?? "openai", workspace, project: import_node_path6.default.basename(workspace), version: "0.10.8", distribution: readDistributionState() });
     return;
   }
   if (url2.pathname === "/api/copilot/visible-session") {
@@ -41845,19 +42702,19 @@ function realPathWithMissingTail2(abs) {
   let cursor = abs;
   const tail = [];
   while (!import_node_fs4.default.existsSync(cursor)) {
-    const parent = import_node_path5.default.dirname(cursor);
+    const parent = import_node_path6.default.dirname(cursor);
     if (parent === cursor) return abs;
-    tail.unshift(import_node_path5.default.basename(cursor));
+    tail.unshift(import_node_path6.default.basename(cursor));
     cursor = parent;
   }
-  return import_node_path5.default.resolve(import_node_fs4.default.realpathSync.native(cursor), ...tail);
+  return import_node_path6.default.resolve(import_node_fs4.default.realpathSync.native(cursor), ...tail);
 }
 function safeChangedPath(change) {
-  const rootReal = realPathWithMissingTail2(import_node_path5.default.resolve(workspace));
-  const abs = import_node_path5.default.resolve(workspace, change.path);
+  const rootReal = realPathWithMissingTail2(import_node_path6.default.resolve(workspace));
+  const abs = import_node_path6.default.resolve(workspace, change.path);
   const candidateReal = realPathWithMissingTail2(abs);
-  const relative = import_node_path5.default.relative(rootReal, candidateReal);
-  if (relative.startsWith("..") || import_node_path5.default.isAbsolute(relative)) throw new Error("\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u306E\u5909\u66F4\u3067\u3059");
+  const relative = import_node_path6.default.relative(rootReal, candidateReal);
+  if (relative.startsWith("..") || import_node_path6.default.isAbsolute(relative)) throw new Error("\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u306E\u5909\u66F4\u3067\u3059");
   return abs;
 }
 async function performVerification(run, requested) {
@@ -41905,7 +42762,7 @@ async function performVerification(run, requested) {
         const text2 = import_node_fs4.default.readFileSync(abs, "utf8");
         if (!/<html[\s>]/i.test(text2) || !/<\/html>/i.test(text2)) throw new Error(`${change.path}: html\u306E\u30EB\u30FC\u30C8\u8981\u7D20\u304C\u4E0D\u5B8C\u5168\u3067\u3059`);
       } else if (lower.endsWith(".ts") || lower.endsWith(".tsx")) {
-        const tsc = import_node_path5.default.join(workspace, "node_modules", ".bin", process.platform === "win32" ? "tsc.cmd" : "tsc");
+        const tsc = import_node_path6.default.join(workspace, "node_modules", ".bin", process.platform === "win32" ? "tsc.cmd" : "tsc");
         if (import_node_fs4.default.existsSync(tsc)) await execFileAsync2(tsc, ["--noEmit", "--pretty", "false"], { cwd: workspace, timeout: 6e4, windowsHide: true });
         else throw new Error("TypeScript\u30B3\u30F3\u30D1\u30A4\u30E9\u304C\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306B\u3042\u308A\u307E\u305B\u3093");
       } else if (lower.endsWith(".ps1")) {

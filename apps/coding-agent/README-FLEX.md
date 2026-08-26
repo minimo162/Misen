@@ -52,6 +52,29 @@ npm run gate -- --live-copilot-v2 http://127.0.0.1:3951 .tmp/flex-copilot-v2-per
 
 llama.cppサーバーは `--live-converter` のときだけ必要です。フラグを付けないlive段はSKIPとなり、全段の結果は `.tmp/gate-result.json` に保存されます。
 
+## 宣言的権限層（v2専用）
+
+`agentLoop: "v2"` のときだけ、設定の `permissions` 配列を実行前フックとして適用できます。各規則は `permission`（bareなツール名）、`pattern`、`action`（`allow` / `ask` / `deny`）で指定します。規則は配列順に評価され、最後に一致した規則が優先されます。`*` と `?` のワイルドカードが使え、ファイル対象はワークスペース相対の `/` 区切りへ正規化されます。
+
+`allow` は既存の承認プロンプトだけを省略し、`ToolDef.run` と既存のワークスペース・危険コマンド・`allowArbitraryCommands`・`safeCommandOnly` ガードは必ず通ります。`ask` は読み取りツールを含めて既存の承認を必ず表示し、`deny` は実行前に停止します。複数の対象がある場合は、1件でも `deny` なら拒否、次に `ask` があれば確認、全件 `allow` のときだけ許可です。
+
+`run_command` と `start_process` は、shell-quoteで安全に1コマンド1トークン列と判定できたときだけ `git status` や `npm run dev` などのコマンド接頭辞へ一致させます。`;`、`&&`、`|`、リダイレクト、glob、複数行、parse失敗を含む複雑な入力は全文を対象に `ask` へ保守的に降格され、`allow` でガードを回避できません。
+
+```json
+{
+  "agentLoop": "v2",
+  "permissions": [
+    { "permission": "write_file", "pattern": "*", "action": "ask" },
+    { "permission": "write_file", "pattern": "generated/**", "action": "allow" },
+    { "permission": "write_file", "pattern": "generated/secrets/**", "action": "deny" },
+    { "permission": "run_command", "pattern": "*", "action": "ask" },
+    { "permission": "run_command", "pattern": "git status", "action": "allow" }
+  ]
+}
+```
+
+未指定または空配列の `permissions` は従来どおりです。設定例のように広い `ask` を先に置き、後ろへ狭い `allow` / `deny` を置いてください。
+
 Layer 1 is the default and needs neither llama.cpp nor a local model. From `apps/coding-agent`, start the agent for any existing folder; that folder is the only file-operation boundary:
 
 ```powershell

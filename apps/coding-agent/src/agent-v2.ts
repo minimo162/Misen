@@ -16,6 +16,7 @@ import {
 } from './agent'
 import { capabilityPolicy, resolveApiKey, type AgentConfig } from './config'
 import { runToolExecuteBeforeHooks, type ToolExecuteBeforeHook } from './hooks'
+import { createPermissionHook, type PermissionDecision } from './permission-hook'
 import type { ChatMessage, ToolCall } from './llm'
 import {
   bareToolName,
@@ -130,8 +131,14 @@ export async function executeV2ToolCall(
   io.event?.({ type: 'tool.requested', tool: qualified, summary, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.toolCallId })
   io.event?.({ type: 'step.started', tool: qualified, summary, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.toolCallId })
 
+  const permissionController = cfg.permissions && cfg.permissions.length > 0 ? createPermissionHook(cfg.permissions) : undefined
+  // Evaluate permissions after all other before-hooks so the decision is bound
+  // to the exact arguments that will reach approval and the existing guards.
+  const effectiveBeforeHooks = permissionController ? [...beforeHooks, permissionController.hook] : beforeHooks
+  let permissionDecision: PermissionDecision | undefined
   try {
-    await runToolExecuteBeforeHooks({ tool: qualified, args, ctx }, beforeHooks)
+    await runToolExecuteBeforeHooks({ tool: qualified, args, ctx }, effectiveBeforeHooks)
+    permissionDecision = permissionController?.takeDecision(args)
   } catch (err) {
     const reason = (err as Error).message || String(err)
     const output = `[hook denied] ${reason}`
@@ -141,8 +148,12 @@ export async function executeV2ToolCall(
   }
 
   const policy = capabilityPolicy(cfg, 'work')
-  if (def.kind !== 'read') {
-    const automatic = def.kind === 'write' ? policy.autoApproveWrite : policy.autoApproveCommand
+  const permissionAsk = permissionDecision === 'ask'
+  const permissionAllow = permissionDecision === 'allow'
+  if (permissionAsk || def.kind !== 'read') {
+    // A permission allow is equivalent to the existing automatic approval
+    // branch, while a permission ask always forces the normal user prompt.
+    const automatic = permissionAllow || (!permissionAsk && (def.kind === 'write' ? policy.autoApproveWrite : policy.autoApproveCommand))
     const fileBinding = await captureFileBinding(def, args, ctx)
     const binding: ApprovalBinding = {
       ...fileBinding,
@@ -170,7 +181,7 @@ export async function executeV2ToolCall(
       }
       io.event?.({ type: 'tool.approved', tool: qualified, summary, approved: true, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.toolCallId })
     } else {
-      io.event?.({ type: 'tool.approved', tool: qualified, summary, approved: true, metadata: { automatic: true }, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.toolCallId })
+      io.event?.({ type: 'tool.approved', tool: qualified, summary, approved: true, metadata: { automatic: true, ...(permissionAllow ? { permission: 'allow' } : {}) }, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.toolCallId })
     }
   }
 
