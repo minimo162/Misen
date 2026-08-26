@@ -9,6 +9,7 @@ import { executeV2ToolCall, runAgentTurnV2 } from '../src/agent-v2'
 import { runConfiguredAgentTurn } from '../src/agent-loop'
 import { clearToolExecuteBeforeHooks, registerToolExecuteBeforeHook } from '../src/hooks'
 import { capabilityPolicy, type AgentConfig } from '../src/config'
+import { commandPermissionTarget, createPermissionHook, evaluateToolPermission } from '../src/permission-hook'
 import type { ChatMessage } from '../src/llm'
 import {
   COPILOT_CLICK_SEND_JS,
@@ -602,6 +603,172 @@ async function testV2HookDenialPropagation(): Promise<void> {
   })
   fs.rmSync(root, { recursive: true, force: true })
   console.log('PASS v2-hook-denial-propagation')
+}
+
+async function testV2PermissionActionsLastWins(): Promise<void> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-v2-permission-actions-'))
+  const ctx = makeCtx(root)
+  const rules = [
+    { permission: 'write_file', pattern: '*', action: 'ask' as const },
+    { permission: 'write_file', pattern: 'notes/**', action: 'allow' as const },
+    { permission: 'write_file', pattern: 'notes/private.txt', action: 'deny' as const }
+  ]
+  assert.strictEqual(evaluateToolPermission('host.write_file', { path: 'notes/public.txt', content: 'x' }, ctx, rules), 'allow')
+  assert.strictEqual(evaluateToolPermission('host.write_file', { path: 'notes/private.txt', content: 'x' }, ctx, rules), 'deny')
+  assert.strictEqual(evaluateToolPermission('host.write_file', { path: 'other.txt', content: 'x' }, ctx, rules), 'ask')
+
+  const controller = createPermissionHook(rules)
+  const args = { path: 'notes/public.txt', content: 'x' }
+  await controller.hook({ tool: 'host.write_file', args, ctx })
+  assert.strictEqual(controller.takeDecision(args), 'allow')
+  assert.strictEqual(controller.takeDecision({ ...args }), undefined, 'decisions are keyed by the exact args object')
+  await assert.rejects(
+    async () => { await controller.hook({ tool: 'host.write_file', args: { path: 'notes/private.txt', content: 'x' }, ctx }) },
+    /permission denied/iu
+  )
+
+  let approvals = 0
+  const io: AgentIO = {
+    print: () => {},
+    askYesNo: async () => { approvals++; return false }
+  }
+  const writeDef = TOOL_DEFS.find((toolDef) => toolDef.name === 'write_file')!
+  const allowed = await executeV2ToolCall(
+    { toolCallId: 'permission-allow', toolName: 'write_file', input: { path: 'notes/public.txt', content: 'allowed' } },
+    writeDef,
+    { baseURL: '', model: '', permissions: rules },
+    ctx,
+    io,
+    []
+  )
+  assert.strictEqual(allowed.status, 'succeeded', 'allow skips only the existing approval prompt')
+  assert.strictEqual(approvals, 0)
+
+  const denied = await executeV2ToolCall(
+    { toolCallId: 'permission-deny', toolName: 'write_file', input: { path: 'notes/private.txt', content: 'never' } },
+    writeDef,
+    { baseURL: '', model: '', permissions: rules },
+    ctx,
+    io,
+    []
+  )
+  assert.strictEqual(denied.status, 'denied')
+  assert.ok(denied.output.includes('permission denied'))
+  assert.ok(!fs.existsSync(path.join(root, 'notes/private.txt')))
+  assert.strictEqual(approvals, 0, 'deny happens before the existing approval flow')
+
+  const readDef = TOOL_DEFS.find((toolDef) => toolDef.name === 'read_file')!
+  const asked = await executeV2ToolCall(
+    { toolCallId: 'permission-ask', toolName: 'read_file', input: { path: 'notes/public.txt' } },
+    readDef,
+    { baseURL: '', model: '', permissions: [{ permission: 'read_file', pattern: '*', action: 'ask' }] },
+    ctx,
+    io,
+    []
+  )
+  assert.strictEqual(asked.status, 'denied')
+  assert.strictEqual(asked.output, 'ユーザーが拒否しました')
+  assert.strictEqual(approvals, 1, 'ask forces the existing approval flow even for a read tool')
+
+  const mutatedArgs = { path: 'notes/public.txt', content: 'never' }
+  const deniedAfterHookMutation = await executeV2ToolCall(
+    { toolCallId: 'permission-post-hook', toolName: 'write_file', input: mutatedArgs },
+    writeDef,
+    { baseURL: '', model: '', permissions: rules },
+    ctx,
+    io,
+    [({ args }) => { args.path = 'notes/private.txt' }]
+  )
+  assert.strictEqual(deniedAfterHookMutation.status, 'denied', 'permission evaluation must bind after other before-hooks')
+  assert.ok(!fs.existsSync(path.join(root, 'notes/private.txt')))
+  fs.rmSync(root, { recursive: true, force: true })
+  console.log('PASS v2-permission-actions-last-wins')
+}
+
+async function testV2PermissionCommandPrefix(): Promise<void> {
+  assert.deepStrictEqual(commandPermissionTarget('git status'), { target: 'git status', allowEligible: true })
+  assert.deepStrictEqual(commandPermissionTarget('git status --short'), { target: 'git status', allowEligible: true })
+  assert.deepStrictEqual(commandPermissionTarget('npm run dev'), { target: 'npm run dev', allowEligible: true })
+  assert.deepStrictEqual(commandPermissionTarget('npm run dev -- --host 127.0.0.1'), { target: 'npm run dev', allowEligible: true })
+  console.log('PASS v2-permission-command-prefix')
+}
+
+async function testV2PermissionCommandConservative(): Promise<void> {
+  for (const command of ['git status; npm run dev', 'git status && npm run dev', 'git status | cat', 'git status > status.txt']) {
+    const parsed = commandPermissionTarget(command)
+    assert.strictEqual(parsed.target, command)
+    assert.strictEqual(parsed.allowEligible, false, command)
+  }
+  const parseFailure = commandPermissionTarget('echo ${BROKEN')
+  assert.strictEqual(parseFailure.target, 'echo ${BROKEN')
+  assert.strictEqual(parseFailure.allowEligible, false)
+
+  const controller = createPermissionHook([{ permission: 'run_command', pattern: '*', action: 'allow' }])
+  const args = { command: 'git status; npm run dev' }
+  await controller.hook({ tool: 'host.run_command', args, ctx: makeCtx(os.tmpdir()) })
+  assert.strictEqual(controller.takeDecision(args), 'ask', 'complex commands downgrade an allow to ask')
+  console.log('PASS v2-permission-command-conservative')
+}
+
+async function testV2PermissionHardGuardComposition(): Promise<void> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-v2-permission-hard-'))
+  const io: AgentIO = { print: () => {}, askYesNo: async () => { throw new Error('permission allow must not ask') } }
+  const readDef = TOOL_DEFS.find((toolDef) => toolDef.name === 'read_file')!
+  const outside = await executeV2ToolCall(
+    { toolCallId: 'outside', toolName: 'read_file', input: { path: '../outside.txt' } },
+    readDef,
+    { baseURL: '', model: '', permissions: [{ permission: 'read_file', pattern: '../*', action: 'allow' }] },
+    makeCtx(root),
+    io,
+    []
+  )
+  assert.notStrictEqual(outside.status, 'succeeded')
+  assert.ok(outside.output.includes('ワークスペース外'))
+
+  const commandDef = TOOL_DEFS.find((toolDef) => toolDef.name === 'run_command')!
+  const dangerous = await executeV2ToolCall(
+    { toolCallId: 'dangerous', toolName: 'run_command', input: { command: 'git reset --hard HEAD' } },
+    commandDef,
+    { baseURL: '', model: '', allowArbitraryCommands: true, permissions: [{ permission: 'run_command', pattern: 'git reset*', action: 'allow' }] },
+    makeCtx(root),
+    io,
+    []
+  )
+  assert.notStrictEqual(dangerous.status, 'succeeded')
+  assert.ok(dangerous.output.includes('破壊的'))
+  fs.rmSync(root, { recursive: true, force: true })
+  console.log('PASS v2-permission-hard-guard-composition')
+}
+
+async function testV2PermissionEmptyCompatibility(): Promise<void> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-v2-permission-empty-'))
+  fs.writeFileSync(path.join(root, 'same.txt'), 'same', 'utf8')
+  const def = TOOL_DEFS.find((toolDef) => toolDef.name === 'read_file')!
+  let missingApprovals = 0
+  let emptyApprovals = 0
+  const missing = await executeV2ToolCall(
+    { toolCallId: 'missing', toolName: 'read_file', input: { path: 'same.txt' } },
+    def,
+    { baseURL: '', model: '' },
+    makeCtx(root),
+    { print: () => {}, askYesNo: async () => { missingApprovals++; return true } },
+    []
+  )
+  const empty = await executeV2ToolCall(
+    { toolCallId: 'empty', toolName: 'read_file', input: { path: 'same.txt' } },
+    def,
+    { baseURL: '', model: '', permissions: [] },
+    makeCtx(root),
+    { print: () => {}, askYesNo: async () => { emptyApprovals++; return true } },
+    []
+  )
+  assert.strictEqual(missing.status, 'succeeded')
+  assert.strictEqual(empty.status, 'succeeded')
+  assert.strictEqual(empty.output, missing.output)
+  assert.strictEqual(missingApprovals, 0)
+  assert.strictEqual(emptyApprovals, 0)
+  fs.rmSync(root, { recursive: true, force: true })
+  console.log('PASS v2-permission-empty-compatibility')
 }
 
 async function testV2LimitsAndNoProgress(): Promise<void> {
@@ -1851,6 +2018,11 @@ async function testDemoRecordingContract(): Promise<void> {
   await testV2SafeExecutionOrder()
   await testV2ToolLoopAndEventContract()
   await testV2HookDenialPropagation()
+  await testV2PermissionActionsLastWins()
+  await testV2PermissionCommandPrefix()
+  await testV2PermissionCommandConservative()
+  await testV2PermissionHardGuardComposition()
+  await testV2PermissionEmptyCompatibility()
   await testV2LimitsAndNoProgress()
   await testDenial()
   await testProtocolParsing()

@@ -6,6 +6,12 @@ export interface AutoApprove {
   command?: boolean
 }
 
+export interface PermissionRule {
+  permission: string
+  pattern: string
+  action: 'allow' | 'ask' | 'deny'
+}
+
 export type TurnMode = 'chat' | 'research' | 'work'
 
 export interface CapabilityPolicy {
@@ -72,6 +78,8 @@ export interface AgentConfig {
   maxNoProgress?: number
   /** High-risk arbitrary shell execution. Disabled unless explicitly enabled. */
   allowArbitraryCommands?: boolean
+  /** Declarative permissions applied only by the agent-loop v2 before-hook. */
+  permissions?: PermissionRule[]
   /** When enabled, command tools accept only the explicit workspace-file open allowlist. */
   safeCommandOnly?: boolean
   autoApprove?: AutoApprove
@@ -97,6 +105,7 @@ const DEFAULT_CONFIG: AgentConfig = {
   maxCommandExecutions: 2,
   maxNoProgress: 2,
   allowArbitraryCommands: false,
+  permissions: [],
   autoApprove: { write: false, command: false },
   copilot: { displayMode: 'foreground', agentMode: true },
   localResponseConverter: { enabled: false, baseURL: 'http://127.0.0.1:8080/v1', model: 'Qwen3.5-4B-Q4_K_M.gguf', timeoutMs: 30000, apiKey: 'company-apps-flex-local' }
@@ -115,10 +124,29 @@ function parseConfig(found: string): AgentConfig {
   if (provider === 'openai' && (!raw.baseURL || !raw.model)) {
     throw new Error(`provider=openai には baseURL / model が必要です: ${found}`)
   }
+  const configuredPermissions = (raw as unknown as { permissions?: unknown }).permissions
+  let permissions: PermissionRule[] | undefined
+  if (configuredPermissions !== undefined) {
+    if (!Array.isArray(configuredPermissions)) throw new Error(`permissions は配列で指定してください: ${found}`)
+    permissions = configuredPermissions.map((candidate, index) => {
+      if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+        throw new Error(`permissions[${index}] は permission / pattern / action を持つオブジェクトで指定してください: ${found}`)
+      }
+      const rule = candidate as { permission?: unknown; pattern?: unknown; action?: unknown }
+      if (typeof rule.permission !== 'string' || typeof rule.pattern !== 'string') {
+        throw new Error(`permissions[${index}] の permission / pattern は文字列で指定してください: ${found}`)
+      }
+      if (rule.action !== 'allow' && rule.action !== 'ask' && rule.action !== 'deny') {
+        throw new Error(`permissions[${index}].action は allow / ask / deny で指定してください: ${found}`)
+      }
+      return { permission: rule.permission, pattern: rule.pattern, action: rule.action }
+    })
+  }
   return {
     ...DEFAULT_CONFIG,
     ...raw,
     provider,
+    permissions: permissions ?? DEFAULT_CONFIG.permissions,
     autoApprove: { ...DEFAULT_CONFIG.autoApprove, ...(raw.autoApprove ?? {}) },
     copilot: { ...DEFAULT_CONFIG.copilot, ...(raw.copilot ?? {}) },
     localResponseConverter: { ...DEFAULT_CONFIG.localResponseConverter, ...(raw.localResponseConverter ?? {}) }

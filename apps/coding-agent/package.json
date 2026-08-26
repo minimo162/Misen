@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.72",
-    "ai": "^6.0.268"
+    "ai": "^6.0.268",
+    "shell-quote": "1.10.0"
   }
 }

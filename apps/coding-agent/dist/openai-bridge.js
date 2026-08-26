@@ -881,6 +881,7 @@ var DEFAULT_CONFIG = {
   maxCommandExecutions: 2,
   maxNoProgress: 2,
   allowArbitraryCommands: false,
+  permissions: [],
   autoApprove: { write: false, command: false },
   copilot: { displayMode: "foreground", agentMode: true },
   localResponseConverter: { enabled: false, baseURL: "http://127.0.0.1:8080/v1", model: "Qwen3.5-4B-Q4_K_M.gguf", timeoutMs: 3e4, apiKey: "company-apps-flex-local" }
@@ -897,10 +898,29 @@ function parseConfig(found) {
   if (provider === "openai" && (!raw.baseURL || !raw.model)) {
     throw new Error(`provider=openai \u306B\u306F baseURL / model \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
   }
+  const configuredPermissions = raw.permissions;
+  let permissions;
+  if (configuredPermissions !== void 0) {
+    if (!Array.isArray(configuredPermissions)) throw new Error(`permissions \u306F\u914D\u5217\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+    permissions = configuredPermissions.map((candidate, index) => {
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+        throw new Error(`permissions[${index}] \u306F permission / pattern / action \u3092\u6301\u3064\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+      }
+      const rule = candidate;
+      if (typeof rule.permission !== "string" || typeof rule.pattern !== "string") {
+        throw new Error(`permissions[${index}] \u306E permission / pattern \u306F\u6587\u5B57\u5217\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+      }
+      if (rule.action !== "allow" && rule.action !== "ask" && rule.action !== "deny") {
+        throw new Error(`permissions[${index}].action \u306F allow / ask / deny \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+      }
+      return { permission: rule.permission, pattern: rule.pattern, action: rule.action };
+    });
+  }
   return {
     ...DEFAULT_CONFIG,
     ...raw,
     provider,
+    permissions: permissions ?? DEFAULT_CONFIG.permissions,
     autoApprove: { ...DEFAULT_CONFIG.autoApprove, ...raw.autoApprove ?? {} },
     copilot: { ...DEFAULT_CONFIG.copilot, ...raw.copilot ?? {} },
     localResponseConverter: { ...DEFAULT_CONFIG.localResponseConverter, ...raw.localResponseConverter ?? {} }
