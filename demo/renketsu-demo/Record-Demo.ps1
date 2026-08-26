@@ -77,6 +77,18 @@ namespace VideoCapture {
 '@
 }
 
+Add-Type -AssemblyName System.Windows.Forms
+$virtualScreen = [System.Windows.Forms.SystemInformation]::VirtualScreen
+$captureX = [int]$virtualScreen.X
+$captureY = [int]$virtualScreen.Y
+$captureWidth = [int]($virtualScreen.Width - ($virtualScreen.Width % 2))
+$captureHeight = [int]($virtualScreen.Height - ($virtualScreen.Height % 2))
+if ($captureWidth -lt 320 -or $captureHeight -lt 240) {
+    throw "Capture area is too small: ${captureWidth}x${captureHeight}"
+}
+$leftWidth = [int][Math]::Floor($captureWidth / 2)
+$rightWidth = $captureWidth - $leftWidth
+
 function Move-WindowForDemo {
     param(
         [Parameter(Mandatory = $true)][IntPtr]$Handle,
@@ -101,16 +113,16 @@ $edgeWindow = Get-Process -Name msedge -ErrorAction SilentlyContinue |
 if ($null -eq $edgeWindow) {
     throw 'Visible coding-agent Edge window was not found.'
 }
-Move-WindowForDemo -Handle $edgeWindow.MainWindowHandle -X 0 -Y 0 -Width 1920 -Height 1080
+Move-WindowForDemo -Handle $edgeWindow.MainWindowHandle -X $captureX -Y $captureY -Width $captureWidth -Height $captureHeight
 
 $ffmpegArgs = @(
     '-hide_banner',
     '-loglevel', 'warning',
     '-f', 'gdigrab',
     '-framerate', '30',
-    '-offset_x', '0',
-    '-offset_y', '0',
-    '-video_size', '1920x1080',
+    '-offset_x', [string]$captureX,
+    '-offset_y', [string]$captureY,
+    '-video_size', ("{0}x{1}" -f $captureWidth, $captureHeight),
     '-i', 'desktop',
     '-an',
     '-c:v', 'libx264',
@@ -264,8 +276,8 @@ try {
     $excel.Visible = $true
     $excel.DisplayAlerts = $false
     $workbook = $excel.Workbooks.Open($ledgerPath)
-    Move-WindowForDemo -Handle $edgeWindow.MainWindowHandle -X 0 -Y 0 -Width 960 -Height 1080
-    Move-WindowForDemo -Handle ([IntPtr]$excel.Hwnd) -X 960 -Y 0 -Width 960 -Height 1080
+    Move-WindowForDemo -Handle $edgeWindow.MainWindowHandle -X $captureX -Y $captureY -Width $leftWidth -Height $captureHeight
+    Move-WindowForDemo -Handle ([IntPtr]$excel.Hwnd) -X ($captureX + $leftWidth) -Y $captureY -Width $rightWidth -Height $captureHeight
 
     $ledgerSheet = $workbook.Worksheets.Item('連結台帳')
     $ledgerSheet.Activate()
