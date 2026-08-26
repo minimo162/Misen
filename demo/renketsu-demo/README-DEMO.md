@@ -97,9 +97,21 @@ Update-Ledger の一行目は少なくとも次のキーを含む JSON です。
    powershell.exe -NoProfile -File tools\Read-Xlsx.ps1 -Path reports\<報告ファイル>.xlsx
    ```
 
+3. **OSキャプチャが使えない場合の手動録画待ち** — 録画ソフト側で次の保存先を指定して待機し、別の通常PowerShellから実行します。`MANUAL CAPTURE READY`が表示されたら録画を開始してEnter、最後の停止案内で録画を停止してEnterを押します。エージェント進行、fresh session、真値照合、Excel表示は従来どおり自動です。
+
+   ```powershell
+   Set-Location C:\Users\yuuki\company-apps-share
+   powershell.exe -NoProfile -File demo\renketsu-demo\Record-Demo.ps1 `
+     -NoCapture `
+     -OutputPath demo\renketsu-demo\recordings\manual-take.mp4 `
+     -RepoRoot C:\Users\yuuki\company-apps-share
+   ```
+
+   `ok:true`は、指定した動画ファイルが実在して空でないこと、抽出値が真値と一致すること、Update-Ledgerの合計・件数が一致することをすべて確認できた場合だけ返します。
+
    `Read-Xlsx.ps1` または ImportExcel/EPPlus が実機で使えない場合、元の Excel を開いて必要セルと単位をメモし、JSON を手動レビューします。値を空欄のまま転記して pass にしません。
 
-3. **抽出 fixture の緊急コピー** — Copilot の初回拒否または接続断で、かつ人が fixture の出所・日付を確認できる場合だけ、次のように workspace 内へコピーします。これは scripted insurance であり、LLM が抽出した結果とは表示しません。
+4. **抽出 fixture の緊急コピー** — Copilot の初回拒否または接続断で、かつ人が fixture の出所・日付を確認できる場合だけ、次のように workspace 内へコピーします。これは scripted insurance であり、LLM が抽出した結果とは表示しません。
 
    ```powershell
    Set-Location C:\Users\yuuki\company-apps-share\demo\renketsu-demo\workspace
@@ -110,7 +122,7 @@ Update-Ledger の一行目は少なくとも次のキーを含む JSON です。
 
    この fixture の出所と更新時刻を朝に確認します。モデルへの入力にはこのパスを含めません。
 
-4. **台帳更新** — `work/extracted.json` を人が確認した後、同じ workspace ルートで一度だけ実行します。
+5. **台帳更新** — `work/extracted.json` を人が確認した後、同じ workspace ルートで一度だけ実行します。
 
    ```powershell
    powershell.exe -NoProfile -File tools\Update-Ledger.ps1 -Extracted work\extracted.json -Rates rates\レート表.csv -Ledger 集計台帳.xlsx
@@ -118,7 +130,7 @@ Update-Ledger の一行目は少なくとも次のキーを含む JSON です。
 
    一行目の JSON を保存し、`ok`、各 count、`totals` を読み上げます。失敗時に ledger を初期化して再実行しません。
 
-5. **開く／検査する** — `集計台帳.xlsx` を `Invoke-Item .\集計台帳.xlsx` で開き、会社別と `確認事項` を目視します。保存日時と確認者を記録し、元の `reports/` と `rates/` の更新日時が変わっていないことを確認します。
+6. **開く／検査する** — `集計台帳.xlsx` を `Invoke-Item .\集計台帳.xlsx` で開き、会社別と `確認事項` を目視します。保存日時と確認者を記録し、元の `reports/` と `rates/` の更新日時が変わっていないことを確認します。
 
 ## 4. 明朝チェックリスト（順序を変えない）
 
@@ -149,6 +161,7 @@ Update-Ledger の一行目は少なくとも次のキーを含む JSON です。
 | ImportExcel／EPPlus のロード警告、EDR 隔離 | 再試行を繰り返さず、DLL の版・場所・hash と EDR イベントを記録。ローカルコピーの scripted fallback を使い、事前登録や承認が無いまま配布 DLL を追加しない。 |
 | PowerShell の実行ポリシーで止まる | `Get-ExecutionPolicy -List` とエラーを記録し、承認済みの通常ターミナル／ローカルコピーで `-ExecutionPolicy Bypass` を付けて再試行してよい。launcher 自体は変更しない。 |
 | config変更後も旧指示で動く／入力位置不一致 | サーバー再起動だけでは永続セッションのsystemPromptは更新されない。`Record-Demo.ps1` は各テイク前に新規セッションを自動作成する。手動検証でもUIの「新しいセッション」または `POST /api/sessions` を実行してから固定指示を送る。 |
+| `gdigrab error 5`／`ddagrab`のDXGI出力なし／`CopyFromScreen`のhandle invalid | キャプチャだけの5秒試験を先に行う。3方式とも失敗する環境では本番ランを開始せず、`Record-Demo.ps1 -NoCapture`で外部録画の開始・停止を人に委ねる。スクリプトは指定動画の存在とサイズも最後に検証する。 |
 | 共有フォルダー上でだけ失敗 | リポジトリを承認済みのローカル作業フォルダーへコピーし、同じ相対パスで実行。コピー元・先、時刻、hash を記録し、共有元へ書き戻さない。 |
 | 会社が欠落、未提出判定が違う | `reports/` の全件 list と入力一覧を突合し、`missing` の `quote` を確認。モデルの推測で会社を追加せず、原文・ファイル名・時刻を記録して中止判断。 |
 | リハーサル間で ledger がリセット／追記される | 各 Run 前後の ledger hash と保存日時を記録。既存 ledger を削除・初期化せず、Run ごとのコピー／backup で比較し、Update-Ledger を一回だけ通す。 |

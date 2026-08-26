@@ -1,6 +1,5 @@
 ﻿[CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
     [string]$FfmpegPath,
 
     [Parameter(Mandatory = $true)]
@@ -8,7 +7,9 @@ param(
 
     [string]$RepoRoot,
 
-    [string]$AgentUrl = 'http://127.0.0.1:3948'
+    [string]$AgentUrl = 'http://127.0.0.1:3948',
+
+    [switch]$NoCapture
 )
 
 Set-StrictMode -Version 2.0
@@ -25,7 +26,13 @@ $extractedPath = Join-Path $workspacePath 'work\extracted.json'
 $expectedExtractionPath = Join-Path $RepoRoot 'demo\renketsu-demo\validation\extracted.correct.json'
 $compareExtractionPath = Join-Path $RepoRoot 'demo\renketsu-demo\validation\compare-extracted.mjs'
 $expectedLedgerPath = Join-Path $RepoRoot 'demo\renketsu-demo\validation\expected.json'
-$resolvedFfmpeg = (Resolve-Path -LiteralPath $FfmpegPath).Path
+$resolvedFfmpeg = $null
+if (-not $NoCapture) {
+    if ([string]::IsNullOrWhiteSpace($FfmpegPath)) {
+        throw 'FfmpegPath is required unless -NoCapture is used.'
+    }
+    $resolvedFfmpeg = (Resolve-Path -LiteralPath $FfmpegPath).Path
+}
 $fullOutputPath = [System.IO.Path]::GetFullPath($OutputPath)
 $outputDirectory = Split-Path -Parent $fullOutputPath
 
@@ -115,34 +122,39 @@ if ($null -eq $edgeWindow) {
 }
 Move-WindowForDemo -Handle $edgeWindow.MainWindowHandle -X $captureX -Y $captureY -Width $captureWidth -Height $captureHeight
 
-$ffmpegArgs = @(
-    '-hide_banner',
-    '-loglevel', 'warning',
-    '-f', 'gdigrab',
-    '-framerate', '30',
-    '-offset_x', [string]$captureX,
-    '-offset_y', [string]$captureY,
-    '-video_size', ("{0}x{1}" -f $captureWidth, $captureHeight),
-    '-i', 'desktop',
-    '-an',
-    '-c:v', 'libx264',
-    '-preset', 'ultrafast',
-    '-crf', '18',
-    '-pix_fmt', 'yuv420p',
-    $fullOutputPath
-)
-$escapedArgs = $ffmpegArgs | ForEach-Object {
-    if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
+$ffmpegProcess = $null
+if (-not $NoCapture) {
+    $ffmpegArgs = @(
+        '-hide_banner',
+        '-loglevel', 'warning',
+        '-f', 'gdigrab',
+        '-framerate', '30',
+        '-offset_x', [string]$captureX,
+        '-offset_y', [string]$captureY,
+        '-video_size', ("{0}x{1}" -f $captureWidth, $captureHeight),
+        '-i', 'desktop',
+        '-an',
+        '-c:v', 'libx264',
+        '-preset', 'ultrafast',
+        '-crf', '18',
+        '-pix_fmt', 'yuv420p',
+        $fullOutputPath
+    )
+    $escapedArgs = $ffmpegArgs | ForEach-Object {
+        if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
+    }
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $resolvedFfmpeg
+    $startInfo.Arguments = ($escapedArgs -join ' ')
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardInput = $true
+    $startInfo.CreateNoWindow = $true
+    $ffmpegProcess = New-Object System.Diagnostics.Process
+    $ffmpegProcess.StartInfo = $startInfo
 }
-$startInfo = New-Object System.Diagnostics.ProcessStartInfo
-$startInfo.FileName = $resolvedFfmpeg
-$startInfo.Arguments = ($escapedArgs -join ' ')
-$startInfo.UseShellExecute = $false
-$startInfo.RedirectStandardInput = $true
-$startInfo.CreateNoWindow = $true
-$ffmpegProcess = New-Object System.Diagnostics.Process
-$ffmpegProcess.StartInfo = $startInfo
 $ffmpegStarted = $false
+$manualCaptureStarted = $false
+$manualCaptureStopPrompted = $false
 $excel = $null
 $workbook = $null
 $ledgerSheet = $null
@@ -160,15 +172,23 @@ $ledgerFresh = $false
 $truthVerified = $false
 $ledgerTotalsVerified = $false
 $ffmpegVerified = $false
+$recordingVerified = $false
 
 try {
-    if (-not $ffmpegProcess.Start()) {
-        throw 'ffmpeg did not start.'
+    if ($NoCapture) {
+        Write-Host ('MANUAL CAPTURE READY output={0}' -f $fullOutputPath)
+        $null = Read-Host 'Start recording now, then press Enter to run the demo'
+        $manualCaptureStarted = $true
     }
-    $ffmpegStarted = $true
-    Start-Sleep -Seconds 2
-    if ($ffmpegProcess.HasExited) {
-        throw "ffmpeg exited early with code $($ffmpegProcess.ExitCode)"
+    else {
+        if (-not $ffmpegProcess.Start()) {
+            throw 'ffmpeg did not start.'
+        }
+        $ffmpegStarted = $true
+        Start-Sleep -Seconds 2
+        if ($ffmpegProcess.HasExited) {
+            throw "ffmpeg exited early with code $($ffmpegProcess.ExitCode)"
+        }
     }
 
     $instructionSentAt = Get-Date
@@ -290,12 +310,21 @@ try {
     $issuesSheet.Range('A1').Select()
     $excel.ActiveWindow.Zoom = 80
     Start-Sleep -Seconds 7
+
+    if ($NoCapture) {
+        $null = Read-Host 'Stop recording now, then press Enter to finish verification'
+        $manualCaptureStopPrompted = $true
+    }
 }
 catch {
     $recordingError = $_.Exception.Message
 }
 finally {
-    if ($ffmpegStarted -and -not $ffmpegProcess.HasExited) {
+    if ($NoCapture -and $manualCaptureStarted -and -not $manualCaptureStopPrompted) {
+        $null = Read-Host 'The run stopped. Stop recording now, then press Enter to continue cleanup'
+        $manualCaptureStopPrompted = $true
+    }
+    if ($ffmpegStarted -and $null -ne $ffmpegProcess -and -not $ffmpegProcess.HasExited) {
         $ffmpegProcess.StandardInput.WriteLine('q')
         if (-not $ffmpegProcess.WaitForExit(15000)) {
             $ffmpegProcess.Kill()
@@ -317,14 +346,25 @@ finally {
 }
 
 if ($null -eq $recordingError) {
-    if (-not $ffmpegStarted -or -not $ffmpegProcess.HasExited -or $ffmpegProcess.ExitCode -ne 0) {
-        $recordingError = 'ffmpeg did not finish successfully.'
-    }
-    elseif (-not (Test-Path -LiteralPath $fullOutputPath) -or (Get-Item -LiteralPath $fullOutputPath).Length -le 0) {
-        $recordingError = 'Recording file was not created or is empty.'
+    if ($NoCapture) {
+        if (-not (Test-Path -LiteralPath $fullOutputPath) -or (Get-Item -LiteralPath $fullOutputPath).Length -le 0) {
+            $recordingError = 'Manual recording file was not created or is empty.'
+        }
+        else {
+            $recordingVerified = $true
+        }
     }
     else {
-        $ffmpegVerified = $true
+        if (-not $ffmpegStarted -or -not $ffmpegProcess.HasExited -or $ffmpegProcess.ExitCode -ne 0) {
+            $recordingError = 'ffmpeg did not finish successfully.'
+        }
+        elseif (-not (Test-Path -LiteralPath $fullOutputPath) -or (Get-Item -LiteralPath $fullOutputPath).Length -le 0) {
+            $recordingError = 'Recording file was not created or is empty.'
+        }
+        else {
+            $ffmpegVerified = $true
+            $recordingVerified = $true
+        }
     }
 }
 
@@ -335,6 +375,7 @@ $elapsedSeconds = if ($null -ne $instructionSentAt -and $null -ne $savedAt) {
 }
 $metadata = [ordered]@{
     ok = ($null -eq $recordingError)
+    captureMode = if ($NoCapture) { 'manual' } else { 'ffmpeg' }
     recording = $fullOutputPath
     instruction = $fixedInstruction
     instructionSentAt = if ($null -ne $instructionSentAt) { $instructionSentAt.ToString('o') } else { $null }
@@ -352,6 +393,9 @@ $metadata = [ordered]@{
     truthVerified = $truthVerified
     ledgerTotalsVerified = $ledgerTotalsVerified
     ffmpegVerified = $ffmpegVerified
+    recordingVerified = $recordingVerified
+    manualCaptureStarted = $manualCaptureStarted
+    manualCaptureStopPrompted = $manualCaptureStopPrompted
     runStatus = if ($null -ne $runResponse -and $null -ne $runResponse.run) { [string]$runResponse.run.status } else { $null }
     reply = if ($null -ne $runResponse) { [string]$runResponse.reply } else { $null }
     error = $recordingError

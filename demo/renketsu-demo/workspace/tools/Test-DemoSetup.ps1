@@ -471,6 +471,17 @@ try {
         else {
             Write-DemoNg 'recording script does not require fresh sessions for take and input retry'
         }
+        $manualReadyIndex = $recordDemoText.IndexOf('MANUAL CAPTURE READY', [System.StringComparison]::Ordinal)
+        $turnIndex = $recordDemoText.IndexOf("'/api/turn'", [System.StringComparison]::Ordinal)
+        $issuesDisplayIndex = $recordDemoText.IndexOf('$issuesSheet.Activate()', [System.StringComparison]::Ordinal)
+        $manualStopIndex = $recordDemoText.IndexOf('Stop recording now, then press Enter to finish verification', [System.StringComparison]::Ordinal)
+        $manualFileCheckIndex = $recordDemoText.IndexOf('Manual recording file was not created or is empty.', [System.StringComparison]::Ordinal)
+        if ($recordDemoText.Contains('[switch]$NoCapture') -and $recordDemoText.Contains("captureMode = if (`$NoCapture) { 'manual' } else { 'ffmpeg' }") -and $manualReadyIndex -ge 0 -and $manualReadyIndex -lt $turnIndex -and $issuesDisplayIndex -ge 0 -and $manualStopIndex -gt $issuesDisplayIndex -and $manualFileCheckIndex -gt $manualStopIndex) {
+            Write-DemoOk 'recording script supports explicit manual capture handoff'
+        }
+        else {
+            Write-DemoNg 'recording script manual capture handoff is missing'
+        }
     }
     else {
         Write-DemoNg 'Record-Demo.ps1 missing'
