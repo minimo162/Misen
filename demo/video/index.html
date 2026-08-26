@@ -1,0 +1,604 @@
+<!doctype html>
+<html lang="ja" data-resolution="landscape">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      @font-face { font-family: "Meiryo"; src: local("Meiryo"); }
+      :root {
+        --ink: #17202a;
+        --paper: #f5f1e8;
+        --paper-2: #ebe5d8;
+        --accent: #e4572e;
+        --support: #2a6f73;
+        --highlight: #f2c14e;
+        --muted: #607079;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: var(--paper);
+      }
+      body {
+        color: var(--ink);
+        font-family: "Meiryo", sans-serif;
+        font-feature-settings: "palt" 1;
+      }
+      .clip { position: absolute; inset: 0; overflow: hidden; }
+      .scene { background: var(--paper); }
+      .video-scene { position: absolute; inset: 0; overflow: hidden; visibility: hidden; }
+      .eyebrow {
+        font-size: 24px;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+        color: var(--support);
+      }
+      .small-note {
+        font-size: 22px;
+        font-weight: 700;
+        color: var(--muted);
+      }
+      .persistent-mark {
+        position: absolute;
+        z-index: 50;
+        top: 38px;
+        right: 52px;
+        padding: 12px 22px;
+        border: 2px solid rgba(23, 32, 42, 0.24);
+        border-radius: 999px;
+        background: rgba(245, 241, 232, 0.94);
+        color: var(--ink);
+        font-size: 20px;
+        font-weight: 900;
+        letter-spacing: 0.08em;
+      }
+      .progress-line {
+        position: absolute;
+        z-index: 51;
+        left: 0;
+        bottom: 0;
+        width: 100%;
+        height: 10px;
+        background: rgba(23, 32, 42, 0.12);
+      }
+      .progress-fill {
+        width: 100%;
+        height: 100%;
+        background: var(--accent);
+        transform: scaleX(0);
+        transform-origin: left center;
+      }
+      .grain {
+        position: absolute;
+        inset: 0;
+        opacity: 0.10;
+        pointer-events: none;
+        background-image:
+          radial-gradient(circle at 20% 20%, rgba(42,111,115,.20) 0 2px, transparent 3px),
+          radial-gradient(circle at 80% 70%, rgba(228,87,46,.16) 0 2px, transparent 3px);
+        background-size: 38px 38px, 52px 52px;
+      }
+
+      .scenario-grid {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        grid-template-columns: 1.05fr .95fr;
+        align-items: center;
+        padding: 100px 120px;
+      }
+      .scenario-title {
+        width: 970px;
+        margin-top: 28px;
+        font-size: 94px;
+        line-height: 1.16;
+        font-weight: 900;
+        letter-spacing: -0.04em;
+      }
+      .scenario-title .accent { color: var(--accent); }
+      .scenario-sub {
+        margin-top: 38px;
+        font-size: 32px;
+        font-weight: 700;
+        color: var(--muted);
+      }
+      .report-stage {
+        position: relative;
+        width: 650px;
+        height: 710px;
+        justify-self: end;
+      }
+      .ledger-card {
+        position: absolute;
+        right: 32px;
+        top: 95px;
+        width: 420px;
+        height: 520px;
+        border: 5px solid var(--ink);
+        border-radius: 26px;
+        background: #fffdfa;
+        box-shadow: 26px 30px 0 rgba(42,111,115,.20);
+        padding: 46px 38px;
+      }
+      .ledger-card h2 { margin: 0; font-size: 50px; line-height: 1; }
+      .ledger-rule { height: 7px; margin: 28px 0 32px; background: var(--support); }
+      .ledger-row { display: grid; grid-template-columns: 1fr 120px; gap: 16px; margin: 19px 0; }
+      .ledger-row span { height: 19px; border-radius: 6px; background: var(--paper-2); }
+      .ledger-row span:last-child { background: rgba(228,87,46,.34); }
+      .report-card {
+        position: absolute;
+        left: 0;
+        width: 180px;
+        height: 78px;
+        display: flex;
+        align-items: center;
+        padding-left: 24px;
+        border: 3px solid var(--ink);
+        border-radius: 14px;
+        background: var(--highlight);
+        font-size: 24px;
+        font-weight: 900;
+        box-shadow: 8px 8px 0 rgba(23,32,42,.16);
+      }
+
+      .instruction-layout { padding: 88px 108px 76px; }
+      .instruction-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: end;
+        margin-bottom: 30px;
+      }
+      .instruction-head h1 { margin: 10px 0 0; font-size: 70px; line-height: 1; }
+      .replay-label {
+        padding: 13px 20px;
+        border-radius: 12px;
+        background: var(--ink);
+        color: var(--paper);
+        font-size: 20px;
+        font-weight: 800;
+      }
+      .typing-card {
+        position: relative;
+        height: 410px;
+        border: 4px solid var(--ink);
+        border-radius: 28px;
+        background: #fffdfa;
+        box-shadow: 18px 20px 0 rgba(42,111,115,.18);
+        padding: 48px 54px 78px;
+      }
+      .typed-copy {
+        white-space: pre-wrap;
+        font-size: 38px;
+        line-height: 1.62;
+        font-weight: 700;
+        letter-spacing: .01em;
+      }
+      .cursor {
+        display: inline-block;
+        width: 5px;
+        height: 44px;
+        margin-left: 5px;
+        vertical-align: -8px;
+        background: var(--accent);
+      }
+      .send-state {
+        position: absolute;
+        right: 30px;
+        bottom: 24px;
+        display: flex;
+        align-items: center;
+        gap: 13px;
+        padding: 12px 19px;
+        border-radius: 999px;
+        background: var(--support);
+        color: white;
+        font-size: 22px;
+        font-weight: 900;
+      }
+      .send-dot { width: 13px; height: 13px; border-radius: 50%; background: var(--highlight); }
+      .full-caption {
+        margin-top: 35px;
+        padding: 24px 34px;
+        border-top: 4px solid var(--ink);
+        border-bottom: 4px solid var(--ink);
+        font-size: 30px;
+        line-height: 1.65;
+        font-weight: 800;
+      }
+      .kw {
+        display: inline-block;
+        padding: 0 .16em;
+        border-radius: 5px;
+        background: var(--highlight);
+        color: var(--ink);
+        font-weight: 900;
+      }
+
+      .execution-layout {
+        display: grid;
+        grid-template-columns: 800px 1fr;
+        gap: 86px;
+        align-items: center;
+        height: 100%;
+        padding: 70px 110px;
+      }
+      .capture-shell {
+        position: relative;
+        width: 700px;
+        height: 930px;
+        overflow: hidden;
+        border: 5px solid var(--ink);
+        border-radius: 30px;
+        background: #d9d5cc;
+        box-shadow: 24px 26px 0 rgba(42,111,115,.20);
+      }
+      .capture-shell video {
+        position: absolute;
+        left: 100px;
+        top: 0;
+        width: 500px;
+        height: 920px;
+        object-fit: cover;
+        object-position: top center;
+      }
+      .speed-badge {
+        position: absolute;
+        z-index: 5;
+        left: 24px;
+        top: 24px;
+        padding: 12px 18px;
+        border: 3px solid var(--paper);
+        border-radius: 12px;
+        background: var(--accent);
+        color: var(--paper);
+        font-size: 30px;
+        font-weight: 900;
+      }
+      .execution-copy h1 {
+        margin: 20px 0 44px;
+        font-size: 76px;
+        line-height: 1.05;
+      }
+      .step-list { display: grid; gap: 18px; }
+      .step {
+        display: grid;
+        grid-template-columns: 62px 1fr 54px;
+        align-items: center;
+        gap: 18px;
+        height: 92px;
+        padding: 0 25px;
+        border: 3px solid rgba(23,32,42,.24);
+        border-radius: 18px;
+        background: rgba(255,253,250,.72);
+        font-size: 34px;
+        font-weight: 900;
+      }
+      .step-num { color: var(--support); font-variant-numeric: tabular-nums; }
+      .step-check {
+        width: 44px;
+        height: 44px;
+        display: grid;
+        place-items: center;
+        border: 3px solid var(--muted);
+        border-radius: 50%;
+        color: #505b60;
+        font-size: 26px;
+        line-height: 1;
+      }
+
+      .reveal-layout {
+        display: grid;
+        grid-template-columns: 560px 1fr;
+        gap: 70px;
+        align-items: center;
+        height: 100%;
+        padding: 78px 95px;
+      }
+      .reveal-copy h1 { margin: 22px 0 28px; font-size: 82px; line-height: 1.05; }
+      .reveal-stat { margin-top: 38px; font-size: 44px; line-height: 1.45; font-weight: 900; }
+      .reveal-stat strong { color: var(--accent); font-size: 78px; }
+      .crop-stage {
+        position: relative;
+        width: 720px;
+        justify-self: center;
+        height: 820px;
+        overflow: hidden;
+        border: 5px solid var(--ink);
+        border-radius: 28px;
+        background: #fff;
+        box-shadow: 22px 24px 0 rgba(42,111,115,.18);
+      }
+      .crop-stage video { position: absolute; width: 1672px; height: 3115px; max-width: none; }
+      #ledger-video { left: -1080px; top: -410px; }
+      #issues-video { left: -1080px; top: -420px; }
+      .source-ribbon {
+        position: absolute;
+        z-index: 4;
+        left: 22px;
+        top: 22px;
+        padding: 10px 16px;
+        border-radius: 10px;
+        background: rgba(23,32,42,.92);
+        color: var(--paper);
+        font-size: 21px;
+        font-weight: 900;
+      }
+      .issue-tags { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
+      .issue-tag {
+        padding: 13px 18px;
+        border: 3px solid var(--ink);
+        border-radius: 999px;
+        background: #fffdfa;
+        font-size: 25px;
+        font-weight: 900;
+      }
+
+      .close-grid {
+        display: grid;
+        grid-template-columns: .9fr 1.1fr;
+        gap: 84px;
+        align-items: center;
+        height: 100%;
+        padding: 110px 130px;
+      }
+      .boundary-list { display: grid; gap: 26px; }
+      .boundary {
+        display: flex;
+        align-items: center;
+        gap: 22px;
+        font-size: 42px;
+        font-weight: 900;
+      }
+      .boundary::before {
+        content: "";
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--support);
+      }
+      .metric-card {
+        position: relative;
+        border: 5px solid var(--ink);
+        border-radius: 32px;
+        background: #fffdfa;
+        padding: 60px 68px;
+        box-shadow: 24px 26px 0 rgba(228,87,46,.18);
+      }
+      .metric-card .from { font-size: 34px; font-weight: 800; color: var(--muted); }
+      .metric-card .arrow { margin: 14px 0; font-size: 42px; color: var(--accent); font-weight: 900; }
+      .metric-card .to { font-size: 84px; font-weight: 900; line-height: 1; color: var(--accent); }
+      .metric-card .measured { margin-top: 20px; font-size: 24px; font-weight: 800; color: var(--support); }
+      .next-layout {
+        display: grid;
+        grid-template-columns: 320px 1fr;
+        gap: 68px;
+        align-items: center;
+        height: 100%;
+        padding: 120px 150px;
+      }
+      .next-index {
+        font-size: 180px;
+        line-height: 1;
+        font-weight: 900;
+        color: var(--highlight);
+        -webkit-text-stroke: 5px var(--ink);
+      }
+      .next-label { font-size: 32px; font-weight: 900; color: var(--support); letter-spacing: .1em; }
+      .next-title { margin-top: 28px; font-size: 92px; line-height: 1.18; font-weight: 900; letter-spacing: -.04em; }
+      .next-rule { width: 100%; height: 8px; margin-top: 48px; background: var(--accent); transform-origin: left; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="62" data-width="1920" data-height="1080" data-fps="30">
+      <div class="persistent-mark">架空データ</div>
+      <div class="progress-line"><div id="progress-fill" class="progress-fill"></div></div>
+
+      <section id="scene-scenario" class="clip scene" data-start="0" data-duration="5" data-track-index="1">
+        <div class="grain" data-layout-ignore></div>
+        <div class="scenario-grid">
+          <div>
+            <div id="scenario-eye" class="eyebrow">BUSINESS AGENT DEMO / 01</div>
+            <h1 class="scenario-title"><span id="scenario-a">20社の子会社報告を、</span><br /><span id="scenario-b" class="accent">1つの台帳へ</span></h1>
+            <p id="scenario-sub" class="scenario-sub">架空データによる業務エージェント実演</p>
+          </div>
+          <div class="report-stage">
+            <div id="scenario-glow" style="position:absolute;right:-20px;top:20px;width:560px;height:660px;border-radius:50%;background:radial-gradient(circle,rgba(228,87,46,.34),rgba(228,87,46,0) 70%);opacity:0;" data-layout-ignore></div>
+            <div id="ledger-card" class="ledger-card">
+              <h2>集計台帳</h2><div class="ledger-rule"></div>
+              <div class="ledger-row"><span></span><span></span></div><div class="ledger-row"><span></span><span></span></div>
+              <div class="ledger-row"><span></span><span></span></div><div class="ledger-row"><span></span><span></span></div>
+              <div class="ledger-row"><span></span><span></span></div><div class="ledger-row"><span></span><span></span></div>
+            </div>
+            <div id="report-stack"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="scene-instruction" class="clip scene instruction-layout" data-start="5" data-duration="11" data-track-index="1">
+        <div class="instruction-head">
+          <div><div class="eyebrow">INSTRUCTION / 02</div><h1>送信した指示（全文）</h1></div>
+          <div class="replay-label">録画メタデータに記録された指示を再現表示</div>
+        </div>
+        <div class="typing-card">
+          <span id="typed-copy" class="typed-copy"></span><span id="typing-cursor" class="cursor"></span>
+          <div id="send-state" class="send-state"><span class="send-dot"></span><span>送信</span></div>
+        </div>
+        <div id="full-caption" class="full-caption">
+          reports フォルダの各社の報告ファイルを<span class="kw">全部読んで</span>、rates のレート表で<span class="kw">円換算</span>して、<span class="kw">集計台帳.xlsx に会社別に転記</span>して。<br />未提出の会社と、単位や科目名が怪しい会社は「<span class="kw">確認事項</span>」シートにまとめて、<span class="kw">保存</span>して
+        </div>
+      </section>
+
+      <section id="scene-execution" class="scene video-scene">
+        <div class="grain" data-layout-ignore></div>
+        <div class="execution-layout">
+          <div id="capture-shell" class="capture-shell">
+            <video id="execution-video" src="assets/raw-demo.mp4" data-start="16" data-duration="26" data-media-start="0" data-playback-rate="4" data-track-index="2" muted playsinline></video>
+            <div class="speed-badge">実写 4×</div>
+          </div>
+          <div class="execution-copy">
+            <div class="eyebrow">AUTOMATION / 03</div>
+            <h1>指示に沿って<br />一気に実行</h1>
+            <div class="step-list">
+              <div id="step-1" class="step"><span class="step-num">01</span><span>全部読んで</span><span class="step-check">✓</span></div>
+              <div id="step-2" class="step"><span class="step-num">02</span><span>円換算</span><span class="step-check">✓</span></div>
+              <div id="step-3" class="step"><span class="step-num">03</span><span>台帳に転記</span><span class="step-check">✓</span></div>
+              <div id="step-4" class="step"><span class="step-num">04</span><span>確認事項</span><span class="step-check">✓</span></div>
+              <div id="step-5" class="step"><span class="step-num">05</span><span>保存</span><span class="step-check">✓</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="scene-ledger" class="scene video-scene">
+        <div class="reveal-layout">
+          <div class="reveal-copy">
+            <div class="eyebrow">RESULT / 04</div>
+            <h1>台帳に転記</h1>
+            <p class="small-note">元素材 104–110秒 / 等速表示</p>
+            <div class="reveal-stat"><strong>19社</strong> 提出<br /><strong>1社</strong> 未提出</div>
+          </div>
+          <div id="ledger-stage" class="crop-stage">
+            <video id="ledger-video" src="assets/raw-demo.mp4" data-start="42" data-duration="6" data-media-start="104" data-playback-rate="1" data-track-index="2" data-layout-allow-overflow muted playsinline></video>
+            <div class="source-ribbon">実写 / 集計台帳.xlsx</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="scene-issues" class="scene video-scene">
+        <div class="reveal-layout">
+          <div class="reveal-copy">
+            <div class="eyebrow">CHECK / 05</div>
+            <h1>確認事項</h1>
+            <div class="reveal-stat"><strong>5件</strong> を整理</div>
+            <div class="issue-tags"><span class="issue-tag">単位差異 3</span><span class="issue-tag">科目名差異 1</span><span class="issue-tag">未提出 1</span></div>
+          </div>
+          <div id="issues-stage" class="crop-stage">
+            <video id="issues-video" src="assets/raw-demo.mp4" data-start="48" data-duration="6" data-media-start="110" data-playback-rate="1" data-track-index="2" data-layout-allow-overflow muted playsinline></video>
+            <div class="source-ribbon">実写 / 確認事項シート</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="scene-close-policy" class="clip scene" data-start="54" data-duration="4" data-track-index="1">
+        <div class="grain" data-layout-ignore></div>
+        <div class="close-grid">
+          <div>
+            <div class="eyebrow">MEASURED RESULT / 06</div>
+            <div class="boundary-list" style="margin-top:44px">
+              <div id="boundary-1" class="boundary">承認済みCopilotのみ</div>
+              <div id="boundary-2" class="boundary">社外送信なし</div>
+              <div id="boundary-3" class="boundary">架空データ</div>
+            </div>
+          </div>
+          <div id="metric-card" class="metric-card">
+            <div class="from">手作業想定 1時間</div>
+            <div class="arrow">→</div>
+            <div class="to">実測 1.61分</div>
+            <div class="measured">録画メタデータ: 96.692秒</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="scene-close-next" class="clip scene" data-start="58" data-duration="4" data-track-index="1">
+        <div class="grain" data-layout-ignore></div>
+        <div class="next-layout">
+          <div id="next-index" class="next-index">→</div>
+          <div>
+            <div id="next-label" class="next-label">NEXT STEP</div>
+            <div id="next-title" class="next-title">次のステップ:<br /><span style="color:var(--accent)">実業務データでの検証</span></div>
+            <div id="next-rule" class="next-rule"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      const instruction = "reports フォルダの各社の報告ファイルを全部読んで、rates のレート表で円換算して、集計台帳.xlsx に会社別に転記して。未提出の会社と、単位や科目名が怪しい会社は『確認事項』シートにまとめて、保存して";
+
+      const reportStack = document.querySelector("#report-stack");
+      for (let i = 0; i < 6; i += 1) {
+        const el = document.createElement("div");
+        el.className = "report-card";
+        el.id = `report-${i + 1}`;
+        el.textContent = i === 5 ? "+15 reports" : `report ${String(i + 1).padStart(2, "0")}`;
+        el.style.top = `${80 + i * 96}px`;
+        reportStack.appendChild(el);
+      }
+
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      tl.fromTo("#progress-fill", { scaleX: 0 }, { scaleX: 1, duration: 62, ease: "none" }, 0);
+      tl.set(["#scene-execution", "#scene-ledger", "#scene-issues"], { autoAlpha: 0 }, 0);
+      tl.set("#scene-execution", { autoAlpha: 1 }, 16).set("#scene-execution", { autoAlpha: 0 }, 42);
+      tl.set("#scene-ledger", { autoAlpha: 1 }, 42).set("#scene-ledger", { autoAlpha: 0 }, 48);
+      tl.set("#scene-issues", { autoAlpha: 1 }, 48).set("#scene-issues", { autoAlpha: 0 }, 54);
+
+      tl.set(["#scenario-eye", "#scenario-a", "#scenario-b", "#scenario-sub"], { opacity: 0 }, 0);
+      tl.set("#scenario-eye", { opacity: 1, y: 54 }, 0.18).to("#scenario-eye", { y: 0, duration: 0.18, ease: "power4.out" }, 0.18);
+      tl.set("#scenario-a", { opacity: 1, y: 74 }, 0.48).to("#scenario-a", { y: 0, duration: 0.2, ease: "power4.out" }, 0.48);
+      tl.set("#scenario-b", { opacity: 1, y: 62 }, 0.66).to("#scenario-b", { y: 0, duration: 0.18, ease: "power4.out" }, 0.66);
+      tl.set("#scenario-sub", { opacity: 1, x: -46 }, 1.0).to("#scenario-sub", { x: 0, duration: 0.34, ease: "power3.out" }, 1.0);
+      tl.fromTo("#ledger-card", { scale: 0.86, rotation: 2 }, { scale: 1, rotation: 0, duration: 0.55, ease: "back.out(1.6)" }, 0.55);
+      tl.fromTo("#scenario-glow", { opacity: 0, scale: .82 }, { opacity: .42, scale: 1, duration: .7, ease: "power2.out" }, 0.45);
+      document.querySelectorAll(".report-card").forEach((el, i) => {
+        tl.fromTo(el, { opacity: 0, x: -180, rotation: -4 }, { opacity: 1, x: 0, rotation: 0, duration: .28, ease: "power4.out" }, 1.0 + i * .15);
+      });
+
+      const typingState = { chars: 0 };
+      tl.set("#typing-cursor", { opacity: 1 }, 5.2);
+      tl.fromTo("#typed-copy", { opacity: 0 }, { opacity: 1, duration: .2, ease: "none" }, 5.2);
+      tl.to(typingState, {
+        chars: instruction.length,
+        duration: 6.0,
+        ease: "none",
+        onUpdate: () => {
+          document.querySelector("#typed-copy").textContent = instruction.slice(0, Math.floor(typingState.chars));
+        }
+      }, 5.35);
+      tl.fromTo("#full-caption", { y: 35, opacity: 0 }, { y: 0, opacity: 1, duration: .42, ease: "power3.out" }, 5.15);
+      tl.fromTo("#send-state", { scale: .86, opacity: .45 }, { scale: 1, opacity: 1, duration: .34, ease: "back.out(2)" }, 15.15);
+      tl.to("#typing-cursor", { opacity: 0, duration: .08, repeat: 12, yoyo: true, ease: "steps(1)" }, 11.45);
+
+      tl.fromTo("#capture-shell", { x: -80, opacity: 0 }, { x: 0, opacity: 1, duration: .45, ease: "power3.out" }, 16.08);
+      const stepStarts = [16.5, 21.2, 26.2, 31.3, 36.4];
+      for (let i = 1; i <= 5; i += 1) {
+        tl.set(`#step-${i}`, { opacity: .46, x: 35 }, 16.0);
+        tl.to(`#step-${i}`, { opacity: .58, x: 0, duration: .28, ease: "power3.out" }, 16.0 + i * .08);
+        tl.to(`#step-${i}`, { opacity: 1, backgroundColor: "#f2c14e", borderColor: "#e4572e", duration: .22, ease: "power2.out" }, stepStarts[i - 1]);
+        if (i < 5) {
+          tl.to(`#step-${i}`, { backgroundColor: "#fffdfa", borderColor: "#2a6f73", duration: .2, ease: "power2.out" }, stepStarts[i]);
+          tl.to(`#step-${i} .step-check`, { backgroundColor: "#1a4e50", borderColor: "#1a4e50", color: "#ffffff", duration: .2, ease: "power2.out" }, stepStarts[i]);
+        }
+      }
+      tl.to("#step-5", { backgroundColor: "#fffdfa", borderColor: "#2a6f73", duration: .18, ease: "power2.out" }, 41.55);
+      tl.to("#step-5 .step-check", { backgroundColor: "#1a4e50", borderColor: "#1a4e50", color: "#ffffff", duration: .18, ease: "power2.out" }, 41.55);
+
+      tl.fromTo("#ledger-stage", { scale: .94, opacity: 0 }, { scale: 1, opacity: 1, duration: .45, ease: "power3.out" }, 42.05);
+      tl.fromTo("#ledger-video", { y: 0 }, { y: -510, duration: 5.45, ease: "power1.inOut" }, 42.25);
+      tl.fromTo("#scene-ledger .reveal-copy", { x: -60, opacity: 0 }, { x: 0, opacity: 1, duration: .42, ease: "power3.out" }, 42.12);
+
+      tl.fromTo("#issues-stage", { scale: .94, opacity: 0 }, { scale: 1, opacity: 1, duration: .45, ease: "power3.out" }, 48.05);
+      tl.fromTo("#issues-video", { y: 0 }, { y: -110, duration: 5.35, ease: "power1.inOut" }, 48.3);
+      tl.fromTo("#scene-issues .reveal-copy", { x: -60, opacity: 0 }, { x: 0, opacity: 1, duration: .42, ease: "power3.out" }, 48.12);
+      tl.fromTo(".issue-tag", { y: 34, opacity: 0 }, { y: 0, opacity: 1, duration: .24, stagger: .11, ease: "power4.out" }, 48.6);
+
+      tl.fromTo("#boundary-1", { x: -55, opacity: 0 }, { x: 0, opacity: 1, duration: .28, ease: "power4.out" }, 54.12);
+      tl.fromTo("#boundary-2", { x: -45, opacity: 0 }, { x: 0, opacity: 1, duration: .26, ease: "power4.out" }, 54.34);
+      tl.fromTo("#boundary-3", { x: -35, opacity: 0 }, { x: 0, opacity: 1, duration: .24, ease: "power4.out" }, 54.54);
+      tl.fromTo("#metric-card", { scale: .82, rotation: 1.5 }, { scale: 1, rotation: 0, duration: .52, ease: "back.out(1.7)" }, 54.2);
+
+      tl.set(["#next-index", "#next-label", "#next-title"], { opacity: 0 }, 58);
+      tl.set("#next-index", { opacity: 1, y: 70 }, 58.12).to("#next-index", { y: 0, duration: .18, ease: "power4.out" }, 58.12);
+      tl.set("#next-label", { opacity: 1, y: 48 }, 58.38).to("#next-label", { y: 0, duration: .16, ease: "power4.out" }, 58.38);
+      tl.set("#next-title", { opacity: 1, y: 60 }, 58.58).to("#next-title", { y: 0, duration: .2, ease: "power4.out" }, 58.58);
+      tl.fromTo("#next-rule", { scaleX: 0 }, { scaleX: 1, duration: .55, ease: "power3.out" }, 58.8);
+
+      window.__timelines.main = tl;
+    </script>
+  </body>
+</html>
