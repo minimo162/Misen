@@ -6487,6 +6487,15 @@ var import_node_net = __toESM(require("node:net"));
 var import_node_fs2 = __toESM(require("node:fs"));
 var import_node_path3 = __toESM(require("node:path"));
 var RESPONSE_STABILITY_MS = 1e3;
+var VISIBLE_SESSION_MARKER_PREFIX = "company-apps-coding-agent:";
+function makeVisibleSessionMarker(sessionId) {
+  const normalized = sessionId.trim();
+  if (!/^[a-z0-9_-]{6,80}$/i.test(normalized)) throw new Error("\u8868\u793A\u30BB\u30C3\u30B7\u30E7\u30F3ID\u304C\u4E0D\u6B63\u3067\u3059");
+  return VISIBLE_SESSION_MARKER_PREFIX + normalized;
+}
+function visibleSessionMarkerMatches(sessionId, marker) {
+  return marker === makeVisibleSessionMarker(sessionId);
+}
 function assertResponseDeadline(deadlineMs, responseTimeoutSec, nowMs = Date.now()) {
   if (nowMs >= deadlineMs) throw new Error(`Copilot \u306E\u5FDC\u7B54\u304C\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8\u3057\u307E\u3057\u305F (${responseTimeoutSec}\u79D2)`);
 }
@@ -6588,7 +6597,7 @@ var COPILOT_SCREEN_STATE_JS = `(() => {
   const signIn = buttons.find(el => __vis(el) && /sign\\s*in|log\\s*in|\u30B5\u30A4\u30F3\u30A4\u30F3|\u30ED\u30B0\u30A4\u30F3/i.test((el.innerText || el.textContent || el.getAttribute('aria-label') || el.title || '').trim()));
   const url = String(location.href || '');
   const signinRequired = /(?:login|signin|sign-in|auth)/i.test(url) || (!input && !!signIn);
-  return JSON.stringify({ inputReady: !!input, stopCandidates, responseCandidates, signinRequired, url });
+  return JSON.stringify({ inputReady: !!input, stopCandidates, responseCandidates, signinRequired, url, title: String(document.title || ''), windowName: String(window.name || ''), sessionMarker: String(document.documentElement.getAttribute('data-company-apps-session') || '') });
 })()`;
 var FRESH_CHAT_JS = `(() => {
   ${VISIBLE_JS}
@@ -6901,6 +6910,7 @@ var CopilotEdgeClient = class {
   clipGranted = false;
   ownedEdgePid = null;
   edgeProfileDir = null;
+  visibleSessionId = null;
   constructor(cfg) {
     this.s = resolveCopilotSettings(cfg);
   }
@@ -7168,6 +7178,48 @@ var CopilotEdgeClient = class {
       await sleep(450);
     }
   }
+  async stampVisibleSessionMarker(sessionId) {
+    const marker = makeVisibleSessionMarker(sessionId);
+    const result = await this.evalWithReconnect(`(() => { const marker = ${JSON.stringify(marker)}; window.name = marker; document.documentElement.setAttribute('data-company-apps-session', marker); return JSON.stringify({ windowName: window.name, sessionMarker: document.documentElement.getAttribute('data-company-apps-session') }); })()`);
+    const stamped = JSON.parse(String(result));
+    if (stamped.windowName !== marker || stamped.sessionMarker !== marker) throw new Error("Copilot\u8868\u793A\u30BF\u30D6\u3078\u30BB\u30C3\u30B7\u30E7\u30F3\u8B58\u5225\u5B50\u3092\u8A2D\u5B9A\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
+  }
+  async prepareVisibleSession(sessionId) {
+    makeVisibleSessionMarker(sessionId);
+    await this.ensureEdge();
+    await this.ensurePage();
+    await this.cdpMethod("Page.navigate", { url: this.s.url });
+    await sleep(3e3);
+    await this.waitInputReady(120);
+    await this.assertTrustedOrigin();
+    this.visibleSessionId = sessionId;
+    await this.stampVisibleSessionMarker(sessionId);
+    await this.bringToFront();
+    return this.inspectVisibleSession(sessionId);
+  }
+  async inspectVisibleSession(sessionId) {
+    const expectedMarker = makeVisibleSessionMarker(sessionId);
+    if (!this.cdp) throw new Error("Copilot\u8868\u793A\u30BF\u30D6\u306F\u6E96\u5099\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
+    const raw = await this.evalWithReconnect(COPILOT_SCREEN_STATE_JS, 15e3);
+    const parsed = JSON.parse(String(raw));
+    const responses = parsed.responseCandidates ?? [];
+    const latest = selectLatestResponseCandidate(responses);
+    const marker = String(parsed.sessionMarker ?? "");
+    return {
+      sessionId,
+      marker,
+      markerMatches: marker === expectedMarker && String(parsed.windowName ?? "") === expectedMarker,
+      pid: this.ownedEdgePid,
+      cdpPort: this.s.cdpPort,
+      url: String(parsed.url ?? ""),
+      title: String(parsed.title ?? ""),
+      inputReady: parsed.inputReady === true,
+      responseCount: responses.length,
+      latestResponseLength: latest?.text.length ?? 0,
+      generating: (parsed.stopCandidates ?? []).some(isStopGenerationControl),
+      copyEnabled: latest?.copyEnabled === true
+    };
+  }
   async cdpMethod(name, params, timeoutMs = 3e4) {
     if (!this.cdp) throw new Error("Copilot \u30DA\u30FC\u30B8\u672A\u63A5\u7D9A\u3067\u3059");
     await this.cdp.method(name, params, timeoutMs);
@@ -7387,6 +7439,10 @@ var CopilotEdgeClient = class {
     await this.ensurePage();
     await this.freshChat();
     await this.waitInputReady(120, signal);
+    if (this.visibleSessionId) {
+      await this.stampVisibleSessionMarker(this.visibleSessionId);
+      await this.bringToFront();
+    }
     await this.selectModel();
     throwIfAborted(signal);
     await this.waitInputReady(30, signal);
@@ -8038,6 +8094,11 @@ async function testCopilotEdgeIsolation() {
   const attached = resolveCopilotSettings({ ...base, copilot: { cdpPort: 9444, reuseExistingEdge: true } });
   import_node_assert.default.strictEqual(attached.reuseExistingEdge, true);
   import_node_assert.default.strictEqual(attached.cdpPort, 9444);
+  const sessionMarker = makeVisibleSessionMarker("mt9icyqzvay6");
+  import_node_assert.default.strictEqual(sessionMarker, "company-apps-coding-agent:mt9icyqzvay6");
+  import_node_assert.default.strictEqual(visibleSessionMarkerMatches("mt9icyqzvay6", sessionMarker), true);
+  import_node_assert.default.strictEqual(visibleSessionMarkerMatches("mt9gbgtilhj0", sessionMarker), false);
+  import_node_assert.default.throws(() => makeVisibleSessionMarker("../wrong-session"), /表示セッションIDが不正/);
   console.log("PASS copilot-edge-isolation");
 }
 async function testCopilotResponseCompletion() {
@@ -8141,7 +8202,7 @@ async function testCopilotResponseCompletion() {
     { text: "latest", bottom: 200, order: 1, copyEnabled: isResponseCopyControl(responseCopy) }
   ]);
   import_node_assert.default.strictEqual(latestWithResponseCopy?.copyEnabled, true);
-  for (const required of ["shadowRoot", "contentDocument", "stopGeneratingButton", "stop-button", "fai-SendButton__stopBackground", '[role="article"][class*="CopilotMessage" i]', '[data-testid="copilot-message-div"]']) {
+  for (const required of ["shadowRoot", "contentDocument", "stopGeneratingButton", "stop-button", "fai-SendButton__stopBackground", '[role="article"][class*="CopilotMessage" i]', '[data-testid="copilot-message-div"]', "windowName", "data-company-apps-session"]) {
     import_node_assert.default.ok(COPILOT_SCREEN_STATE_JS.includes(required), `screen-state detector missing ${required}`);
     if (required.includes("CopilotMessage") || required.includes("copilot-message-div")) {
       import_node_assert.default.ok(COPILOT_CLICK_COPY_JS.includes(required), `copy detector missing ${required}`);
@@ -8470,6 +8531,26 @@ async function testUiContract() {
   for (const required of ["run-plan", "run-eyebrow", "run-pause", "run-resume", "run-retry", "run-complete", "\u56DE\u7B54\u5B8C\u4E86", "activity-details", "\u5B9F\u969B\u306E\u5DEE\u5206\u3092\u8868\u793A", "\u5DEE\u5206\u306E\u7D9A\u304D", "preview-frame", "verification-list", "\u8A3A\u65ADJSON", "approval-meta", "parentRunId", "/api/runs/", "/api/changes/", "compositionstart", "aria-live", "mode-select", "\u3053\u306EPC\u3067\u5B9F\u884C", "Copilot\u5185\u3067\u89B3\u6E2C", "@media (max-width: 720px)"]) import_node_assert.default.ok(html.includes(required), `UI contract missing: ${required}`);
   console.log("PASS ui-contract");
 }
+async function testDemoRecordingContract() {
+  const repoRoot = import_node_path4.default.resolve(process.cwd(), "..", "..");
+  const recorder = import_node_fs3.default.readFileSync(import_node_path4.default.join(repoRoot, "demo", "renketsu-demo", "Record-Demo.ps1"), "utf8");
+  for (const required of [
+    "/api/copilot/visible-session",
+    "sessionId = $TargetSessionId",
+    "Get-VisibleEdgeWindow -ProcessId",
+    "Visible Copilot action log did not grow",
+    "visibleSessionVerified",
+    "visibleActivityVerified"
+  ]) {
+    import_node_assert.default.ok(recorder.includes(required), `Record-Demo visibility contract missing: ${required}`);
+  }
+  import_node_assert.default.ok(!recorder.includes("Sort-Object StartTime -Descending"), "Record-Demo must not choose an unrelated newest Edge window");
+  const motionGate = import_node_fs3.default.readFileSync(import_node_path4.default.join(repoRoot, "demo", "video", "qa", "Test-VideoMotion.ps1"), "utf8");
+  for (const required of ["SampleIntervalSec = 2", "tblend=all_mode=difference", "signalstats", "MinimumMovingPairs", "MinimumMovingRatio", "MaximumStaticSec", "crop=430:900:260:85"]) {
+    import_node_assert.default.ok(motionGate.includes(required), `video motion gate missing: ${required}`);
+  }
+  console.log("PASS demo-recording-contract");
+}
 (async () => {
   await testWeather();
   await testApprovals();
@@ -8488,6 +8569,7 @@ async function testUiContract() {
   await testCopilotPlainMode();
   await testCopilotFenceMode();
   await testUiContract();
+  await testDemoRecordingContract();
   console.log("ALL PASS");
 })().catch((err) => {
   console.error(err);

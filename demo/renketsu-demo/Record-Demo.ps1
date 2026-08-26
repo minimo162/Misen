@@ -113,12 +113,145 @@ function Move-WindowForDemo {
     Start-Sleep -Milliseconds 500
 }
 
-$edgeWindow = Get-Process -Name msedge -ErrorAction SilentlyContinue |
-    Where-Object { $_.MainWindowHandle -ne 0 } |
-    Sort-Object StartTime -Descending |
-    Select-Object -First 1
-if ($null -eq $edgeWindow) {
-    throw 'Visible coding-agent Edge window was not found.'
+function Assert-VisibleSessionState {
+    param(
+        [Parameter(Mandatory = $true)]$State,
+        [Parameter(Mandatory = $true)][string]$ExpectedSessionId,
+        [switch]$RequireInputReady
+    )
+    if ([string]$State.sessionId -ne $ExpectedSessionId) {
+        throw "Visible Copilot session mismatch: expected=$ExpectedSessionId actual=$($State.sessionId)"
+    }
+    if ($State.markerMatches -ne $true) {
+        throw "Visible Copilot tab marker mismatch for session $ExpectedSessionId"
+    }
+    if ($RequireInputReady -and $State.inputReady -ne $true) {
+        throw "Visible Copilot tab input is not ready for session $ExpectedSessionId"
+    }
+    if ($RequireInputReady -and [int]$State.responseCount -ne 0) {
+        throw "Visible Copilot tab is not a blank fresh chat for session $ExpectedSessionId"
+    }
+    if ([int]$State.pid -le 0) {
+        throw "Visible Copilot Edge PID is missing for session $ExpectedSessionId"
+    }
+    if ([string]$State.url -notmatch '^https://m365\.cloud\.microsoft/') {
+        throw "Visible Copilot tab URL is not trusted: $($State.url)"
+    }
+}
+
+function Prepare-VisibleSession {
+    param([Parameter(Mandatory = $true)][string]$TargetSessionId)
+    $body = @{ sessionId = $TargetSessionId } | ConvertTo-Json -Compress
+    $state = Invoke-RestMethod -Uri ($AgentUrl + '/api/copilot/visible-session') -Method Post -ContentType 'application/json; charset=utf-8' -Body $body
+    Assert-VisibleSessionState -State $state -ExpectedSessionId $TargetSessionId -RequireInputReady
+    return $state
+}
+
+function Get-VisibleSessionState {
+    param([Parameter(Mandatory = $true)][string]$TargetSessionId)
+    $state = Invoke-RestMethod -Uri ($AgentUrl + '/api/copilot/visible-session?sessionId=' + [Uri]::EscapeDataString($TargetSessionId)) -Method Get
+    Assert-VisibleSessionState -State $state -ExpectedSessionId $TargetSessionId
+    return $state
+}
+
+function Get-VisibleEdgeWindow {
+    param([Parameter(Mandatory = $true)][int]$ProcessId)
+    $deadline = (Get-Date).AddSeconds(15)
+    do {
+        $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+        if ($null -ne $process -and $process.ProcessName -eq 'msedge' -and $process.MainWindowHandle -ne 0) {
+            return $process
+        }
+        Start-Sleep -Milliseconds 500
+    } while ((Get-Date) -lt $deadline)
+    throw "The exact Copilot Edge window was not found for PID $ProcessId. Refusing to capture another Edge window."
+}
+
+function Invoke-AgentTurnWithVisibleCheck {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetSessionId,
+        [Parameter(Mandatory = $true)]$BaselineState
+    )
+    $turnBody = @{ message = $fixedInstruction; mode = 'work'; sessionId = $TargetSessionId } | ConvertTo-Json -Compress
+    $turnJob = Start-Job -ScriptBlock {
+        param($Url, $Body)
+        $response = Invoke-RestMethod -Uri ($Url + '/api/turn') -Method Post -ContentType 'application/json; charset=utf-8' -Body $Body
+        $response | ConvertTo-Json -Depth 50 -Compress
+    } -ArgumentList $AgentUrl, $turnBody
+    $activityObserved = $false
+    $maximumResponseCount = [int]$BaselineState.responseCount
+    $lastVisibleState = $BaselineState
+    $consecutiveVisibilityFailures = 0
+    $visibilityLost = $false
+    $visibilityError = $null
+    try {
+        while ($turnJob.State -eq 'Running') {
+            Start-Sleep -Seconds 1
+            try {
+                $lastVisibleState = Get-VisibleSessionState -TargetSessionId $TargetSessionId
+                $consecutiveVisibilityFailures = 0
+                $currentCount = [int]$lastVisibleState.responseCount
+                if ($currentCount -gt $maximumResponseCount) {
+                    $maximumResponseCount = $currentCount
+                }
+                if ($currentCount -gt [int]$BaselineState.responseCount) {
+                    $activityObserved = $true
+                }
+            }
+            catch {
+                $consecutiveVisibilityFailures++
+                $visibilityError = $_.Exception.Message
+                if ($consecutiveVisibilityFailures -ge 3) {
+                    $visibilityLost = $true
+                }
+            }
+        }
+        try {
+            $lastVisibleState = Get-VisibleSessionState -TargetSessionId $TargetSessionId
+            $currentCount = [int]$lastVisibleState.responseCount
+            if ($currentCount -gt $maximumResponseCount) {
+                $maximumResponseCount = $currentCount
+            }
+            if ($currentCount -gt [int]$BaselineState.responseCount) {
+                $activityObserved = $true
+            }
+        }
+        catch {
+            $visibilityLost = $true
+            $visibilityError = $_.Exception.Message
+        }
+        $jobOutput = @(Receive-Job -Job $turnJob -ErrorAction Stop)
+        if ($jobOutput.Count -eq 0) {
+            throw 'coding-agent turn job returned no response.'
+        }
+        $response = ($jobOutput -join '') | ConvertFrom-Json
+        if ($visibilityLost) {
+            throw "Visible Copilot session could not be verified throughout the run: $visibilityError"
+        }
+        if (-not $activityObserved) {
+            throw "Visible Copilot action log did not grow for session $TargetSessionId"
+        }
+        return [pscustomobject]@{
+            Response = $response
+            ActivityObserved = $activityObserved
+            MaximumResponseCount = $maximumResponseCount
+            FinalVisibleState = $lastVisibleState
+        }
+    }
+    finally {
+        if ($null -ne $turnJob) {
+            if ($turnJob.State -eq 'Running') {
+                Stop-Job -Job $turnJob -ErrorAction SilentlyContinue
+            }
+            Remove-Job -Job $turnJob -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+$visibleState = Prepare-VisibleSession -TargetSessionId $sessionId
+$edgeWindow = Get-VisibleEdgeWindow -ProcessId ([int]$visibleState.pid)
+if ([int]$edgeWindow.Id -ne [int]$visibleState.pid) {
+    throw 'Resolved Edge process does not match the verified visible Copilot process.'
 }
 Move-WindowForDemo -Handle $edgeWindow.MainWindowHandle -X $captureX -Y $captureY -Width $captureWidth -Height $captureHeight
 
@@ -162,9 +295,17 @@ $issuesSheet = $null
 $runResponse = $null
 $initialRunId = $null
 $inputRetryUsed = $false
+$captureStartedAt = $null
 $instructionSentAt = $null
 $savedAt = $null
 $recordingError = $null
+$visibleSessionVerified = $true
+$visibleActivityVerified = $false
+$visibleMaximumResponseCount = [int]$visibleState.responseCount
+$displayEdgePid = [int]$visibleState.pid
+$displaySessionMarker = [string]$visibleState.marker
+$displayUrlBefore = [string]$visibleState.url
+$displayUrlAfter = $null
 $writeEventVerified = $false
 $ledgerEventVerified = $false
 $extractedFresh = $false
@@ -176,9 +317,10 @@ $recordingVerified = $false
 
 try {
     if ($NoCapture) {
-        Write-Host ('MANUAL CAPTURE READY output={0}' -f $fullOutputPath)
+        Write-Host ('MANUAL CAPTURE READY session={0} edgePid={1} output={2}' -f $sessionId, $displayEdgePid, $fullOutputPath)
         $null = Read-Host 'Start recording now, then press Enter to run the demo'
         $manualCaptureStarted = $true
+        $captureStartedAt = Get-Date
     }
     else {
         if (-not $ffmpegProcess.Start()) {
@@ -189,11 +331,15 @@ try {
         if ($ffmpegProcess.HasExited) {
             throw "ffmpeg exited early with code $($ffmpegProcess.ExitCode)"
         }
+        $captureStartedAt = Get-Date
     }
 
     $instructionSentAt = Get-Date
-    $body = @{ message = $fixedInstruction; mode = 'work' } | ConvertTo-Json -Compress
-    $runResponse = Invoke-RestMethod -Uri ($AgentUrl + '/api/turn') -Method Post -ContentType 'application/json; charset=utf-8' -Body $body
+    $turnResult = Invoke-AgentTurnWithVisibleCheck -TargetSessionId $sessionId -BaselineState $visibleState
+    $runResponse = $turnResult.Response
+    $visibleActivityVerified = $turnResult.ActivityObserved -eq $true
+    $visibleMaximumResponseCount = [int]$turnResult.MaximumResponseCount
+    $displayUrlAfter = [string]$turnResult.FinalVisibleState.url
     $initialRunId = if ($null -ne $runResponse.run) { [string]$runResponse.run.id } else { $null }
 
     if ($runResponse.aborted -eq $true) {
@@ -207,8 +353,17 @@ try {
             if ([string]::IsNullOrWhiteSpace($sessionId)) {
                 throw 'coding-agent did not create a fresh session for the input retry.'
             }
-            $retryBody = @{ message = $fixedInstruction; mode = 'work' } | ConvertTo-Json -Compress
-            $runResponse = Invoke-RestMethod -Uri ($AgentUrl + '/api/turn') -Method Post -ContentType 'application/json; charset=utf-8' -Body $retryBody
+            $visibleState = Prepare-VisibleSession -TargetSessionId $sessionId
+            $edgeWindow = Get-VisibleEdgeWindow -ProcessId ([int]$visibleState.pid)
+            Move-WindowForDemo -Handle $edgeWindow.MainWindowHandle -X $captureX -Y $captureY -Width $captureWidth -Height $captureHeight
+            $displayEdgePid = [int]$visibleState.pid
+            $displaySessionMarker = [string]$visibleState.marker
+            $displayUrlBefore = [string]$visibleState.url
+            $turnResult = Invoke-AgentTurnWithVisibleCheck -TargetSessionId $sessionId -BaselineState $visibleState
+            $runResponse = $turnResult.Response
+            $visibleActivityVerified = $turnResult.ActivityObserved -eq $true
+            $visibleMaximumResponseCount = [int]$turnResult.MaximumResponseCount
+            $displayUrlAfter = [string]$turnResult.FinalVisibleState.url
         }
     }
     $savedAt = Get-Date
@@ -378,6 +533,7 @@ $metadata = [ordered]@{
     captureMode = if ($NoCapture) { 'manual' } else { 'ffmpeg' }
     recording = $fullOutputPath
     instruction = $fixedInstruction
+    captureStartedAt = if ($null -ne $captureStartedAt) { $captureStartedAt.ToString('o') } else { $null }
     instructionSentAt = if ($null -ne $instructionSentAt) { $instructionSentAt.ToString('o') } else { $null }
     savedAt = if ($null -ne $savedAt) { $savedAt.ToString('o') } else { $null }
     elapsedSeconds = $elapsedSeconds
@@ -386,6 +542,13 @@ $metadata = [ordered]@{
     runId = if ($null -ne $runResponse -and $null -ne $runResponse.run) { [string]$runResponse.run.id } else { $null }
     initialRunId = $initialRunId
     inputRetryUsed = $inputRetryUsed
+    visibleSessionVerified = $visibleSessionVerified
+    visibleActivityVerified = $visibleActivityVerified
+    visibleMaximumResponseCount = $visibleMaximumResponseCount
+    displayEdgePid = $displayEdgePid
+    displaySessionMarker = $displaySessionMarker
+    displayUrlBefore = $displayUrlBefore
+    displayUrlAfter = $displayUrlAfter
     writeEventVerified = $writeEventVerified
     ledgerEventVerified = $ledgerEventVerified
     extractedFresh = $extractedFresh

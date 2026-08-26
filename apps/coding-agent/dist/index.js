@@ -6503,6 +6503,12 @@ var import_node_net = __toESM(require("node:net"));
 var import_node_fs3 = __toESM(require("node:fs"));
 var import_node_path4 = __toESM(require("node:path"));
 var RESPONSE_STABILITY_MS = 1e3;
+var VISIBLE_SESSION_MARKER_PREFIX = "company-apps-coding-agent:";
+function makeVisibleSessionMarker(sessionId) {
+  const normalized = sessionId.trim();
+  if (!/^[a-z0-9_-]{6,80}$/i.test(normalized)) throw new Error("\u8868\u793A\u30BB\u30C3\u30B7\u30E7\u30F3ID\u304C\u4E0D\u6B63\u3067\u3059");
+  return VISIBLE_SESSION_MARKER_PREFIX + normalized;
+}
 function assertResponseDeadline(deadlineMs, responseTimeoutSec, nowMs = Date.now()) {
   if (nowMs >= deadlineMs) throw new Error(`Copilot \u306E\u5FDC\u7B54\u304C\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8\u3057\u307E\u3057\u305F (${responseTimeoutSec}\u79D2)`);
 }
@@ -6598,7 +6604,7 @@ var COPILOT_SCREEN_STATE_JS = `(() => {
   const signIn = buttons.find(el => __vis(el) && /sign\\s*in|log\\s*in|\u30B5\u30A4\u30F3\u30A4\u30F3|\u30ED\u30B0\u30A4\u30F3/i.test((el.innerText || el.textContent || el.getAttribute('aria-label') || el.title || '').trim()));
   const url = String(location.href || '');
   const signinRequired = /(?:login|signin|sign-in|auth)/i.test(url) || (!input && !!signIn);
-  return JSON.stringify({ inputReady: !!input, stopCandidates, responseCandidates, signinRequired, url });
+  return JSON.stringify({ inputReady: !!input, stopCandidates, responseCandidates, signinRequired, url, title: String(document.title || ''), windowName: String(window.name || ''), sessionMarker: String(document.documentElement.getAttribute('data-company-apps-session') || '') });
 })()`;
 var FRESH_CHAT_JS = `(() => {
   ${VISIBLE_JS}
@@ -6911,6 +6917,7 @@ var CopilotEdgeClient = class {
   clipGranted = false;
   ownedEdgePid = null;
   edgeProfileDir = null;
+  visibleSessionId = null;
   constructor(cfg) {
     this.s = resolveCopilotSettings(cfg);
   }
@@ -7178,6 +7185,48 @@ var CopilotEdgeClient = class {
       await sleep(450);
     }
   }
+  async stampVisibleSessionMarker(sessionId) {
+    const marker = makeVisibleSessionMarker(sessionId);
+    const result = await this.evalWithReconnect(`(() => { const marker = ${JSON.stringify(marker)}; window.name = marker; document.documentElement.setAttribute('data-company-apps-session', marker); return JSON.stringify({ windowName: window.name, sessionMarker: document.documentElement.getAttribute('data-company-apps-session') }); })()`);
+    const stamped = JSON.parse(String(result));
+    if (stamped.windowName !== marker || stamped.sessionMarker !== marker) throw new Error("Copilot\u8868\u793A\u30BF\u30D6\u3078\u30BB\u30C3\u30B7\u30E7\u30F3\u8B58\u5225\u5B50\u3092\u8A2D\u5B9A\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
+  }
+  async prepareVisibleSession(sessionId) {
+    makeVisibleSessionMarker(sessionId);
+    await this.ensureEdge();
+    await this.ensurePage();
+    await this.cdpMethod("Page.navigate", { url: this.s.url });
+    await sleep(3e3);
+    await this.waitInputReady(120);
+    await this.assertTrustedOrigin();
+    this.visibleSessionId = sessionId;
+    await this.stampVisibleSessionMarker(sessionId);
+    await this.bringToFront();
+    return this.inspectVisibleSession(sessionId);
+  }
+  async inspectVisibleSession(sessionId) {
+    const expectedMarker = makeVisibleSessionMarker(sessionId);
+    if (!this.cdp) throw new Error("Copilot\u8868\u793A\u30BF\u30D6\u306F\u6E96\u5099\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
+    const raw = await this.evalWithReconnect(COPILOT_SCREEN_STATE_JS, 15e3);
+    const parsed = JSON.parse(String(raw));
+    const responses = parsed.responseCandidates ?? [];
+    const latest = selectLatestResponseCandidate(responses);
+    const marker = String(parsed.sessionMarker ?? "");
+    return {
+      sessionId,
+      marker,
+      markerMatches: marker === expectedMarker && String(parsed.windowName ?? "") === expectedMarker,
+      pid: this.ownedEdgePid,
+      cdpPort: this.s.cdpPort,
+      url: String(parsed.url ?? ""),
+      title: String(parsed.title ?? ""),
+      inputReady: parsed.inputReady === true,
+      responseCount: responses.length,
+      latestResponseLength: latest?.text.length ?? 0,
+      generating: (parsed.stopCandidates ?? []).some(isStopGenerationControl),
+      copyEnabled: latest?.copyEnabled === true
+    };
+  }
   async cdpMethod(name, params, timeoutMs = 3e4) {
     if (!this.cdp) throw new Error("Copilot \u30DA\u30FC\u30B8\u672A\u63A5\u7D9A\u3067\u3059");
     await this.cdp.method(name, params, timeoutMs);
@@ -7397,6 +7446,10 @@ var CopilotEdgeClient = class {
     await this.ensurePage();
     await this.freshChat();
     await this.waitInputReady(120, signal);
+    if (this.visibleSessionId) {
+      await this.stampVisibleSessionMarker(this.visibleSessionId);
+      await this.bringToFront();
+    }
     await this.selectModel();
     throwIfAborted(signal);
     await this.waitInputReady(30, signal);

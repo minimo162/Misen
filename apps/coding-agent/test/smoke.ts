@@ -14,9 +14,11 @@ import {
   CopilotEdgeClient,
   assertResponseDeadline,
   isStopGenerationControl,
+  makeVisibleSessionMarker,
   resolveCopilotSettings,
   selectLatestResponseCandidate,
   updateResponseCompletionState,
+  visibleSessionMarkerMatches,
   type ResponseCompletionState
 } from '../src/copilot'
 
@@ -619,6 +621,11 @@ async function testCopilotEdgeIsolation(): Promise<void> {
   const attached = resolveCopilotSettings({ ...base, copilot: { cdpPort: 9444, reuseExistingEdge: true } })
   assert.strictEqual(attached.reuseExistingEdge, true)
   assert.strictEqual(attached.cdpPort, 9444)
+  const sessionMarker = makeVisibleSessionMarker('mt9icyqzvay6')
+  assert.strictEqual(sessionMarker, 'company-apps-coding-agent:mt9icyqzvay6')
+  assert.strictEqual(visibleSessionMarkerMatches('mt9icyqzvay6', sessionMarker), true)
+  assert.strictEqual(visibleSessionMarkerMatches('mt9gbgtilhj0', sessionMarker), false)
+  assert.throws(() => makeVisibleSessionMarker('../wrong-session'), /表示セッションIDが不正/)
   console.log('PASS copilot-edge-isolation')
 }
 async function testCopilotResponseCompletion(): Promise<void> {
@@ -729,7 +736,7 @@ async function testCopilotResponseCompletion(): Promise<void> {
     { text: 'latest', bottom: 200, order: 1, copyEnabled: isResponseCopyControl(responseCopy) }
   ])
   assert.strictEqual(latestWithResponseCopy?.copyEnabled, true)
-  for (const required of ['shadowRoot', 'contentDocument', 'stopGeneratingButton', 'stop-button', 'fai-SendButton__stopBackground', '[role="article"][class*="CopilotMessage" i]', '[data-testid="copilot-message-div"]']) {
+  for (const required of ['shadowRoot', 'contentDocument', 'stopGeneratingButton', 'stop-button', 'fai-SendButton__stopBackground', '[role="article"][class*="CopilotMessage" i]', '[data-testid="copilot-message-div"]', 'windowName', 'data-company-apps-session']) {
     assert.ok(COPILOT_SCREEN_STATE_JS.includes(required), `screen-state detector missing ${required}`)
     if (required.includes('CopilotMessage') || required.includes('copilot-message-div')) {
       assert.ok(COPILOT_CLICK_COPY_JS.includes(required), `copy detector missing ${required}`)
@@ -1074,6 +1081,28 @@ async function testUiContract(): Promise<void> {
   console.log('PASS ui-contract')
 }
 
+async function testDemoRecordingContract(): Promise<void> {
+  const repoRoot = path.resolve(process.cwd(), '..', '..')
+  const recorder = fs.readFileSync(path.join(repoRoot, 'demo', 'renketsu-demo', 'Record-Demo.ps1'), 'utf8')
+  for (const required of [
+    '/api/copilot/visible-session',
+    "sessionId = $TargetSessionId",
+    'Get-VisibleEdgeWindow -ProcessId',
+    'Visible Copilot action log did not grow',
+    'visibleSessionVerified',
+    'visibleActivityVerified'
+  ]) {
+    assert.ok(recorder.includes(required), `Record-Demo visibility contract missing: ${required}`)
+  }
+  assert.ok(!recorder.includes('Sort-Object StartTime -Descending'), 'Record-Demo must not choose an unrelated newest Edge window')
+
+  const motionGate = fs.readFileSync(path.join(repoRoot, 'demo', 'video', 'qa', 'Test-VideoMotion.ps1'), 'utf8')
+  for (const required of ['SampleIntervalSec = 2', 'tblend=all_mode=difference', 'signalstats', 'MinimumMovingPairs', 'MinimumMovingRatio', 'MaximumStaticSec', 'crop=430:900:260:85']) {
+    assert.ok(motionGate.includes(required), `video motion gate missing: ${required}`)
+  }
+  console.log('PASS demo-recording-contract')
+}
+
 (async () => {
   await testWeather()
   await testApprovals()
@@ -1092,6 +1121,7 @@ async function testUiContract(): Promise<void> {
   await testCopilotPlainMode()
   await testCopilotFenceMode()
   await testUiContract()
+  await testDemoRecordingContract()
   console.log('ALL PASS')
 })().catch((err) => {
   console.error(err)
