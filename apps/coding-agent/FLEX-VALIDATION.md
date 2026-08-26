@@ -1,4 +1,4 @@
-# Flex mode validation (2026-08-26)
+# Flex mode validation (2026-08-27)
 
 Scope: preparation PC, local workspace fixtures, real M365 Copilot Edge session, and the checked-in local converter. This does not claim company-PC EDR or tenant validation.
 
@@ -6,13 +6,13 @@ Scope: preparation PC, local workspace fixtures, real M365 Copilot Edge session,
 
 | Task | Deterministic host corpus | Local converter corpus | Real Copilot evidence | Status for kickoff |
 |---|---:|---:|---|---|
-| List | 3/3 | 3/3 | folder list 26.6 s; root-direct list 40.5 s | Stable |
-| Read | 4/4 | 4/4 | txt 32.5 s; CSV 30.6 s; xlsx 43.4 s; missing file 18.5 s | Stable |
-| Open | 3/3 | 3/3 | CSV default-app launch 43.6 s | Stable |
-| Write | 3/3 | 3/3 | one-line file 35.5 s; two-line file 33.0 s; both read back exactly | Stable |
-| Search | 3/3 | 3/3 | two different terms, 30.6 s and 31.4 s | Stable |
+| List | 3/3 | 3/3 | layer-1-only fresh session 18.844 s | Stable |
+| Read | 4/4 | 4/4 | layer-1-only txt read 15.283 s | Stable |
+| Open | 3/3 | 3/3 | layer-1-only CSV default-app launch 18.411 s | Stable |
+| Write | 3/3 | 3/3 | layer-1-only new file 24.752 s; content read back exactly | Stable |
+| Search | 3/3 | 3/3 | layer-1-only cross-file search 16.958 s | Stable |
 
-The deterministic corpus varied workspace root, `reports`, `rates`, `tools`, an empty directory, and a mixed Japanese-name directory containing txt, CSV, xlsx, and Markdown. The converter corpus used different strict JSON, flattened JSON, labeled text, and plain Japanese forms. The final post-review Q4_K_M run passed 16/16; strict JSON used the schema-validated fast path in 0–1 ms. A separate eight-case negative gate, including explanatory mentions of tool names and an unknown tool, produced zero false-positive tool calls. The adoption run measured at most 3.710 s for a positive and 12.539 s for a negative. The final rerun under a more heavily loaded CPU still passed 16/16 and 0/8 false positives, but the maxima rose to 11.808 s and 21.920 s respectively; converter latency is therefore workload-sensitive.
+The deterministic corpus varied workspace root, `reports`, `rates`, `tools`, an empty directory, and a mixed Japanese-name directory containing txt, CSV, xlsx, and Markdown. Layer 1 used strict JSON, flattened JSON, labeled text, and malformed JSON forms and passed 16/16. Its expanded ten-case negative gate, including explanatory mentions of tool names, an unknown tool, example-only JSON, and an unescaped Windows-path example, produced zero false-positive tool calls. Thirty jsonrepair-inspired categories passed 30/30 while schema-invalid values remained rejected. The optional Q4_K_M converter separately retained its prior 16/16 positive and 0/8 false-positive adoption gate. Its measured maxima varied from 3.710/12.539 seconds to 11.808/21.920 seconds under load, which is one reason it is insurance rather than the kickoff default.
 
 The first-choice Qwen3.5-0.8B Q4 model scored 2/16 after removing a harness false negative. It invented commands and paths, so it was rejected. Qwen3.5-4B Q4_0 then established a 16/16 baseline. Per the final packaging decision, the trusted Unsloth Q4_K_M file was hash-verified and rerun against the same 16 positives plus eight negative cases; it retained 16/16 and zero false positives, so Q4_K_M replaced Q4_0 in the package.
 
@@ -24,6 +24,8 @@ The first-choice Qwen3.5-0.8B Q4 model scored 2/16 after removing a harness fals
 - The final safety review found that safe mode still advertised the network-backed weather tool and accepted executable/link targets for `Invoke-Item`. Safe mode now removes weather from the prompt, converter schema, and OpenAI tool contract and rejects it again at execution; document opens require an allowlisted regular non-link file and reject scripts, executables, shortcuts, URL files, directories, and reparse points.
 - A successful GUI launch produced no stdout, which caused a retry loop. A zero-exit `Invoke-Item` now returns an explicit application-launch success result.
 - “ここ直下” was initially answered from the recursive bootstrap list. `list_files` now supports `recursive:false`, while the existing bootstrap remains recursive.
+- Whole-prompt `Input.insertText` is now attempted once and verified against the Edge editor. A cold failure gets one direct retry; only then does the established chunk path run. The final five-task run had one cold retry and no truncated input.
+- Synthetic send click is no longer assumed successful. The client observes generation, changed response, cleared input, or a disabled/disappeared send control and falls back to a native CDP mouse click at the verified send-button rectangle before failing closed.
 
 ## Segment timing and YakuLingo comparison
 
@@ -33,10 +35,17 @@ The first-choice Qwen3.5-0.8B Q4 model scored 2/16 after removing a harness fals
 |---|---:|---:|---|
 | Instrumented baseline | 5/5 | 31.298–35.775 s | Converter 65.207 s and generation wait 56.574 s were dominant across the set; clipboard response retrieval cost 14.570 s. |
 | YakuLingo-style stable DOM response retrieval | 5/5 | 19.952–36.299 s | Retrieval fell from 14.570 s to 0.001 s across the set; adopted. Strict completion still requires no Stop control, enabled Copy, and unchanged text for at least one second. |
-| Whole `Input.insertText` prompt write | 0/2, then 0/1 after focus repair | not adopted | Edge showed the text in the DOM but the React send state remained disabled or opened the blank-message confirmation. The existing verified clipboard path with chunk fallback remains. |
+| Initial whole `Input.insertText` experiment | 0/2, then 0/1 after focus repair | not adopted at that point | Edge showed text while React send state remained disabled or opened the blank-message confirmation. This result motivated explicit editor verification and send-establishment checks. |
 | Deterministic post-tool answer shortcut | 5/5 | 26.999–38.034 s | Did not match the real response forms and did not improve time; reverted rather than widening language heuristics by guesswork. |
+| Verified whole-input insertion, one direct retry, staged send, layer 1 default | 5/5 | 15.283–24.752 s | Adopted. Nine model decisions were layer 1, layer 2 was unused, and failed decisions were zero. |
 
-The accepted run's phase totals were: converter 64.273 s, Copilot generation wait 62.246 s, prompt write 14.950 s, UI session creation 7.856 s, connection 1.179 s, send 0.563 s, input ready 0.095 s, and completion retrieval 0.001 s. Converter and service generation remain the limiting intervals. YakuLingo's full-input insertion is not transferable to this Edge surface without losing completion, while its direct DOM response retrieval is transferable after this agent's stronger completion gate. YakuLingo's request-scoped domain marker was not copied because generic replies do not have an equivalent reliable marker.
+The final accepted layer-1-only run's phase totals were: Copilot generation wait 71.085 s, prompt write 9.751 s, UI session creation 7.395 s, connection 1.501 s, send 0.498 s, input ready 0.055 s, completion retrieval 0 s, layer 1 interpretation below timer resolution, and converter 0 s. The cold first prompt used one verified retry and took 7.091 s; the remaining eight prompt writes took 0.325–0.348 s. Service generation is now the limiting interval. YakuLingo's single `Input.insertText` approach became transferable only after adding editor-content verification, one retry, and explicit send establishment; its direct DOM response retrieval remains adopted behind this agent's stronger completion gate. YakuLingo's request-scoped domain marker was not copied because generic replies do not have an equivalent reliable marker.
+
+## Layer activity and OpenCode bridge
+
+The final built-in Flex run made nine model decisions: layer 1 resolved 9, optional layer 2 was needed 0, and both-layer failure was 0. This is the evidence for keeping `localResponseConverter.enabled=false` as the kickoff default. The 4B runtime remains an opt-in insurance path and its 16/16 positive, zero-false-positive corpus gate remains preserved.
+
+The separate OpenAI-compatible bridge reused the same Copilot client and deterministic interpreter. OpenCode 1.18.21 completed five changed-wording tasks 5/5: list 28.45 s (2 turns), CSV read 28.67 s (3), search 18.67 s (2), new-file write 20.50 s (2), and actual text-file open 31.08 s (3, new Notepad PID observed). Seven tool calls were recovered by layer 1, four final answers used the plain-answer path, and one post-tool answer was returned unchanged as raw content. Layer 2 was invoked zero times and schema rejection was zero. Full setup and the fixed binary SHA-256 are in `README-OPENAI-BRIDGE.md`.
 
 ## Operating boundary
 

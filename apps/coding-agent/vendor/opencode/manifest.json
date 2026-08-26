@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "releaseTag": "flex-runtime-v1",
+  "repository": "minimo162/company-apps-share",
+  "artifact": {
+    "name": "opencode-1.18.21-windows-x64-baseline.exe",
+    "version": "1.18.21",
+    "bytes": 179463208,
+    "sha256": "ea4f4d4bec95cd41baf0fc53adc4e34b31e1c8676dc5b2507c8797ab1884af18",
+    "url": "https://github.com/minimo162/company-apps-share/releases/download/flex-runtime-v1/opencode-1.18.21-windows-x64-baseline.exe",
+    "license": "MIT",
+    "licenseFile": "LICENSE-OpenCode.txt"
+  }
+}

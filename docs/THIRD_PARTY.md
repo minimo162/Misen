@@ -11,6 +11,7 @@
 | iconv-lite | 0.6.3 | MIT | `apps/coding-agent/vendor/npm/node_modules/iconv-lite/` | CP932 等のテキスト decode 補助 |
 | jsonrepair | 3.15.0 | ISC | `apps/coding-agent/vendor/npm/node_modules/jsonrepair/` | 層1で厳密parseに失敗したJSON候補を純JSで修復し、再parse・host tool schema検証へ渡す補助。追加exeなし |
 | safer-buffer | 2.1.2 | MIT | `apps/coding-agent/vendor/npm/node_modules/safer-buffer/` | iconv-lite の依存 buffer 実装 |
+| OpenCode | 1.18.21 Windows x64 baseline | MIT | GitHub Release `flex-runtime-v1`; manifest/script/license only in `apps/coding-agent/vendor/opencode/` | OpenAI互換bridgeへ接続する任意OSSハーネス。exeはGit履歴に入れず、取得時にサイズ・SHA-256・単独起動を検査 |
 
 `apps/coding-agent/vendor/npm/package-lock.json` の resolved/integrity と `package.json` の exact dependency も、上記 npm 3 パッケージの固定根拠です。ImportExcel の `ImportExcel.psd1` は ModuleVersion 7.8.10 と `EPPlus.dll` の required assembly を示します。
 
@@ -23,6 +24,7 @@
 - iconv-lite (MIT): `apps/coding-agent/vendor/npm/node_modules/iconv-lite/LICENSE`。
 - jsonrepair 3.15.0 (ISC): `apps/coding-agent/vendor/npm/node_modules/jsonrepair/LICENSE.md`。同梱実物の本文は Copyright (c) 2020-2026 Jos de Jong、package.json の license も ISC と確認しています。
 - safer-buffer (MIT): `apps/coding-agent/vendor/npm/node_modules/safer-buffer/LICENSE`。
+- OpenCode 1.18.21 (MIT): `apps/coding-agent/vendor/opencode/LICENSE-OpenCode.txt`。同梱実物の本文は Copyright (c) 2025 opencode、npm package の license も MIT と確認しています。Release asset `opencode-1.18.21-windows-x64-baseline.exe` は 179,463,208 bytes、SHA-256 `EA4F4D4BEC95CD41BAF0FC53ADC4E34B31E1C8676DC5B2507C8797AB1884AF18` です。
 
 ## 取得と実行の境界
 
@@ -35,6 +37,7 @@
 2. ImportExcel は PowerShell Gallery の 7.8.10 パッケージを準備工程で保存し、`vendor/ImportExcel/7.8.10/` に展開します。`Install-Module` やダウンロードを `Read-Xlsx.ps1`／`Update-Ledger.ps1` の実行時に呼び出しません。
 3. 実行時のネットワーク取得、パッケージ install、外部 script の評価を禁止します。任意のFlex runtime取得はデモ開始前の準備工程に限定します。共有フォルダー上のまま実行せず、承認済みlocal-copyとSHA-256確認済みRelease資産だけを使います。
 4. 同梱 DLL／script は EDR canary の後に使い、Excel や入力 xlsx はデモ用に信頼したものだけを対象にします。EPPlus 4.5.3.2 は legacy/unsupported parser であり、「安全」とは表現しません。悪意ある xlsx に対する残余リスクがあります。
+5. OpenCode は `Get-OpenCode.ps1` で Release から取得し、manifest のサイズ・SHA-256照合後に `--version` を単独実行します。会社PCのEDR/プロキシ結果はこの準備PCの成功から推定せず、朝のゲートで確認します。
 
 ## 受入れレビュー（毎回の手順）
 

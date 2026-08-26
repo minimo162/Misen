@@ -1,0 +1,33 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "copilot-bridge/copilot-edge-layer1",
+  "agent": {
+    "title": { "disable": true }
+  },
+  "provider": {
+    "copilot-bridge": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Copilot Edge Bridge",
+      "options": {
+        "baseURL": "http://127.0.0.1:3952/v1",
+        "apiKey": "{env:COPILOT_BRIDGE_TOKEN}"
+      },
+      "models": {
+        "copilot-edge-layer1": {
+          "name": "Copilot Edge + deterministic layer 1",
+          "limit": { "context": 32000, "output": 4096 }
+        }
+      }
+    }
+  },
+  "permission": {
+    "read": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "write": "ask",
+    "edit": "ask",
+    "bash": "ask",
+    "webfetch": "deny",
+    "websearch": "deny"
+  }
+}
