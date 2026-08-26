@@ -1,6 +1,6 @@
 import http from 'node:http'
 import crypto from 'node:crypto'
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import util from 'node:util'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -23,7 +23,7 @@ function argValue(flag: string): string | undefined {
 const cfg: AgentConfig = loadConfig(argValue('--config'))
 const workspaceArg = argValue('--workspace')
 const workspace = workspaceArg ? path.resolve(workspaceArg) : process.cwd()
-const ctx: ToolContext = { workspace, restrictToWorkspace: cfg.restrictToWorkspace ?? true, weatherDefaultLocation: cfg.weather?.defaultLocation }
+const ctx: ToolContext = { workspace, restrictToWorkspace: cfg.restrictToWorkspace ?? true, safeCommandOnly: cfg.safeCommandOnly === true, weatherDefaultLocation: cfg.weather?.defaultLocation }
 
 const here = typeof __dirname !== 'undefined' ? __dirname : path.dirname(process.argv[1] ?? '.')
 const indexCandidates = [
@@ -1353,5 +1353,14 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 }
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`coding-agent web UI: http://127.0.0.1:${PORT}  (workspace=${workspace})`)
+  const url = `http://127.0.0.1:${PORT}`
+  console.log(`coding-agent web UI: ${url}  (workspace=${workspace})`)
+  // Opening is convenience-only. Arguments are fixed and no shell is used.
+  const open = process.platform === 'win32'
+    ? spawn('explorer.exe', [url], { detached: true, stdio: 'ignore', windowsHide: true })
+    : process.platform === 'darwin'
+      ? spawn('open', [url], { detached: true, stdio: 'ignore' })
+      : spawn('xdg-open', [url], { detached: true, stdio: 'ignore' })
+  open.once('error', (err) => console.warn(`[warn] ブラウザを開けませんでした。${url} を開いてください: ${err.message}`))
+  open.unref()
 })

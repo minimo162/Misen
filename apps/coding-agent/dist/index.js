@@ -244,7 +244,7 @@ var require_jsonrepair = __commonJS({
     Object.defineProperty(exports2, "__esModule", {
       value: true
     });
-    exports2.jsonrepair = jsonrepair2;
+    exports2.jsonrepair = jsonrepair3;
     var _JSONRepairError = require_JSONRepairError();
     var _stringUtils = require_stringUtils();
     var controlCharacters = {
@@ -265,7 +265,7 @@ var require_jsonrepair = __commonJS({
       t: "	"
       // note that \u is handled separately in parseString()
     };
-    function jsonrepair2(text) {
+    function jsonrepair3(text) {
       let i = 0;
       let output = "";
       parseMarkdownCodeBlock(["```", "[```", "{```"]);
@@ -4520,7 +4520,8 @@ var DEFAULT_CONFIG = {
   maxNoProgress: 2,
   allowArbitraryCommands: false,
   autoApprove: { write: false, command: false },
-  copilot: { displayMode: "foreground", agentMode: true }
+  copilot: { displayMode: "foreground", agentMode: true },
+  localResponseConverter: { enabled: false, baseURL: "http://127.0.0.1:8080/v1", model: "Qwen3.5-4B-Q4_K_M.gguf", timeoutMs: 3e4, apiKey: "company-apps-flex-local" }
 };
 function appDataConfigPath() {
   return import_node_path.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent", "config.json");
@@ -4536,7 +4537,8 @@ function parseConfig(found) {
     ...raw,
     provider,
     autoApprove: { ...DEFAULT_CONFIG.autoApprove, ...raw.autoApprove ?? {} },
-    copilot: { ...DEFAULT_CONFIG.copilot, ...raw.copilot ?? {} }
+    copilot: { ...DEFAULT_CONFIG.copilot, ...raw.copilot ?? {} },
+    localResponseConverter: { ...DEFAULT_CONFIG.localResponseConverter, ...raw.localResponseConverter ?? {} }
   };
 }
 function capabilityPolicy(cfg, mode = cfg.turnMode ?? "work") {
@@ -4581,15 +4583,405 @@ var import_node_readline = __toESM(require("node:readline"));
 // src/agent.ts
 var import_node_crypto2 = __toESM(require("node:crypto"));
 var import_node_path3 = __toESM(require("node:path"));
-var import_jsonrepair = __toESM(require_cjs());
+var import_jsonrepair2 = __toESM(require_cjs());
 
-// src/llm.ts
+// src/converter.ts
 var import_node_http = __toESM(require("node:http"));
 var import_node_https = __toESM(require("node:https"));
+var import_jsonrepair = __toESM(require_cjs());
+function decisionSchema(tools) {
+  return {
+    type: "object",
+    additionalProperties: false,
+    oneOf: [
+      { type: "object", additionalProperties: false, required: ["answer"], properties: { answer: { type: "string" } } },
+      {
+        type: "object",
+        additionalProperties: false,
+        required: ["tool", "args"],
+        properties: {
+          tool: { type: "string", enum: tools.map((tool) => tool.name) },
+          args: { type: "object", additionalProperties: true }
+        }
+      }
+    ]
+  };
+}
+function compactParameters(value) {
+  if (Array.isArray(value)) return value.map(compactParameters);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !["description", "examples", "default", "title"].includes(key)).map(([key, item]) => [key, compactParameters(item)]));
+}
+function candidateTools(rawResponse, tools) {
+  const lower = rawResponse.toLowerCase();
+  const mentioned = tools.filter((tool) => {
+    const bare = tool.name.startsWith("host.") ? tool.name.slice(5) : tool.name;
+    return lower.includes(tool.name.toLowerCase()) || lower.includes(bare.toLowerCase());
+  });
+  return mentioned.length > 0 ? mentioned : tools;
+}
+function protocolObject(value, tools) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const parsed = value;
+  const keys = Object.keys(parsed);
+  if (Object.prototype.hasOwnProperty.call(parsed, "AGENT_END") && parsed.AGENT_END !== true) return null;
+  if (typeof parsed.answer === "string" && keys.every((key) => ["answer", "AGENT_END"].includes(key))) {
+    return JSON.stringify({ answer: parsed.answer });
+  }
+  if (typeof parsed.tool !== "string") return null;
+  const requested = parsed.tool.startsWith("host.") ? parsed.tool : `host.${parsed.tool}`;
+  const matched = tools.find((tool) => tool.name === requested);
+  if (!matched) return null;
+  if (Object.prototype.hasOwnProperty.call(parsed, "args")) {
+    if (keys.some((key) => !["tool", "args", "AGENT_END"].includes(key))) return null;
+    if (!parsed.args || typeof parsed.args !== "object" || Array.isArray(parsed.args)) return null;
+    return JSON.stringify({ tool: matched.name, args: parsed.args });
+  }
+  const args = Object.fromEntries(Object.entries(parsed).filter(([key]) => !["tool", "AGENT_END"].includes(key)));
+  return JSON.stringify({ tool: matched.name, args });
+}
+function scanJsonObjects(text) {
+  const found = [];
+  for (let start = 0; start < text.length; start++) {
+    if (text[start] !== "{") continue;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < text.length; index++) {
+      const ch = text[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === "{") depth++;
+      else if (ch === "}" && --depth === 0) {
+        found.push({ text: text.slice(start, index + 1), position: start });
+        start = index;
+        break;
+      }
+    }
+  }
+  return found;
+}
+function closeTruncatedJson(text) {
+  let inString = false;
+  let escaped = false;
+  const stack = [];
+  let lastSafe = -1;
+  let lastComma = -1;
+  for (let index = 0; index < text.length; index++) {
+    const ch = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') {
+        inString = false;
+        lastSafe = index;
+      }
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{" || ch === "[") stack.push(ch);
+    else if (ch === "}" || ch === "]") {
+      if (stack.length > 0) stack.pop();
+      lastSafe = index;
+    } else if (ch === ",") {
+      lastSafe = index;
+      lastComma = index;
+    }
+  }
+  if (!inString && stack.length === 0) return null;
+  const cutAt = inString ? lastComma : lastSafe;
+  if (cutAt < 0) return null;
+  let closed = text.slice(0, cutAt).replace(/,\s*$/u, "");
+  const remaining = [];
+  let quoted = false;
+  let slash = false;
+  for (const ch of closed) {
+    if (quoted) {
+      if (slash) slash = false;
+      else if (ch === "\\") slash = true;
+      else if (ch === '"') quoted = false;
+    } else if (ch === '"') quoted = true;
+    else if (ch === "{" || ch === "[") remaining.push(ch);
+    else if ((ch === "}" || ch === "]") && remaining.length > 0) remaining.pop();
+  }
+  for (let index = remaining.length - 1; index >= 0; index--) closed += remaining[index] === "{" ? "}" : "]";
+  return closed;
+}
+function repairJsonText(source) {
+  let text = source;
+  const repairs = [];
+  let next = text.replace(/((?:"[^"\r\n]+"\s*:\s*))([「｢『【])/gu, '$1"$2');
+  if (next !== text) {
+    text = next;
+    repairs.push("missing-open-quote");
+  }
+  const closed = closeTruncatedJson(text);
+  if (closed !== null) {
+    text = closed;
+    repairs.push("truncated-tool-tail-drop");
+  }
+  return { text, repairs };
+}
+function repairWindowsPathBackslashes(source) {
+  let changed = false;
+  const repaired = source.replace(/(:\s*")([A-Za-z]:\\[^"\r\n]*)(")/gu, (_match, prefix, pathValue, suffix) => {
+    const escaped = pathValue.replace(/\\+/gu, (slashes) => slashes.length % 2 === 0 ? slashes : `${slashes}\\`);
+    if (escaped !== pathValue) changed = true;
+    return prefix + escaped + suffix;
+  });
+  return changed ? repaired : null;
+}
+function repairInvalidJsonBackslashes(source) {
+  let changed = false;
+  const repaired = source.replace(/\\+/gu, (slashes, offset, full) => {
+    if (slashes.length % 2 === 0) return slashes;
+    const nextOffset = offset + slashes.length;
+    const next = full[nextOffset] ?? "";
+    const validSimpleEscape = /^["\\/bfnrt]$/u.test(next);
+    const validUnicodeEscape = next === "u" && /^[0-9a-f]{4}$/iu.test(full.slice(nextOffset + 1, nextOffset + 5));
+    if (validSimpleEscape || validUnicodeEscape) return slashes;
+    changed = true;
+    return `${slashes}\\`;
+  });
+  return changed ? repaired : null;
+}
+function jsonDecisionCandidates(rawResponse, tools) {
+  const clean = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, "").replace(/```(?:json)?/giu, "").replace(/```/gu, "").replace(/\bAGENT_END\b/giu, "").trim();
+  const sources = scanJsonObjects(clean).map((candidate) => ({ text: candidate.text, offset: candidate.position }));
+  for (let position = clean.indexOf("{"); position >= 0; position = clean.indexOf("{", position + 1)) sources.push({ text: clean.slice(position), offset: position });
+  const valid = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const source of sources) {
+    const attempts = [{ text: source.text, repairs: [] }];
+    try {
+      const repaired = (0, import_jsonrepair.jsonrepair)(source.text);
+      if (repaired !== source.text) attempts.push({ text: repaired, repairs: ["jsonrepair"] });
+    } catch {
+      const custom = repairJsonText(source.text);
+      if (custom.repairs.length > 0) {
+        try {
+          attempts.push({ text: (0, import_jsonrepair.jsonrepair)(custom.text), repairs: [...custom.repairs, "jsonrepair"] });
+        } catch {
+        }
+      }
+    }
+    const windowsPath = repairWindowsPathBackslashes(source.text);
+    if (windowsPath !== null) {
+      try {
+        attempts.push({ text: (0, import_jsonrepair.jsonrepair)(windowsPath), repairs: ["windows-path-backslash", "jsonrepair"], semanticBonus: 40 });
+      } catch {
+      }
+    }
+    const invalidBackslash = repairInvalidJsonBackslashes(source.text);
+    if (invalidBackslash !== null) {
+      try {
+        attempts.push({ text: (0, import_jsonrepair.jsonrepair)(invalidBackslash), repairs: ["invalid-json-backslash", "jsonrepair"], semanticBonus: 35 });
+      } catch {
+      }
+    }
+    for (const attempt of attempts) {
+      try {
+        const content = protocolObject(JSON.parse(attempt.text), tools);
+        if (!content) continue;
+        const key = `${source.offset}:${content}:${attempt.repairs.join(",")}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const score = /"(?:tool|answer)"/u.test(attempt.text) ? 20 : 0;
+        valid.push({ text: content, position: source.offset, score: score + (/"args"/u.test(attempt.text) ? 8 : 0) + (attempt.semanticBonus ?? 0), repairs: attempt.repairs });
+      } catch {
+      }
+    }
+  }
+  return valid.sort((a, b) => b.score - a.score || b.position - a.position || a.repairs.length - b.repairs.length);
+}
+function captureLabeledValue(raw, key) {
+  const marker = new RegExp(`${key}\\s*(?:\u306F|=|:|\uFF1A)\\s*`, "iu").exec(raw);
+  if (!marker) return void 0;
+  let rest = raw.slice(marker.index + marker[0].length).trim();
+  if (rest.startsWith("\u300C")) return rest.slice(1, rest.indexOf("\u300D") >= 0 ? rest.indexOf("\u300D") : void 0);
+  if (rest.startsWith('"')) {
+    try {
+      return JSON.parse(rest.match(/^"(?:\\.|[^"\\])*"/u)?.[0] ?? "");
+    } catch {
+    }
+  }
+  if (rest.startsWith("[") || rest.startsWith("{")) {
+    const candidate = rest.startsWith("{") ? scanJsonObjects(rest)[0]?.text : rest.match(/^\[[\s\S]*?\]/u)?.[0];
+    try {
+      if (candidate) return JSON.parse(candidate);
+    } catch {
+    }
+  }
+  rest = rest.split(/\s+\/\s+(?=[a-z_]+\s*=)/iu)[0].replace(/\s+(?:で呼びます|で呼ぶ|を使います|を使う|です)[。.!！]?\s*$/u, "").replace(/[。.!！]\s*$/u, "").trim();
+  if (/^(?:true|false)$/iu.test(rest)) return rest.toLowerCase() === "true";
+  if (/^-?\d+$/u.test(rest)) return Number(rest);
+  return rest || void 0;
+}
+function hasNegatedToolIntent(rawResponse) {
+  const text = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, "").trim();
+  if (/(?:例[:：]|たとえば|例えば|今回は[^。\n]*(?:しません|しない)|拒否され|呼び出せません|操作しません)/u.test(text)) return true;
+  const japaneseAction = "(?:\u5B9F\u884C|\u64CD\u4F5C|\u51E6\u7406|\u547C\u3073\u51FA\u3057?|\u8D77\u52D5|\u958B\u304F|\u66F8\u304D\u8FBC(?:\u307F|\u3080)?|\u8AAD\u307F\u53D6(?:\u308A|\u308B)?|\u691C\u7D22|\u4F7F\u7528|\u4F7F\u3046)";
+  const japaneseNegation = "(?:\u3057\u306A\u3044\u3067|\u3057\u306A\u3044|\u3057\u307E\u305B\u3093|\u3057\u306A\u304F\u3066|\u3057\u3066\u306F\u3044\u3051|\u3067\u304D\u306A\u3044|\u3067\u304D\u307E\u305B\u3093|\u3067\u304D\u305A|\u4E0D\u53EF\u80FD|\u7981\u6B62|\u4E0D\u53EF|\u4E0D\u8981|\u3084\u3081)";
+  if (new RegExp(`${japaneseAction}.{0,32}${japaneseNegation}|${japaneseNegation}.{0,32}${japaneseAction}`, "iu").test(text)) return true;
+  const englishAction = "(?:execute|run|call|invoke|use|open|write|read|search)";
+  const englishNegation = `(?:do\\s+not|don't|never|must\\s+not|should\\s+not|shall\\s+not)`;
+  return new RegExp(`\\b${englishNegation}\\b.{0,64}\\b${englishAction}\\b|\\b${englishAction}\\b.{0,64}\\b${englishNegation}\\b`, "iu").test(text);
+}
+function isInformationalToolMention(rawResponse) {
+  const text = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, "").trim();
+  return /(?:とは|は)[^。\n]{0,80}(?:ツール|関数|機能)(?:です|だ|になります)/iu.test(text) || /(?:ツール|関数|機能)[^。\n]{0,40}(?:説明|意味|用途)(?:です|は|:|：)/iu.test(text);
+}
+function explicitToolDecision(rawResponse, tools) {
+  const text = rawResponse.trim();
+  if (hasNegatedToolIntent(text) || isInformationalToolMention(text) || /まだ[^。\n]*(?:できません|呼べません)/u.test(text)) return null;
+  const matched = [...tools].sort((a, b) => b.name.length - a.name.length).find((tool) => {
+    const bare2 = tool.name.startsWith("host.") ? tool.name.slice(5) : tool.name;
+    return text.toLowerCase().includes(tool.name.toLowerCase()) || text.toLowerCase().includes(bare2.toLowerCase());
+  });
+  if (!matched) return null;
+  const argsLabel = /\bARGS?\b\s*[:：]?\s*/iu.exec(text);
+  if (argsLabel) {
+    const argsCandidate = scanJsonObjects(text.slice(argsLabel.index + argsLabel[0].length))[0];
+    if (argsCandidate) {
+      try {
+        return JSON.stringify({ tool: matched.name, args: JSON.parse(argsCandidate.text) });
+      } catch {
+      }
+    }
+  }
+  const bare = matched.name.startsWith("host.") ? matched.name.slice(5) : matched.name;
+  if (bare === "write_file") {
+    const naturalWrite = text.match(/(?:host\.)?write_file\s*で\s*([^\r\n]+?)\s*に「([\s\S]*?)」を新規作成/u);
+    if (naturalWrite) return JSON.stringify({ tool: matched.name, args: { path: naturalWrite[1].trim(), content: naturalWrite[2] } });
+  }
+  const keysByTool = {
+    list_files: ["path", "glob", "recursive"],
+    read_file: ["path"],
+    read_files: ["paths", "pattern"],
+    read_xlsx: ["path"],
+    search_files: ["query", "path", "glob", "max_results"],
+    write_file: ["path", "content"],
+    run_command: ["command"],
+    start_process: ["command"]
+  };
+  const args = {};
+  for (const key of keysByTool[bare] ?? []) {
+    const value = captureLabeledValue(text, key);
+    if (value !== void 0) args[key] = value;
+  }
+  if (Object.keys(args).length === 0 && !/(?:使|呼び|実行|取得|列挙|一覧)/u.test(text)) return null;
+  return JSON.stringify({ tool: matched.name, args });
+}
+function interpretCopilotResponseDeterministically(rawResponse, tools) {
+  const candidates = jsonDecisionCandidates(rawResponse, tools);
+  const negativeContext = hasNegatedToolIntent(rawResponse) || isInformationalToolMention(rawResponse);
+  if (candidates.length > 0 && !negativeContext) return { content: candidates[0].text, method: "json-candidate", repairs: candidates[0].repairs };
+  const explicit = explicitToolDecision(rawResponse, tools);
+  if (explicit) return { content: explicit, method: "explicit-tool-text", repairs: [] };
+  const answer = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, "").replace(/```/gu, "").replace(/\bAGENT_END\b/giu, "").trim();
+  if (!answer) return null;
+  const mentionsAllowedTool = tools.some((tool) => {
+    const bare = tool.name.startsWith("host.") ? tool.name.slice(5) : tool.name;
+    return answer.toLowerCase().includes(tool.name.toLowerCase()) || answer.toLowerCase().includes(bare.toLowerCase());
+  });
+  if (mentionsAllowedTool && !negativeContext) return null;
+  return { content: JSON.stringify({ answer }), method: "plain-answer", repairs: [] };
+}
+function loopbackUrl(value) {
+  const url = new URL(value);
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/gu, "");
+  if (url.protocol !== "http:" && url.protocol !== "https:" || !["127.0.0.1", "::1", "localhost"].includes(host)) {
+    throw new Error("localResponseConverter.baseURL \u306F loopback HTTP(S) URL \u3060\u3051\u6307\u5B9A\u3067\u304D\u307E\u3059");
+  }
+  return url;
+}
+function endpoint(baseURL) {
+  const base = loopbackUrl(baseURL);
+  return new URL(base.pathname.endsWith("/") ? "chat/completions" : `${base.pathname}/chat/completions`, base);
+}
+async function convertCopilotResponse(settings, rawResponse, tools, signal) {
+  if (settings?.enabled !== true) return null;
+  const baseURL = settings.baseURL ?? "http://127.0.0.1:8080/v1";
+  const url = endpoint(baseURL);
+  const deterministic = interpretCopilotResponseDeterministically(rawResponse, tools);
+  if (deterministic) return deterministic.content;
+  const timeoutMs = Math.max(250, Math.min(6e4, Math.floor(settings.timeoutMs ?? 3e4)));
+  const activeTools = candidateTools(rawResponse, tools);
+  const body = JSON.stringify({
+    model: settings.model ?? "Qwen3.5-4B-Q4_K_M.gguf",
+    temperature: 0,
+    max_tokens: 192,
+    stream: false,
+    // llama.cpp accepts OpenAI's response_format JSON schema and disables
+    // free-form "thinking" through the Qwen chat-template flag.
+    response_format: { type: "json_schema", json_schema: { name: "host_decision", strict: true, schema: decisionSchema(activeTools) } },
+    chat_template_kwargs: { enable_thinking: false },
+    messages: [
+      {
+        role: "system",
+        content: [
+          "Copilot\u306E\u751F\u5FDC\u7B54\u3092\u3001\u8A31\u53EF\u6E08\u307Fhost\u64CD\u4F5C\u307E\u305F\u306Fanswer\u3078\u5909\u63DB\u3059\u308B\u3002JSON\u3060\u3051\u3092\u8FD4\u3059\u3002",
+          "raw_response\u306B\u660E\u793A\u3055\u308C\u305Ftool\u3001path\u3001paths\u3001pattern\u3001glob\u3001query\u3001content\u3001command\u3060\u3051\u3092\u5FE0\u5B9F\u306B\u79FB\u3059\u3002",
+          "\u5024\u3084\u30D5\u30A1\u30A4\u30EB\u540D\u3092\u63A8\u6E2C\u30FB\u88DC\u5B8C\u30FB\u7F6E\u63DB\u305B\u305A\u3001host_tools\u306E\u4F8B\u793A\u5024\u3082\u4F7F\u308F\u306A\u3044\u3002",
+          "tool\u540D\u306Bhost.\u304C\u306A\u3051\u308C\u3070\u4ED8\u3051\u3001\u30C8\u30C3\u30D7\u30EC\u30D9\u30EB\u306E\u5F15\u6570\u306Fargs\u3078\u79FB\u3059\u3002",
+          "\u64CD\u4F5C\u3068\u5F15\u6570\u3092\u7279\u5B9A\u3067\u304D\u306A\u3044\u81EA\u7136\u6587\u306F\u3001raw_response\u5168\u6587\u3092answer\u306B\u3059\u308B\u3002"
+        ].join("\n")
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          raw_response: rawResponse,
+          host_tools: activeTools.map((tool) => ({ name: tool.name, parameters: compactParameters(tool.parameters) }))
+        })
+      }
+    ]
+  });
+  const headers = { "content-type": "application/json", "content-length": Buffer.byteLength(body) };
+  if (settings.apiKey) headers.authorization = `Bearer ${settings.apiKey}`;
+  return await new Promise((resolve, reject) => {
+    const request = (url.protocol === "https:" ? import_node_https.default.request : import_node_http.default.request)(url, {
+      method: "POST",
+      headers,
+      timeout: timeoutMs
+    }, (response) => {
+      let text = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => {
+        text += chunk;
+      });
+      response.on("end", () => {
+        if ((response.statusCode ?? 500) < 200 || (response.statusCode ?? 500) >= 300) return reject(new Error(`converter HTTP ${response.statusCode ?? 0}`));
+        try {
+          const parsed = JSON.parse(text);
+          const content = parsed.choices?.[0]?.message?.content;
+          if (typeof content !== "string" || !content.trim()) throw new Error("converter response content \u304C\u3042\u308A\u307E\u305B\u3093");
+          resolve(content);
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    request.once("timeout", () => request.destroy(new Error(`converter timeout (${timeoutMs}ms)`)));
+    request.once("error", reject);
+    const abort = () => request.destroy(new Error("converter canceled"));
+    signal?.addEventListener("abort", abort, { once: true });
+    request.once("close", () => signal?.removeEventListener("abort", abort));
+    request.end(body);
+  });
+}
+
+// src/llm.ts
+var import_node_http2 = __toESM(require("node:http"));
+var import_node_https2 = __toESM(require("node:https"));
 function postJson(url, body, headers, signal) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
-    const mod = u.protocol === "https:" ? import_node_https.default : import_node_http.default;
+    const mod = u.protocol === "https:" ? import_node_https2.default : import_node_http2.default;
     const req = mod.request(
       u,
       { method: "POST", headers: { ...headers, "content-length": Buffer.byteLength(body).toString() } },
@@ -4958,6 +5350,7 @@ async function getWeather(locationName, signal, fetcher = (input, init) => fetch
 
 // src/tools.ts
 var execAsync = import_node_util.default.promisify(import_node_child_process2.exec);
+var execFileAsync = import_node_util.default.promisify(import_node_child_process2.execFile);
 var IGNORED_DIRS = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", ".tmp"]);
 var MAX_LIST = 500;
 var MAX_SEARCH_RESULTS = 200;
@@ -5057,7 +5450,7 @@ function normalizeRunCommand(command) {
       }
       normalizedPath = import_node_path2.default.win32.join(import_node_path2.default.win32.dirname(reportPaths[0]), "*.xlsx");
     }
-    return `powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path ${quoteCommandWord(normalizedPath)}`;
+    return `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path ${quoteCommandWord(normalizedPath)}`;
   }
   const rest = parsed.words.slice(scriptArgsIndex);
   const named = /* @__PURE__ */ new Map();
@@ -5081,7 +5474,91 @@ function normalizeRunCommand(command) {
   const rates = (named.get("rates") ?? positional[1])?.replaceAll("/", "\\");
   const ledger = (named.get("ledger") ?? positional[2])?.replaceAll("/", "\\");
   if (!extracted || !rates || !ledger || positional.length > 3) throw new Error(`Update-Ledger \u306F ${UPDATE_LEDGER_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
-  return `powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted ${quoteCommandWord(extracted)} -Rates ${quoteCommandWord(rates)} -Ledger ${quoteCommandWord(ledger)}`;
+  return `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Update-Ledger.ps1 -Extracted ${quoteCommandWord(extracted)} -Rates ${quoteCommandWord(rates)} -Ledger ${quoteCommandWord(ledger)}`;
+}
+function normalizeWorkspaceOpenCommand(command, ctx) {
+  const parsed = splitCommandWords(command.trim());
+  if (parsed.unsafe || parsed.words.length === 0) return null;
+  const words = parsed.words;
+  let candidate;
+  const executable = (words[0] ?? "").toLowerCase();
+  if (executable === "invoke-item" || executable === "ii") {
+    if (words.length === 2) candidate = words[1];
+    else if (words.length === 3 && /^-(?:literal)?path$/iu.test(words[1])) candidate = words[2];
+  } else if (executable === "start-process") {
+    if (words.length === 2) candidate = words[1];
+    else if (words.length === 3 && /^-filepath$/iu.test(words[1])) candidate = words[2];
+  } else if (["start", "open"].includes(executable) && words.length === 2) {
+    candidate = words[1].trimStart();
+  } else if (["excel", "excel.exe"].includes(executable) && words.length === 2 && /\.xlsx$/iu.test(words[1])) {
+    candidate = words[1];
+  } else if (words.length === 1) {
+    candidate = words[0];
+  }
+  if (!candidate) return null;
+  let absolute;
+  try {
+    absolute = resolveInWorkspace(candidate, ctx);
+  } catch {
+    throw new Error(`run_command\u62D2\u5426: \u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u3078\u306E\u30A2\u30AF\u30BB\u30B9\u306F\u7981\u6B62\u3067\u3059: ${candidate}`);
+  }
+  if (!import_node_fs2.default.existsSync(absolute)) throw new Error(`run_command\u62D2\u5426: \u958B\u304F\u5BFE\u8C61\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${candidate}`);
+  const stat = import_node_fs2.default.lstatSync(absolute);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`run_command\u62D2\u5426: \u901A\u5E38\u30D5\u30A1\u30A4\u30EB\u4EE5\u5916\u306F\u958B\u3051\u307E\u305B\u3093: ${candidate}`);
+  const allowedExtensions = /* @__PURE__ */ new Set([
+    ".txt",
+    ".md",
+    ".csv",
+    ".tsv",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".xml",
+    ".log",
+    ".xlsx",
+    ".xlsm",
+    ".xls",
+    ".ods",
+    ".docx",
+    ".doc",
+    ".odt",
+    ".pptx",
+    ".ppt",
+    ".odp",
+    ".pdf",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".bmp",
+    ".webp",
+    ".svg",
+    ".mp4",
+    ".mov",
+    ".avi",
+    ".mkv",
+    ".mp3",
+    ".wav",
+    ".m4a"
+  ]);
+  const extension = import_node_path2.default.extname(absolute).toLowerCase();
+  if (!allowedExtensions.has(extension)) throw new Error(`run_command\u62D2\u5426: \u5B89\u5168\u306B\u958B\u3051\u308B\u901A\u5E38\u6587\u66F8\u30FB\u30E1\u30C7\u30A3\u30A2\u5F62\u5F0F\u3067\u306F\u3042\u308A\u307E\u305B\u3093: ${candidate}`);
+  if (absolute.includes("'")) throw new Error("run_command\u62D2\u5426: \u958B\u304F\u5BFE\u8C61\u306E\u30D1\u30B9\u306B\u5F15\u7528\u7B26\u306F\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093");
+  return `powershell.exe -NoProfile -Command "Invoke-Item -LiteralPath '${absolute}'"`;
+}
+function prepareHostCommand(command, ctx) {
+  const normalized = normalizeRunCommand(command);
+  const safeOpen = normalizeWorkspaceOpenCommand(normalized, ctx);
+  if (ctx.safeCommandOnly && !safeOpen) throw new Error("run_command\u62D2\u5426: \u3053\u306E\u69CB\u6210\u3067\u306F\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5185\u30D5\u30A1\u30A4\u30EB\u3092\u958B\u304F\u660E\u793A\u8A31\u53EF\u5F62\u5F0F\u3060\u3051\u5B9F\u884C\u3067\u304D\u307E\u3059");
+  const prepared = safeOpen ?? normalized;
+  assertRunCommandPolicy(prepared, ctx);
+  return prepared;
+}
+function formatHostCommandOutput(requested, prepared, stdout, stderr) {
+  const parts = [stdout, stderr].filter((value) => value.trim().length > 0).map((value) => truncate(value));
+  if (parts.length > 0) return parts.join("\n---stderr---\n");
+  if (/\bInvoke-Item\s+-LiteralPath\b/iu.test(prepared)) return `\u30A2\u30D7\u30EA\u8D77\u52D5\u30B3\u30DE\u30F3\u30C9\u6210\u529F: ${requested}`;
+  return "(\u51FA\u529B\u306A\u3057)";
 }
 var DELETE_OPERATIONS = /* @__PURE__ */ new Set([
   "remove-item",
@@ -5168,6 +5645,11 @@ function commandWords(command) {
 function commandOperationTokens(command) {
   return commandWords(command).map((word) => word.toLowerCase());
 }
+function containsPowerShellEncodedCommand(command) {
+  const words = commandWords(command);
+  const powershell = words.findIndex((word) => /^(?:powershell|powershell\.exe|pwsh|pwsh\.exe)$/iu.test(word));
+  return powershell >= 0 && words.slice(powershell + 1).some(isEncodedCommandFlag);
+}
 function assertWorkspaceWriteTarget(target, ctx) {
   const cleaned = target.trim().replace(/^['"]|['"]$/g, "");
   if (!cleaned || /^&\d$/u.test(cleaned) || /^(?:nul|\$null)$/iu.test(cleaned)) return;
@@ -5212,7 +5694,7 @@ function writeOperationTargets(command) {
   return targets;
 }
 function assertRunCommandPolicy(command, ctx) {
-  if (commandWords(command).some(isEncodedCommandFlag)) {
+  if (containsPowerShellEncodedCommand(command)) {
     throw new Error("run_command\u62D2\u5426: -EncodedCommand \u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
   }
   const operations = commandOperationTokens(command);
@@ -5476,7 +5958,8 @@ var TOOL_DEFS = [
       type: "object",
       properties: {
         path: { type: "string", description: "\u8D77\u70B9\u30C7\u30A3\u30EC\u30AF\u30C8\u30EA (\u65E2\u5B9A: \u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u30EB\u30FC\u30C8)" },
-        glob: { type: "string", description: "\u30D5\u30A1\u30A4\u30EB\u540D\u306E\u30D1\u30BF\u30FC\u30F3\u3002\u4F8B: *.ts" }
+        glob: { type: "string", description: "\u30D5\u30A1\u30A4\u30EB\u540D\u306E\u30D1\u30BF\u30FC\u30F3\u3002\u4F8B: *.ts" },
+        recursive: { type: "boolean", description: "\u30B5\u30D6\u30D5\u30A9\u30EB\u30C0\u3082\u518D\u5E30\u3059\u308B\u304B (\u65E2\u5B9A: true)\u3002\u76F4\u4E0B\u3060\u3051\u306A\u3089false" }
       },
       required: []
     },
@@ -5484,10 +5967,21 @@ var TOOL_DEFS = [
       const base = args.path ? resolveInWorkspace(String(args.path), ctx) : ctx.workspace;
       const re = args.glob ? wildcardToRegExp(String(args.glob)) : null;
       const out = [];
-      await walk(base, (f) => {
-        if (out.length >= MAX_LIST) return;
-        if (!re || re.test(import_node_path2.default.basename(f))) out.push(import_node_path2.default.relative(ctx.workspace, f).replaceAll("\\", "/"));
-      });
+      if (args.recursive === false) {
+        const entries = await import_promises.default.readdir(base, { withFileTypes: true });
+        for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name, "ja"))) {
+          if (out.length >= MAX_LIST) break;
+          if (!re || re.test(entry.name)) {
+            const relative = import_node_path2.default.relative(ctx.workspace, import_node_path2.default.join(base, entry.name)).replaceAll("\\", "/");
+            out.push(entry.isDirectory() ? `${relative}/` : relative);
+          }
+        }
+      } else {
+        await walk(base, (f) => {
+          if (out.length >= MAX_LIST) return;
+          if (!re || re.test(import_node_path2.default.basename(f))) out.push(import_node_path2.default.relative(ctx.workspace, f).replaceAll("\\", "/"));
+        });
+      }
       return out.length === 0 ? "(\u8A72\u5F53\u306A\u3057)" : truncate(out.join("\n"));
     }
   },
@@ -5630,6 +6124,38 @@ var TOOL_DEFS = [
     }
   },
   {
+    name: "read_xlsx",
+    description: "\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5185\u306E\u4EFB\u610F\u306Exlsx\u3092\u8AAD\u307F\u3001\u30B7\u30FC\u30C8\u540D\u30FB\u30BB\u30EB\u7BC4\u56F2\u30FB\u8868\u5185\u5BB9\u3092JSON\u3067\u8FD4\u3059",
+    kind: "read",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u76F8\u5BFE\u306Exlsx\u30D5\u30A1\u30A4\u30EB\u30D1\u30B9" }
+      },
+      required: ["path"]
+    },
+    async run(args, ctx) {
+      const requested = String(args.path ?? "");
+      const abs = resolveInWorkspace(requested, ctx);
+      if (import_node_path2.default.extname(abs).toLowerCase() !== ".xlsx") throw new Error("read_xlsx \u306F .xlsx \u30D5\u30A1\u30A4\u30EB\u3060\u3051\u3092\u8AAD\u307F\u53D6\u308C\u307E\u3059");
+      const stat = await import_promises.default.stat(abs).catch(() => null);
+      if (!stat?.isFile()) throw new Error(`xlsx\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${requested}`);
+      const appRoot = import_node_path2.default.resolve(__dirname, "..");
+      const helper = import_node_path2.default.join(appRoot, "tools", "Read-Xlsx.ps1");
+      if (!import_node_fs2.default.existsSync(helper)) throw new Error(`xlsx\u8AAD\u307F\u53D6\u308A\u30D8\u30EB\u30D1\u30FC\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${helper}`);
+      const { stdout, stderr } = await execFileAsync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", helper, "-Path", abs], {
+        cwd: ctx.workspace,
+        windowsHide: true,
+        encoding: "utf8",
+        maxBuffer: 1e7,
+        signal: ctx.signal
+      });
+      const output = String(stdout).trim();
+      if (!output) throw new Error(`xlsx\u8AAD\u307F\u53D6\u308A\u7D50\u679C\u304C\u7A7A\u3067\u3059${stderr ? `: ${String(stderr).trim()}` : ""}`);
+      return truncate(output, MAX_READ_FILES_CHARS);
+    }
+  },
+  {
     name: "write_file",
     description: "\u30C6\u30AD\u30B9\u30C8\u30D5\u30A1\u30A4\u30EB\u3092\u65B0\u898F\u4F5C\u6210\u307E\u305F\u306F\u4E0A\u66F8\u304D\u3059\u308B",
     kind: "write",
@@ -5769,7 +6295,9 @@ var TOOL_DEFS = [
       required: ["command"]
     },
     async run(args, ctx) {
-      const process2 = startManagedProcess(String(args.command ?? ""), ctx.workspace, args.label ? String(args.label) : void 0, args.url ? String(args.url) : void 0);
+      if (ctx.safeCommandOnly && args.url) throw new Error("start_process\u62D2\u5426: \u3053\u306E\u69CB\u6210\u3067\u306F\u30D7\u30EC\u30D3\u30E5\u30FCURL\u3092\u6307\u5B9A\u3067\u304D\u307E\u305B\u3093");
+      const command = prepareHostCommand(String(args.command ?? ""), ctx);
+      const process2 = startManagedProcess(command, ctx.workspace, args.label ? String(args.label) : void 0, args.url ? String(args.url) : void 0);
       return JSON.stringify(process2);
     }
   },
@@ -5823,9 +6351,9 @@ var TOOL_DEFS = [
       required: ["command"]
     },
     async run(args, ctx) {
-      const command = normalizeRunCommand(String(args.command ?? ""));
-      if (/wttr\.in/i.test(command)) throw new Error("\u5929\u6C17\u30FB\u6C17\u6E29\u306E\u53D6\u5F97\u306Bwttr.in\u306F\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093\u3002get_weather\u30C4\u30FC\u30EB\u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044");
-      assertRunCommandPolicy(command, ctx);
+      const requested = String(args.command ?? "");
+      if (/wttr\.in/i.test(requested)) throw new Error("\u5929\u6C17\u30FB\u6C17\u6E29\u306E\u53D6\u5F97\u306Bwttr.in\u306F\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093\u3002get_weather\u30C4\u30FC\u30EB\u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044");
+      const command = prepareHostCommand(requested, ctx);
       if (ctx.signal?.aborted) throw new Error("\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F");
       try {
         const { stdout, stderr } = await execAsync(command, {
@@ -5835,8 +6363,7 @@ var TOOL_DEFS = [
           windowsHide: true,
           signal: ctx.signal
         });
-        const parts = [stdout, stderr].filter((s) => s.trim().length > 0).map((s) => truncate(s));
-        return parts.length > 0 ? parts.join("\n---stderr---\n") : "(\u51FA\u529B\u306A\u3057)";
+        return formatHostCommandOutput(requested, command, stdout, stderr);
       } catch (err) {
         const e = err;
         const tail = [e.stdout ?? "", e.stderr ?? ""].filter((s) => s.trim()).map((s) => truncate(s)).join("\n---\n");
@@ -5845,8 +6372,30 @@ var TOOL_DEFS = [
     }
   }
 ];
+function toolDefsForContract(options = {}) {
+  return TOOL_DEFS.filter((tool) => (options.allowArbitraryCommands || tool.name !== "run_command") && !(options.safeCommandOnly && tool.name === "get_weather")).map((tool) => {
+    if (!options.safeCommandOnly) return tool;
+    if (tool.name === "run_command") return { ...tool, description: "\u65E2\u5B58\u306E\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5185\u901A\u5E38\u30D5\u30A1\u30A4\u30EB1\u4EF6\u3092\u65E2\u5B9A\u30A2\u30D7\u30EA\u3067\u958B\u304F\u3002command\u306F\u5BFE\u8C61\u306E\u76F8\u5BFE\u30D1\u30B91\u4EF6\u3001\u307E\u305F\u306F Invoke-Item <\u76F8\u5BFE\u30D1\u30B9>\u3002\u4EFB\u610F\u30B7\u30A7\u30EB\u3001\u524A\u9664\u3001\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u3001\u30EC\u30B8\u30B9\u30C8\u30EA\u64CD\u4F5C\u306F\u5229\u7528\u3067\u304D\u306A\u3044" };
+    if (tool.name === "start_process") {
+      const parameters = tool.parameters;
+      const properties = parameters.properties ?? {};
+      return {
+        ...tool,
+        description: "\u65E2\u5B58\u306E\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5185\u901A\u5E38\u30D5\u30A1\u30A4\u30EB1\u4EF6\u3092\u65E2\u5B9A\u30A2\u30D7\u30EA\u3067\u958B\u304F\u3002command\u306F\u5BFE\u8C61\u306E\u76F8\u5BFE\u30D1\u30B91\u4EF6\u3001\u307E\u305F\u306F Invoke-Item <\u76F8\u5BFE\u30D1\u30B9>\u3002\u5916\u90E8URL\u3084\u4EFB\u610F\u30D7\u30ED\u30BB\u30B9\u306F\u5229\u7528\u3067\u304D\u306A\u3044",
+        parameters: {
+          ...parameters,
+          properties: {
+            command: { type: "string", description: "\u958B\u304F\u5BFE\u8C61\u306E\u76F8\u5BFE\u30D1\u30B91\u4EF6\u3001\u307E\u305F\u306F Invoke-Item <\u76F8\u5BFE\u30D1\u30B9>" },
+            label: properties.label
+          }
+        }
+      };
+    }
+    return tool;
+  });
+}
 function openAITools(options = {}) {
-  const defs = options.allowArbitraryCommands ? TOOL_DEFS : TOOL_DEFS.filter((tool) => tool.name !== "run_command");
+  const defs = toolDefsForContract(options);
   return defs.map((t) => ({
     type: "function",
     function: { name: qualifiedToolName(t.name), description: t.description, parameters: { ...t.parameters, additionalProperties: false } }
@@ -5935,7 +6484,7 @@ function parseStrictCandidate(candidate) {
     const observedRepair = repairObservedWriteContent(candidate.text);
     if (observedRepair === null) return null;
     try {
-      const libraryRepair = JSON.parse((0, import_jsonrepair.jsonrepair)(candidate.text));
+      const libraryRepair = JSON.parse((0, import_jsonrepair2.jsonrepair)(candidate.text));
       parsedValue = JSON.stringify(libraryRepair) === JSON.stringify(observedRepair) ? libraryRepair : observedRepair;
     } catch {
       parsedValue = observedRepair;
@@ -5991,13 +6540,13 @@ var END_MARKER = "AGENT_END";
 function shouldCancel(io) {
   return io.signal?.aborted === true || io.isCanceled?.() === true;
 }
-function buildProtocolRules(mode = "work", allowArbitraryCommands = false, autoApproveCommand = false) {
-  const toolDocs = TOOL_DEFS.filter((t) => allowArbitraryCommands || t.name !== "run_command").map((t) => {
+function buildProtocolRules(mode = "work", allowArbitraryCommands = false, autoApproveCommand = false, safeCommandOnly = false) {
+  const toolDocs = toolDefsForContract({ allowArbitraryCommands, safeCommandOnly }).map((t) => {
     const req = t.parameters.required ?? [];
     const props = Object.keys(t.parameters.properties ?? {});
     return `- ${qualifiedToolName(t.name)}(${props.join(", ")}):${req.length ? ` \u5FC5\u9808=${req.join(",")};` : ""} ${t.description}`;
   }).join("\n");
-  const commandRule = allowArbitraryCommands ? autoApproveCommand ? "\u660E\u793A\u8A2D\u5B9A\u306B\u3088\u308A\u4EFB\u610F\u306Ehost\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u81EA\u52D5\u627F\u8A8D\u6E08\u307F\u3067\u3059\u3002\u627F\u8A8D\u3092\u6C42\u3081\u308Banswer\u3092\u8FD4\u3055\u305A\u3001\u5FC5\u8981\u306Ahost.run_command\u3092\u76F4\u3061\u306B\u8981\u6C42\u3057\u3066\u304F\u3060\u3055\u3044\u3002" : "\u660E\u793A\u8A2D\u5B9A\u306B\u3088\u308A\u4EFB\u610F\u306Ehost\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u304C\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u3059\u3002\u5B9F\u884C\u524D\u306B\u627F\u8A8D\u3092\u53D6\u5F97\u3057\u3066\u304F\u3060\u3055\u3044\u3002" : "\u4EFB\u610F\u306E\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u3053\u306ERun\u3067\u306F\u7121\u52B9\u3067\u3059\u3002\u65E2\u77E5\u306E\u691C\u8A3C\u624B\u9806\u3084\u7BA1\u7406\u30D7\u30ED\u30BB\u30B9\u3092\u4F7F\u3044\u3001\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u3092\u8981\u6C42\u3057\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002";
+  const commandRule = safeCommandOnly ? "\u3053\u306ERun\u3067host.run_command\u3068host.start_process\u306B\u8A31\u53EF\u3055\u308C\u308B\u306E\u306F\u3001\u65E2\u5B58\u306E\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5185\u901A\u5E38\u30D5\u30A1\u30A4\u30EB1\u4EF6\u3092\u65E2\u5B9A\u30A2\u30D7\u30EA\u3067\u958B\u304F\u64CD\u4F5C\u3060\u3051\u3067\u3059\u3002\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u3067\u306F\u3042\u308A\u307E\u305B\u3093\u3002\u627F\u8A8D\u753B\u9762\u306F\u30DB\u30B9\u30C8\u304C\u8868\u793A\u3059\u308B\u305F\u3081\u3001answer\u3067\u5229\u7528\u8005\u3078\u8A31\u53EF\u3092\u5C0B\u306D\u305A\u3001\u5FC5\u8981\u306Ahost\u30C4\u30FC\u30EB\u3092\u8981\u6C42\u3057\u3066\u304F\u3060\u3055\u3044\u3002" : allowArbitraryCommands ? autoApproveCommand ? "\u660E\u793A\u8A2D\u5B9A\u306B\u3088\u308A\u4EFB\u610F\u306Ehost\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u81EA\u52D5\u627F\u8A8D\u6E08\u307F\u3067\u3059\u3002\u627F\u8A8D\u3092\u6C42\u3081\u308Banswer\u3092\u8FD4\u3055\u305A\u3001\u5FC5\u8981\u306Ahost.run_command\u3092\u76F4\u3061\u306B\u8981\u6C42\u3057\u3066\u304F\u3060\u3055\u3044\u3002" : "\u660E\u793A\u8A2D\u5B9A\u306B\u3088\u308A\u4EFB\u610F\u306Ehost\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u304C\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u3059\u3002\u5B9F\u884C\u524D\u306B\u627F\u8A8D\u3092\u53D6\u5F97\u3057\u3066\u304F\u3060\u3055\u3044\u3002" : "\u4EFB\u610F\u306E\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u3053\u306ERun\u3067\u306F\u7121\u52B9\u3067\u3059\u3002\u65E2\u77E5\u306E\u691C\u8A3C\u624B\u9806\u3084\u7BA1\u7406\u30D7\u30ED\u30BB\u30B9\u3092\u4F7F\u3044\u3001\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u3092\u8981\u6C42\u3057\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002";
   if (mode !== "work") {
     const label = mode === "research" ? "\u8ABF\u67FB" : "\u901A\u5E38\u56DE\u7B54";
     return [
@@ -6013,7 +6562,7 @@ function buildProtocolRules(mode = "work", allowArbitraryCommands = false, autoA
     "\u3042\u306A\u305F\u306E\u5FDC\u7B54\u306F\u5B9F\u884C\u7D50\u679C\u3067\u306F\u306A\u304F\u3001\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u304C\u89E3\u91C8\u3059\u308B\u300C\u6B21\u306E1\u624B\u300D\u3067\u3059\u3002",
     "\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u306F host.* \u306EJSON\u3060\u3051\u3092\u691C\u8A3C\u3057\u30661\u56DE\u305A\u3064\u5B9F\u884C\u3057\u3001\u7D50\u679C\u3092\u6B21\u306E\u5165\u529B\u306Bhost_result\u3068\u3057\u3066\u6E21\u3057\u307E\u3059\u3002",
     "\u30ED\u30FC\u30AB\u30EB\u64CD\u4F5C\u304C\u4E0D\u8981\u306A\u3089answer\u3092\u8FD4\u3057\u307E\u3059\u3002\u5148\u56DE\u308A\u306Elist_files\u3084\u3001\u540C\u3058\u64CD\u4F5C\u306E\u7E70\u308A\u8FD4\u3057\u306F\u7981\u6B62\u3067\u3059\u3002",
-    allowArbitraryCommands ? "\u5929\u6C17\u30FB\u6C17\u6E29\u30FB\u964D\u6C34\u91CF\u306Fhost.get_weather\u3092\u4F7F\u3044\u3001\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u3067\u5916\u90E8\u5929\u6C17\u30B5\u30A4\u30C8\u3092\u547C\u3093\u3067\u306F\u3044\u3051\u307E\u305B\u3093\u3002" : "\u5929\u6C17\u30FB\u6C17\u6E29\u30FB\u964D\u6C34\u91CF\u306Fhost.get_weather\u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044\u3002",
+    safeCommandOnly ? "\u3053\u306E\u69CB\u6210\u3067\u306F\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u901A\u4FE1\u3092\u884C\u3046host\u30C4\u30FC\u30EB\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093\u3002\u5929\u6C17\u306A\u3069\u5916\u90E8\u60C5\u5831\u3092\u53D6\u5F97\u3057\u305F\u3068\u4E3B\u5F35\u3057\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002" : allowArbitraryCommands ? "\u5929\u6C17\u30FB\u6C17\u6E29\u30FB\u964D\u6C34\u91CF\u306Fhost.get_weather\u3092\u4F7F\u3044\u3001\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u3067\u5916\u90E8\u5929\u6C17\u30B5\u30A4\u30C8\u3092\u547C\u3093\u3067\u306F\u3044\u3051\u307E\u305B\u3093\u3002" : "\u5929\u6C17\u30FB\u6C17\u6E29\u30FB\u964D\u6C34\u91CF\u306Fhost.get_weather\u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044\u3002",
     "\u30C4\u30FC\u30EB\u304C\u62D2\u5426\u3055\u308C\u305F\u3001\u307E\u305F\u306F\u60C5\u5831\u304C\u4E0D\u8DB3\u3057\u3066\u3044\u308B\u5834\u5408\u306F\u3001\u6B21\u306E\u64CD\u4F5C\u3092\u63A8\u6E2C\u305B\u305Aanswer\u3067\u5229\u7528\u8005\u306B\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
     "",
     "\u9078\u629E\u3067\u304D\u308Bhost\u30A2\u30AF\u30B7\u30E7\u30F3:",
@@ -6114,10 +6663,10 @@ async function approvalPreconditionChanged(binding, ctx) {
   const state = await getFilePrecondition(binding.path, ctx);
   return state.existedBefore !== binding.existedBefore || state.beforeHash !== binding.beforeHash;
 }
-function composeCopilotPrompt(mode, userInput, steps, budget = 12e4, history = [], allowArbitraryCommands = false, autoApproveCommand = false, systemInstructions = "") {
+function composeCopilotPrompt(mode, userInput, steps, budget = 12e4, history = [], allowArbitraryCommands = false, autoApproveCommand = false, systemInstructions = "", safeCommandOnly = false) {
   const histBlock = history.length > 0 ? ["", "[\u3053\u308C\u307E\u3067\u306E\u3084\u308A\u3068\u308A]", ...history.map((h) => `${h.role}: ${h.content.replace(/\r?\n+/g, " ")}`)] : [];
   const systemBlock = systemInstructions.trim() ? ["", "[\u696D\u52D9\u56FA\u6709\u6307\u793A]", systemInstructions.trim()] : [];
-  const head = [buildProtocolRules(mode, allowArbitraryCommands, autoApproveCommand), ...systemBlock, ...histBlock, "", "[\u4F9D\u983C]", userInput];
+  const head = [buildProtocolRules(mode, allowArbitraryCommands, autoApproveCommand, safeCommandOnly), ...systemBlock, ...histBlock, "", "[\u4F9D\u983C]", userInput];
   const tail = [
     "",
     "[\u6307\u793A]",
@@ -6198,18 +6747,53 @@ async function runCopilotTurn(opts) {
     if (shouldCancel(io)) return canceled();
     if (io.isPaused?.()) return { reply: "", messages: turnMessages("[\u4E00\u6642\u505C\u6B62] \u30C1\u30A7\u30C3\u30AF\u30DD\u30A4\u30F3\u30C8\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F"), aborted: true, paused: true, checkpoint: steps.slice(-20) };
     let raw;
+    const backendStartedAt = Date.now();
     try {
-      raw = await backend.complete(composeCopilotPrompt("work", opts.userInput, steps, cfg.copilot?.maxPromptChars ?? 12e4, history, policy.allowArbitraryCommands, policy.autoApproveCommand, systemInstructions), io.signal);
+      raw = await backend.complete(composeCopilotPrompt("work", opts.userInput, steps, cfg.copilot?.maxPromptChars ?? 12e4, history, policy.allowArbitraryCommands, policy.autoApproveCommand, systemInstructions, ctx.safeCommandOnly === true), io.signal);
       raw = raw.replace(/＜/g, "<").replace(/＞/g, ">").replace(/｀/g, String.fromCharCode(96));
-      io.event?.({ type: "model.decision", summary: "Copilot\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: "copilot", namespace: "native", authority: "claimed" });
     } catch (err) {
       const msg = err.message;
       io.print(`[error] ${msg}`);
       return { reply: "", messages: turnMessages(`[error] ${msg}`), aborted: true };
     }
-    const pe = extractReplyAndEnd(raw);
+    const converterTools = toolDefsForContract({ allowArbitraryCommands: policy.allowArbitraryCommands, safeCommandOnly: ctx.safeCommandOnly });
+    const contractTools = converterTools.map((tool) => ({ name: qualifiedToolName(tool.name), description: tool.description, parameters: tool.parameters }));
+    const layer1StartedAt = Date.now();
+    const directPe = extractReplyAndEnd(raw);
+    const deterministic = directPe ? null : interpretCopilotResponseDeterministically(raw, contractTools);
+    const layer1Ms = Date.now() - layer1StartedAt;
+    let interpretationLayer = directPe || deterministic ? "layer1" : "failed";
+    let interpretationMethod = directPe ? "strict-protocol" : deterministic?.method ?? "none";
+    let interpretationRepairs = deterministic?.repairs ?? [];
+    let converterRaw = null;
+    const converterStartedAt = Date.now();
+    if (!directPe && !deterministic) {
+      try {
+        converterRaw = await convertCopilotResponse(cfg.localResponseConverter, raw, contractTools, io.signal);
+        if (converterRaw !== null) {
+          interpretationLayer = "layer2";
+          interpretationMethod = "local-model";
+          io.print("[converter] loopback response converter applied");
+        }
+      } catch (err) {
+        io.print(`[converter] fallback: ${err.message}`);
+        interpretationMethod = "layer2-failed";
+      }
+    }
+    const converterMs = Date.now() - converterStartedAt;
+    const copilotTiming = backend.getLastTiming?.() ?? null;
+    io.event?.({
+      type: "model.decision",
+      summary: "Copilot\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F",
+      durationMs: Date.now() - backendStartedAt,
+      metadata: { copilot: copilotTiming, layer1Ms, converterMs, interpretationLayer, interpretationMethod, interpretationRepairs },
+      origin: "copilot",
+      namespace: "native",
+      authority: "claimed"
+    });
+    const pe = directPe ?? (deterministic ? extractReplyAndEnd(deterministic.content) : null) ?? (converterRaw ? extractReplyAndEnd(converterRaw) : null);
     let parsed = pe?.parsed ?? null;
-    if (parsed && bareToolName(parsed.tool ?? "") === "write_file") attachFenceContent(raw, pe.end, parsed);
+    if (directPe && parsed && bareToolName(parsed.tool ?? "") === "write_file") attachFenceContent(raw, directPe.end, parsed);
     if (!parsed) {
       if (!parseRetried) {
         parseRetried = true;
@@ -6233,6 +6817,7 @@ async function runCopilotTurn(opts) {
       if (invalidDecisions >= 2) return stopWithWarning("\u8A31\u53EF\u3055\u308C\u3066\u3044\u306A\u3044Copilot\u5185\u8535\u30C4\u30FC\u30EB\u307E\u305F\u306F\u4E0D\u660E\u306A\u30C4\u30FC\u30EB\u304C\u8981\u6C42\u3055\u308C\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
       continue;
     }
+    if (ctx.safeCommandOnly && bareToolName(def.name) === "get_weather") return stopWithWarning("\u3053\u306E\u69CB\u6210\u3067\u306F\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u901A\u4FE1\u3092\u884C\u3046host\u30C4\u30FC\u30EB\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093");
     parsed.tool = normalizedTool;
     if (bareToolName(def.name) === "run_command" && !policy.allowArbitraryCommands) return stopWithWarning("\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u8A2D\u5B9A\u3067\u660E\u793A\u7684\u306B\u6709\u52B9\u5316\u3055\u308C\u3066\u3044\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
     const args = parsed.args ?? {};
@@ -6382,7 +6967,7 @@ async function runOpenAITurn(opts) {
     if (io.isPaused?.()) return { reply: "", messages, aborted: true, paused: true };
     let assistant;
     try {
-      assistant = await chat(cfg, messages, openAITools({ allowArbitraryCommands: policy.allowArbitraryCommands }), io.signal);
+      assistant = await chat(cfg, messages, openAITools({ allowArbitraryCommands: policy.allowArbitraryCommands, safeCommandOnly: ctx.safeCommandOnly }), io.signal);
     } catch (err) {
       const msg = err.message;
       io.print(`[error] ${msg}`);
@@ -6397,6 +6982,7 @@ async function runOpenAITurn(opts) {
     const call = calls[0];
     const def = findHostTool(call.function.name);
     if (!def) return warning(`\u8A31\u53EF\u3055\u308C\u3066\u3044\u306A\u3044host\u30C4\u30FC\u30EB ${call.function.name} \u304C\u8981\u6C42\u3055\u308C\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`);
+    if (ctx.safeCommandOnly && bareToolName(def.name) === "get_weather") return warning("\u3053\u306E\u69CB\u6210\u3067\u306F\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u901A\u4FE1\u3092\u884C\u3046host\u30C4\u30FC\u30EB\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093");
     if (bareToolName(def.name) === "run_command" && !policy.allowArbitraryCommands) return warning("\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u8A2D\u5B9A\u3067\u660E\u793A\u7684\u306B\u6709\u52B9\u5316\u3055\u308C\u3066\u3044\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
     if (def.kind === "write" && writes >= maxWrites) return warning(`\u66F8\u304D\u8FBC\u307F\u5B9F\u884C\u4E0A\u9650(${maxWrites}\u56DE)\u306B\u9054\u3057\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`);
     if (def.kind === "command" && commands >= maxCommands) return warning(`\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u4E0A\u9650(${maxCommands}\u56DE)\u306B\u9054\u3057\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`);
@@ -6428,6 +7014,7 @@ async function executeCall(call, cfg, ctx, io) {
   if (!call.function.name.startsWith("host.")) return "[policy error] host.* \u4EE5\u5916\u306E\u30C4\u30FC\u30EB\u306Fwork\u30E2\u30FC\u30C9\u3067\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093";
   const def = findHostTool(call.function.name);
   if (!def) return `[policy error] \u672A\u77E5\u306Ehost\u30C4\u30FC\u30EB: ${call.function.name}`;
+  if (ctx.safeCommandOnly && bareToolName(def.name) === "get_weather") return "[policy error] \u3053\u306E\u69CB\u6210\u3067\u306F\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u901A\u4FE1\u3092\u884C\u3046host\u30C4\u30FC\u30EB\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093";
   if (bareToolName(def.name) === "run_command" && !policy.allowArbitraryCommands) return "[policy error] \u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u8A2D\u5B9A\u3067\u660E\u793A\u7684\u306B\u6709\u52B9\u5316\u3055\u308C\u3066\u3044\u307E\u305B\u3093";
   let args;
   try {
@@ -6532,12 +7119,12 @@ function isStopGenerationControl(candidate) {
   return structural || semantic;
 }
 function updateResponseCompletionState(previous, sample) {
-  if (sample.generating || !sample.copyEnabled || sample.textLength <= 0) {
-    return { state: { stableLength: null, stableSinceMs: null }, ready: false };
+  if (sample.generating || !sample.copyEnabled || sample.text.length <= 0) {
+    return { state: { stableText: null, stableSinceMs: null }, ready: false };
   }
-  if (previous.stableLength !== sample.textLength || previous.stableSinceMs === null) {
+  if (previous.stableText !== sample.text || previous.stableSinceMs === null) {
     return {
-      state: { stableLength: sample.textLength, stableSinceMs: sample.observedAtMs },
+      state: { stableText: sample.text, stableSinceMs: sample.observedAtMs },
       ready: false
     };
   }
@@ -6637,28 +7224,48 @@ var FRESH_CHAT_JS = `(() => {
   if (candidates[0]) { candidates[0].el.click(); return JSON.stringify({ clicked: true }); }
   return JSON.stringify({ clicked: false });
 })()`;
-var CLICK_SEND_JS = `(() => {
+var COPILOT_CLICK_SEND_JS = `(() => {
   ${VISIBLE_JS}
   ${DOCS_JS}
   const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button, [role="button"]')));
   const exclude = /stop|cancel|\u505C\u6B62|\u30AD\u30E3\u30F3\u30BB\u30EB|regenerate|\u518D\u751F\u6210|attach|\u6DFB\u4ED8|microphone|voice|\u30DC\u30A4\u30B9|\u97F3\u58F0|new chat|\u65B0\u3057\u3044\u30C1\u30E3\u30C3\u30C8|clear|\u30AF\u30EA\u30A2|close|\u9589\u3058\u308B|search|\u691C\u7D22|library|\u30E9\u30A4\u30D6\u30E9\u30EA|file|\u30D5\u30A1\u30A4\u30EB/;
+  const structural = b => b.matches('button[type="submit"],.fai-SendButton,[class*="SendButton" i],[data-testid*="send" i],[data-automation-id*="send" i]');
+  const inventory = b => { const r=b.getBoundingClientRect(); let x=r.x,y=r.y,w=b.ownerDocument&&b.ownerDocument.defaultView; try{while(w&&w!==w.top){const f=w.frameElement;if(!f)break;const fr=f.getBoundingClientRect();x+=fr.x;y+=fr.y;w=f.ownerDocument&&f.ownerDocument.defaultView;}}catch(e){} return {ariaLabel:b.getAttribute('aria-label')||'',title:b.title||'',testId:b.getAttribute('data-testid')||'',automationId:b.getAttribute('data-automation-id')||'',className:typeof b.className==='string'?b.className:'',type:b.getAttribute('type')||'',disabled:!!b.disabled,ariaDisabled:b.getAttribute('aria-disabled')||'',visible:__vis(b),rect:{x,y,width:r.width,height:r.height,cx:x+r.width/2,cy:y+r.height/2}}; };
   const clickable = [];
   for (const b of buttons) {
     const label = (b.getAttribute('aria-label') || b.title || b.textContent || '').trim();
-    if (!label) continue;
     const lower = label.toLowerCase();
+    const identity = [lower,b.getAttribute('data-testid'),b.getAttribute('data-automation-id'),typeof b.className==='string'?b.className:''].filter(Boolean).join(' ').toLowerCase();
     let score = 0;
     if (/^(\u9001\u4FE1|send)$/i.test(label)) score += 1000;
+    else if (structural(b)) score += 600;
     else if (/\u9001\u4FE1|send/i.test(lower)) score += 400;
     if (score <= 0) continue;
-    if (exclude.test(lower)) continue;
+    if (exclude.test(identity)) continue;
     if (b.disabled || b.getAttribute('aria-disabled') === 'true') continue;
     if (!__vis(b)) continue;
-    clickable.push({ el: b, score });
+    clickable.push({ el: b, score, inventory: inventory(b) });
   }
   clickable.sort((a, b) => b.score - a.score);
-  if (clickable[0]) { clickable[0].el.click(); return JSON.stringify({ clicked: true }); }
-  return JSON.stringify({ clicked: false });
+  if (clickable[0]) { clickable[0].el.click(); return JSON.stringify({ clicked: true, selected:clickable[0].inventory }); }
+  const inputSelectors=['#m365-chat-editor-target-element','[data-lexical-editor="true"][contenteditable]','[role="textbox"][contenteditable]'];
+  let nearby=[];
+  for(const d of __docs)for(const selector of inputSelectors){const input=d.querySelector(selector);if(!input)continue;let scope=input.parentElement;for(let depth=0;scope&&depth<6;depth++,scope=scope.parentElement){const found=Array.from(scope.querySelectorAll('button,[role="button"]'));if(found.length){nearby=found;break;}}if(nearby.length)break;}
+  const diagnosticButtons=(nearby.length?nearby:buttons).slice(-32);
+  return JSON.stringify({ clicked: false, inventory: diagnosticButtons.map(inventory) });
+})()`;
+var COPILOT_SEND_READY_JS = `(() => {
+  ${VISIBLE_JS}
+  ${DOCS_JS}
+  const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button, [role="button"]')));
+  const structural = b => b.matches('button[type="submit"],.fai-SendButton,[class*="SendButton" i],[data-testid*="send" i],[data-automation-id*="send" i]');
+  const inventory = b => { const r=b.getBoundingClientRect(); return {ariaLabel:b.getAttribute('aria-label')||'',title:b.title||'',testId:b.getAttribute('data-testid')||'',automationId:b.getAttribute('data-automation-id')||'',className:typeof b.className==='string'?b.className:'',type:b.getAttribute('type')||'',disabled:!!b.disabled,ariaDisabled:b.getAttribute('aria-disabled')||'',visible:__vis(b),rect:{x:r.x,y:r.y,width:r.width,height:r.height,cx:r.x+r.width/2,cy:r.y+r.height/2}}; };
+  const candidates = buttons.filter(b => {
+    const label=(b.getAttribute('aria-label')||b.title||b.textContent||'').trim();
+    return structural(b) || /^(\u9001\u4FE1|send)$/i.test(label);
+  });
+  const ready = candidates.find(b => __vis(b) && !b.disabled && b.getAttribute('aria-disabled') !== 'true');
+  return JSON.stringify({ready:!!ready,inventory:candidates.slice(-32).map(inventory)});
 })()`;
 var EDITOR_LENGTH_JS = `(() => {
   ${VISIBLE_JS}
@@ -6666,7 +7273,7 @@ var EDITOR_LENGTH_JS = `(() => {
   const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
   for (const d of __docs) for (const s of sels) {
     const el = d.querySelector(s);
-    if (__vis(el)) return String((el.textContent || '').length);
+    if (__vis(el)) return String((el.textContent || '').replace(/[\\u200B\\u200C]/g, '').length);
   }
   return '-1';
 })()`;
@@ -6676,10 +7283,20 @@ var EDITOR_STATE_JS = `(() => {
   const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
   for (const d of __docs) for (const s of sels) {
     const el = d.querySelector(s);
-    if (__vis(el)) return JSON.stringify({ found: true, text: String(el.textContent || ''), active: d.activeElement === el });
+    if (__vis(el)) return JSON.stringify({ found: true, text: String(el.textContent || '').replace(/[\\u200B\\u200C]/g, ''), active: d.activeElement === el });
   }
   return JSON.stringify({ found: false, text: '', active: false });
 })()`;
+function textMismatchDiagnostic(expected, actual) {
+  let index = 0;
+  while (index < expected.length && index < actual.length && expected[index] === actual[index]) index++;
+  const start = Math.max(0, index - 12);
+  const end = index + 20;
+  const expectedSlice = expected.slice(start, end);
+  const actualSlice = actual.slice(start, end);
+  const code = (value) => Array.from(value).map((char) => char.codePointAt(0)?.toString(16).padStart(4, "0")).join(" ");
+  return `first=${index} expected=${JSON.stringify(expectedSlice)} [${code(expectedSlice)}] actual=${JSON.stringify(actualSlice)} [${code(actualSlice)}] lengths=${expected.length}/${actual.length}`;
+}
 var CLEAR_EDITOR_JS = `(() => {
   ${VISIBLE_JS}
   ${DOCS_JS}
@@ -6928,6 +7545,7 @@ var CopilotEdgeClient = class {
   visibleEdgePid = null;
   edgeProfileDir = null;
   visibleSessionId = null;
+  lastTiming = null;
   constructor(cfg) {
     this.s = resolveCopilotSettings(cfg);
   }
@@ -7204,14 +7822,31 @@ var CopilotEdgeClient = class {
     }
     throw new Error("Copilot \u306E\u5165\u529B\u6B04\u304C\u6E96\u5099\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F (\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8)\u3002");
   }
-  async freshChat() {
-    const raw = await this.evalWithReconnect(FRESH_CHAT_JS);
-    if (!JSON.parse(String(raw)).clicked) {
-      await this.cdpMethod("Page.navigate", { url: this.s.url });
-      await sleep(3e3);
-    } else {
-      await sleep(450);
+  async freshSurfaceReady() {
+    try {
+      const raw = await this.evalWithReconnect(COPILOT_SCREEN_STATE_JS, 5e3);
+      const state = JSON.parse(String(raw));
+      const inputLength = await this.editorLength();
+      return state.inputReady === true && Array.isArray(state.responseCandidates) && state.responseCandidates.length === 0 && inputLength >= 0 && inputLength <= 2;
+    } catch {
+      return false;
     }
+  }
+  async waitFreshSurface(timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    do {
+      if (await this.freshSurfaceReady()) return true;
+      if (Date.now() < deadline) await sleep(200);
+    } while (Date.now() < deadline);
+    return false;
+  }
+  async freshChat() {
+    if (await this.freshSurfaceReady()) return;
+    const raw = await this.evalWithReconnect(FRESH_CHAT_JS);
+    const clicked = JSON.parse(String(raw)).clicked;
+    if (clicked && await this.waitFreshSurface(5e3)) return;
+    await this.cdpMethod("Page.navigate", { url: this.s.url });
+    if (!await this.waitFreshSurface(3e4)) throw new Error("\u65B0\u898FCopilot\u30BB\u30C3\u30B7\u30E7\u30F3\u306E\u7A7A\u753B\u9762\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
   }
   async stampVisibleSessionMarker(sessionId) {
     const marker = makeVisibleSessionMarker(sessionId);
@@ -7278,32 +7913,35 @@ var CopilotEdgeClient = class {
     if (prompt.length > this.s.maxPromptChars) {
       throw new Error(`\u4F9D\u983C\u6587\u304C\u4E0A\u9650 ${this.s.maxPromptChars} \u6587\u5B57\u3092\u8D85\u3048\u3066\u3044\u307E\u3059 (${prompt.length} \u6587\u5B57)`);
     }
-    try {
-      await this.pasteViaClipboard(prompt);
-      return;
-    } catch (err) {
-      console.log(`[paste] \u30AF\u30EA\u30C3\u30D7\u30DC\u30FC\u30C9\u8CBC\u308A\u4ED8\u3051\u306B\u5931\u6557\u3001\u30C1\u30E3\u30F3\u30AF\u65B9\u5F0F\u3078\u30D5\u30A9\u30FC\u30EB\u30D0\u30C3\u30AF: ${err.message}`);
+    let lastDirectError = "";
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await this.insertDirect(prompt);
+        if (attempt > 1) console.log("[input] \u5358\u4E00Input.insertText\u306E\u518D\u8A66\u884C\u3067\u6210\u529F");
+        return;
+      } catch (err) {
+        lastDirectError = err.message;
+        console.log(`[input] \u5358\u4E00Input.insertText attempt=${attempt} failed: ${lastDirectError}`);
+        if (attempt < 2) await sleep(300);
+      }
     }
+    console.log(`[input] \u5358\u4E00Input.insertText\u30922\u56DE\u78BA\u8A8D\u3067\u304D\u305A\u3001\u30C1\u30E3\u30F3\u30AF\u65B9\u5F0F\u3078\u30D5\u30A9\u30FC\u30EB\u30D0\u30C3\u30AF: ${lastDirectError}`);
     await this.insertByChunks(prompt);
   }
-  async pasteViaClipboard(prompt) {
+  async insertDirect(prompt) {
+    if (await this.editorLength() > 0) await this.clearEditor();
     await this.bringToFront();
-    await this.grantClipboard();
     await this.focusEditor();
-    await this.evalWithReconnect("window.focus(); true", 5e3);
-    await this.evalWithReconnect(`navigator.clipboard.writeText(${JSON.stringify(prompt)})`, 15e3);
-    for (let i = 0; i < 6; i++) {
-      await this.evalWithReconnect(CLEAR_EDITOR_JS);
+    const timeoutMs = prompt.length > 12e3 ? 9e4 : prompt.length > 5e3 ? 6e4 : 3e4;
+    await this.cdpMethod("Input.insertText", { text: prompt }, timeoutMs);
+    let final = await this.editorState();
+    for (let poll = 0; poll < 12 && (!final.found || final.text !== prompt); poll++) {
       await sleep(150);
-      if (await this.editorLength() === 0) break;
+      final = await this.editorState();
     }
-    await this.focusEditor();
-    await this.evalWithReconnect("(() => { const s = getSelection(); if (!s || !document.activeElement) return; s.selectAllChildren(document.activeElement); s.collapseToEnd() })()", 1e4);
-    await this.cdpMethod("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "v", code: "KeyV", windowsVirtualKeyCode: 86, modifiers: 2 });
-    await this.cdpMethod("Input.dispatchKeyEvent", { type: "keyUp", key: "v", code: "KeyV", windowsVirtualKeyCode: 86, modifiers: 2 });
-    await sleep(700);
-    const len = Number(await this.editorLength());
-    if (len < prompt.length * 0.9) throw new Error(`\u8CBC\u308A\u4ED8\u3051\u5F8C\u306E\u9577\u3055\u4E0D\u8DB3 (\u671F\u5F85 ~${prompt.length}, \u5B9F\u969B ${len})`);
+    if (!final.found || final.text !== prompt) throw new Error(`\u8CBC\u308A\u4ED8\u3051\u5F8C\u306E\u5185\u5BB9\u4E0D\u4E00\u81F4 (${textMismatchDiagnostic(prompt, final.text)})`);
+    const send = await this.waitSendReady(6e3);
+    if (!send.ready) throw new Error("\u5358\u4E00Input.insertText\u5F8C\u3082\u9001\u4FE1\u30DC\u30BF\u30F3\u304C\u6709\u52B9\u306B\u306A\u308A\u307E\u305B\u3093\u3067\u3057\u305F");
   }
   async insertByChunks(prompt) {
     if (await this.editorLength() > 0) {
@@ -7319,7 +7957,9 @@ var CopilotEdgeClient = class {
         const before = await this.editorState();
         if (!before.found) throw new Error("\u5165\u529B\u6B04\u304C\u518D\u63CF\u753B\u4E2D\u3067\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F");
         if (!prompt.startsWith(before.text)) {
-          if (rebuilds >= 2) throw new Error(`\u4F9D\u983C\u6587\u306E\u5165\u529B\u5185\u5BB9\u304C\u4F4D\u7F6E ${before.text.length} \u3067\u4E0D\u4E00\u81F4\u306B\u306A\u308A\u307E\u3057\u305F`);
+          const diagnostic = textMismatchDiagnostic(prompt, before.text);
+          console.warn(`[input] DOM\u6587\u5B57\u5217\u4E0D\u4E00\u81F4: ${diagnostic}`);
+          if (rebuilds >= 2) throw new Error(`\u4F9D\u983C\u6587\u306E\u5165\u529B\u5185\u5BB9\u304C\u4E00\u81F4\u3057\u307E\u305B\u3093\u3067\u3057\u305F (${diagnostic})`);
           await this.clearEditor();
           pos = 0;
           rebuilds++;
@@ -7360,7 +8000,7 @@ var CopilotEdgeClient = class {
       }
     }
     const final = await this.editorState();
-    if (!final.found || !final.text.startsWith(prompt)) {
+    if (!final.found || final.text !== prompt) {
       throw new Error(`\u4F9D\u983C\u6587\u306E\u5165\u529B\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F (\u671F\u5F85 ${prompt.length} / \u5B9F\u969B ${final.text.length})`);
     }
   }
@@ -7396,11 +8036,61 @@ var CopilotEdgeClient = class {
     })()`;
     if (await this.evalWithReconnect(js) !== "ok") throw new Error("\u5165\u529B\u6B04\u306B\u30D5\u30A9\u30FC\u30AB\u30B9\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
   }
-  async clickSend() {
-    const raw = await this.evalWithReconnect(CLICK_SEND_JS);
-    if (!JSON.parse(String(raw)).clicked) {
-      throw new Error("\u6709\u52B9\u306A\u9001\u4FE1\u30DC\u30BF\u30F3\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F");
+  async waitSendReady(timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    let latest = { ready: false, inventory: [] };
+    do {
+      try {
+        latest = JSON.parse(String(await this.evalWithReconnect(COPILOT_SEND_READY_JS)));
+        if (latest.ready) return latest;
+      } catch {
+      }
+      if (Date.now() < deadline) await sleep(150);
+    } while (Date.now() < deadline);
+    return latest;
+  }
+  async waitSendEstablished(baselineText, baselineInputLength, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    let notReadySamples = 0;
+    do {
+      const state = await this.readScreenState(5e3);
+      const inputLength = await this.editorLength();
+      const ready = await this.waitSendReady(1);
+      if (state.generating || baselineText && state.text && state.text !== baselineText || baselineInputLength > 0 && inputLength >= 0 && inputLength <= 2) return true;
+      notReadySamples = ready.ready ? 0 : notReadySamples + 1;
+      if (notReadySamples >= 2) return true;
+      if (Date.now() < deadline) await sleep(150);
+    } while (Date.now() < deadline);
+    return false;
+  }
+  async clickSend(baselineText = "") {
+    const ready = await this.waitSendReady(6e3);
+    if (!ready.ready) {
+      const diagnostic = JSON.stringify(ready.inventory ?? []).slice(0, 3e3);
+      console.log(`[send] candidate inventory: ${diagnostic}`);
+      throw new Error(`\u6709\u52B9\u306A\u9001\u4FE1\u30DC\u30BF\u30F3\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u5019\u88DC\u8A3A\u65AD: ${diagnostic}`);
     }
+    const baselineInputLength = await this.editorLength();
+    const raw = await this.evalWithReconnect(COPILOT_CLICK_SEND_JS);
+    const result = JSON.parse(String(raw));
+    if (!result.clicked) {
+      const diagnostic = JSON.stringify(result.inventory ?? []).slice(0, 3e3);
+      console.log(`[send] candidate inventory: ${diagnostic}`);
+      throw new Error(`\u6709\u52B9\u306A\u9001\u4FE1\u30DC\u30BF\u30F3\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u5019\u88DC\u8A3A\u65AD: ${diagnostic}`);
+    }
+    if (await this.waitSendEstablished(baselineText, baselineInputLength, 1800)) return;
+    const x = Number(result.selected?.rect?.cx);
+    const y = Number(result.selected?.rect?.cy);
+    if (Number.isFinite(x) && Number.isFinite(y) && x >= 0 && y >= 0) {
+      await this.cdpMethod("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
+      await sleep(80);
+      await this.cdpMethod("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
+      if (await this.waitSendEstablished(baselineText, baselineInputLength, 1800)) {
+        console.log("[send] synthetic click\u672A\u6210\u7ACB\u306E\u305F\u3081CDP native mouse\u3067\u9001\u4FE1");
+        return;
+      }
+    }
+    throw new Error("\u9001\u4FE1\u30DC\u30BF\u30F3\u64CD\u4F5C\u5F8C\u3082\u751F\u6210\u958B\u59CB\u30FB\u5165\u529B\u6D88\u53BB\u30FB\u5FDC\u7B54\u5897\u52A0\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
   }
   async readScreenState(timeoutMs = 15e3) {
     const raw = await this.evalWithReconnect(COPILOT_SCREEN_STATE_JS, timeoutMs);
@@ -7414,11 +8104,12 @@ var CopilotEdgeClient = class {
     };
   }
   async waitResponse(baseline, signal) {
+    const startedAt = Date.now();
     const deadline = Date.now() + this.s.responseTimeoutSec * 1e3;
     let lastText = "";
     let lastChange = Date.now();
     let sawNewText = false;
-    let completionState = { stableLength: null, stableSinceMs: null };
+    let completionState = { stableText: null, stableSinceMs: null };
     while (Date.now() < deadline) {
       throwIfAborted(signal);
       const remainingMs = deadline - Date.now();
@@ -7436,15 +8127,21 @@ var CopilotEdgeClient = class {
       const quietFor = Date.now() - lastChange;
       const completion = updateResponseCompletionState(completionState, {
         observedAtMs: Date.now(),
-        textLength: sawNewText && st.text === lastText ? lastText.length : 0,
+        text: sawNewText && st.text === lastText ? lastText : "",
         generating: st.generating,
         copyEnabled: st.copyEnabled
       });
       completionState = completion.state;
       if (completion.ready) {
-        const answer = await this.finalizeAnswer(lastText, deadline);
+        const completionReadyAt = Date.now();
+        const visibleAnswer = this.cleanResponse(lastText);
+        const answer = visibleAnswer || await this.finalizeAnswer(lastText, deadline);
         assertResponseDeadline(deadline, this.s.responseTimeoutSec);
-        return answer;
+        return {
+          answer,
+          generationWaitMs: completionReadyAt - startedAt,
+          completionRetrievalMs: Date.now() - completionReadyAt
+        };
       }
       if (!st.generating && sawNewText && quietFor > this.s.stallTimeoutSec * 1e3) {
         throw new Error("Copilot \u306E\u5FDC\u7B54\u304C\u505C\u6EDE\u3057\u305F\u305F\u3081\u8AE6\u3081\u307E\u3057\u305F");
@@ -7465,29 +8162,68 @@ var CopilotEdgeClient = class {
       const raw = await this.evalWithReconnect(js, 3e4);
       const r = JSON.parse(String(raw));
       if (r.changed) console.log(`[model] ${r.before ?? "?"} -> ${r.after ?? r.picked ?? "?"}`);
+      else if (["switcher_not_found", "menu_not_found", "model_not_in_menu"].includes(r.reason ?? "")) console.warn(`[model] \u5229\u7528\u4E0D\u53EF\u306E\u305F\u3081UI\u65E2\u5B9A\u3092\u7D99\u7D9A: ${r.reason}`);
     } catch (err) {
       console.log(`[model] \u5207\u66FF\u30B9\u30AD\u30C3\u30D7(\u7D99\u7D9A): ${err.message}`);
     }
   }
   async complete(prompt, signal) {
+    const totalStartedAt = Date.now();
+    this.lastTiming = null;
     throwIfAborted(signal);
+    let phaseStartedAt = Date.now();
     await this.ensureEdge();
     await this.ensurePage();
+    const connectionMs = Date.now() - phaseStartedAt;
+    phaseStartedAt = Date.now();
     await this.freshChat();
+    const sessionCreationMs = Date.now() - phaseStartedAt;
+    phaseStartedAt = Date.now();
     await this.waitInputReady(120, signal);
     if (this.visibleSessionId) {
       await this.stampVisibleSessionMarker(this.visibleSessionId);
       await this.bringToFront();
     }
+    const inputReadyMs = Date.now() - phaseStartedAt;
+    phaseStartedAt = Date.now();
     await this.selectModel();
+    const modelSelectionMs = Date.now() - phaseStartedAt;
     throwIfAborted(signal);
+    phaseStartedAt = Date.now();
     await this.waitInputReady(30, signal);
     await this.assertTrustedOrigin();
+    const prePromptReadyMs = Date.now() - phaseStartedAt;
+    phaseStartedAt = Date.now();
     await this.insertPrompt(prompt);
+    const promptWriteMs = Date.now() - phaseStartedAt;
+    phaseStartedAt = Date.now();
     const baseline = (await this.readScreenState()).text;
-    await this.clickSend();
+    const baselineReadMs = Date.now() - phaseStartedAt;
+    phaseStartedAt = Date.now();
+    await this.clickSend(baseline);
+    const sendMs = Date.now() - phaseStartedAt;
     throwIfAborted(signal);
-    return this.waitResponse(baseline, signal);
+    const response = await this.waitResponse(baseline, signal);
+    this.lastTiming = {
+      connectionMs,
+      sessionCreationMs,
+      inputReadyMs,
+      modelSelectionMs,
+      prePromptReadyMs,
+      promptWriteMs,
+      baselineReadMs,
+      sendMs,
+      generationWaitMs: response.generationWaitMs,
+      completionRetrievalMs: response.completionRetrievalMs,
+      totalMs: Date.now() - totalStartedAt,
+      promptChars: prompt.length,
+      responseChars: response.answer.length
+    };
+    console.log("[copilot-timing] " + JSON.stringify(this.lastTiming));
+    return response.answer;
+  }
+  getLastTiming() {
+    return this.lastTiming ? { ...this.lastTiming } : null;
   }
   close() {
     this.cdp?.close();
@@ -7620,7 +8356,7 @@ async function main() {
   const cfg = loadConfig(argValue("--config"));
   const workspaceArg = argValue("--workspace") ?? positionalWorkspace();
   const workspace = workspaceArg ? import_node_path6.default.resolve(workspaceArg) : process.cwd();
-  await startRepl(cfg, { workspace, restrictToWorkspace: cfg.restrictToWorkspace ?? true, weatherDefaultLocation: cfg.weather?.defaultLocation });
+  await startRepl(cfg, { workspace, restrictToWorkspace: cfg.restrictToWorkspace ?? true, safeCommandOnly: cfg.safeCommandOnly === true, weatherDefaultLocation: cfg.weather?.defaultLocation });
 }
 main().catch((err) => {
   console.error(err instanceof Error ? err.message : err);

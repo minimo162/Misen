@@ -2,3 +2,5 @@ node_modules/
 .tmp/
 config.json
 *.log
+vendor/opencode/*.exe
+vendor/opencode/*.download

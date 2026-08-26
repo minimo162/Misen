@@ -34,14 +34,20 @@ export interface CopilotSettings {
 
 export interface ResponseCompletionSample {
   observedAtMs: number
-  textLength: number
+  text: string
   generating: boolean
   copyEnabled: boolean
 }
 
 export interface ResponseCompletionState {
-  stableLength: number | null
+  stableText: string | null
   stableSinceMs: number | null
+}
+
+export function normalizeCopilotEditorText(value: string): string {
+  // Lexical inserts these caret markers at Input.insertText chunk boundaries.
+  // They are DOM implementation details and are not part of the submitted text.
+  return value.replace(/[\u200B\u200C]/gu, '')
 }
 
 export interface CopilotResponseCandidate {
@@ -138,12 +144,12 @@ export function updateResponseCompletionState(
   previous: ResponseCompletionState,
   sample: ResponseCompletionSample
 ): { state: ResponseCompletionState; ready: boolean } {
-  if (sample.generating || !sample.copyEnabled || sample.textLength <= 0) {
-    return { state: { stableLength: null, stableSinceMs: null }, ready: false }
+  if (sample.generating || !sample.copyEnabled || sample.text.length <= 0) {
+    return { state: { stableText: null, stableSinceMs: null }, ready: false }
   }
-  if (previous.stableLength !== sample.textLength || previous.stableSinceMs === null) {
+  if (previous.stableText !== sample.text || previous.stableSinceMs === null) {
     return {
-      state: { stableLength: sample.textLength, stableSinceMs: sample.observedAtMs },
+      state: { stableText: sample.text, stableSinceMs: sample.observedAtMs },
       ready: false
     }
   }
@@ -250,28 +256,49 @@ const FRESH_CHAT_JS = `(() => {
   return JSON.stringify({ clicked: false });
 })()`
 
-const CLICK_SEND_JS = `(() => {
+export const COPILOT_CLICK_SEND_JS = `(() => {
   ${VISIBLE_JS}
   ${DOCS_JS}
   const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button, [role="button"]')));
   const exclude = /stop|cancel|停止|キャンセル|regenerate|再生成|attach|添付|microphone|voice|ボイス|音声|new chat|新しいチャット|clear|クリア|close|閉じる|search|検索|library|ライブラリ|file|ファイル/;
+  const structural = b => b.matches('button[type="submit"],.fai-SendButton,[class*="SendButton" i],[data-testid*="send" i],[data-automation-id*="send" i]');
+  const inventory = b => { const r=b.getBoundingClientRect(); let x=r.x,y=r.y,w=b.ownerDocument&&b.ownerDocument.defaultView; try{while(w&&w!==w.top){const f=w.frameElement;if(!f)break;const fr=f.getBoundingClientRect();x+=fr.x;y+=fr.y;w=f.ownerDocument&&f.ownerDocument.defaultView;}}catch(e){} return {ariaLabel:b.getAttribute('aria-label')||'',title:b.title||'',testId:b.getAttribute('data-testid')||'',automationId:b.getAttribute('data-automation-id')||'',className:typeof b.className==='string'?b.className:'',type:b.getAttribute('type')||'',disabled:!!b.disabled,ariaDisabled:b.getAttribute('aria-disabled')||'',visible:__vis(b),rect:{x,y,width:r.width,height:r.height,cx:x+r.width/2,cy:y+r.height/2}}; };
   const clickable = [];
   for (const b of buttons) {
     const label = (b.getAttribute('aria-label') || b.title || b.textContent || '').trim();
-    if (!label) continue;
     const lower = label.toLowerCase();
+    const identity = [lower,b.getAttribute('data-testid'),b.getAttribute('data-automation-id'),typeof b.className==='string'?b.className:''].filter(Boolean).join(' ').toLowerCase();
     let score = 0;
     if (/^(送信|send)$/i.test(label)) score += 1000;
+    else if (structural(b)) score += 600;
     else if (/送信|send/i.test(lower)) score += 400;
     if (score <= 0) continue;
-    if (exclude.test(lower)) continue;
+    if (exclude.test(identity)) continue;
     if (b.disabled || b.getAttribute('aria-disabled') === 'true') continue;
     if (!__vis(b)) continue;
-    clickable.push({ el: b, score });
+    clickable.push({ el: b, score, inventory: inventory(b) });
   }
   clickable.sort((a, b) => b.score - a.score);
-  if (clickable[0]) { clickable[0].el.click(); return JSON.stringify({ clicked: true }); }
-  return JSON.stringify({ clicked: false });
+  if (clickable[0]) { clickable[0].el.click(); return JSON.stringify({ clicked: true, selected:clickable[0].inventory }); }
+  const inputSelectors=['#m365-chat-editor-target-element','[data-lexical-editor="true"][contenteditable]','[role="textbox"][contenteditable]'];
+  let nearby=[];
+  for(const d of __docs)for(const selector of inputSelectors){const input=d.querySelector(selector);if(!input)continue;let scope=input.parentElement;for(let depth=0;scope&&depth<6;depth++,scope=scope.parentElement){const found=Array.from(scope.querySelectorAll('button,[role="button"]'));if(found.length){nearby=found;break;}}if(nearby.length)break;}
+  const diagnosticButtons=(nearby.length?nearby:buttons).slice(-32);
+  return JSON.stringify({ clicked: false, inventory: diagnosticButtons.map(inventory) });
+})()`
+
+export const COPILOT_SEND_READY_JS = `(() => {
+  ${VISIBLE_JS}
+  ${DOCS_JS}
+  const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button, [role="button"]')));
+  const structural = b => b.matches('button[type="submit"],.fai-SendButton,[class*="SendButton" i],[data-testid*="send" i],[data-automation-id*="send" i]');
+  const inventory = b => { const r=b.getBoundingClientRect(); return {ariaLabel:b.getAttribute('aria-label')||'',title:b.title||'',testId:b.getAttribute('data-testid')||'',automationId:b.getAttribute('data-automation-id')||'',className:typeof b.className==='string'?b.className:'',type:b.getAttribute('type')||'',disabled:!!b.disabled,ariaDisabled:b.getAttribute('aria-disabled')||'',visible:__vis(b),rect:{x:r.x,y:r.y,width:r.width,height:r.height,cx:r.x+r.width/2,cy:r.y+r.height/2}}; };
+  const candidates = buttons.filter(b => {
+    const label=(b.getAttribute('aria-label')||b.title||b.textContent||'').trim();
+    return structural(b) || /^(送信|send)$/i.test(label);
+  });
+  const ready = candidates.find(b => __vis(b) && !b.disabled && b.getAttribute('aria-disabled') !== 'true');
+  return JSON.stringify({ready:!!ready,inventory:candidates.slice(-32).map(inventory)});
 })()`
 
 const EDITOR_LENGTH_JS = `(() => {
@@ -280,7 +307,7 @@ const EDITOR_LENGTH_JS = `(() => {
   const sels = ${JSON.stringify(['#m365-chat-editor-target-element', '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
   for (const d of __docs) for (const s of sels) {
     const el = d.querySelector(s);
-    if (__vis(el)) return String((el.textContent || '').length);
+    if (__vis(el)) return String((el.textContent || '').replace(/[\\u200B\\u200C]/g, '').length);
   }
   return '-1';
 })()`
@@ -291,10 +318,37 @@ const EDITOR_STATE_JS = `(() => {
   const sels = ${JSON.stringify(['#m365-chat-editor-target-element', '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
   for (const d of __docs) for (const s of sels) {
     const el = d.querySelector(s);
-    if (__vis(el)) return JSON.stringify({ found: true, text: String(el.textContent || ''), active: d.activeElement === el });
+    if (__vis(el)) return JSON.stringify({ found: true, text: String(el.textContent || '').replace(/[\\u200B\\u200C]/g, ''), active: d.activeElement === el });
   }
   return JSON.stringify({ found: false, text: '', active: false });
 })()`
+
+function textMismatchDiagnostic(expected: string, actual: string): string {
+  let index = 0
+  while (index < expected.length && index < actual.length && expected[index] === actual[index]) index++
+  const start = Math.max(0, index - 12)
+  const end = index + 20
+  const expectedSlice = expected.slice(start, end)
+  const actualSlice = actual.slice(start, end)
+  const code = (value: string) => Array.from(value).map((char) => char.codePointAt(0)?.toString(16).padStart(4, '0')).join(' ')
+  return `first=${index} expected=${JSON.stringify(expectedSlice)} [${code(expectedSlice)}] actual=${JSON.stringify(actualSlice)} [${code(actualSlice)}] lengths=${expected.length}/${actual.length}`
+}
+
+export interface CopilotPhaseTiming {
+  connectionMs: number
+  sessionCreationMs: number
+  inputReadyMs: number
+  modelSelectionMs: number
+  prePromptReadyMs: number
+  promptWriteMs: number
+  baselineReadMs: number
+  sendMs: number
+  generationWaitMs: number
+  completionRetrievalMs: number
+  totalMs: number
+  promptChars: number
+  responseChars: number
+}
 
 const CLEAR_EDITOR_JS = `(() => {
   ${VISIBLE_JS}
@@ -548,6 +602,7 @@ export class CopilotEdgeClient {
   private visibleEdgePid: number | null = null
   private edgeProfileDir: string | null = null
   private visibleSessionId: string | null = null
+  private lastTiming: CopilotPhaseTiming | null = null
 
   constructor(cfg: AgentConfig) {
     this.s = resolveCopilotSettings(cfg)
@@ -830,14 +885,33 @@ export class CopilotEdgeClient {
     throw new Error('Copilot の入力欄が準備できませんでした (タイムアウト)。')
   }
 
-  private async freshChat(): Promise<void> {
-    const raw = await this.evalWithReconnect(FRESH_CHAT_JS)
-    if (!(JSON.parse(String(raw)) as { clicked: boolean }).clicked) {
-      await this.cdpMethod('Page.navigate', { url: this.s.url })
-      await sleep(3000)
-    } else {
-      await sleep(450)
+  private async freshSurfaceReady(): Promise<boolean> {
+    try {
+      const raw = await this.evalWithReconnect(COPILOT_SCREEN_STATE_JS, 5000)
+      const state = JSON.parse(String(raw)) as { inputReady?: boolean; responseCandidates?: unknown[] }
+      const inputLength = await this.editorLength()
+      return state.inputReady === true && Array.isArray(state.responseCandidates) && state.responseCandidates.length === 0 && inputLength >= 0 && inputLength <= 2
+    } catch {
+      return false
     }
+  }
+
+  private async waitFreshSurface(timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs
+    do {
+      if (await this.freshSurfaceReady()) return true
+      if (Date.now() < deadline) await sleep(200)
+    } while (Date.now() < deadline)
+    return false
+  }
+
+  private async freshChat(): Promise<void> {
+    if (await this.freshSurfaceReady()) return
+    const raw = await this.evalWithReconnect(FRESH_CHAT_JS)
+    const clicked = (JSON.parse(String(raw)) as { clicked: boolean }).clicked
+    if (clicked && await this.waitFreshSurface(5000)) return
+    await this.cdpMethod('Page.navigate', { url: this.s.url })
+    if (!await this.waitFreshSurface(30000)) throw new Error('新規Copilotセッションの空画面を確認できませんでした')
   }
 
   private async stampVisibleSessionMarker(sessionId: string): Promise<void> {
@@ -919,33 +993,36 @@ export class CopilotEdgeClient {
     if (prompt.length > this.s.maxPromptChars) {
       throw new Error(`依頼文が上限 ${this.s.maxPromptChars} 文字を超えています (${prompt.length} 文字)`)
     }
-    try {
-      await this.pasteViaClipboard(prompt)
-      return
-    } catch (err) {
-      console.log(`[paste] クリップボード貼り付けに失敗、チャンク方式へフォールバック: ${(err as Error).message}`)
+    let lastDirectError = ''
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await this.insertDirect(prompt)
+        if (attempt > 1) console.log('[input] 単一Input.insertTextの再試行で成功')
+        return
+      } catch (err) {
+        lastDirectError = (err as Error).message
+        console.log(`[input] 単一Input.insertText attempt=${attempt} failed: ${lastDirectError}`)
+        if (attempt < 2) await sleep(300)
+      }
     }
+    console.log(`[input] 単一Input.insertTextを2回確認できず、チャンク方式へフォールバック: ${lastDirectError}`)
     await this.insertByChunks(prompt)
   }
 
-  private async pasteViaClipboard(prompt: string): Promise<void> {
+  private async insertDirect(prompt: string): Promise<void> {
+    if ((await this.editorLength()) > 0) await this.clearEditor()
     await this.bringToFront()
-    await this.grantClipboard()
     await this.focusEditor()
-    await this.evalWithReconnect('window.focus(); true', 5000)
-    await this.evalWithReconnect(`navigator.clipboard.writeText(${JSON.stringify(prompt)})`, 15000)
-    for (let i = 0; i < 6; i++) {
-      await this.evalWithReconnect(CLEAR_EDITOR_JS)
+    const timeoutMs = prompt.length > 12000 ? 90000 : prompt.length > 5000 ? 60000 : 30000
+    await this.cdpMethod('Input.insertText', { text: prompt }, timeoutMs)
+    let final = await this.editorState()
+    for (let poll = 0; poll < 12 && (!final.found || final.text !== prompt); poll++) {
       await sleep(150)
-      if ((await this.editorLength()) === 0) break
+      final = await this.editorState()
     }
-    await this.focusEditor()
-    await this.evalWithReconnect('(() => { const s = getSelection(); if (!s || !document.activeElement) return; s.selectAllChildren(document.activeElement); s.collapseToEnd() })()', 10000)
-    await this.cdpMethod('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'v', code: 'KeyV', windowsVirtualKeyCode: 86, modifiers: 2 })
-    await this.cdpMethod('Input.dispatchKeyEvent', { type: 'keyUp', key: 'v', code: 'KeyV', windowsVirtualKeyCode: 86, modifiers: 2 })
-    await sleep(700)
-    const len = Number(await this.editorLength())
-    if (len < prompt.length * 0.9) throw new Error(`貼り付け後の長さ不足 (期待 ~${prompt.length}, 実際 ${len})`)
+    if (!final.found || final.text !== prompt) throw new Error(`貼り付け後の内容不一致 (${textMismatchDiagnostic(prompt, final.text)})`)
+    const send = await this.waitSendReady(6000)
+    if (!send.ready) throw new Error('単一Input.insertText後も送信ボタンが有効になりませんでした')
   }
 
   private async insertByChunks(prompt: string): Promise<void> {
@@ -962,7 +1039,9 @@ export class CopilotEdgeClient {
         const before = await this.editorState()
         if (!before.found) throw new Error('入力欄が再描画中で見つかりませんでした')
         if (!prompt.startsWith(before.text)) {
-          if (rebuilds >= 2) throw new Error(`依頼文の入力内容が位置 ${before.text.length} で不一致になりました`)
+          const diagnostic = textMismatchDiagnostic(prompt, before.text)
+          console.warn(`[input] DOM文字列不一致: ${diagnostic}`)
+          if (rebuilds >= 2) throw new Error(`依頼文の入力内容が一致しませんでした (${diagnostic})`)
           await this.clearEditor()
           pos = 0
           rebuilds++
@@ -1003,7 +1082,7 @@ export class CopilotEdgeClient {
       }
     }
     const final = await this.editorState()
-    if (!final.found || !final.text.startsWith(prompt)) {
+    if (!final.found || final.text !== prompt) {
       throw new Error(`依頼文の入力を確認できませんでした (期待 ${prompt.length} / 実際 ${final.text.length})`)
     }
   }
@@ -1042,11 +1121,62 @@ export class CopilotEdgeClient {
     if ((await this.evalWithReconnect(js)) !== 'ok') throw new Error('入力欄にフォーカスできませんでした')
   }
 
-  private async clickSend(): Promise<void> {
-    const raw = await this.evalWithReconnect(CLICK_SEND_JS)
-    if (!(JSON.parse(String(raw)) as { clicked: boolean }).clicked) {
-      throw new Error('有効な送信ボタンが見つかりませんでした')
+  private async waitSendReady(timeoutMs: number): Promise<{ ready: boolean; inventory: unknown }> {
+    const deadline = Date.now() + timeoutMs
+    let latest: { ready: boolean; inventory: unknown } = { ready: false, inventory: [] }
+    do {
+      try {
+        latest = JSON.parse(String(await this.evalWithReconnect(COPILOT_SEND_READY_JS))) as { ready: boolean; inventory: unknown }
+        if (latest.ready) return latest
+      } catch {}
+      if (Date.now() < deadline) await sleep(150)
+    } while (Date.now() < deadline)
+    return latest
+  }
+
+  private async waitSendEstablished(baselineText: string, baselineInputLength: number, timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs
+    let notReadySamples = 0
+    do {
+      const state = await this.readScreenState(5000)
+      const inputLength = await this.editorLength()
+      const ready = await this.waitSendReady(1)
+      if (state.generating || (baselineText && state.text && state.text !== baselineText) || (baselineInputLength > 0 && inputLength >= 0 && inputLength <= 2)) return true
+      notReadySamples = ready.ready ? 0 : notReadySamples + 1
+      if (notReadySamples >= 2) return true
+      if (Date.now() < deadline) await sleep(150)
+    } while (Date.now() < deadline)
+    return false
+  }
+
+  private async clickSend(baselineText = ''): Promise<void> {
+    const ready = await this.waitSendReady(6000)
+    if (!ready.ready) {
+      const diagnostic = JSON.stringify(ready.inventory ?? []).slice(0, 3000)
+      console.log(`[send] candidate inventory: ${diagnostic}`)
+      throw new Error(`有効な送信ボタンが見つかりませんでした。候補診断: ${diagnostic}`)
     }
+    const baselineInputLength = await this.editorLength()
+    const raw = await this.evalWithReconnect(COPILOT_CLICK_SEND_JS)
+    const result = JSON.parse(String(raw)) as { clicked: boolean; selected?: { rect?: { cx?: number; cy?: number } }; inventory?: unknown }
+    if (!result.clicked) {
+      const diagnostic = JSON.stringify(result.inventory ?? []).slice(0, 3000)
+      console.log(`[send] candidate inventory: ${diagnostic}`)
+      throw new Error(`有効な送信ボタンが見つかりませんでした。候補診断: ${diagnostic}`)
+    }
+    if (await this.waitSendEstablished(baselineText, baselineInputLength, 1800)) return
+    const x = Number(result.selected?.rect?.cx)
+    const y = Number(result.selected?.rect?.cy)
+    if (Number.isFinite(x) && Number.isFinite(y) && x >= 0 && y >= 0) {
+      await this.cdpMethod('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
+      await sleep(80)
+      await this.cdpMethod('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
+      if (await this.waitSendEstablished(baselineText, baselineInputLength, 1800)) {
+        console.log('[send] synthetic click未成立のためCDP native mouseで送信')
+        return
+      }
+    }
+    throw new Error('送信ボタン操作後も生成開始・入力消去・応答増加を確認できませんでした')
   }
 
   private async readScreenState(timeoutMs = 15000): Promise<{ text: string; generating: boolean; copyEnabled: boolean; signinRequired: boolean }> {
@@ -1065,12 +1195,13 @@ export class CopilotEdgeClient {
     }
   }
 
-  private async waitResponse(baseline: string, signal?: AbortSignal): Promise<string> {
+  private async waitResponse(baseline: string, signal?: AbortSignal): Promise<{ answer: string; generationWaitMs: number; completionRetrievalMs: number }> {
+    const startedAt = Date.now()
     const deadline = Date.now() + this.s.responseTimeoutSec * 1000
     let lastText = ''
     let lastChange = Date.now()
     let sawNewText = false
-    let completionState: ResponseCompletionState = { stableLength: null, stableSinceMs: null }
+    let completionState: ResponseCompletionState = { stableText: null, stableSinceMs: null }
     while (Date.now() < deadline) {
       throwIfAborted(signal)
       const remainingMs = deadline - Date.now()
@@ -1088,15 +1219,25 @@ export class CopilotEdgeClient {
       const quietFor = Date.now() - lastChange
       const completion = updateResponseCompletionState(completionState, {
         observedAtMs: Date.now(),
-        textLength: sawNewText && st.text === lastText ? lastText.length : 0,
+        text: sawNewText && st.text === lastText ? lastText : '',
         generating: st.generating,
         copyEnabled: st.copyEnabled
       })
       completionState = completion.state
       if (completion.ready) {
-        const answer = await this.finalizeAnswer(lastText, deadline)
+        const completionReadyAt = Date.now()
+        // The stable response candidate is already the same visible DOM text
+        // used by YakuLingo. Avoid a second copy-button/clipboard round trip
+        // after the strict completion gate; retain clipboard recovery only for
+        // the unexpected case where the DOM candidate cleans to an empty value.
+        const visibleAnswer = this.cleanResponse(lastText)
+        const answer = visibleAnswer || await this.finalizeAnswer(lastText, deadline)
         assertResponseDeadline(deadline, this.s.responseTimeoutSec)
-        return answer
+        return {
+          answer,
+          generationWaitMs: completionReadyAt - startedAt,
+          completionRetrievalMs: Date.now() - completionReadyAt
+        }
       }
       if (!st.generating && sawNewText && quietFor > this.s.stallTimeoutSec * 1000) {
         throw new Error('Copilot の応答が停滞したため諦めました')
@@ -1119,32 +1260,72 @@ export class CopilotEdgeClient {
       .replace('__SWITCHER__', JSON.stringify('#gptModeSwitcher'))
     try {
       const raw = await this.evalWithReconnect(js, 30000)
-      const r = JSON.parse(String(raw)) as { changed?: boolean; reason?: string; before?: string; after?: string; picked?: string }
+      const r = JSON.parse(String(raw)) as { changed?: boolean; reason?: string; before?: string; after?: string; picked?: string; tried?: string[] }
       if (r.changed) console.log(`[model] ${r.before ?? '?'} -> ${r.after ?? r.picked ?? '?'}`)
+      else if (['switcher_not_found', 'menu_not_found', 'model_not_in_menu'].includes(r.reason ?? '')) console.warn(`[model] 利用不可のためUI既定を継続: ${r.reason}`)
     } catch (err) {
       console.log(`[model] 切替スキップ(継続): ${(err as Error).message}`)
     }
   }
 
   async complete(prompt: string, signal?: AbortSignal): Promise<string> {
+    const totalStartedAt = Date.now()
+    this.lastTiming = null
     throwIfAborted(signal)
+    let phaseStartedAt = Date.now()
     await this.ensureEdge()
     await this.ensurePage()
+    const connectionMs = Date.now() - phaseStartedAt
+    phaseStartedAt = Date.now()
     await this.freshChat()
+    const sessionCreationMs = Date.now() - phaseStartedAt
+    phaseStartedAt = Date.now()
     await this.waitInputReady(120, signal)
     if (this.visibleSessionId) {
       await this.stampVisibleSessionMarker(this.visibleSessionId)
       await this.bringToFront()
     }
+    const inputReadyMs = Date.now() - phaseStartedAt
+    phaseStartedAt = Date.now()
     await this.selectModel()
+    const modelSelectionMs = Date.now() - phaseStartedAt
     throwIfAborted(signal)
+    phaseStartedAt = Date.now()
     await this.waitInputReady(30, signal)
     await this.assertTrustedOrigin()
+    const prePromptReadyMs = Date.now() - phaseStartedAt
+    phaseStartedAt = Date.now()
     await this.insertPrompt(prompt)
+    const promptWriteMs = Date.now() - phaseStartedAt
+    phaseStartedAt = Date.now()
     const baseline = (await this.readScreenState()).text
-    await this.clickSend()
+    const baselineReadMs = Date.now() - phaseStartedAt
+    phaseStartedAt = Date.now()
+    await this.clickSend(baseline)
+    const sendMs = Date.now() - phaseStartedAt
     throwIfAborted(signal)
-    return this.waitResponse(baseline, signal)
+    const response = await this.waitResponse(baseline, signal)
+    this.lastTiming = {
+      connectionMs,
+      sessionCreationMs,
+      inputReadyMs,
+      modelSelectionMs,
+      prePromptReadyMs,
+      promptWriteMs,
+      baselineReadMs,
+      sendMs,
+      generationWaitMs: response.generationWaitMs,
+      completionRetrievalMs: response.completionRetrievalMs,
+      totalMs: Date.now() - totalStartedAt,
+      promptChars: prompt.length,
+      responseChars: response.answer.length
+    }
+    console.log('[copilot-timing] ' + JSON.stringify(this.lastTiming))
+    return response.answer
+  }
+
+  getLastTiming(): CopilotPhaseTiming | null {
+    return this.lastTiming ? { ...this.lastTiming } : null
   }
 
   close(): void {

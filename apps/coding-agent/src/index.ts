@@ -24,7 +24,7 @@ async function main(): Promise<void> {
   const cfg = loadConfig(argValue('--config'))
   const workspaceArg = argValue('--workspace') ?? positionalWorkspace()
   const workspace = workspaceArg ? path.resolve(workspaceArg) : process.cwd()
-  await startRepl(cfg, { workspace, restrictToWorkspace: cfg.restrictToWorkspace ?? true, weatherDefaultLocation: cfg.weather?.defaultLocation })
+  await startRepl(cfg, { workspace, restrictToWorkspace: cfg.restrictToWorkspace ?? true, safeCommandOnly: cfg.safeCommandOnly === true, weatherDefaultLocation: cfg.weather?.defaultLocation })
 }
 
 main().catch((err) => {

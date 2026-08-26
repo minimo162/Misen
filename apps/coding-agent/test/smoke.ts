@@ -8,6 +8,8 @@ import { extractJsonReply, runAgentTurn, type AgentIO, type TextBackend } from '
 import { capabilityPolicy, type AgentConfig } from '../src/config'
 import type { ChatMessage } from '../src/llm'
 import {
+  COPILOT_CLICK_SEND_JS,
+  COPILOT_SEND_READY_JS,
   COPILOT_CLICK_COPY_JS,
   isResponseCopyControl,
   COPILOT_SCREEN_STATE_JS,
@@ -15,6 +17,7 @@ import {
   assertResponseDeadline,
   isStopGenerationControl,
   makeVisibleSessionMarker,
+  normalizeCopilotEditorText,
   resolveCopilotSettings,
   selectBrowserProcessId,
   selectLatestResponseCandidate,
@@ -23,9 +26,11 @@ import {
   type ResponseCompletionState
 } from '../src/copilot'
 
-import { getFileSnapshot, normalizeRunCommand, openAITools, parseToolResultMeta, rollbackFileChange, validateToolArgs, TOOL_DEFS, type ToolContext } from '../src/tools'
+import { formatHostCommandOutput, getFileSnapshot, normalizeRunCommand, normalizeWorkspaceOpenCommand, openAITools, parseToolResultMeta, prepareHostCommand, rollbackFileChange, validateToolArgs, TOOL_DEFS, type ToolContext } from '../src/tools'
 import { listApprovals, requestApproval, resolveApproval } from '../src/approvals'
 import { getWeather, weatherCodeLabel, type WeatherFetcher } from '../src/weather'
+import { convertCopilotResponse } from '../src/converter'
+import { buildBridgePrompt, createOpenAICompatibleBridgeServer, interpretBridgeResponse, type OpenAITool } from '../src/openai-bridge'
 
 function makeCtx(root: string, restrict = true): ToolContext {
   return { workspace: root, restrictToWorkspace: restrict }
@@ -119,6 +124,8 @@ async function testTools(): Promise<void> {
 
   fs.mkdirSync(path.join(root, 'batch'), { recursive: true })
   fs.mkdirSync(path.join(root, 'other'), { recursive: true })
+  const directOnly = await get('list_files').run({ path: '.', recursive: false }, ctx)
+  assert.ok(directOnly.includes('batch/') && directOnly.includes('other/') && !directOnly.includes('batch/utf8.txt'), 'recursive=false must return only immediate entries')
   fs.writeFileSync(path.join(root, 'batch', 'utf8.txt'), 'UTF-8本文')
   fs.writeFileSync(path.join(root, 'batch', 'bom.txt'), Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('BOM本文')]))
   fs.writeFileSync(path.join(root, 'batch', 'cp932.txt'), Buffer.from([0x43, 0x50, 0x39, 0x33, 0x32, 0x3a, 0x93, 0xfa, 0x96, 0x7b]))
@@ -148,48 +155,55 @@ async function testTools(): Promise<void> {
   }
   assert.ok(readFilesOutsideThrew, 'read_files must reject workspace escape')
 
+  const bundledWorkbook = path.resolve(__dirname, '..', '..', '..', 'demo', 'renketsu-demo', 'workspace', '集計台帳.xlsx')
+  fs.copyFileSync(bundledWorkbook, path.join(root, 'batch', 'real.xlsx'))
+  const workbookRead = await get('read_xlsx').run({ path: 'batch/real.xlsx' }, ctx)
+  assert.ok(workbookRead.includes('"ok":true') && workbookRead.includes('sheets'), 'read_xlsx must read an arbitrary workspace workbook through the bundled helper')
+  assert.ok(workbookRead.includes('連結台帳') && workbookRead.includes('確認事項'), 'read_xlsx must preserve Japanese sheet names across Windows PowerShell stdout')
+  await assert.rejects(() => get('read_xlsx').run({ path: 'batch/utf8.txt' }, ctx), /\.xlsx/u)
+
   const cmd = await get('run_command').run({ command: 'echo smoke-ok' }, ctx)
   assert.ok(cmd.includes('smoke-ok'))
 
   assert.strictEqual(
     normalizeRunCommand('powershell -File tools/Read-Xlsx.ps1 reports/OS04.xlsx reports/OS05.xlsx'),
-    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\*.xlsx'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path reports\\*.xlsx'
   )
   assert.strictEqual(
     normalizeRunCommand('powershell.exe -File tools\\Read-Xlsx.ps1 "reports\\one file.xlsx"'),
-    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path "reports\\one file.xlsx"'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path "reports\\one file.xlsx"'
   )
   assert.strictEqual(
     normalizeRunCommand('tools/Read-Xlsx.ps1 reports/OS04.xlsx'),
-    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx'
   )
   assert.strictEqual(
     normalizeRunCommand('powershell -NoProfile -File tools/Read-Xlsx.ps1 reports/OS04.xlsx,reports/OS05.xlsx,集計台帳.xlsx'),
-    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\*.xlsx'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path reports\\*.xlsx'
   )
   assert.strictEqual(
     normalizeRunCommand('powershell -File tools/Update-Ledger.ps1 work/extracted.json rates/レート表.csv 集計台帳.xlsx'),
-    'powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\レート表.csv -Ledger 集計台帳.xlsx'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\レート表.csv -Ledger 集計台帳.xlsx'
   )
   assert.strictEqual(
     normalizeRunCommand('tools\\Update-Ledger.ps1 work\\extracted.json rates\\レート表.csv 集計台帳.xlsx'),
-    'powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\レート表.csv -Ledger 集計台帳.xlsx'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\レート表.csv -Ledger 集計台帳.xlsx'
   )
   assert.strictEqual(
     normalizeRunCommand('powershell.exe -File tools\\Update-Ledger.ps1 -Ledger 集計台帳.xlsx -Extracted work\\extracted.json -Rates rates\\レート表.csv'),
-    'powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\レート表.csv -Ledger 集計台帳.xlsx'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\レート表.csv -Ledger 集計台帳.xlsx'
   )
   assert.strictEqual(
     normalizeRunCommand('powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'),
-    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx'
   )
   assert.strictEqual(
     normalizeRunCommand('powershell.exe "-ExecutionPolicy" Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'),
-    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx'
   )
   assert.strictEqual(
     normalizeRunCommand('powershell.exe -ExecutionPolicy:Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'),
-    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx'
   )
   const bypassReadXlsx = await get('run_command').run({
     command: 'powershell.exe -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'
@@ -215,6 +229,35 @@ async function testTools(): Promise<void> {
     command: 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-Content -LiteralPath safe-write.txt -Value inside-ok"'
   }, ctx)
   assert.ok(fs.readFileSync(path.join(root, 'safe-write.txt'), 'utf8').includes('inside-ok'), 'workspace-local writes must remain allowed')
+  fs.writeFileSync(path.join(root, 'open-me.txt'), 'open safely')
+  fs.writeFileSync(path.join(root, 'ledger-open.xlsx'), 'not a real workbook')
+  fs.writeFileSync(path.join(root, 'blocked.cmd'), '@echo should-not-run')
+  fs.writeFileSync(path.join(root, 'blocked.ps1'), 'throw "should-not-run"')
+  fs.writeFileSync(path.join(root, 'blocked.exe'), 'not-an-executable')
+  fs.writeFileSync(path.join(root, 'blocked.lnk'), 'not-a-shortcut')
+  fs.writeFileSync(path.join(root, 'blocked.url'), '[InternetShortcut]\nURL=https://example.com')
+  for (const openCommand of ['open-me.txt', 'Invoke-Item open-me.txt', 'Start-Process -FilePath open-me.txt', 'start " open-me.txt"', 'open open-me.txt', 'excel.exe ledger-open.xlsx']) {
+    const normalizedOpen = normalizeWorkspaceOpenCommand(openCommand, ctx)
+    assert.ok(normalizedOpen?.includes('Invoke-Item -LiteralPath'), `safe workspace open must normalize: ${openCommand}`)
+  }
+  for (const blockedOpen of ['blocked.cmd', 'blocked.ps1', 'blocked.exe', 'blocked.lnk', 'blocked.url']) {
+    assert.throws(() => normalizeWorkspaceOpenCommand(`Invoke-Item ${blockedOpen}`, ctx), /安全に開ける/u, `executable/link open must be rejected: ${blockedOpen}`)
+  }
+  fs.mkdirSync(path.join(root, 'blocked-directory'))
+  assert.throws(() => normalizeWorkspaceOpenCommand('Invoke-Item blocked-directory', ctx), /通常ファイル以外/u)
+  const linked = path.join(root, 'linked.txt')
+  try {
+    fs.symlinkSync(path.join(root, 'open-me.txt'), linked, 'file')
+    assert.throws(() => normalizeWorkspaceOpenCommand('Invoke-Item linked.txt', ctx), /通常ファイル以外/u, 'reparse/symlink open must be rejected')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EPERM') throw err
+  }
+  assert.strictEqual(
+    formatHostCommandOutput('open open-me.txt', 'powershell.exe -NoProfile -Command "Invoke-Item -LiteralPath \'open-me.txt\'"', '', ''),
+    'アプリ起動コマンド成功: open open-me.txt'
+  )
+  assert.throws(() => prepareHostCommand('Invoke-Item ..\\outside.txt', ctx), /run_command拒否/u)
+  assert.throws(() => prepareHostCommand('Start-Process open-me.txt; whoami', ctx), /run_command拒否/u)
   assert.throws(
     () => normalizeRunCommand('powershell.exe -File tools\\Read-Xlsx.ps1 "reports\\x&whoami.xlsx"'),
     /複合コマンド/u,
@@ -250,6 +293,18 @@ async function testTools(): Promise<void> {
       `dangerous operation must be rejected: ${blockedCommand}`
     )
   }
+  for (const blockedStart of [
+    'powershell.exe -Command "Remove-Item safe-read.txt"',
+    'curl.exe https://example.com',
+    'reg.exe add HKCU\\Software\\CodingAgentSmoke /v Test /d 1',
+    'powershell.exe -EncodedCommand RwBlAHQALQBEAGEAdABlAA==',
+    'cmd.exe /c "echo x > ..\\escape.txt"'
+  ]) await assert.rejects(() => get('start_process').run({ command: blockedStart }, ctx), /run_command拒否/u, `start_process must share denial policy: ${blockedStart}`)
+  await assert.rejects(
+    () => get('start_process').run({ command: 'Invoke-Item open-me.txt', url: 'https://example.com/' }, { ...ctx, safeCommandOnly: true }),
+    /プレビューURL/u,
+    'safe mode must reject preview URLs before a process is started'
+  )
   const outsideName = `ca-smoke-outside-${process.pid}.txt`
   await assert.rejects(
     () => get('run_command').run({
@@ -280,8 +335,12 @@ async function testTools(): Promise<void> {
   }, ctx)) as { id: string; status: string }
   assert.ok(started.id && started.status === 'running')
   try {
-    await new Promise((resolve) => setTimeout(resolve, 150))
-    const processLog = JSON.parse(await get('read_process_log').run({ process_id: started.id }, ctx)) as { lines: string[]; nextOffset: number }
+    const deadline = Date.now() + 5000
+    let processLog = { lines: [] as string[], nextOffset: 0 }
+    while (Date.now() < deadline && !processLog.lines.join('\n').includes('process-smoke')) {
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      processLog = JSON.parse(await get('read_process_log').run({ process_id: started.id }, ctx)) as { lines: string[]; nextOffset: number }
+    }
     assert.ok(processLog.lines.join('\n').includes('process-smoke'))
     assert.ok(processLog.nextOffset >= processLog.lines.length)
     const stopped = JSON.parse(await get('stop_process').run({ process_id: started.id }, ctx)) as { status: string }
@@ -445,6 +504,25 @@ async function testCopilotChoosesFirstAction(): Promise<void> {
   assert.ok(answerBackend.prompts[0].includes('host.get_weather') && !answerBackend.prompts[0].includes('host.run_command(command)'))
   assert.deepStrictEqual(fs.readdirSync(answerRoot), ['evidence.txt'])
   fs.rmSync(answerRoot, { recursive: true, force: true })
+
+  const safeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-safe-'))
+  const safeBackend = new FakeBackend(['{"answer":"外部情報は取得できません"}\nAGENT_END'])
+  const safeCtx = { ...makeCtx(safeRoot), safeCommandOnly: true }
+  const safeAnswer = await runAgentTurn({ cfg, messages: [], userInput: '天気を教えて', ctx: safeCtx, io: ioStub(true), backend: safeBackend })
+  assert.strictEqual(safeAnswer.reply, '外部情報は取得できません')
+  assert.ok(!safeBackend.prompts[0].includes('host.get_weather'), 'safe command contract must hide network host tools')
+  assert.ok(!safeBackend.prompts[0].includes('任意のhostコマンド実行が許可'), 'safe prompt must not claim arbitrary command permission')
+  assert.ok(safeBackend.prompts[0].includes('既存のワークスペース内通常ファイル1件'))
+  assert.ok(safeBackend.prompts[0].includes('answerで利用者へ許可を尋ねず'))
+  const safeTools = openAITools({ allowArbitraryCommands: true, safeCommandOnly: true })
+  assert.ok(!safeTools.some((tool) => tool.function.name === 'host.get_weather'))
+  const safeStart = safeTools.find((tool) => tool.function.name === 'host.start_process')
+  assert.ok(safeStart && !('url' in ((safeStart.function.parameters.properties ?? {}) as Record<string, unknown>)), 'safe start_process schema must omit url')
+  assert.ok(safeTools.find((tool) => tool.function.name === 'host.run_command')?.function.description.includes('任意シェル'))
+  const deniedWeather = await runAgentTurn({ cfg, messages: [], userInput: '天気を教えて', ctx: safeCtx, io: ioStub(true), backend: new FakeBackend(['{"tool":"host.get_weather","args":{"location":"広島市"}}\nAGENT_END']) })
+  assert.strictEqual(deniedWeather.aborted, true)
+  assert.ok(deniedWeather.messages.at(-1)?.content?.includes('ネットワーク通信'))
+  fs.rmSync(safeRoot, { recursive: true, force: true })
 
   const toolRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-'))
   const toolBackend = new FakeBackend([
@@ -767,10 +845,10 @@ async function testCopilotVisibleSessionPidLifecycle(): Promise<void> {
 }
 
 async function testCopilotResponseCompletion(): Promise<void> {
-  const empty = (): ResponseCompletionState => ({ stableLength: null, stableSinceMs: null })
+  const empty = (): ResponseCompletionState => ({ stableText: null, stableSinceMs: null })
   let result = updateResponseCompletionState(empty(), {
     observedAtMs: 0,
-    textLength: 5000,
+    text: 'a'.repeat(5000),
     generating: true,
     copyEnabled: true
   })
@@ -779,7 +857,7 @@ async function testCopilotResponseCompletion(): Promise<void> {
 
   result = updateResponseCompletionState(empty(), {
     observedAtMs: 0,
-    textLength: 5000,
+    text: 'a'.repeat(5000),
     generating: false,
     copyEnabled: false
   })
@@ -788,13 +866,13 @@ async function testCopilotResponseCompletion(): Promise<void> {
 
   result = updateResponseCompletionState(empty(), {
     observedAtMs: 100,
-    textLength: 5000,
+    text: 'a'.repeat(5000),
     generating: false,
     copyEnabled: true
   })
   result = updateResponseCompletionState(result.state, {
     observedAtMs: 1200,
-    textLength: 7000,
+    text: 'b'.repeat(7000),
     generating: false,
     copyEnabled: true
   })
@@ -803,14 +881,14 @@ async function testCopilotResponseCompletion(): Promise<void> {
 
   result = updateResponseCompletionState(result.state, {
     observedAtMs: 2000,
-    textLength: 7000,
+    text: 'b'.repeat(7000),
     generating: false,
     copyEnabled: true
   })
   assert.strictEqual(result.ready, false)
   result = updateResponseCompletionState(result.state, {
     observedAtMs: 2200,
-    textLength: 7000,
+    text: 'b'.repeat(7000),
     generating: false,
     copyEnabled: true
   })
@@ -818,7 +896,16 @@ async function testCopilotResponseCompletion(): Promise<void> {
 
   result = updateResponseCompletionState(result.state, {
     observedAtMs: 2300,
-    textLength: 7000,
+    text: 'c'.repeat(7000),
+    generating: false,
+    copyEnabled: true
+  })
+  assert.strictEqual(result.ready, false, 'same-length content replacement must reset response stability')
+  assert.strictEqual(result.state.stableSinceMs, 2300)
+
+  result = updateResponseCompletionState(result.state, {
+    observedAtMs: 2400,
+    text: 'c'.repeat(7000),
     generating: false,
     copyEnabled: false
   })
@@ -827,13 +914,13 @@ async function testCopilotResponseCompletion(): Promise<void> {
 
   result = updateResponseCompletionState(empty(), {
     observedAtMs: 3000,
-    textLength: 7000,
+    text: 'b'.repeat(7000),
     generating: false,
     copyEnabled: true
   })
   result = updateResponseCompletionState(result.state, {
     observedAtMs: 4100,
-    textLength: 7000,
+    text: 'b'.repeat(7000),
     generating: true,
     copyEnabled: true
   })
@@ -882,6 +969,14 @@ async function testCopilotResponseCompletion(): Promise<void> {
   }
   new Function('document', 'window', `return ${COPILOT_SCREEN_STATE_JS}`)
   new Function('document', 'window', `return ${COPILOT_CLICK_COPY_JS}`)
+  new Function('document', 'window', `return ${COPILOT_CLICK_SEND_JS}`)
+  new Function('document', 'window', `return ${COPILOT_SEND_READY_JS}`)
+  assert.strictEqual(normalizeCopilotEditorText('前\u200B中\u200C後'), '前中後')
+  for (const required of ['button[type="submit"]', '.fai-SendButton', '[class*="SendButton" i]', '[data-testid*="send" i]', '[data-automation-id*="send" i]', 'exclude.test(identity)', 'ariaLabel', 'automationId', 'diagnosticButtons']) {
+    assert.ok(COPILOT_CLICK_SEND_JS.includes(required), `send-button detector missing ${required}`)
+    if (required !== 'exclude.test(identity)' && required !== 'diagnosticButtons') assert.ok(COPILOT_SEND_READY_JS.includes(required), `send-button readiness detector missing ${required}`)
+  }
+  assert.ok(fs.readFileSync(path.join(process.cwd(), 'src', 'copilot.ts'), 'utf8').includes("this.cdpMethod('Input.dispatchMouseEvent', { type: 'mousePressed'"), 'send path must retain native CDP mouse fallback')
   assert.ok(COPILOT_CLICK_COPY_JS.includes('scope=latest'))
   assert.ok(COPILOT_CLICK_COPY_JS.includes('others.length>0'))
   for (const required of ['CopyButtonTestId', 'CopyButtonContainerTestId', 'pre,code', 'copy\\s*(?:response|answer)']) {
@@ -898,7 +993,7 @@ async function testCopilotResponseCompletion(): Promise<void> {
   type DeadlineInternals = {
     readScreenState: (timeoutMs?: number) => Promise<{ text: string; generating: boolean; copyEnabled: boolean; signinRequired: boolean }>
     finalizeAnswer: (text: string) => Promise<string>
-    waitResponse: (baseline: string) => Promise<string>
+    waitResponse: (baseline: string) => Promise<{ answer: string; generationWaitMs: number; completionRetrievalMs: number }>
   }
   const deadlineInternal = deadlineClient as unknown as DeadlineInternals
   let finalized = false
@@ -1008,11 +1103,33 @@ async function testCopilotResponseCompletion(): Promise<void> {
       boundaryNow = waitPolls === 1 ? 1000 : 2100
       return { text: 'complete response', generating: false, copyEnabled: true, signinRequired: false }
     }
+    let waitBoundaryFinalized = false
     waitBoundary.finalizeAnswer = async () => {
+      waitBoundaryFinalized = true
       boundaryNow = 6000
       return 'complete response'
     }
-    await assert.rejects(waitBoundary.waitResponse('baseline'), /タイムアウト/)
+    const directDomResponse = await waitBoundary.waitResponse('baseline')
+    assert.strictEqual(directDomResponse.answer, 'complete response')
+    assert.strictEqual(waitBoundaryFinalized, false, 'stable visible DOM response must not perform a clipboard round trip')
+
+    boundaryNow = 3000
+    const emptyDomClient = new CopilotEdgeClient({
+      baseURL: '',
+      model: '',
+      provider: 'copilot-edge',
+      copilot: { responseTimeoutSec: 5, pollIntervalMs: 500 }
+    })
+    const emptyDom = emptyDomClient as unknown as DeadlineInternals
+    let emptyPolls = 0
+    emptyDom.readScreenState = async () => {
+      emptyPolls++
+      boundaryNow = emptyPolls === 1 ? 3000 : 4100
+      return { text: 'AGENT_END', generating: false, copyEnabled: true, signinRequired: false }
+    }
+    emptyDom.finalizeAnswer = async () => 'clipboard fallback response'
+    const clipboardFallback = await emptyDom.waitResponse('baseline')
+    assert.strictEqual(clipboardFallback.answer, 'clipboard fallback response')
   } finally {
     Date.now = realDateNow
   }
@@ -1028,7 +1145,7 @@ async function testCopilotResponseCompletion(): Promise<void> {
     insertPrompt: () => Promise<void>
     readScreenState: () => Promise<{ text: string; generating: boolean; copyEnabled: boolean; signinRequired: boolean }>
     clickSend: () => Promise<void>
-    waitResponse: (baseline: string) => Promise<string>
+    waitResponse: (baseline: string) => Promise<{ answer: string; generationWaitMs: number; completionRetrievalMs: number }>
   }
   const orderInternal = orderClient as unknown as CompleteInternals
   const order: string[] = []
@@ -1044,7 +1161,7 @@ async function testCopilotResponseCompletion(): Promise<void> {
     return { text: 'old response', generating: false, copyEnabled: true, signinRequired: false }
   }
   orderInternal.clickSend = async () => { order.push('send') }
-  orderInternal.waitResponse = async (baseline) => { order.push(`wait:${baseline}`); return 'done' }
+  orderInternal.waitResponse = async (baseline) => { order.push(`wait:${baseline}`); return { answer: 'done', generationWaitMs: 1, completionRetrievalMs: 2 } }
   assert.strictEqual(await orderClient.complete('prompt'), 'done')
   assert.ok(order.indexOf('baseline') < order.indexOf('send'))
   assert.strictEqual(order[order.length - 1], 'wait:old response')
@@ -1059,14 +1176,16 @@ async function testCopilotChunkFallback(): Promise<void> {
     focusEditor: () => Promise<void>
     bringToFront: () => Promise<void>
     cdpMethod: (name: string, params: Record<string, unknown>) => Promise<void>
+    waitSendReady: (timeoutMs: number) => Promise<{ ready: boolean; inventory: unknown }>
+    insertDirect: (prompt: string) => Promise<void>
     insertByChunks: (prompt: string) => Promise<void>
   }
   const internal = client as unknown as Internals
   const prompt = ('0123456789abcdef'.repeat(140)) + '\n末尾'
   let editor = ''
   let insertCalls = 0
-  internal.editorLength = async () => editor.length
-  internal.editorState = async () => ({ found: true, text: editor, active: true })
+  internal.editorLength = async () => normalizeCopilotEditorText(editor).length
+  internal.editorState = async () => ({ found: true, text: normalizeCopilotEditorText(editor), active: true })
   internal.clearEditor = async () => { editor = '' }
   internal.focusEditor = async () => {}
   internal.bringToFront = async () => {}
@@ -1074,11 +1193,87 @@ async function testCopilotChunkFallback(): Promise<void> {
     if (name !== 'Input.insertText') return
     const chunk = String(params.text ?? '')
     insertCalls++
-    editor += insertCalls === 2 ? chunk.slice(0, 120) : chunk
+    const inserted = insertCalls === 2 ? chunk.slice(0, 120) : chunk
+    editor += `${insertCalls > 1 ? '\u200B\u200C' : ''}${inserted}`
   }
+  internal.waitSendReady = async () => ({ ready: true, inventory: [] })
   await internal.insertByChunks(prompt)
-  assert.strictEqual(editor, prompt)
+  assert.strictEqual(normalizeCopilotEditorText(editor), prompt)
+  assert.ok(editor.includes('\u200B\u200C'), 'Lexical chunk boundary markers were not exercised')
   assert.ok(insertCalls > Math.ceil(prompt.length / 450))
+  editor = ''
+  insertCalls = 0
+  internal.cdpMethod = async (name, params) => {
+    if (name === 'Input.insertText') { insertCalls++; editor = String(params.text ?? '') }
+  }
+  await internal.insertDirect(prompt)
+  assert.strictEqual(editor, prompt)
+  assert.strictEqual(insertCalls, 1, 'YakuLingo-style direct input must use one Input.insertText call')
+
+  const garbageClient = new CopilotEdgeClient({ baseURL: '', model: '', provider: 'copilot-edge', copilot: { maxPromptChars: 5000 } })
+  const garbage = garbageClient as unknown as Internals
+  let garbageEditor = ''
+  garbage.editorLength = async () => garbageEditor.length
+  garbage.editorState = async () => ({ found: true, text: garbageEditor, active: true })
+  garbage.clearEditor = async () => { garbageEditor = '' }
+  garbage.focusEditor = async () => {}
+  garbage.bringToFront = async () => {}
+  garbage.waitSendReady = async () => ({ ready: true, inventory: [] })
+  garbage.cdpMethod = async (name, params) => {
+    if (name !== 'Input.insertText') return
+    garbageEditor += String(params.text ?? '')
+    if (garbageEditor === prompt) garbageEditor += 'TRAILING_GARBAGE'
+  }
+  const originalWarn = console.warn
+  const garbageWarnings: string[] = []
+  console.warn = (...args: unknown[]) => { garbageWarnings.push(args.map(String).join(' ')) }
+  try {
+    await assert.rejects(garbage.insertByChunks(prompt), /依頼文の入力/, 'chunk fallback must reject prompt plus trailing garbage')
+  } finally {
+    console.warn = originalWarn
+  }
+  assert.ok(garbageWarnings.some((line) => line.includes('DOM文字列不一致')), 'trailing garbage rejection must retain a diagnostic warning')
+
+  const sendClient = new CopilotEdgeClient({ baseURL: '', model: '', provider: 'copilot-edge' })
+  type SendInternals = {
+    clickSend: (baseline: string) => Promise<void>
+    waitSendReady: () => Promise<{ ready: boolean; inventory: unknown }>
+    editorLength: () => Promise<number>
+    evalWithReconnect: () => Promise<unknown>
+    waitSendEstablished: () => Promise<boolean>
+    cdpMethod: (name: string, params: Record<string, unknown>) => Promise<void>
+  }
+  const sendInternal = sendClient as unknown as SendInternals
+  sendInternal.waitSendReady = async () => ({ ready: true, inventory: [] })
+  sendInternal.editorLength = async () => 12
+  sendInternal.evalWithReconnect = async () => JSON.stringify({ clicked: true, selected: { rect: { cx: 123, cy: 456 } } })
+  let establishmentChecks = 0
+  sendInternal.waitSendEstablished = async () => ++establishmentChecks > 1
+  const mouseEvents: Array<{ name: string; params: Record<string, unknown> }> = []
+  sendInternal.cdpMethod = async (name, params) => { mouseEvents.push({ name, params }) }
+  await sendInternal.clickSend('old response')
+  assert.deepStrictEqual(mouseEvents.map((event) => [event.name, event.params.type, event.params.x, event.params.y]), [
+    ['Input.dispatchMouseEvent', 'mousePressed', 123, 456],
+    ['Input.dispatchMouseEvent', 'mouseReleased', 123, 456]
+  ])
+
+  const freshClient = new CopilotEdgeClient({ baseURL: '', model: '', provider: 'copilot-edge' })
+  type FreshInternals = {
+    freshChat: () => Promise<void>
+    freshSurfaceReady: () => Promise<boolean>
+    waitFreshSurface: () => Promise<boolean>
+    evalWithReconnect: () => Promise<unknown>
+    cdpMethod: (name: string, params: Record<string, unknown>) => Promise<void>
+  }
+  const freshInternal = freshClient as unknown as FreshInternals
+  freshInternal.freshSurfaceReady = async () => false
+  freshInternal.evalWithReconnect = async () => JSON.stringify({ clicked: true })
+  let freshWaits = 0
+  freshInternal.waitFreshSurface = async () => ++freshWaits > 1
+  const navigations: Record<string, unknown>[] = []
+  freshInternal.cdpMethod = async (name, params) => { if (name === 'Page.navigate') navigations.push(params) }
+  await freshInternal.freshChat()
+  assert.deepStrictEqual(navigations, [{ url: 'https://m365.cloud.microsoft/chat/' }], 'unverified synthetic new-chat click must navigate explicitly')
   console.log('PASS copilot-chunk-fallback')
 }
 async function testCopilotLoop(): Promise<void> {
@@ -1210,13 +1405,229 @@ async function testCopilotFenceMode(): Promise<void> {
   console.log('PASS copilot-fence')
 }
 
+async function testLocalResponseConverter(): Promise<void> {
+  let responseContent = '{"answer":"変換済み"}'
+  let requestCount = 0
+  let lastUserContent = ''
+  const server = http.createServer((req, res) => {
+    let body = ''
+    req.on('data', (chunk) => { body += String(chunk) })
+    req.on('end', () => {
+      requestCount++
+      assert.strictEqual(req.headers.authorization, 'Bearer smoke-local-token')
+      const request = JSON.parse(body) as { temperature?: number; max_tokens?: number; response_format?: { type?: string }; chat_template_kwargs?: { enable_thinking?: boolean }; messages?: Array<{ role?: string; content?: string }> }
+      assert.strictEqual(request.temperature, 0); assert.strictEqual(request.response_format?.type, 'json_schema'); assert.strictEqual(request.chat_template_kwargs?.enable_thinking, false)
+      assert.strictEqual(request.max_tokens, 192)
+      lastUserContent = request.messages?.find((message) => message.role === 'user')?.content ?? ''
+      res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ choices: [{ message: { content: responseContent } }] }))
+    })
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = (server.address() as net.AddressInfo).port
+  const settings = { enabled: true, baseURL: `http://127.0.0.1:${port}/v1`, model: 'fake', timeoutMs: 1000, apiKey: 'smoke-local-token' }
+  try {
+    assert.strictEqual(await convertCopilotResponse(settings, 'raw', []), '{"answer":"raw"}')
+    assert.strictEqual(requestCount, 0, 'plain answers must stay on deterministic layer 1')
+    assert.strictEqual(await convertCopilotResponse(settings, 'write_file の判断情報が不足', [
+      { name: 'host.write_file', description: 'write', parameters: { type: 'object' } }
+    ]), responseContent)
+    const direct = await convertCopilotResponse(settings, '{"tool":"write_file","path":"メモ.txt","content":"一言"}', [
+      { name: 'host.write_file', description: 'write', parameters: { type: 'object' } }
+    ])
+    assert.strictEqual(direct, '{"tool":"host.write_file","args":{"path":"メモ.txt","content":"一言"}}')
+    assert.strictEqual(requestCount, 1, 'strict JSON must not spend a local-model request')
+    const deterministicSearch = await convertCopilotResponse(settings, 'search_filesを使い query=青', [
+      { name: 'host.list_files', description: 'list', parameters: { type: 'object' } },
+      { name: 'host.search_files', description: 'search', parameters: { type: 'object' } }
+    ])
+    assert.strictEqual(deterministicSearch, '{"tool":"host.search_files","args":{"query":"青"}}')
+    assert.strictEqual(requestCount, 1, 'explicit tool text must stay on deterministic layer 1')
+    await convertCopilotResponse(settings, 'search_files の判断情報が不足', [
+      { name: 'host.list_files', description: 'list', parameters: { type: 'object' } },
+      { name: 'host.search_files', description: 'search', parameters: { type: 'object' } }
+    ])
+    const converterInput = JSON.parse(lastUserContent) as { host_tools?: Array<{ name?: string }> }
+    assert.deepStrictEqual(converterInput.host_tools?.map((tool) => tool.name), ['host.search_files'])
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'converter-smoke-'))
+    const converted = await runAgentTurn({ cfg: { baseURL: '', model: '', provider: 'copilot-edge', copilot: { agentMode: true }, localResponseConverter: settings }, messages: [], userInput: '答えて', ctx: makeCtx(root), io: ioStub(true), backend: new FakeBackend(['write_file の判断情報が不足']) })
+    assert.strictEqual(converted.reply, '変換済み')
+    responseContent = '{"tool":"host.write_file","args":{"unexpected":true}}'
+    const rejected = await runAgentTurn({ cfg: { baseURL: '', model: '', provider: 'copilot-edge', copilot: { agentMode: true }, localResponseConverter: settings }, messages: [], userInput: '書いて', ctx: makeCtx(root), io: ioStub(true), backend: new FakeBackend(['write_file の判断情報が不足', '{"answer":"schema rejected"}\nAGENT_END']) })
+    assert.strictEqual(rejected.reply, 'schema rejected'); assert.ok(!fs.existsSync(path.join(root, 'unexpected')), 'schema-invalid converter args must not execute')
+    fs.rmSync(root, { recursive: true, force: true })
+    responseContent = 'invalid converter content'
+    const fallback = await runAgentTurn({ cfg: { baseURL: '', model: '', provider: 'copilot-edge', copilot: { agentMode: true }, localResponseConverter: settings }, messages: [], userInput: '答えて', ctx: makeCtx(os.tmpdir(), false), io: ioStub(true), backend: new FakeBackend(['write_file の判断情報が不足', '{"answer":"fallback raw"}\nAGENT_END']) })
+    assert.strictEqual(fallback.reply, 'fallback raw')
+  } finally { await new Promise<void>((resolve) => server.close(() => resolve())) }
+  const ambiguousWrite = 'write_file の判断情報が不足'
+  const writeTool = [{ name: 'host.write_file', description: 'write', parameters: { type: 'object' } }]
+  await assert.rejects(() => convertCopilotResponse({ enabled: true, baseURL: 'http://example.com/v1' }, ambiguousWrite, writeTool), /loopback/u)
+  await assert.rejects(
+    () => convertCopilotResponse({ enabled: true, baseURL: 'http://[::1]:9/v1', timeoutMs: 10 }, ambiguousWrite, writeTool),
+    (err: unknown) => !/loopback/u.test(String((err as Error).message)),
+    'IPv6 loopback must pass URL validation before connection failure'
+  )
+  console.log('PASS local-response-converter')
+}
+
 async function testUiContract(): Promise<void> {
   const html = fs.readFileSync(path.join(process.cwd(), 'public', 'index.html'), 'utf8')
   const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1]
   assert.ok(script, 'UI script missing')
   new Function(script)
-  for (const required of ['run-plan', 'run-eyebrow', 'run-pause', 'run-resume', 'run-retry', 'run-complete', '回答完了', 'activity-details', '実際の差分を表示', '差分の続き', 'preview-frame', 'verification-list', '診断JSON', 'approval-meta', 'parentRunId', '/api/runs/', '/api/changes/', 'compositionstart', 'aria-live', 'mode-select', 'このPCで実行', 'Copilot内で観測', '@media (max-width: 720px)']) assert.ok(html.includes(required), `UI contract missing: ${required}`)
+  for (const required of ['run-plan', 'run-eyebrow', 'run-pause', 'run-resume', 'run-retry', 'run-complete', '回答完了', 'activity-details', '実際の差分を表示', '差分の続き', 'preview-frame', 'verification-list', '診断JSON', 'approval-meta', 'parentRunId', '/api/runs/', '/api/changes/', 'compositionstart', 'aria-live', 'mode-select', 'このPCで実行', 'Copilot内で観測', '@media (max-width: 720px)', 'demo-view', 'diagnostic-view', 'view-toggle', 'artifacts-panel', '過去の実行', 'friendlyToolName', '入力の反映に失敗したため、自動でやり直しています。']) assert.ok(html.includes(required), `UI contract missing: ${required}`)
   console.log('PASS ui-contract')
+}
+
+async function testOpenAICompatibleBridge(): Promise<void> {
+  const token = 'bridge-smoke-token-1234'
+  const prompts: string[] = []
+  const rawReplies = [
+    'ストリーム回答',
+    '通常回答です',
+    `処理します。\n{'tool':'write_file','args':{'path':'メモ.txt','content':'確認'}}`,
+    '{"tool":"write_file","args":{"path":3,"content":"不正"}}',
+    '{"tool":"write_file","args":{"path":"禁止.txt","content":"x"}}',
+    '関数を選べませんでした'
+  ]
+  const server = createOpenAICompatibleBridgeServer(token, {
+    complete: async (prompt) => { prompts.push(prompt); return rawReplies.shift() ?? 'empty' },
+    now: () => 1_700_000_000_000
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = (server.address() as net.AddressInfo).port
+  const url = `http://127.0.0.1:${port}/v1/chat/completions`
+  const post = (body: unknown, bearer = token) => fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}` },
+    body: JSON.stringify(body)
+  })
+  const tools: OpenAITool[] = [{
+    type: 'function',
+    function: {
+      name: 'write_file',
+      description: '新規ファイルを書く',
+      parameters: {
+        type: 'object', additionalProperties: false, required: ['path', 'content'],
+        properties: { path: { type: 'string', minLength: 1 }, content: { type: 'string' } }
+      }
+    }
+  }]
+  try {
+    const unauthorized = await post({ model: 'test', messages: [{ role: 'user', content: 'hi' }] }, 'wrong-token-12345678')
+    assert.strictEqual(unauthorized.status, 401)
+    const streaming = await post({ model: 'test', stream: true, messages: [{ role: 'user', content: 'hi' }] })
+    assert.strictEqual(streaming.status, 200)
+    assert.ok(streaming.headers.get('content-type')?.includes('text/event-stream'))
+    const streamText = await streaming.text()
+    assert.ok(streamText.includes('ストリーム回答') && streamText.includes('data: [DONE]'))
+
+    const normal = await post({ model: 'bridge-test', messages: [{ role: 'system', content: '日本語で' }, { role: 'user', content: '答えて' }] })
+    assert.strictEqual(normal.status, 200)
+    const normalJson = await normal.json() as { choices: Array<{ message: { content: string }; finish_reason: string }> }
+    assert.strictEqual(normalJson.choices[0].message.content, '通常回答です')
+    assert.strictEqual(normalJson.choices[0].finish_reason, 'stop')
+    assert.ok(prompts[1].includes('[1:SYSTEM]') && prompts[1].includes('[2:USER]'))
+
+    const called = await post({ model: 'bridge-test', messages: [{ role: 'user', content: 'メモを書いて' }], tools })
+    assert.strictEqual(called.status, 200)
+    const calledJson = await called.json() as { choices: Array<{ message: { content: null; tool_calls: Array<{ function: { name: string; arguments: string } }> }; finish_reason: string }> }
+    assert.strictEqual(calledJson.choices[0].finish_reason, 'tool_calls')
+    assert.strictEqual(calledJson.choices[0].message.tool_calls[0].function.name, 'write_file')
+    assert.deepStrictEqual(JSON.parse(calledJson.choices[0].message.tool_calls[0].function.arguments), { path: 'メモ.txt', content: '確認' })
+    assert.ok(prompts[2].includes('AVAILABLE_FUNCTIONS=') && prompts[2].includes('write_file'))
+    assert.ok(prompts[2].includes('「ここ」「この場所」「直下」') && prompts[2].includes(' . を使ってください'))
+    assert.ok(prompts[2].includes('「開く」') && prompts[2].includes('既定アプリを起動'))
+    assert.ok(prompts[2].includes("Start-Process -FilePath './相対パス'") && prompts[2].includes('-LiteralPath は使わず'))
+
+    const rejected = await post({ model: 'bridge-test', messages: [{ role: 'user', content: '不正な引数' }], tools })
+    const rejectedJson = await rejected.json() as { choices: Array<{ message: { content: string }; finish_reason: string }> }
+    assert.strictEqual(rejectedJson.choices[0].finish_reason, 'stop')
+    assert.strictEqual(rejectedJson.choices[0].message.content, '{"tool":"write_file","args":{"path":3,"content":"不正"}}')
+
+    const toolChoiceNone = await post({ model: 'bridge-test', tool_choice: 'none', messages: [{ role: 'user', content: '関数を呼ばないで' }], tools })
+    assert.strictEqual(toolChoiceNone.status, 200)
+    const toolChoiceNoneJson = await toolChoiceNone.json() as { choices: Array<{ message: { content: string; tool_calls?: unknown } }> }
+    assert.strictEqual(toolChoiceNoneJson.choices[0].message.tool_calls, undefined)
+    assert.ok(toolChoiceNoneJson.choices[0].message.content.includes('write_file'))
+    assert.ok(prompts[4].includes('関数を呼び出さず') && !prompts[4].includes('AVAILABLE_FUNCTIONS='))
+
+    const toolChoiceRequired = await post({ model: 'bridge-test', tool_choice: 'required', messages: [{ role: 'user', content: '必ず選んで' }], tools })
+    assert.strictEqual(toolChoiceRequired.status, 422)
+    const unsupportedChoice = await post({ model: 'bridge-test', tool_choice: 'sometimes', messages: [{ role: 'user', content: '不正' }], tools })
+    assert.strictEqual(unsupportedChoice.status, 422)
+
+    const negative = interpretBridgeResponse('例: {"tool":"write_file","args":{"path":"推測.txt","content":"x"}} ですが今回は操作しません。', tools)
+    assert.strictEqual(negative.toolCalls, undefined)
+    const impossible = interpretBridgeResponse('write_file の実行は不可能です。{"tool":"write_file","args":{"path":"推測.txt","content":"x"}}', tools)
+    assert.strictEqual(impossible.toolCalls, undefined)
+    const informational = interpretBridgeResponse('write_file はファイルを書くツールです。', tools)
+    assert.strictEqual(informational.toolCalls, undefined)
+    const readTool: OpenAITool[] = [{ type: 'function', function: { name: 'read', parameters: { type: 'object', additionalProperties: false, required: ['filePath'], properties: { filePath: { type: 'string' } } } } }]
+    const windowsPath = interpretBridgeResponse(String.raw`{"tool":"read","args":{"filePath":"C:\Users\yuuki\flex-live"}}`, readTool)
+    assert.strictEqual(JSON.parse(String((windowsPath.toolCalls?.[0].function as { arguments?: string })?.arguments)).filePath, 'C:\\Users\\yuuki\\flex-live')
+    assert.ok(windowsPath.repairs.includes('windows-path-backslash'))
+    const bashTool: OpenAITool[] = [{ type: 'function', function: { name: 'bash', parameters: { type: 'object', additionalProperties: false, required: ['command'], properties: { command: { type: 'string' } } } } }]
+    const relativeWindowsPath = interpretBridgeResponse(String.raw`{"tool":"bash","args":{"command":"Start-Process -FilePath '.\概要.txt'"}}`, bashTool)
+    assert.strictEqual(JSON.parse(String((relativeWindowsPath.toolCalls?.[0].function as { arguments?: string })?.arguments)).command, "Start-Process -FilePath '.\\概要.txt'")
+    assert.ok(relativeWindowsPath.repairs.includes('invalid-json-backslash'))
+    const alreadyEscapedRelativePath = interpretBridgeResponse(String.raw`{"tool":"bash","args":{"command":"Start-Process -FilePath '.\\概要.txt'"}}`, bashTool)
+    assert.strictEqual(JSON.parse(String((alreadyEscapedRelativePath.toolCalls?.[0].function as { arguments?: string })?.arguments)).command, "Start-Process -FilePath '.\\概要.txt'")
+    assert.ok(!alreadyEscapedRelativePath.repairs.includes('invalid-json-backslash'))
+    assert.ok(buildBridgePrompt({ messages: [{ role: 'user', content: [{ type: 'text', text: '配列本文' }] }], tools: [] }).includes('配列本文'))
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+  assert.strictEqual(prompts.length, 6, 'unauthorized or invalid requests must not reach Copilot')
+
+  let completeCalls = 0
+  let abortedCalls = 0
+  let releaseFirst: (() => void) | undefined
+  const cancellationServer = createOpenAICompatibleBridgeServer(token, {
+    complete: async (_prompt, signal) => {
+      completeCalls++
+      return new Promise<string>((resolve, reject) => {
+        if (completeCalls === 1) releaseFirst = () => resolve('first done')
+        signal?.addEventListener('abort', () => { abortedCalls++; reject(new Error('aborted by client')) }, { once: true })
+      })
+    }
+  })
+  await new Promise<void>((resolve) => cancellationServer.listen(0, '127.0.0.1', resolve))
+  const cancellationPort = (cancellationServer.address() as net.AddressInfo).port
+  const cancellationUrl = `http://127.0.0.1:${cancellationPort}/v1/chat/completions`
+  const requestBody = JSON.stringify({ model: 'test', messages: [{ role: 'user', content: 'wait' }] })
+  const first = fetch(cancellationUrl, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: requestBody })
+  for (let poll = 0; poll < 50 && completeCalls === 0; poll++) await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.strictEqual(completeCalls, 1)
+  const queuedAbort = new AbortController()
+  const second = fetch(cancellationUrl, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: requestBody, signal: queuedAbort.signal }).catch((error) => error)
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  queuedAbort.abort()
+  await second
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  releaseFirst?.()
+  const firstResponse = await first
+  assert.strictEqual(firstResponse.status, 200)
+  await firstResponse.text()
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  assert.strictEqual(completeCalls, 1, 'a canceled queued request must not reach Copilot')
+
+  const activeAbort = new AbortController()
+  const active = fetch(cancellationUrl, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: requestBody, signal: activeAbort.signal }).catch((error) => error)
+  for (let poll = 0; poll < 50 && completeCalls < 2; poll++) await new Promise((resolve) => setTimeout(resolve, 10))
+  activeAbort.abort()
+  await active
+  for (let poll = 0; poll < 50 && abortedCalls === 0; poll++) await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.strictEqual(abortedCalls, 1, 'response-side disconnect must abort active Copilot work')
+  cancellationServer.abortAll()
+  await new Promise<void>((resolve) => cancellationServer.close(() => resolve()))
+
+  for (const relative of ['vendor/opencode/Get-OpenCode.ps1', 'vendor/opencode/manifest.json', 'vendor/opencode/LICENSE-OpenCode.txt']) {
+    const bytes = fs.readFileSync(path.join(process.cwd(), relative))
+    assert.deepStrictEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf], `${relative} must use UTF-8 BOM`)
+    assert.ok(!/(?<!\r)\n/u.test(bytes.subarray(3).toString('utf8')), `${relative} must use CRLF`)
+  }
+  console.log('PASS openai-compatible-bridge')
 }
 
 async function testDemoRecordingContract(): Promise<void> {
@@ -1259,6 +1670,8 @@ async function testDemoRecordingContract(): Promise<void> {
   await testMaxIterationHistory()
   await testCopilotPlainMode()
   await testCopilotFenceMode()
+  await testLocalResponseConverter()
+  await testOpenAICompatibleBridge()
   await testUiContract()
   await testDemoRecordingContract()
   console.log('ALL PASS')

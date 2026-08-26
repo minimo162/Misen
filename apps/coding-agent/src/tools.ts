@@ -1,5 +1,5 @@
 import fs from 'node:fs'
-import { exec } from 'node:child_process'
+import { exec, execFile } from 'node:child_process'
 import crypto from 'node:crypto'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
@@ -10,6 +10,7 @@ import { listManagedProcesses, readManagedProcessLog, startManagedProcess, stopM
 import { getWeather } from './weather'
 
 const execAsync = util.promisify(exec)
+const execFileAsync = util.promisify(execFile)
 
 const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', '.tmp'])
 const MAX_LIST = 500
@@ -21,6 +22,7 @@ const UPDATE_LEDGER_USAGE = 'powershell.exe -NoProfile -File tools\\Update-Ledge
 export interface ToolContext {
   workspace: string
   restrictToWorkspace: boolean
+  safeCommandOnly?: boolean
   weatherDefaultLocation?: string
   signal?: AbortSignal
   /** Run-scoped journal key. Tests and REPL may omit it. */
@@ -158,7 +160,7 @@ export function normalizeRunCommand(command: string): string {
       }
       normalizedPath = path.win32.join(path.win32.dirname(reportPaths[0]), '*.xlsx')
     }
-    return `powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path ${quoteCommandWord(normalizedPath)}`
+    return `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path ${quoteCommandWord(normalizedPath)}`
   }
 
   const rest = parsed.words.slice(scriptArgsIndex)
@@ -183,7 +185,73 @@ export function normalizeRunCommand(command: string): string {
   const rates = (named.get('rates') ?? positional[1])?.replaceAll('/', '\\')
   const ledger = (named.get('ledger') ?? positional[2])?.replaceAll('/', '\\')
   if (!extracted || !rates || !ledger || positional.length > 3) throw new Error(`Update-Ledger は ${UPDATE_LEDGER_USAGE} の形式で呼んでください`)
-  return `powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted ${quoteCommandWord(extracted)} -Rates ${quoteCommandWord(rates)} -Ledger ${quoteCommandWord(ledger)}`
+  return `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Update-Ledger.ps1 -Extracted ${quoteCommandWord(extracted)} -Rates ${quoteCommandWord(rates)} -Ledger ${quoteCommandWord(ledger)}`
+}
+
+/**
+ * Permit only a single workspace-contained document open.  We intentionally
+ * rewrite common open aliases/Start-Process/excel into Invoke-Item so the command policy does not
+ * need to allow general process creation or arbitrary arguments.
+ */
+export function normalizeWorkspaceOpenCommand(command: string, ctx: ToolContext): string | null {
+  const parsed = splitCommandWords(command.trim())
+  if (parsed.unsafe || parsed.words.length === 0) return null
+  const words = parsed.words
+  let candidate: string | undefined
+  const executable = (words[0] ?? '').toLowerCase()
+  if (executable === 'invoke-item' || executable === 'ii') {
+    if (words.length === 2) candidate = words[1]
+    else if (words.length === 3 && /^-(?:literal)?path$/iu.test(words[1])) candidate = words[2]
+  } else if (executable === 'start-process') {
+    if (words.length === 2) candidate = words[1]
+    else if (words.length === 3 && /^-filepath$/iu.test(words[1])) candidate = words[2]
+  } else if (['start', 'open'].includes(executable) && words.length === 2) {
+    // Copilot commonly emits cmd's `start "" file` as `start " file"`, or
+    // the cross-platform `open file`. Both remain a single existing workspace file.
+    candidate = words[1].trimStart()
+  } else if (['excel', 'excel.exe'].includes(executable) && words.length === 2 && /\.xlsx$/iu.test(words[1])) {
+    candidate = words[1]
+  } else if (words.length === 1) {
+    // The converter may emit only the requested path for a plain Japanese
+    // "open" request. The same existence, type, extension, link, quote, and
+    // workspace checks below still apply before it becomes Invoke-Item.
+    candidate = words[0]
+  }
+  if (!candidate) return null
+  let absolute: string
+  try { absolute = resolveInWorkspace(candidate, ctx) } catch { throw new Error(`run_command拒否: ワークスペース外へのアクセスは禁止です: ${candidate}`) }
+  if (!fs.existsSync(absolute)) throw new Error(`run_command拒否: 開く対象が存在しません: ${candidate}`)
+  const stat = fs.lstatSync(absolute)
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`run_command拒否: 通常ファイル以外は開けません: ${candidate}`)
+  const allowedExtensions = new Set([
+    '.txt', '.md', '.csv', '.tsv', '.json', '.yaml', '.yml', '.xml', '.log',
+    '.xlsx', '.xlsm', '.xls', '.ods', '.docx', '.doc', '.odt', '.pptx', '.ppt', '.odp', '.pdf',
+    '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg',
+    '.mp4', '.mov', '.avi', '.mkv', '.mp3', '.wav', '.m4a'
+  ])
+  const extension = path.extname(absolute).toLowerCase()
+  if (!allowedExtensions.has(extension)) throw new Error(`run_command拒否: 安全に開ける通常文書・メディア形式ではありません: ${candidate}`)
+  // The source is a tokenized value with metacharacters rejected above. A
+  // quote would alter the generated single-quoted literal, so reject it too.
+  if (absolute.includes("'")) throw new Error('run_command拒否: 開く対象のパスに引用符は使用できません')
+  return `powershell.exe -NoProfile -Command "Invoke-Item -LiteralPath '${absolute}'"`
+}
+
+/** Shared gate for run_command and start_process. */
+export function prepareHostCommand(command: string, ctx: ToolContext): string {
+  const normalized = normalizeRunCommand(command)
+  const safeOpen = normalizeWorkspaceOpenCommand(normalized, ctx)
+  if (ctx.safeCommandOnly && !safeOpen) throw new Error('run_command拒否: この構成ではワークスペース内ファイルを開く明示許可形式だけ実行できます')
+  const prepared = safeOpen ?? normalized
+  assertRunCommandPolicy(prepared, ctx)
+  return prepared
+}
+
+export function formatHostCommandOutput(requested: string, prepared: string, stdout: string, stderr: string): string {
+  const parts = [stdout, stderr].filter((value) => value.trim().length > 0).map((value) => truncate(value))
+  if (parts.length > 0) return parts.join('\n---stderr---\n')
+  if (/\bInvoke-Item\s+-LiteralPath\b/iu.test(prepared)) return `アプリ起動コマンド成功: ${requested}`
+  return '(出力なし)'
 }
 
 const DELETE_OPERATIONS = new Set([
@@ -225,6 +293,12 @@ function commandWords(command: string): string[] {
 
 function commandOperationTokens(command: string): string[] {
   return commandWords(command).map((word) => word.toLowerCase())
+}
+
+function containsPowerShellEncodedCommand(command: string): boolean {
+  const words = commandWords(command)
+  const powershell = words.findIndex((word) => /^(?:powershell|powershell\.exe|pwsh|pwsh\.exe)$/iu.test(word))
+  return powershell >= 0 && words.slice(powershell + 1).some(isEncodedCommandFlag)
 }
 
 function assertWorkspaceWriteTarget(target: string, ctx: ToolContext): void {
@@ -276,7 +350,7 @@ function writeOperationTargets(command: string): string[] {
 }
 
 function assertRunCommandPolicy(command: string, ctx: ToolContext): void {
-  if (commandWords(command).some(isEncodedCommandFlag)) {
+  if (containsPowerShellEncodedCommand(command)) {
     throw new Error('run_command拒否: -EncodedCommand は許可されていません')
   }
   const operations = commandOperationTokens(command)
@@ -626,7 +700,8 @@ export const TOOL_DEFS: ToolDef[] = [
       type: 'object',
       properties: {
         path: { type: 'string', description: '起点ディレクトリ (既定: ワークスペースルート)' },
-        glob: { type: 'string', description: 'ファイル名のパターン。例: *.ts' }
+        glob: { type: 'string', description: 'ファイル名のパターン。例: *.ts' },
+        recursive: { type: 'boolean', description: 'サブフォルダも再帰するか (既定: true)。直下だけならfalse' }
       },
       required: []
     },
@@ -634,10 +709,21 @@ export const TOOL_DEFS: ToolDef[] = [
       const base = args.path ? resolveInWorkspace(String(args.path), ctx) : ctx.workspace
       const re = args.glob ? wildcardToRegExp(String(args.glob)) : null
       const out: string[] = []
-      await walk(base, (f) => {
-        if (out.length >= MAX_LIST) return
-        if (!re || re.test(path.basename(f))) out.push(path.relative(ctx.workspace, f).replaceAll('\\', '/'))
-      })
+      if (args.recursive === false) {
+        const entries = await fsp.readdir(base, { withFileTypes: true })
+        for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name, 'ja'))) {
+          if (out.length >= MAX_LIST) break
+          if (!re || re.test(entry.name)) {
+            const relative = path.relative(ctx.workspace, path.join(base, entry.name)).replaceAll('\\', '/')
+            out.push(entry.isDirectory() ? `${relative}/` : relative)
+          }
+        }
+      } else {
+        await walk(base, (f) => {
+          if (out.length >= MAX_LIST) return
+          if (!re || re.test(path.basename(f))) out.push(path.relative(ctx.workspace, f).replaceAll('\\', '/'))
+        })
+      }
       return out.length === 0 ? '(該当なし)' : truncate(out.join('\n'))
     }
   },
@@ -782,6 +868,38 @@ export const TOOL_DEFS: ToolDef[] = [
     }
   },
   {
+    name: 'read_xlsx',
+    description: 'ワークスペース内の任意のxlsxを読み、シート名・セル範囲・表内容をJSONで返す',
+    kind: 'read',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'ワークスペース相対のxlsxファイルパス' }
+      },
+      required: ['path']
+    },
+    async run(args, ctx) {
+      const requested = String(args.path ?? '')
+      const abs = resolveInWorkspace(requested, ctx)
+      if (path.extname(abs).toLowerCase() !== '.xlsx') throw new Error('read_xlsx は .xlsx ファイルだけを読み取れます')
+      const stat = await fsp.stat(abs).catch(() => null)
+      if (!stat?.isFile()) throw new Error(`xlsxが見つかりません: ${requested}`)
+      const appRoot = path.resolve(__dirname, '..')
+      const helper = path.join(appRoot, 'tools', 'Read-Xlsx.ps1')
+      if (!fs.existsSync(helper)) throw new Error(`xlsx読み取りヘルパーが見つかりません: ${helper}`)
+      const { stdout, stderr } = await execFileAsync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', helper, '-Path', abs], {
+        cwd: ctx.workspace,
+        windowsHide: true,
+        encoding: 'utf8',
+        maxBuffer: 10_000_000,
+        signal: ctx.signal
+      })
+      const output = String(stdout).trim()
+      if (!output) throw new Error(`xlsx読み取り結果が空です${stderr ? `: ${String(stderr).trim()}` : ''}`)
+      return truncate(output, MAX_READ_FILES_CHARS)
+    }
+  },
+  {
     name: 'write_file',
     description: 'テキストファイルを新規作成または上書きする',
     kind: 'write',
@@ -917,7 +1035,9 @@ export const TOOL_DEFS: ToolDef[] = [
       required: ['command']
     },
     async run(args, ctx) {
-      const process = startManagedProcess(String(args.command ?? ''), ctx.workspace, args.label ? String(args.label) : undefined, args.url ? String(args.url) : undefined)
+      if (ctx.safeCommandOnly && args.url) throw new Error('start_process拒否: この構成ではプレビューURLを指定できません')
+      const command = prepareHostCommand(String(args.command ?? ''), ctx)
+      const process = startManagedProcess(command, ctx.workspace, args.label ? String(args.label) : undefined, args.url ? String(args.url) : undefined)
       return JSON.stringify(process)
     }
   },
@@ -971,9 +1091,9 @@ export const TOOL_DEFS: ToolDef[] = [
       required: ['command']
     },
     async run(args, ctx) {
-      const command = normalizeRunCommand(String(args.command ?? ''))
-      if (/wttr\.in/i.test(command)) throw new Error('天気・気温の取得にwttr.inは使用できません。get_weatherツールを使ってください')
-      assertRunCommandPolicy(command, ctx)
+      const requested = String(args.command ?? '')
+      if (/wttr\.in/i.test(requested)) throw new Error('天気・気温の取得にwttr.inは使用できません。get_weatherツールを使ってください')
+      const command = prepareHostCommand(requested, ctx)
       if (ctx.signal?.aborted) throw new Error('コマンド実行はキャンセルされました')
       try {
         const { stdout, stderr } = await execAsync(command, {
@@ -983,8 +1103,7 @@ export const TOOL_DEFS: ToolDef[] = [
           windowsHide: true,
           signal: ctx.signal
         })
-        const parts = [stdout, stderr].filter((s) => s.trim().length > 0).map((s) => truncate(s))
-        return parts.length > 0 ? parts.join('\n---stderr---\n') : '(出力なし)'
+        return formatHostCommandOutput(requested, command, stdout, stderr)
       } catch (err) {
         const e = err as { code?: number | string; stdout?: string; stderr?: string; message?: string }
         const tail = [e.stdout ?? '', e.stderr ?? '']
@@ -997,8 +1116,33 @@ export const TOOL_DEFS: ToolDef[] = [
   }
 ]
 
-export function openAITools(options: { allowArbitraryCommands?: boolean } = {}): OpenAIToolSchema[] {
-  const defs = options.allowArbitraryCommands ? TOOL_DEFS : TOOL_DEFS.filter((tool) => tool.name !== 'run_command')
+export function toolDefsForContract(options: { allowArbitraryCommands?: boolean; safeCommandOnly?: boolean } = {}): ToolDef[] {
+  return TOOL_DEFS.filter((tool) =>
+    (options.allowArbitraryCommands || tool.name !== 'run_command') &&
+    !(options.safeCommandOnly && tool.name === 'get_weather')).map((tool) => {
+      if (!options.safeCommandOnly) return tool
+      if (tool.name === 'run_command') return { ...tool, description: '既存のワークスペース内通常ファイル1件を既定アプリで開く。commandは対象の相対パス1件、または Invoke-Item <相対パス>。任意シェル、削除、ネットワーク、レジストリ操作は利用できない' }
+      if (tool.name === 'start_process') {
+        const parameters = tool.parameters as { type?: string; properties?: Record<string, unknown>; required?: string[] }
+        const properties = parameters.properties ?? {}
+        return {
+          ...tool,
+          description: '既存のワークスペース内通常ファイル1件を既定アプリで開く。commandは対象の相対パス1件、または Invoke-Item <相対パス>。外部URLや任意プロセスは利用できない',
+          parameters: {
+            ...parameters,
+            properties: {
+              command: { type: 'string', description: '開く対象の相対パス1件、または Invoke-Item <相対パス>' },
+              label: properties.label
+            }
+          }
+        }
+      }
+      return tool
+    })
+}
+
+export function openAITools(options: { allowArbitraryCommands?: boolean; safeCommandOnly?: boolean } = {}): OpenAIToolSchema[] {
+  const defs = toolDefsForContract(options)
   return defs.map((t) => ({
     type: 'function' as const,
     function: { name: qualifiedToolName(t.name), description: t.description, parameters: { ...t.parameters, additionalProperties: false } }
