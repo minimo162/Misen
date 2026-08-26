@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import path from 'node:path'
 import { jsonrepair } from '../vendor/npm/node_modules/jsonrepair'
-import { convertCopilotResponse } from './converter'
+import { convertCopilotResponse, interpretCopilotResponseDeterministically } from './converter'
 export interface ParsedReply {
   tool?: string
   args?: Record<string, unknown>
@@ -163,7 +163,7 @@ function attachFenceContent(raw: string, end: number, parsed: ParsedReply): void
 import type { ApprovalBinding } from './approvals'
 import { capabilityPolicy, type AgentConfig, type TurnMode } from './config'
 import { chat, type ChatMessage, type ToolCall } from './llm'
-import { bareToolName, findHostTool, getFilePrecondition, openAITools, parseToolResultMeta, qualifiedToolName, TOOL_DEFS, validateToolArgs, type ToolContext } from './tools'
+import { bareToolName, findHostTool, getFilePrecondition, openAITools, parseToolResultMeta, qualifiedToolName, toolDefsForContract, validateToolArgs, type ToolContext } from './tools'
 
 export type AgentEvent = {
   type: 'model.decision' | 'copilot.native.observed' | 'plan.created' | 'step.started' | 'step.completed' | 'step.failed' | 'tool.requested' | 'tool.approved' | 'tool.started' | 'tool.succeeded' | 'tool.failed' | 'tool.denied' | 'approval.requested' | 'approval.resolved' | 'artifact.created' | 'preview.ready' | 'run.warning'
@@ -227,6 +227,7 @@ export interface AgentTurnResult {
 export interface TextBackend {
   readonly name: string
   complete(prompt: string, signal?: AbortSignal): Promise<string>
+  getLastTiming?(): unknown
   close?(): void
 }
 
@@ -247,14 +248,14 @@ function pausedResult(messages: ChatMessage[], userInput: string, steps: string[
 }
 
 function buildProtocolRules(mode: TurnMode = 'work', allowArbitraryCommands = false, autoApproveCommand = false, safeCommandOnly = false): string {
-  const toolDocs = TOOL_DEFS.filter((t) =>
-    (allowArbitraryCommands || t.name !== 'run_command') &&
-    !(safeCommandOnly && t.name === 'get_weather')).map((t) => {
+  const toolDocs = toolDefsForContract({ allowArbitraryCommands, safeCommandOnly }).map((t) => {
     const req = ((t.parameters as { required?: string[] }).required ?? [])
     const props = Object.keys((t.parameters as { properties?: Record<string, unknown> }).properties ?? {})
     return `- ${qualifiedToolName(t.name)}(${props.join(', ')}):${req.length ? ` 必須=${req.join(',')};` : ''} ${t.description}`
   }).join('\n')
-  const commandRule = allowArbitraryCommands
+  const commandRule = safeCommandOnly
+    ? 'このRunでhost.run_commandとhost.start_processに許可されるのは、既存のワークスペース内通常ファイル1件を既定アプリで開く操作だけです。任意コマンドではありません。承認画面はホストが表示するため、answerで利用者へ許可を尋ねず、必要なhostツールを要求してください。'
+    : allowArbitraryCommands
     ? autoApproveCommand
       ? '明示設定により任意のhostコマンド実行は自動承認済みです。承認を求めるanswerを返さず、必要なhost.run_commandを直ちに要求してください。'
       : '明示設定により任意のhostコマンド実行が許可されています。実行前に承認を取得してください。'
@@ -500,30 +501,55 @@ async function runCopilotTurn(opts: {
     if (shouldCancel(io)) return canceled()
     if (io.isPaused?.()) return { reply: '', messages: turnMessages('[一時停止] チェックポイントを保存しました'), aborted: true, paused: true, checkpoint: steps.slice(-20) }
     let raw: string
+    const backendStartedAt = Date.now()
     try {
       raw = await backend.complete(composeCopilotPrompt('work', opts.userInput, steps, cfg.copilot?.maxPromptChars ?? 120000, history, policy.allowArbitraryCommands, policy.autoApproveCommand, systemInstructions, ctx.safeCommandOnly === true), io.signal)
       raw = raw.replace(/＜/g, '<').replace(/＞/g, '>').replace(/｀/g, String.fromCharCode(96))
-      io.event?.({ type: 'model.decision', summary: 'Copilotの次の1手を受信しました', origin: 'copilot', namespace: 'native', authority: 'claimed' })
     } catch (err) {
       const msg = (err as Error).message
       io.print(`[error] ${msg}`)
       return { reply: '', messages: turnMessages(`[error] ${msg}`), aborted: true }
     }
+    const converterTools = toolDefsForContract({ allowArbitraryCommands: policy.allowArbitraryCommands, safeCommandOnly: ctx.safeCommandOnly })
+    const contractTools = converterTools.map((tool) => ({ name: qualifiedToolName(tool.name), description: tool.description, parameters: tool.parameters }))
+    const layer1StartedAt = Date.now()
+    const directPe = extractReplyAndEnd(raw)
+    const deterministic = directPe ? null : interpretCopilotResponseDeterministically(raw, contractTools)
+    const layer1Ms = Date.now() - layer1StartedAt
+    let interpretationLayer = directPe || deterministic ? 'layer1' : 'failed'
+    let interpretationMethod = directPe ? 'strict-protocol' : deterministic?.method ?? 'none'
+    let interpretationRepairs = deterministic?.repairs ?? []
     let converterRaw: string | null = null
-    try {
-      const converterTools = TOOL_DEFS.filter((tool) =>
-        (policy.allowArbitraryCommands || tool.name !== 'run_command') &&
-        !(ctx.safeCommandOnly && tool.name === 'get_weather'))
-      converterRaw = await convertCopilotResponse(cfg.localResponseConverter, raw, converterTools.map((tool) => ({ name: qualifiedToolName(tool.name), description: tool.description, parameters: tool.parameters })), io.signal)
-      if (converterRaw !== null) io.print('[converter] loopback response converter applied')
-    } catch (err) {
-      // The converter is optional. A failed/unavailable local service is never
-      // allowed to change the proven tolerant-parser path.
-      io.print(`[converter] fallback: ${(err as Error).message}`)
+    const converterStartedAt = Date.now()
+    if (!directPe && !deterministic) {
+      try {
+        converterRaw = await convertCopilotResponse(cfg.localResponseConverter, raw, contractTools, io.signal)
+        if (converterRaw !== null) {
+          interpretationLayer = 'layer2'
+          interpretationMethod = 'local-model'
+          io.print('[converter] loopback response converter applied')
+        }
+      } catch (err) {
+        // Layer 2 is optional insurance. Every unavailable or malformed result
+        // remains fail-closed and never broadens the deterministic host schema.
+        io.print(`[converter] fallback: ${(err as Error).message}`)
+        interpretationMethod = 'layer2-failed'
+      }
     }
-    const pe = converterRaw ? extractReplyAndEnd(converterRaw) ?? extractReplyAndEnd(raw) : extractReplyAndEnd(raw)
+    const converterMs = Date.now() - converterStartedAt
+    const copilotTiming = backend.getLastTiming?.() ?? null
+    io.event?.({
+      type: 'model.decision',
+      summary: 'Copilotの次の1手を受信しました',
+      durationMs: Date.now() - backendStartedAt,
+      metadata: { copilot: copilotTiming, layer1Ms, converterMs, interpretationLayer, interpretationMethod, interpretationRepairs },
+      origin: 'copilot',
+      namespace: 'native',
+      authority: 'claimed'
+    })
+    const pe = directPe ?? (deterministic ? extractReplyAndEnd(deterministic.content) : null) ?? (converterRaw ? extractReplyAndEnd(converterRaw) : null)
     let parsed = pe?.parsed ?? null
-    if (parsed && bareToolName(parsed.tool ?? '') === 'write_file') attachFenceContent(raw, pe!.end, parsed)
+    if (directPe && parsed && bareToolName(parsed.tool ?? '') === 'write_file') attachFenceContent(raw, directPe.end, parsed)
     if (!parsed) {
       if (!parseRetried) {
         parseRetried = true

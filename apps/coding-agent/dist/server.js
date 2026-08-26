@@ -244,7 +244,7 @@ var require_jsonrepair = __commonJS({
     Object.defineProperty(exports2, "__esModule", {
       value: true
     });
-    exports2.jsonrepair = jsonrepair2;
+    exports2.jsonrepair = jsonrepair3;
     var _JSONRepairError = require_JSONRepairError();
     var _stringUtils = require_stringUtils();
     var controlCharacters = {
@@ -265,7 +265,7 @@ var require_jsonrepair = __commonJS({
       t: "	"
       // note that \u is handled separately in parseString()
     };
-    function jsonrepair2(text) {
+    function jsonrepair3(text) {
       let i = 0;
       let output = "";
       parseMarkdownCodeBlock(["```", "[```", "{```"]);
@@ -4585,11 +4585,12 @@ function resolveApiKey(cfg2) {
 // src/agent.ts
 var import_node_crypto2 = __toESM(require("node:crypto"));
 var import_node_path3 = __toESM(require("node:path"));
-var import_jsonrepair = __toESM(require_cjs());
+var import_jsonrepair2 = __toESM(require_cjs());
 
 // src/converter.ts
 var import_node_http = __toESM(require("node:http"));
 var import_node_https = __toESM(require("node:https"));
+var import_jsonrepair = __toESM(require_cjs());
 function decisionSchema(tools) {
   return {
     type: "object",
@@ -4621,22 +4622,227 @@ function candidateTools(rawResponse, tools) {
   });
   return mentioned.length > 0 ? mentioned : tools;
 }
-function strictProtocolFastPath(rawResponse, tools) {
-  try {
-    const parsed = JSON.parse(rawResponse.trim());
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-    if (typeof parsed.answer === "string" && Object.keys(parsed).every((key) => ["answer", "AGENT_END"].includes(key))) {
-      return JSON.stringify({ answer: parsed.answer });
-    }
-    if (typeof parsed.tool !== "string") return null;
-    const requested = parsed.tool.startsWith("host.") ? parsed.tool : `host.${parsed.tool}`;
-    const matched = tools.find((tool) => tool.name === requested);
-    if (!matched) return null;
-    const args = parsed.args && typeof parsed.args === "object" && !Array.isArray(parsed.args) ? parsed.args : Object.fromEntries(Object.entries(parsed).filter(([key]) => !["tool", "AGENT_END"].includes(key)));
-    return JSON.stringify({ tool: matched.name, args });
-  } catch {
-    return null;
+function protocolObject(value, tools) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const parsed = value;
+  const keys = Object.keys(parsed);
+  if (Object.prototype.hasOwnProperty.call(parsed, "AGENT_END") && parsed.AGENT_END !== true) return null;
+  if (typeof parsed.answer === "string" && keys.every((key) => ["answer", "AGENT_END"].includes(key))) {
+    return JSON.stringify({ answer: parsed.answer });
   }
+  if (typeof parsed.tool !== "string") return null;
+  const requested = parsed.tool.startsWith("host.") ? parsed.tool : `host.${parsed.tool}`;
+  const matched = tools.find((tool) => tool.name === requested);
+  if (!matched) return null;
+  if (Object.prototype.hasOwnProperty.call(parsed, "args")) {
+    if (keys.some((key) => !["tool", "args", "AGENT_END"].includes(key))) return null;
+    if (!parsed.args || typeof parsed.args !== "object" || Array.isArray(parsed.args)) return null;
+    return JSON.stringify({ tool: matched.name, args: parsed.args });
+  }
+  const args = Object.fromEntries(Object.entries(parsed).filter(([key]) => !["tool", "AGENT_END"].includes(key)));
+  return JSON.stringify({ tool: matched.name, args });
+}
+function scanJsonObjects(text) {
+  const found = [];
+  for (let start = 0; start < text.length; start++) {
+    if (text[start] !== "{") continue;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < text.length; index++) {
+      const ch = text[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === "{") depth++;
+      else if (ch === "}" && --depth === 0) {
+        found.push({ text: text.slice(start, index + 1), position: start });
+        start = index;
+        break;
+      }
+    }
+  }
+  return found;
+}
+function closeTruncatedJson(text) {
+  let inString = false;
+  let escaped = false;
+  const stack = [];
+  let lastSafe = -1;
+  let lastComma = -1;
+  for (let index = 0; index < text.length; index++) {
+    const ch = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') {
+        inString = false;
+        lastSafe = index;
+      }
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{" || ch === "[") stack.push(ch);
+    else if (ch === "}" || ch === "]") {
+      if (stack.length > 0) stack.pop();
+      lastSafe = index;
+    } else if (ch === ",") {
+      lastSafe = index;
+      lastComma = index;
+    }
+  }
+  if (!inString && stack.length === 0) return null;
+  const cutAt = inString ? lastComma : lastSafe;
+  if (cutAt < 0) return null;
+  let closed = text.slice(0, cutAt).replace(/,\s*$/u, "");
+  const remaining = [];
+  let quoted = false;
+  let slash = false;
+  for (const ch of closed) {
+    if (quoted) {
+      if (slash) slash = false;
+      else if (ch === "\\") slash = true;
+      else if (ch === '"') quoted = false;
+    } else if (ch === '"') quoted = true;
+    else if (ch === "{" || ch === "[") remaining.push(ch);
+    else if ((ch === "}" || ch === "]") && remaining.length > 0) remaining.pop();
+  }
+  for (let index = remaining.length - 1; index >= 0; index--) closed += remaining[index] === "{" ? "}" : "]";
+  return closed;
+}
+function repairJsonText(source) {
+  let text = source;
+  const repairs = [];
+  let next = text.replace(/((?:"[^"\r\n]+"\s*:\s*))([「｢『【])/gu, '$1"$2');
+  if (next !== text) {
+    text = next;
+    repairs.push("missing-open-quote");
+  }
+  const closed = closeTruncatedJson(text);
+  if (closed !== null) {
+    text = closed;
+    repairs.push("truncated-tool-tail-drop");
+  }
+  return { text, repairs };
+}
+function jsonDecisionCandidates(rawResponse, tools) {
+  const clean = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, "").replace(/```(?:json)?/giu, "").replace(/```/gu, "").replace(/\bAGENT_END\b/giu, "").trim();
+  const sources = scanJsonObjects(clean).map((candidate) => ({ text: candidate.text, offset: candidate.position }));
+  for (let position = clean.indexOf("{"); position >= 0; position = clean.indexOf("{", position + 1)) sources.push({ text: clean.slice(position), offset: position });
+  const valid = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const source of sources) {
+    const attempts = [{ text: source.text, repairs: [] }];
+    try {
+      const repaired = (0, import_jsonrepair.jsonrepair)(source.text);
+      if (repaired !== source.text) attempts.push({ text: repaired, repairs: ["jsonrepair"] });
+    } catch {
+      const custom = repairJsonText(source.text);
+      if (custom.repairs.length > 0) {
+        try {
+          attempts.push({ text: (0, import_jsonrepair.jsonrepair)(custom.text), repairs: [...custom.repairs, "jsonrepair"] });
+        } catch {
+        }
+      }
+    }
+    for (const attempt of attempts) {
+      try {
+        const content = protocolObject(JSON.parse(attempt.text), tools);
+        if (!content) continue;
+        const key = `${source.offset}:${content}:${attempt.repairs.join(",")}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const score = /"(?:tool|answer)"/u.test(attempt.text) ? 20 : 0;
+        valid.push({ text: content, position: source.offset, score: score + (/"args"/u.test(attempt.text) ? 8 : 0), repairs: attempt.repairs });
+      } catch {
+      }
+    }
+  }
+  return valid.sort((a, b) => b.score - a.score || b.position - a.position || a.repairs.length - b.repairs.length);
+}
+function captureLabeledValue(raw, key) {
+  const marker = new RegExp(`${key}\\s*(?:\u306F|=|:|\uFF1A)\\s*`, "iu").exec(raw);
+  if (!marker) return void 0;
+  let rest = raw.slice(marker.index + marker[0].length).trim();
+  if (rest.startsWith("\u300C")) return rest.slice(1, rest.indexOf("\u300D") >= 0 ? rest.indexOf("\u300D") : void 0);
+  if (rest.startsWith('"')) {
+    try {
+      return JSON.parse(rest.match(/^"(?:\\.|[^"\\])*"/u)?.[0] ?? "");
+    } catch {
+    }
+  }
+  if (rest.startsWith("[") || rest.startsWith("{")) {
+    const candidate = rest.startsWith("{") ? scanJsonObjects(rest)[0]?.text : rest.match(/^\[[\s\S]*?\]/u)?.[0];
+    try {
+      if (candidate) return JSON.parse(candidate);
+    } catch {
+    }
+  }
+  rest = rest.split(/\s+\/\s+(?=[a-z_]+\s*=)/iu)[0].replace(/\s+(?:で呼びます|で呼ぶ|を使います|を使う|です)[。.!！]?\s*$/u, "").replace(/[。.!！]\s*$/u, "").trim();
+  if (/^(?:true|false)$/iu.test(rest)) return rest.toLowerCase() === "true";
+  if (/^-?\d+$/u.test(rest)) return Number(rest);
+  return rest || void 0;
+}
+function explicitToolDecision(rawResponse, tools) {
+  const text = rawResponse.trim();
+  const negative = /(?:例[:：]|たとえば|例えば|今回は[^。\n]*(?:しません|しない)|拒否され|呼び出せません|まだ[^。\n]*(?:できません|呼べません)|操作しません)/u.test(text);
+  if (negative) return null;
+  const matched = [...tools].sort((a, b) => b.name.length - a.name.length).find((tool) => {
+    const bare2 = tool.name.startsWith("host.") ? tool.name.slice(5) : tool.name;
+    return text.toLowerCase().includes(tool.name.toLowerCase()) || text.toLowerCase().includes(bare2.toLowerCase());
+  });
+  if (!matched) return null;
+  const argsLabel = /\bARGS?\b\s*[:：]?\s*/iu.exec(text);
+  if (argsLabel) {
+    const argsCandidate = scanJsonObjects(text.slice(argsLabel.index + argsLabel[0].length))[0];
+    if (argsCandidate) {
+      try {
+        return JSON.stringify({ tool: matched.name, args: JSON.parse(argsCandidate.text) });
+      } catch {
+      }
+    }
+  }
+  const bare = matched.name.startsWith("host.") ? matched.name.slice(5) : matched.name;
+  if (bare === "write_file") {
+    const naturalWrite = text.match(/(?:host\.)?write_file\s*で\s*([^\r\n]+?)\s*に「([\s\S]*?)」を新規作成/u);
+    if (naturalWrite) return JSON.stringify({ tool: matched.name, args: { path: naturalWrite[1].trim(), content: naturalWrite[2] } });
+  }
+  const keysByTool = {
+    list_files: ["path", "glob", "recursive"],
+    read_file: ["path"],
+    read_files: ["paths", "pattern"],
+    read_xlsx: ["path"],
+    search_files: ["query", "path", "glob", "max_results"],
+    write_file: ["path", "content"],
+    run_command: ["command"],
+    start_process: ["command"]
+  };
+  const args = {};
+  for (const key of keysByTool[bare] ?? []) {
+    const value = captureLabeledValue(text, key);
+    if (value !== void 0) args[key] = value;
+  }
+  if (Object.keys(args).length === 0 && !/(?:使|呼び|実行|取得|列挙|一覧)/u.test(text)) return null;
+  return JSON.stringify({ tool: matched.name, args });
+}
+function interpretCopilotResponseDeterministically(rawResponse, tools) {
+  const candidates = jsonDecisionCandidates(rawResponse, tools);
+  const negativeContext = /(?:例[:：]|たとえば|例えば|今回は[^。\n]*(?:しません|しない)|操作しません|拒否され|呼び出せません)/u.test(rawResponse);
+  if (candidates.length > 0 && !negativeContext) return { content: candidates[0].text, method: "json-candidate", repairs: candidates[0].repairs };
+  const explicit = explicitToolDecision(rawResponse, tools);
+  if (explicit) return { content: explicit, method: "explicit-tool-text", repairs: [] };
+  const answer = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, "").replace(/```/gu, "").replace(/\bAGENT_END\b/giu, "").trim();
+  if (!answer) return null;
+  const mentionsAllowedTool = tools.some((tool) => {
+    const bare = tool.name.startsWith("host.") ? tool.name.slice(5) : tool.name;
+    return answer.toLowerCase().includes(tool.name.toLowerCase()) || answer.toLowerCase().includes(bare.toLowerCase());
+  });
+  if (mentionsAllowedTool && !negativeContext) return null;
+  return { content: JSON.stringify({ answer }), method: "plain-answer", repairs: [] };
 }
 function loopbackUrl(value) {
   const url = new URL(value);
@@ -4654,8 +4860,8 @@ async function convertCopilotResponse(settings, rawResponse, tools, signal) {
   if (settings?.enabled !== true) return null;
   const baseURL = settings.baseURL ?? "http://127.0.0.1:8080/v1";
   const url = endpoint(baseURL);
-  const direct = strictProtocolFastPath(rawResponse, tools);
-  if (direct) return direct;
+  const deterministic = interpretCopilotResponseDeterministically(rawResponse, tools);
+  if (deterministic) return deterministic.content;
   const timeoutMs = Math.max(250, Math.min(6e4, Math.floor(settings.timeoutMs ?? 3e4)));
   const activeTools = candidateTools(rawResponse, tools);
   const body = JSON.stringify({
@@ -5255,6 +5461,8 @@ function normalizeWorkspaceOpenCommand(command, ctx2) {
     candidate = words[1].trimStart();
   } else if (["excel", "excel.exe"].includes(executable) && words.length === 2 && /\.xlsx$/iu.test(words[1])) {
     candidate = words[1];
+  } else if (words.length === 1) {
+    candidate = words[0];
   }
   if (!candidate) return null;
   let absolute;
@@ -6088,6 +6296,7 @@ var TOOL_DEFS = [
       required: ["command"]
     },
     async run(args, ctx2) {
+      if (ctx2.safeCommandOnly && args.url) throw new Error("start_process\u62D2\u5426: \u3053\u306E\u69CB\u6210\u3067\u306F\u30D7\u30EC\u30D3\u30E5\u30FCURL\u3092\u6307\u5B9A\u3067\u304D\u307E\u305B\u3093");
       const command = prepareHostCommand(String(args.command ?? ""), ctx2);
       const process2 = startManagedProcess(command, ctx2.workspace, args.label ? String(args.label) : void 0, args.url ? String(args.url) : void 0);
       return JSON.stringify(process2);
@@ -6164,8 +6373,30 @@ var TOOL_DEFS = [
     }
   }
 ];
+function toolDefsForContract(options = {}) {
+  return TOOL_DEFS.filter((tool) => (options.allowArbitraryCommands || tool.name !== "run_command") && !(options.safeCommandOnly && tool.name === "get_weather")).map((tool) => {
+    if (!options.safeCommandOnly) return tool;
+    if (tool.name === "run_command") return { ...tool, description: "\u65E2\u5B58\u306E\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5185\u901A\u5E38\u30D5\u30A1\u30A4\u30EB1\u4EF6\u3092\u65E2\u5B9A\u30A2\u30D7\u30EA\u3067\u958B\u304F\u3002command\u306F\u5BFE\u8C61\u306E\u76F8\u5BFE\u30D1\u30B91\u4EF6\u3001\u307E\u305F\u306F Invoke-Item <\u76F8\u5BFE\u30D1\u30B9>\u3002\u4EFB\u610F\u30B7\u30A7\u30EB\u3001\u524A\u9664\u3001\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u3001\u30EC\u30B8\u30B9\u30C8\u30EA\u64CD\u4F5C\u306F\u5229\u7528\u3067\u304D\u306A\u3044" };
+    if (tool.name === "start_process") {
+      const parameters = tool.parameters;
+      const properties = parameters.properties ?? {};
+      return {
+        ...tool,
+        description: "\u65E2\u5B58\u306E\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5185\u901A\u5E38\u30D5\u30A1\u30A4\u30EB1\u4EF6\u3092\u65E2\u5B9A\u30A2\u30D7\u30EA\u3067\u958B\u304F\u3002command\u306F\u5BFE\u8C61\u306E\u76F8\u5BFE\u30D1\u30B91\u4EF6\u3001\u307E\u305F\u306F Invoke-Item <\u76F8\u5BFE\u30D1\u30B9>\u3002\u5916\u90E8URL\u3084\u4EFB\u610F\u30D7\u30ED\u30BB\u30B9\u306F\u5229\u7528\u3067\u304D\u306A\u3044",
+        parameters: {
+          ...parameters,
+          properties: {
+            command: { type: "string", description: "\u958B\u304F\u5BFE\u8C61\u306E\u76F8\u5BFE\u30D1\u30B91\u4EF6\u3001\u307E\u305F\u306F Invoke-Item <\u76F8\u5BFE\u30D1\u30B9>" },
+            label: properties.label
+          }
+        }
+      };
+    }
+    return tool;
+  });
+}
 function openAITools(options = {}) {
-  const defs = TOOL_DEFS.filter((tool) => (options.allowArbitraryCommands || tool.name !== "run_command") && !(options.safeCommandOnly && tool.name === "get_weather"));
+  const defs = toolDefsForContract(options);
   return defs.map((t) => ({
     type: "function",
     function: { name: qualifiedToolName(t.name), description: t.description, parameters: { ...t.parameters, additionalProperties: false } }
@@ -6254,7 +6485,7 @@ function parseStrictCandidate(candidate) {
     const observedRepair = repairObservedWriteContent(candidate.text);
     if (observedRepair === null) return null;
     try {
-      const libraryRepair = JSON.parse((0, import_jsonrepair.jsonrepair)(candidate.text));
+      const libraryRepair = JSON.parse((0, import_jsonrepair2.jsonrepair)(candidate.text));
       parsedValue = JSON.stringify(libraryRepair) === JSON.stringify(observedRepair) ? libraryRepair : observedRepair;
     } catch {
       parsedValue = observedRepair;
@@ -6311,12 +6542,12 @@ function shouldCancel(io) {
   return io.signal?.aborted === true || io.isCanceled?.() === true;
 }
 function buildProtocolRules(mode = "work", allowArbitraryCommands = false, autoApproveCommand = false, safeCommandOnly = false) {
-  const toolDocs = TOOL_DEFS.filter((t) => (allowArbitraryCommands || t.name !== "run_command") && !(safeCommandOnly && t.name === "get_weather")).map((t) => {
+  const toolDocs = toolDefsForContract({ allowArbitraryCommands, safeCommandOnly }).map((t) => {
     const req = t.parameters.required ?? [];
     const props = Object.keys(t.parameters.properties ?? {});
     return `- ${qualifiedToolName(t.name)}(${props.join(", ")}):${req.length ? ` \u5FC5\u9808=${req.join(",")};` : ""} ${t.description}`;
   }).join("\n");
-  const commandRule = allowArbitraryCommands ? autoApproveCommand ? "\u660E\u793A\u8A2D\u5B9A\u306B\u3088\u308A\u4EFB\u610F\u306Ehost\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u81EA\u52D5\u627F\u8A8D\u6E08\u307F\u3067\u3059\u3002\u627F\u8A8D\u3092\u6C42\u3081\u308Banswer\u3092\u8FD4\u3055\u305A\u3001\u5FC5\u8981\u306Ahost.run_command\u3092\u76F4\u3061\u306B\u8981\u6C42\u3057\u3066\u304F\u3060\u3055\u3044\u3002" : "\u660E\u793A\u8A2D\u5B9A\u306B\u3088\u308A\u4EFB\u610F\u306Ehost\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u304C\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u3059\u3002\u5B9F\u884C\u524D\u306B\u627F\u8A8D\u3092\u53D6\u5F97\u3057\u3066\u304F\u3060\u3055\u3044\u3002" : "\u4EFB\u610F\u306E\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u3053\u306ERun\u3067\u306F\u7121\u52B9\u3067\u3059\u3002\u65E2\u77E5\u306E\u691C\u8A3C\u624B\u9806\u3084\u7BA1\u7406\u30D7\u30ED\u30BB\u30B9\u3092\u4F7F\u3044\u3001\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u3092\u8981\u6C42\u3057\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002";
+  const commandRule = safeCommandOnly ? "\u3053\u306ERun\u3067host.run_command\u3068host.start_process\u306B\u8A31\u53EF\u3055\u308C\u308B\u306E\u306F\u3001\u65E2\u5B58\u306E\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5185\u901A\u5E38\u30D5\u30A1\u30A4\u30EB1\u4EF6\u3092\u65E2\u5B9A\u30A2\u30D7\u30EA\u3067\u958B\u304F\u64CD\u4F5C\u3060\u3051\u3067\u3059\u3002\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u3067\u306F\u3042\u308A\u307E\u305B\u3093\u3002\u627F\u8A8D\u753B\u9762\u306F\u30DB\u30B9\u30C8\u304C\u8868\u793A\u3059\u308B\u305F\u3081\u3001answer\u3067\u5229\u7528\u8005\u3078\u8A31\u53EF\u3092\u5C0B\u306D\u305A\u3001\u5FC5\u8981\u306Ahost\u30C4\u30FC\u30EB\u3092\u8981\u6C42\u3057\u3066\u304F\u3060\u3055\u3044\u3002" : allowArbitraryCommands ? autoApproveCommand ? "\u660E\u793A\u8A2D\u5B9A\u306B\u3088\u308A\u4EFB\u610F\u306Ehost\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u81EA\u52D5\u627F\u8A8D\u6E08\u307F\u3067\u3059\u3002\u627F\u8A8D\u3092\u6C42\u3081\u308Banswer\u3092\u8FD4\u3055\u305A\u3001\u5FC5\u8981\u306Ahost.run_command\u3092\u76F4\u3061\u306B\u8981\u6C42\u3057\u3066\u304F\u3060\u3055\u3044\u3002" : "\u660E\u793A\u8A2D\u5B9A\u306B\u3088\u308A\u4EFB\u610F\u306Ehost\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u304C\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u3059\u3002\u5B9F\u884C\u524D\u306B\u627F\u8A8D\u3092\u53D6\u5F97\u3057\u3066\u304F\u3060\u3055\u3044\u3002" : "\u4EFB\u610F\u306E\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u3053\u306ERun\u3067\u306F\u7121\u52B9\u3067\u3059\u3002\u65E2\u77E5\u306E\u691C\u8A3C\u624B\u9806\u3084\u7BA1\u7406\u30D7\u30ED\u30BB\u30B9\u3092\u4F7F\u3044\u3001\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u3092\u8981\u6C42\u3057\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002";
   if (mode !== "work") {
     const label = mode === "research" ? "\u8ABF\u67FB" : "\u901A\u5E38\u56DE\u7B54";
     return [
@@ -6517,26 +6748,53 @@ async function runCopilotTurn(opts) {
     if (shouldCancel(io)) return canceled();
     if (io.isPaused?.()) return { reply: "", messages: turnMessages("[\u4E00\u6642\u505C\u6B62] \u30C1\u30A7\u30C3\u30AF\u30DD\u30A4\u30F3\u30C8\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F"), aborted: true, paused: true, checkpoint: steps.slice(-20) };
     let raw;
+    const backendStartedAt = Date.now();
     try {
       raw = await backend.complete(composeCopilotPrompt("work", opts.userInput, steps, cfg2.copilot?.maxPromptChars ?? 12e4, history, policy.allowArbitraryCommands, policy.autoApproveCommand, systemInstructions, ctx2.safeCommandOnly === true), io.signal);
       raw = raw.replace(/＜/g, "<").replace(/＞/g, ">").replace(/｀/g, String.fromCharCode(96));
-      io.event?.({ type: "model.decision", summary: "Copilot\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: "copilot", namespace: "native", authority: "claimed" });
     } catch (err) {
       const msg = err.message;
       io.print(`[error] ${msg}`);
       return { reply: "", messages: turnMessages(`[error] ${msg}`), aborted: true };
     }
+    const converterTools = toolDefsForContract({ allowArbitraryCommands: policy.allowArbitraryCommands, safeCommandOnly: ctx2.safeCommandOnly });
+    const contractTools = converterTools.map((tool) => ({ name: qualifiedToolName(tool.name), description: tool.description, parameters: tool.parameters }));
+    const layer1StartedAt = Date.now();
+    const directPe = extractReplyAndEnd(raw);
+    const deterministic = directPe ? null : interpretCopilotResponseDeterministically(raw, contractTools);
+    const layer1Ms = Date.now() - layer1StartedAt;
+    let interpretationLayer = directPe || deterministic ? "layer1" : "failed";
+    let interpretationMethod = directPe ? "strict-protocol" : deterministic?.method ?? "none";
+    let interpretationRepairs = deterministic?.repairs ?? [];
     let converterRaw = null;
-    try {
-      const converterTools = TOOL_DEFS.filter((tool) => (policy.allowArbitraryCommands || tool.name !== "run_command") && !(ctx2.safeCommandOnly && tool.name === "get_weather"));
-      converterRaw = await convertCopilotResponse(cfg2.localResponseConverter, raw, converterTools.map((tool) => ({ name: qualifiedToolName(tool.name), description: tool.description, parameters: tool.parameters })), io.signal);
-      if (converterRaw !== null) io.print("[converter] loopback response converter applied");
-    } catch (err) {
-      io.print(`[converter] fallback: ${err.message}`);
+    const converterStartedAt = Date.now();
+    if (!directPe && !deterministic) {
+      try {
+        converterRaw = await convertCopilotResponse(cfg2.localResponseConverter, raw, contractTools, io.signal);
+        if (converterRaw !== null) {
+          interpretationLayer = "layer2";
+          interpretationMethod = "local-model";
+          io.print("[converter] loopback response converter applied");
+        }
+      } catch (err) {
+        io.print(`[converter] fallback: ${err.message}`);
+        interpretationMethod = "layer2-failed";
+      }
     }
-    const pe = converterRaw ? extractReplyAndEnd(converterRaw) ?? extractReplyAndEnd(raw) : extractReplyAndEnd(raw);
+    const converterMs = Date.now() - converterStartedAt;
+    const copilotTiming = backend.getLastTiming?.() ?? null;
+    io.event?.({
+      type: "model.decision",
+      summary: "Copilot\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F",
+      durationMs: Date.now() - backendStartedAt,
+      metadata: { copilot: copilotTiming, layer1Ms, converterMs, interpretationLayer, interpretationMethod, interpretationRepairs },
+      origin: "copilot",
+      namespace: "native",
+      authority: "claimed"
+    });
+    const pe = directPe ?? (deterministic ? extractReplyAndEnd(deterministic.content) : null) ?? (converterRaw ? extractReplyAndEnd(converterRaw) : null);
     let parsed = pe?.parsed ?? null;
-    if (parsed && bareToolName(parsed.tool ?? "") === "write_file") attachFenceContent(raw, pe.end, parsed);
+    if (directPe && parsed && bareToolName(parsed.tool ?? "") === "write_file") attachFenceContent(raw, directPe.end, parsed);
     if (!parsed) {
       if (!parseRetried) {
         parseRetried = true;
@@ -6862,12 +7120,12 @@ function isStopGenerationControl(candidate) {
   return structural || semantic;
 }
 function updateResponseCompletionState(previous, sample) {
-  if (sample.generating || !sample.copyEnabled || sample.textLength <= 0) {
-    return { state: { stableLength: null, stableSinceMs: null }, ready: false };
+  if (sample.generating || !sample.copyEnabled || sample.text.length <= 0) {
+    return { state: { stableText: null, stableSinceMs: null }, ready: false };
   }
-  if (previous.stableLength !== sample.textLength || previous.stableSinceMs === null) {
+  if (previous.stableText !== sample.text || previous.stableSinceMs === null) {
     return {
-      state: { stableLength: sample.textLength, stableSinceMs: sample.observedAtMs },
+      state: { stableText: sample.text, stableSinceMs: sample.observedAtMs },
       ready: false
     };
   }
@@ -7275,6 +7533,7 @@ var CopilotEdgeClient = class {
   visibleEdgePid = null;
   edgeProfileDir = null;
   visibleSessionId = null;
+  lastTiming = null;
   constructor(cfg2) {
     this.s = resolveCopilotSettings(cfg2);
   }
@@ -7766,11 +8025,12 @@ var CopilotEdgeClient = class {
     };
   }
   async waitResponse(baseline, signal) {
+    const startedAt = Date.now();
     const deadline = Date.now() + this.s.responseTimeoutSec * 1e3;
     let lastText = "";
     let lastChange = Date.now();
     let sawNewText = false;
-    let completionState = { stableLength: null, stableSinceMs: null };
+    let completionState = { stableText: null, stableSinceMs: null };
     while (Date.now() < deadline) {
       throwIfAborted(signal);
       const remainingMs = deadline - Date.now();
@@ -7788,15 +8048,21 @@ var CopilotEdgeClient = class {
       const quietFor = Date.now() - lastChange;
       const completion = updateResponseCompletionState(completionState, {
         observedAtMs: Date.now(),
-        textLength: sawNewText && st.text === lastText ? lastText.length : 0,
+        text: sawNewText && st.text === lastText ? lastText : "",
         generating: st.generating,
         copyEnabled: st.copyEnabled
       });
       completionState = completion.state;
       if (completion.ready) {
-        const answer = await this.finalizeAnswer(lastText, deadline);
+        const completionReadyAt = Date.now();
+        const visibleAnswer = this.cleanResponse(lastText);
+        const answer = visibleAnswer || await this.finalizeAnswer(lastText, deadline);
         assertResponseDeadline(deadline, this.s.responseTimeoutSec);
-        return answer;
+        return {
+          answer,
+          generationWaitMs: completionReadyAt - startedAt,
+          completionRetrievalMs: Date.now() - completionReadyAt
+        };
       }
       if (!st.generating && sawNewText && quietFor > this.s.stallTimeoutSec * 1e3) {
         throw new Error("Copilot \u306E\u5FDC\u7B54\u304C\u505C\u6EDE\u3057\u305F\u305F\u3081\u8AE6\u3081\u307E\u3057\u305F");
@@ -7823,24 +8089,62 @@ var CopilotEdgeClient = class {
     }
   }
   async complete(prompt, signal) {
+    const totalStartedAt = Date.now();
+    this.lastTiming = null;
     throwIfAborted(signal);
+    let phaseStartedAt = Date.now();
     await this.ensureEdge();
     await this.ensurePage();
+    const connectionMs = Date.now() - phaseStartedAt;
+    phaseStartedAt = Date.now();
     await this.freshChat();
+    const sessionCreationMs = Date.now() - phaseStartedAt;
+    phaseStartedAt = Date.now();
     await this.waitInputReady(120, signal);
     if (this.visibleSessionId) {
       await this.stampVisibleSessionMarker(this.visibleSessionId);
       await this.bringToFront();
     }
+    const inputReadyMs = Date.now() - phaseStartedAt;
+    phaseStartedAt = Date.now();
     await this.selectModel();
+    const modelSelectionMs = Date.now() - phaseStartedAt;
     throwIfAborted(signal);
+    phaseStartedAt = Date.now();
     await this.waitInputReady(30, signal);
     await this.assertTrustedOrigin();
+    const prePromptReadyMs = Date.now() - phaseStartedAt;
+    phaseStartedAt = Date.now();
     await this.insertPrompt(prompt);
+    const promptWriteMs = Date.now() - phaseStartedAt;
+    phaseStartedAt = Date.now();
     const baseline = (await this.readScreenState()).text;
+    const baselineReadMs = Date.now() - phaseStartedAt;
+    phaseStartedAt = Date.now();
     await this.clickSend();
+    const sendMs = Date.now() - phaseStartedAt;
     throwIfAborted(signal);
-    return this.waitResponse(baseline, signal);
+    const response = await this.waitResponse(baseline, signal);
+    this.lastTiming = {
+      connectionMs,
+      sessionCreationMs,
+      inputReadyMs,
+      modelSelectionMs,
+      prePromptReadyMs,
+      promptWriteMs,
+      baselineReadMs,
+      sendMs,
+      generationWaitMs: response.generationWaitMs,
+      completionRetrievalMs: response.completionRetrievalMs,
+      totalMs: Date.now() - totalStartedAt,
+      promptChars: prompt.length,
+      responseChars: response.answer.length
+    };
+    console.log("[copilot-timing] " + JSON.stringify(this.lastTiming));
+    return response.answer;
+  }
+  getLastTiming() {
+    return this.lastTiming ? { ...this.lastTiming } : null;
   }
   close() {
     this.cdp?.close();

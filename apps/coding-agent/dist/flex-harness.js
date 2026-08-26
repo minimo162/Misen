@@ -244,7 +244,7 @@ var require_jsonrepair = __commonJS({
     Object.defineProperty(exports2, "__esModule", {
       value: true
     });
-    exports2.jsonrepair = jsonrepair2;
+    exports2.jsonrepair = jsonrepair3;
     var _JSONRepairError = require_JSONRepairError();
     var _stringUtils = require_stringUtils();
     var controlCharacters = {
@@ -265,7 +265,7 @@ var require_jsonrepair = __commonJS({
       t: "	"
       // note that \u is handled separately in parseString()
     };
-    function jsonrepair2(text) {
+    function jsonrepair3(text) {
       let i = 0;
       let output = "";
       parseMarkdownCodeBlock(["```", "[```", "{```"]);
@@ -4509,11 +4509,12 @@ var import_node_os = __toESM(require("node:os"));
 var import_node_path2 = __toESM(require("node:path"));
 
 // src/agent.ts
-var import_jsonrepair = __toESM(require_cjs());
+var import_jsonrepair2 = __toESM(require_cjs());
 
 // src/converter.ts
 var import_node_http = __toESM(require("node:http"));
 var import_node_https = __toESM(require("node:https"));
+var import_jsonrepair = __toESM(require_cjs());
 function decisionSchema(tools) {
   return {
     type: "object",
@@ -4545,22 +4546,227 @@ function candidateTools(rawResponse, tools) {
   });
   return mentioned.length > 0 ? mentioned : tools;
 }
-function strictProtocolFastPath(rawResponse, tools) {
-  try {
-    const parsed = JSON.parse(rawResponse.trim());
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-    if (typeof parsed.answer === "string" && Object.keys(parsed).every((key) => ["answer", "AGENT_END"].includes(key))) {
-      return JSON.stringify({ answer: parsed.answer });
-    }
-    if (typeof parsed.tool !== "string") return null;
-    const requested = parsed.tool.startsWith("host.") ? parsed.tool : `host.${parsed.tool}`;
-    const matched = tools.find((tool2) => tool2.name === requested);
-    if (!matched) return null;
-    const args = parsed.args && typeof parsed.args === "object" && !Array.isArray(parsed.args) ? parsed.args : Object.fromEntries(Object.entries(parsed).filter(([key]) => !["tool", "AGENT_END"].includes(key)));
-    return JSON.stringify({ tool: matched.name, args });
-  } catch {
-    return null;
+function protocolObject(value, tools) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const parsed = value;
+  const keys = Object.keys(parsed);
+  if (Object.prototype.hasOwnProperty.call(parsed, "AGENT_END") && parsed.AGENT_END !== true) return null;
+  if (typeof parsed.answer === "string" && keys.every((key) => ["answer", "AGENT_END"].includes(key))) {
+    return JSON.stringify({ answer: parsed.answer });
   }
+  if (typeof parsed.tool !== "string") return null;
+  const requested = parsed.tool.startsWith("host.") ? parsed.tool : `host.${parsed.tool}`;
+  const matched = tools.find((tool2) => tool2.name === requested);
+  if (!matched) return null;
+  if (Object.prototype.hasOwnProperty.call(parsed, "args")) {
+    if (keys.some((key) => !["tool", "args", "AGENT_END"].includes(key))) return null;
+    if (!parsed.args || typeof parsed.args !== "object" || Array.isArray(parsed.args)) return null;
+    return JSON.stringify({ tool: matched.name, args: parsed.args });
+  }
+  const args = Object.fromEntries(Object.entries(parsed).filter(([key]) => !["tool", "AGENT_END"].includes(key)));
+  return JSON.stringify({ tool: matched.name, args });
+}
+function scanJsonObjects(text) {
+  const found = [];
+  for (let start = 0; start < text.length; start++) {
+    if (text[start] !== "{") continue;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < text.length; index++) {
+      const ch = text[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === "{") depth++;
+      else if (ch === "}" && --depth === 0) {
+        found.push({ text: text.slice(start, index + 1), position: start });
+        start = index;
+        break;
+      }
+    }
+  }
+  return found;
+}
+function closeTruncatedJson(text) {
+  let inString = false;
+  let escaped = false;
+  const stack = [];
+  let lastSafe = -1;
+  let lastComma = -1;
+  for (let index = 0; index < text.length; index++) {
+    const ch = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') {
+        inString = false;
+        lastSafe = index;
+      }
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{" || ch === "[") stack.push(ch);
+    else if (ch === "}" || ch === "]") {
+      if (stack.length > 0) stack.pop();
+      lastSafe = index;
+    } else if (ch === ",") {
+      lastSafe = index;
+      lastComma = index;
+    }
+  }
+  if (!inString && stack.length === 0) return null;
+  const cutAt = inString ? lastComma : lastSafe;
+  if (cutAt < 0) return null;
+  let closed = text.slice(0, cutAt).replace(/,\s*$/u, "");
+  const remaining = [];
+  let quoted = false;
+  let slash = false;
+  for (const ch of closed) {
+    if (quoted) {
+      if (slash) slash = false;
+      else if (ch === "\\") slash = true;
+      else if (ch === '"') quoted = false;
+    } else if (ch === '"') quoted = true;
+    else if (ch === "{" || ch === "[") remaining.push(ch);
+    else if ((ch === "}" || ch === "]") && remaining.length > 0) remaining.pop();
+  }
+  for (let index = remaining.length - 1; index >= 0; index--) closed += remaining[index] === "{" ? "}" : "]";
+  return closed;
+}
+function repairJsonText(source) {
+  let text = source;
+  const repairs = [];
+  let next = text.replace(/((?:"[^"\r\n]+"\s*:\s*))([「｢『【])/gu, '$1"$2');
+  if (next !== text) {
+    text = next;
+    repairs.push("missing-open-quote");
+  }
+  const closed = closeTruncatedJson(text);
+  if (closed !== null) {
+    text = closed;
+    repairs.push("truncated-tool-tail-drop");
+  }
+  return { text, repairs };
+}
+function jsonDecisionCandidates(rawResponse, tools) {
+  const clean = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, "").replace(/```(?:json)?/giu, "").replace(/```/gu, "").replace(/\bAGENT_END\b/giu, "").trim();
+  const sources = scanJsonObjects(clean).map((candidate) => ({ text: candidate.text, offset: candidate.position }));
+  for (let position = clean.indexOf("{"); position >= 0; position = clean.indexOf("{", position + 1)) sources.push({ text: clean.slice(position), offset: position });
+  const valid = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const source of sources) {
+    const attempts = [{ text: source.text, repairs: [] }];
+    try {
+      const repaired = (0, import_jsonrepair.jsonrepair)(source.text);
+      if (repaired !== source.text) attempts.push({ text: repaired, repairs: ["jsonrepair"] });
+    } catch {
+      const custom = repairJsonText(source.text);
+      if (custom.repairs.length > 0) {
+        try {
+          attempts.push({ text: (0, import_jsonrepair.jsonrepair)(custom.text), repairs: [...custom.repairs, "jsonrepair"] });
+        } catch {
+        }
+      }
+    }
+    for (const attempt of attempts) {
+      try {
+        const content = protocolObject(JSON.parse(attempt.text), tools);
+        if (!content) continue;
+        const key = `${source.offset}:${content}:${attempt.repairs.join(",")}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const score = /"(?:tool|answer)"/u.test(attempt.text) ? 20 : 0;
+        valid.push({ text: content, position: source.offset, score: score + (/"args"/u.test(attempt.text) ? 8 : 0), repairs: attempt.repairs });
+      } catch {
+      }
+    }
+  }
+  return valid.sort((a, b) => b.score - a.score || b.position - a.position || a.repairs.length - b.repairs.length);
+}
+function captureLabeledValue(raw, key) {
+  const marker = new RegExp(`${key}\\s*(?:\u306F|=|:|\uFF1A)\\s*`, "iu").exec(raw);
+  if (!marker) return void 0;
+  let rest = raw.slice(marker.index + marker[0].length).trim();
+  if (rest.startsWith("\u300C")) return rest.slice(1, rest.indexOf("\u300D") >= 0 ? rest.indexOf("\u300D") : void 0);
+  if (rest.startsWith('"')) {
+    try {
+      return JSON.parse(rest.match(/^"(?:\\.|[^"\\])*"/u)?.[0] ?? "");
+    } catch {
+    }
+  }
+  if (rest.startsWith("[") || rest.startsWith("{")) {
+    const candidate = rest.startsWith("{") ? scanJsonObjects(rest)[0]?.text : rest.match(/^\[[\s\S]*?\]/u)?.[0];
+    try {
+      if (candidate) return JSON.parse(candidate);
+    } catch {
+    }
+  }
+  rest = rest.split(/\s+\/\s+(?=[a-z_]+\s*=)/iu)[0].replace(/\s+(?:で呼びます|で呼ぶ|を使います|を使う|です)[。.!！]?\s*$/u, "").replace(/[。.!！]\s*$/u, "").trim();
+  if (/^(?:true|false)$/iu.test(rest)) return rest.toLowerCase() === "true";
+  if (/^-?\d+$/u.test(rest)) return Number(rest);
+  return rest || void 0;
+}
+function explicitToolDecision(rawResponse, tools) {
+  const text = rawResponse.trim();
+  const negative = /(?:例[:：]|たとえば|例えば|今回は[^。\n]*(?:しません|しない)|拒否され|呼び出せません|まだ[^。\n]*(?:できません|呼べません)|操作しません)/u.test(text);
+  if (negative) return null;
+  const matched = [...tools].sort((a, b) => b.name.length - a.name.length).find((tool2) => {
+    const bare2 = tool2.name.startsWith("host.") ? tool2.name.slice(5) : tool2.name;
+    return text.toLowerCase().includes(tool2.name.toLowerCase()) || text.toLowerCase().includes(bare2.toLowerCase());
+  });
+  if (!matched) return null;
+  const argsLabel = /\bARGS?\b\s*[:：]?\s*/iu.exec(text);
+  if (argsLabel) {
+    const argsCandidate = scanJsonObjects(text.slice(argsLabel.index + argsLabel[0].length))[0];
+    if (argsCandidate) {
+      try {
+        return JSON.stringify({ tool: matched.name, args: JSON.parse(argsCandidate.text) });
+      } catch {
+      }
+    }
+  }
+  const bare = matched.name.startsWith("host.") ? matched.name.slice(5) : matched.name;
+  if (bare === "write_file") {
+    const naturalWrite = text.match(/(?:host\.)?write_file\s*で\s*([^\r\n]+?)\s*に「([\s\S]*?)」を新規作成/u);
+    if (naturalWrite) return JSON.stringify({ tool: matched.name, args: { path: naturalWrite[1].trim(), content: naturalWrite[2] } });
+  }
+  const keysByTool = {
+    list_files: ["path", "glob", "recursive"],
+    read_file: ["path"],
+    read_files: ["paths", "pattern"],
+    read_xlsx: ["path"],
+    search_files: ["query", "path", "glob", "max_results"],
+    write_file: ["path", "content"],
+    run_command: ["command"],
+    start_process: ["command"]
+  };
+  const args = {};
+  for (const key of keysByTool[bare] ?? []) {
+    const value = captureLabeledValue(text, key);
+    if (value !== void 0) args[key] = value;
+  }
+  if (Object.keys(args).length === 0 && !/(?:使|呼び|実行|取得|列挙|一覧)/u.test(text)) return null;
+  return JSON.stringify({ tool: matched.name, args });
+}
+function interpretCopilotResponseDeterministically(rawResponse, tools) {
+  const candidates = jsonDecisionCandidates(rawResponse, tools);
+  const negativeContext = /(?:例[:：]|たとえば|例えば|今回は[^。\n]*(?:しません|しない)|操作しません|拒否され|呼び出せません)/u.test(rawResponse);
+  if (candidates.length > 0 && !negativeContext) return { content: candidates[0].text, method: "json-candidate", repairs: candidates[0].repairs };
+  const explicit = explicitToolDecision(rawResponse, tools);
+  if (explicit) return { content: explicit, method: "explicit-tool-text", repairs: [] };
+  const answer = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, "").replace(/```/gu, "").replace(/\bAGENT_END\b/giu, "").trim();
+  if (!answer) return null;
+  const mentionsAllowedTool = tools.some((tool2) => {
+    const bare = tool2.name.startsWith("host.") ? tool2.name.slice(5) : tool2.name;
+    return answer.toLowerCase().includes(tool2.name.toLowerCase()) || answer.toLowerCase().includes(bare.toLowerCase());
+  });
+  if (mentionsAllowedTool && !negativeContext) return null;
+  return { content: JSON.stringify({ answer }), method: "plain-answer", repairs: [] };
 }
 function loopbackUrl(value) {
   const url = new URL(value);
@@ -4578,8 +4784,8 @@ async function convertCopilotResponse(settings, rawResponse, tools, signal) {
   if (settings?.enabled !== true) return null;
   const baseURL = settings.baseURL ?? "http://127.0.0.1:8080/v1";
   const url = endpoint(baseURL);
-  const direct = strictProtocolFastPath(rawResponse, tools);
-  if (direct) return direct;
+  const deterministic = interpretCopilotResponseDeterministically(rawResponse, tools);
+  if (deterministic) return deterministic.content;
   const timeoutMs = Math.max(250, Math.min(6e4, Math.floor(settings.timeoutMs ?? 3e4)));
   const activeTools = candidateTools(rawResponse, tools);
   const body = JSON.stringify({
@@ -5103,6 +5309,8 @@ function normalizeWorkspaceOpenCommand(command, ctx) {
     candidate = words[1].trimStart();
   } else if (["excel", "excel.exe"].includes(executable) && words.length === 2 && /\.xlsx$/iu.test(words[1])) {
     candidate = words[1];
+  } else if (words.length === 1) {
+    candidate = words[0];
   }
   if (!candidate) return null;
   let absolute;
@@ -5880,6 +6088,7 @@ var TOOL_DEFS = [
       required: ["command"]
     },
     async run(args, ctx) {
+      if (ctx.safeCommandOnly && args.url) throw new Error("start_process\u62D2\u5426: \u3053\u306E\u69CB\u6210\u3067\u306F\u30D7\u30EC\u30D3\u30E5\u30FCURL\u3092\u6307\u5B9A\u3067\u304D\u307E\u305B\u3093");
       const command = prepareHostCommand(String(args.command ?? ""), ctx);
       const process2 = startManagedProcess(command, ctx.workspace, args.label ? String(args.label) : void 0, args.url ? String(args.url) : void 0);
       return JSON.stringify(process2);
@@ -6039,7 +6248,7 @@ function parseStrictCandidate(candidate) {
     const observedRepair = repairObservedWriteContent(candidate.text);
     if (observedRepair === null) return null;
     try {
-      const libraryRepair = JSON.parse((0, import_jsonrepair.jsonrepair)(candidate.text));
+      const libraryRepair = JSON.parse((0, import_jsonrepair2.jsonrepair)(candidate.text));
       parsedValue = JSON.stringify(libraryRepair) === JSON.stringify(observedRepair) ? libraryRepair : observedRepair;
     } catch {
       parsedValue = observedRepair;
@@ -6136,6 +6345,108 @@ async function deterministicCorpus() {
     import_node_fs2.default.rmSync(root, { recursive: true, force: true });
   }
 }
+var LAYER_CASES = [
+  { type: "list", utterance: "reports\u898B\u305B\u3066", target: "reports", raw: '{"tool":"list_files","path":"reports"}', expectedTool: "host.list_files", expectedArgs: { path: "reports" } },
+  { type: "list", utterance: "rates \u306ECSV\u4E00\u89A7\u3092\u304A\u9858\u3044\u3057\u307E\u3059", target: "rates", raw: 'TOOL: host.list_files\nARGS: {"path":"rates","glob":"*.csv"}', expectedTool: "host.list_files", expectedArgs: { path: "rates", glob: "*.csv" } },
+  { type: "list", utterance: "\u96D1\u591A\u30D5\u30A9\u30EB\u30C0\u4F55\u3042\u308B\uFF1F", target: "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0", raw: "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0\u3092\u5217\u6319\u3057\u307E\u3059\u3002list_files \u306E path \u306F\u300C\u96D1\u591A \u30D5\u30A9\u30EB\u30C0\u300D\u3067\u3059\u3002", expectedTool: "host.list_files", expectedArgs: { path: "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0" } },
+  { type: "read", utterance: "\u6982\u8981\u8AAD\u3093\u3067", target: "\u6982\u8981.txt", raw: '{"tool":"read_files","paths":["\u6982\u8981.txt"]}', expectedTool: "host.read_files", expectedArgs: { paths: ["\u6982\u8981.txt"] } },
+  { type: "read", utterance: "\u70BA\u66FFCSV\u3092\u62DD\u898B\u3067\u304D\u307E\u3059\u304B", target: "rates/\u70BA\u66FF.csv", raw: "host.read_files \u3092 pattern=rates/\u70BA\u66FF.csv \u3067\u547C\u3073\u307E\u3059\u3002", expectedTool: "host.read_files", expectedArgs: { pattern: "rates/\u70BA\u66FF.csv" } },
+  { type: "read", utterance: "\u53F0\u5E33\u306E\u4E2D\u8EAB\u304A\u9858\u3044", target: "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u4EFB\u610F\u53F0\u5E33.xlsx", raw: "xlsx\u306A\u306E\u3067 read_xlsx\u3002path \u306F \u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u4EFB\u610F\u53F0\u5E33.xlsx", expectedTool: "host.read_xlsx", expectedArgs: { path: "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u4EFB\u610F\u53F0\u5E33.xlsx" } },
+  { type: "read", utterance: "\u306A\u3044\u8CC7\u6599\u3042\u308B\uFF1F", target: "\u5B58\u5728\u3057\u306A\u3044.txt", raw: '{"tool":"host.read_files","args":{"pattern":"\u5B58\u5728\u3057\u306A\u3044.txt"}}', expectedTool: "host.read_files", expectedArgs: { pattern: "\u5B58\u5728\u3057\u306A\u3044.txt" } },
+  { type: "open", utterance: "\u6982\u8981\u3092\u958B\u3044\u3066\u304F\u3060\u3055\u3044", target: "\u6982\u8981.txt", raw: '{"tool":"start_process","command":"Invoke-Item \u6982\u8981.txt"}', expectedTool: "host.start_process", expectedArgs: { command: "Invoke-Item \u6982\u8981.txt" } },
+  { type: "open", utterance: "\u5317.csv\u958B\u3044\u3066", target: "reports/\u5317.csv", raw: "start_process \u3092\u4F7F\u3046\u3002command \u306F Start-Process -FilePath reports/\u5317.csv", expectedTool: "host.start_process", expectedArgs: { command: "Start-Process -FilePath reports/\u5317.csv" } },
+  { type: "open", utterance: "\u53F0\u5E33\u3072\u3089\u304F", target: "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u4EFB\u610F\u53F0\u5E33.xlsx", raw: '{"tool":"run_command","args":{"command":"excel.exe \\"\u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u4EFB\u610F\u53F0\u5E33.xlsx\\""}}', expectedTool: "host.run_command", expectedArgs: { command: 'excel.exe "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u4EFB\u610F\u53F0\u5E33.xlsx"' } },
+  { type: "write", utterance: "\u65E5\u4ED8\u30E1\u30E2\u4F5C\u3063\u3066", target: "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u65E5\u4ED8.txt", raw: '{"tool":"write_file","path":"\u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u65E5\u4ED8.txt","content":"2026-08-27"}', expectedTool: "host.write_file", expectedArgs: { path: "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u65E5\u4ED8.txt", content: "2026-08-27" } },
+  { type: "write", utterance: "\u4E00\u8A00\u7F6E\u3044\u3066\u304F\u3060\u3055\u3044", target: "rates/\u4E00\u8A00.txt", raw: "host.write_file / path=rates/\u4E00\u8A00.txt / content=\u78BA\u8A8D\u3057\u307E\u3057\u305F", expectedTool: "host.write_file", expectedArgs: { path: "rates/\u4E00\u8A00.txt", content: "\u78BA\u8A8D\u3057\u307E\u3057\u305F" } },
+  { type: "write", utterance: "\u7B87\u6761\u66F8\u304D\u30E1\u30E2\u3088\u308D\u3057\u304F", target: "tools/\u7B87\u6761\u66F8\u304D.md", raw: "write_file \u3067 tools/\u7B87\u6761\u66F8\u304D.md \u306B\u300C- alpha\n- beta\u300D\u3092\u65B0\u898F\u4F5C\u6210\u3002", expectedTool: "host.write_file", expectedArgs: { path: "tools/\u7B87\u6761\u66F8\u304D.md", content: "- alpha\n- beta" } },
+  { type: "search", utterance: "\u9752\u3069\u3053", target: "\u9752", raw: '{"tool":"search_files","query":"\u9752"}', expectedTool: "host.search_files", expectedArgs: { query: "\u9752" } },
+  { type: "search", utterance: "\u8D64\u3092\u6A2A\u65AD\u691C\u7D22\u3057\u3066\u304F\u3060\u3055\u3044", target: "\u8D64", raw: 'TOOL host.search_files ARGS {"query":"\u8D64"}', expectedTool: "host.search_files", expectedArgs: { query: "\u8D64" } },
+  { type: "search", utterance: "\u7DD1 \u691C\u7D22", target: "\u7DD1", raw: "search_files\u3092\u4F7F\u3063\u3066\u3002query=\u7DD1", expectedTool: "host.search_files", expectedArgs: { query: "\u7DD1" } }
+];
+var NEGATIVE_CASES = [
+  "\u8A72\u5F53\u3059\u308B\u30D5\u30A1\u30A4\u30EB\u306F\u3042\u308A\u307E\u305B\u3093\u3002",
+  "\u30D5\u30A1\u30A4\u30EB\u540D\u304C\u6307\u5B9A\u3055\u308C\u3066\u3044\u306A\u3044\u305F\u3081\u3001\u5229\u7528\u8005\u3078\u306E\u78BA\u8A8D\u304C\u5FC5\u8981\u3067\u3059\u3002",
+  "\u51E6\u7406\u306F\u5B8C\u4E86\u3057\u307E\u3057\u305F\u3002",
+  "list_files \u306F\u30D5\u30A1\u30A4\u30EB\u4E00\u89A7\u3092\u53D6\u5F97\u3059\u308B\u30C4\u30FC\u30EB\u3067\u3059\u3002\u4ECA\u56DE\u306F\u64CD\u4F5C\u3057\u307E\u305B\u3093\u3002",
+  "run_command \u306E\u5B9F\u884C\u306F\u5B89\u5168\u5883\u754C\u306B\u3088\u308A\u62D2\u5426\u3055\u308C\u307E\u3057\u305F\u3002",
+  "\u66F8\u304D\u8FBC\u307F\u5148\u304C\u4E0D\u660E\u306A\u306E\u3067 write_file \u306F\u307E\u3060\u547C\u3073\u51FA\u305B\u307E\u305B\u3093\u3002",
+  '{"tool":"host.unknown_tool","args":{"path":"\u63A8\u6E2C.txt"}}',
+  "\u958B\u304F\u5BFE\u8C61\u304C\u5206\u304B\u308A\u307E\u305B\u3093\u3002\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+  '\u4F8B: {"tool":"host.list_files","args":{"path":"reports"}} \u3067\u3059\u304C\u4ECA\u56DE\u306F\u64CD\u4F5C\u3057\u307E\u305B\u3093\u3002'
+];
+var LAYER_DEFS = TOOL_DEFS.map((entry) => ({ name: qualifiedToolName(entry.name), description: entry.description, parameters: entry.parameters }));
+function validatedDecision(output, expectedTool, expectedArgs = {}) {
+  const parsed = output ? extractJsonReply(output) : null;
+  const normalizedTool = parsed?.tool ? qualifiedToolName(parsed.tool) : void 0;
+  const def = normalizedTool ? TOOL_DEFS.find((entry) => qualifiedToolName(entry.name) === normalizedTool) : void 0;
+  const args = parsed?.args ?? {};
+  const argsMatch = Object.entries(expectedArgs).every(([key, value]) => JSON.stringify(args[key]) === JSON.stringify(value));
+  return normalizedTool === expectedTool && argsMatch && Boolean(def) && validateToolArgs(def, args) === null;
+}
+var JSONREPAIR_CASES = [
+  { name: "unquoted-keys", raw: "{tool:'list_files',path:'reports'}", expectedTool: "host.list_files", expectedArgs: { path: "reports" } },
+  { name: "single-quotes", raw: "{'tool':'read_file','path':'\u6982\u8981.txt'}", expectedTool: "host.read_file", expectedArgs: { path: "\u6982\u8981.txt" } },
+  { name: "trailing-object-comma", raw: '{"tool":"search_files","query":"\u8D64",}', expectedTool: "host.search_files", expectedArgs: { query: "\u8D64" } },
+  { name: "trailing-array-comma", raw: '{"tool":"read_files","paths":["a.txt",]}', expectedTool: "host.read_files", expectedArgs: { paths: ["a.txt"] } },
+  { name: "block-comment", raw: '{"tool":"list_files",/* target */"path":"reports"}', expectedTool: "host.list_files", expectedArgs: { path: "reports" } },
+  { name: "line-comment", raw: '{"tool":"list_files",// target\n"path":"reports"}', expectedTool: "host.list_files", expectedArgs: { path: "reports" } },
+  { name: "fenced-json", raw: '```json\n{"tool":"list_files","path":"reports"}\n```', expectedTool: "host.list_files", expectedArgs: { path: "reports" } },
+  { name: "smart-quotes", raw: "{\u201Ctool\u201D:\u201Cread_file\u201D,\u201Cpath\u201D:\u201C\u6982\u8981.txt\u201D}", expectedTool: "host.read_file", expectedArgs: { path: "\u6982\u8981.txt" } },
+  { name: "nbsp-whitespace", raw: '{\xA0"tool"\xA0:\xA0"list_files",\xA0"path"\xA0:\xA0"reports"\xA0}', expectedTool: "host.list_files", expectedArgs: { path: "reports" } },
+  { name: "bom-prefix", raw: '\uFEFF{"tool":"list_files","path":"reports"}', expectedTool: "host.list_files", expectedArgs: { path: "reports" } },
+  { name: "missing-comma", raw: '{"tool":"list_files" "path":"reports"}', expectedTool: "host.list_files", expectedArgs: { path: "reports" } },
+  { name: "missing-colon", raw: '{"tool" "list_files","path":"reports"}', expectedTool: "host.list_files", expectedArgs: { path: "reports" } },
+  { name: "truncated-object", raw: '{"tool":"list_files","path":"reports"', expectedTool: "host.list_files", expectedArgs: { path: "reports" } },
+  { name: "truncated-args", raw: '{"tool":"read_files","args":{"paths":["a.txt"]', expectedTool: "host.read_files", expectedArgs: { paths: ["a.txt"] } },
+  { name: "escaped-json-string", raw: '{\\"tool\\":\\"list_files\\",\\"path\\":\\"reports\\"}', expectedTool: "host.list_files", expectedArgs: { path: "reports" } },
+  { name: "jsonp-wrapper", raw: 'callback({"tool":"list_files","path":"reports"});', expectedTool: "host.list_files", expectedArgs: { path: "reports" } },
+  { name: "number-long-rejected-by-schema", raw: '{"tool":"search_files","query":"\u8D64","max_results":NumberLong(20)}', reject: true },
+  { name: "number-int-rejected-by-schema", raw: '{"tool":"search_files","query":"\u8D64","max_results":NumberInt(20)}', reject: true },
+  { name: "concatenated-string", raw: '{"tool":"list_files","path":"rep" + "orts"}', expectedTool: "host.list_files", expectedArgs: { path: "reports" } },
+  { name: "ellipsis-array", raw: '{"tool":"read_files","paths":["a.txt", ...]}', expectedTool: "host.read_files", expectedArgs: { paths: ["a.txt"] } },
+  { name: "python-true", raw: '{"tool":"list_files","path":"reports","recursive":True}', expectedTool: "host.list_files", expectedArgs: { path: "reports", recursive: true } },
+  { name: "python-false", raw: '{"tool":"list_files","path":"reports","recursive":False}', expectedTool: "host.list_files", expectedArgs: { path: "reports", recursive: false } },
+  { name: "python-none-rejected", raw: '{"tool":"list_files","path":None}', reject: true },
+  { name: "undefined-rejected", raw: '{"tool":"list_files","path":undefined}', reject: true },
+  { name: "nan-rejected", raw: '{"tool":"search_files","query":"\u8D64","max_results":NaN}', reject: true },
+  { name: "infinity-rejected", raw: '{"tool":"search_files","query":"\u8D64","max_results":Infinity}', reject: true },
+  { name: "ground-prose-json", raw: '\u6B21\u3092\u5B9F\u884C\u3057\u307E\u3059\u3002{"tool":"list_files","path":"reports"} \u4EE5\u4E0A\u3067\u3059\u3002', expectedTool: "host.list_files", expectedArgs: { path: "reports" } },
+  { name: "multiple-candidates-last", raw: '{"answer":"\u8349\u7A3F"}\n\u8A02\u6B63: {"tool":"list_files","path":"reports"}', expectedTool: "host.list_files", expectedArgs: { path: "reports" } },
+  { name: "japanese-open-quote", raw: '{"tool":"write_file","path":"\u30E1\u30E2.txt","content":\u300C\u78BA\u8A8D\u300D}', expectedTool: "host.write_file", expectedArgs: { path: "\u30E1\u30E2.txt", content: "\u300C\u78BA\u8A8D\u300D" } },
+  { name: "incomplete-optional-tail-rejected", raw: '{"tool":"list_files","args":{"path":"reports","recursive":"', reject: true }
+];
+async function layer1Corpus() {
+  const results = [];
+  for (const item of LAYER_CASES) {
+    const started = Date.now();
+    const converted = interpretCopilotResponseDeterministically(item.raw, LAYER_DEFS);
+    const ok = validatedDecision(converted?.content ?? null, item.expectedTool, item.expectedArgs);
+    results.push({ type: item.type, utterance: item.utterance, target: item.target, ok, ms: Date.now() - started, detail: converted ? `${converted.method}:${converted.repairs.join(",")}:${converted.content.slice(0, 140)}` : "(null)" });
+  }
+  for (const result of results) console.log(`LAYER1	${result.type}	${result.ok ? "PASS" : "FAIL"}	${result.ms}ms	${result.target}	${result.detail}`);
+  summarize(results, "LAYER1");
+  let falsePositive = 0;
+  for (const raw of NEGATIVE_CASES) {
+    const converted = interpretCopilotResponseDeterministically(raw, LAYER_DEFS);
+    const parsed = converted ? extractJsonReply(converted.content) : null;
+    const ok = !parsed?.tool && typeof parsed?.answer === "string" && parsed.answer.trim().length > 0;
+    if (!ok) falsePositive++;
+    console.log(`LAYER1_NEGATIVE	${ok ? "PASS" : "FAIL"}	${converted?.method ?? "null"}	${raw}`);
+  }
+  console.log(`LAYER1_NEGATIVE_SUMMARY ${JSON.stringify({ total: NEGATIVE_CASES.length, falsePositive })}`);
+  if (falsePositive !== 0) process.exitCode = 1;
+  let repairFailures = 0;
+  for (const item of JSONREPAIR_CASES) {
+    const converted = interpretCopilotResponseDeterministically(item.raw, LAYER_DEFS);
+    const parsed = converted ? extractJsonReply(converted.content) : null;
+    const validTool = parsed?.tool ? validatedDecision(converted.content, item.expectedTool, item.expectedArgs ?? {}) : false;
+    const ok = item.reject ? !validTool : validTool;
+    if (!ok) repairFailures++;
+    console.log(`LAYER1_JSONREPAIR	${ok ? "PASS" : "FAIL"}	${item.name}	${converted?.method ?? "null"}	${converted?.repairs.join(",") ?? ""}	${converted?.content.slice(0, 120) ?? "(null)"}`);
+  }
+  console.log(`LAYER1_JSONREPAIR_SUMMARY ${JSON.stringify({ total: JSONREPAIR_CASES.length, failures: repairFailures })}`);
+  if (repairFailures !== 0) process.exitCode = 1;
+}
 async function liveConverterCorpus() {
   const model = process.env.FLEX_CONVERTER_MODEL || "Qwen3.5-4B-Q4_K_M.gguf";
   const settings = { enabled: true, baseURL: "http://127.0.0.1:8080/v1", model, timeoutMs: 3e4, apiKey: "company-apps-flex-local" };
@@ -6207,6 +6518,7 @@ async function liveConverterCorpus() {
 }
 async function main() {
   await deterministicCorpus();
+  await layer1Corpus();
   if (process.argv.includes("--live")) await liveConverterCorpus();
 }
 main().catch((error) => {

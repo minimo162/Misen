@@ -19,7 +19,7 @@
     "modelPriority": []
   },
   "localResponseConverter": {
-    "enabled": true,
+    "enabled": false,
     "baseURL": "http://127.0.0.1:8080/v1",
     "model": "Qwen3.5-4B-Q4_K_M.gguf",
     "timeoutMs": 30000,

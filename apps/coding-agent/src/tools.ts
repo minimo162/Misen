@@ -211,6 +211,11 @@ export function normalizeWorkspaceOpenCommand(command: string, ctx: ToolContext)
     candidate = words[1].trimStart()
   } else if (['excel', 'excel.exe'].includes(executable) && words.length === 2 && /\.xlsx$/iu.test(words[1])) {
     candidate = words[1]
+  } else if (words.length === 1) {
+    // The converter may emit only the requested path for a plain Japanese
+    // "open" request. The same existence, type, extension, link, quote, and
+    // workspace checks below still apply before it becomes Invoke-Item.
+    candidate = words[0]
   }
   if (!candidate) return null
   let absolute: string
@@ -1030,6 +1035,7 @@ export const TOOL_DEFS: ToolDef[] = [
       required: ['command']
     },
     async run(args, ctx) {
+      if (ctx.safeCommandOnly && args.url) throw new Error('start_process拒否: この構成ではプレビューURLを指定できません')
       const command = prepareHostCommand(String(args.command ?? ''), ctx)
       const process = startManagedProcess(command, ctx.workspace, args.label ? String(args.label) : undefined, args.url ? String(args.url) : undefined)
       return JSON.stringify(process)
@@ -1110,10 +1116,33 @@ export const TOOL_DEFS: ToolDef[] = [
   }
 ]
 
-export function openAITools(options: { allowArbitraryCommands?: boolean; safeCommandOnly?: boolean } = {}): OpenAIToolSchema[] {
-  const defs = TOOL_DEFS.filter((tool) =>
+export function toolDefsForContract(options: { allowArbitraryCommands?: boolean; safeCommandOnly?: boolean } = {}): ToolDef[] {
+  return TOOL_DEFS.filter((tool) =>
     (options.allowArbitraryCommands || tool.name !== 'run_command') &&
-    !(options.safeCommandOnly && tool.name === 'get_weather'))
+    !(options.safeCommandOnly && tool.name === 'get_weather')).map((tool) => {
+      if (!options.safeCommandOnly) return tool
+      if (tool.name === 'run_command') return { ...tool, description: '既存のワークスペース内通常ファイル1件を既定アプリで開く。commandは対象の相対パス1件、または Invoke-Item <相対パス>。任意シェル、削除、ネットワーク、レジストリ操作は利用できない' }
+      if (tool.name === 'start_process') {
+        const parameters = tool.parameters as { type?: string; properties?: Record<string, unknown>; required?: string[] }
+        const properties = parameters.properties ?? {}
+        return {
+          ...tool,
+          description: '既存のワークスペース内通常ファイル1件を既定アプリで開く。commandは対象の相対パス1件、または Invoke-Item <相対パス>。外部URLや任意プロセスは利用できない',
+          parameters: {
+            ...parameters,
+            properties: {
+              command: { type: 'string', description: '開く対象の相対パス1件、または Invoke-Item <相対パス>' },
+              label: properties.label
+            }
+          }
+        }
+      }
+      return tool
+    })
+}
+
+export function openAITools(options: { allowArbitraryCommands?: boolean; safeCommandOnly?: boolean } = {}): OpenAIToolSchema[] {
+  const defs = toolDefsForContract(options)
   return defs.map((t) => ({
     type: 'function' as const,
     function: { name: qualifiedToolName(t.name), description: t.description, parameters: { ...t.parameters, additionalProperties: false } }

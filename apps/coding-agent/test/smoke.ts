@@ -234,7 +234,7 @@ async function testTools(): Promise<void> {
   fs.writeFileSync(path.join(root, 'blocked.exe'), 'not-an-executable')
   fs.writeFileSync(path.join(root, 'blocked.lnk'), 'not-a-shortcut')
   fs.writeFileSync(path.join(root, 'blocked.url'), '[InternetShortcut]\nURL=https://example.com')
-  for (const openCommand of ['Invoke-Item open-me.txt', 'Start-Process -FilePath open-me.txt', 'start " open-me.txt"', 'open open-me.txt', 'excel.exe ledger-open.xlsx']) {
+  for (const openCommand of ['open-me.txt', 'Invoke-Item open-me.txt', 'Start-Process -FilePath open-me.txt', 'start " open-me.txt"', 'open open-me.txt', 'excel.exe ledger-open.xlsx']) {
     const normalizedOpen = normalizeWorkspaceOpenCommand(openCommand, ctx)
     assert.ok(normalizedOpen?.includes('Invoke-Item -LiteralPath'), `safe workspace open must normalize: ${openCommand}`)
   }
@@ -298,6 +298,11 @@ async function testTools(): Promise<void> {
     'powershell.exe -EncodedCommand RwBlAHQALQBEAGEAdABlAA==',
     'cmd.exe /c "echo x > ..\\escape.txt"'
   ]) await assert.rejects(() => get('start_process').run({ command: blockedStart }, ctx), /run_command拒否/u, `start_process must share denial policy: ${blockedStart}`)
+  await assert.rejects(
+    () => get('start_process').run({ command: 'Invoke-Item open-me.txt', url: 'https://example.com/' }, { ...ctx, safeCommandOnly: true }),
+    /プレビューURL/u,
+    'safe mode must reject preview URLs before a process is started'
+  )
   const outsideName = `ca-smoke-outside-${process.pid}.txt`
   await assert.rejects(
     () => get('run_command').run({
@@ -504,7 +509,14 @@ async function testCopilotChoosesFirstAction(): Promise<void> {
   const safeAnswer = await runAgentTurn({ cfg, messages: [], userInput: '天気を教えて', ctx: safeCtx, io: ioStub(true), backend: safeBackend })
   assert.strictEqual(safeAnswer.reply, '外部情報は取得できません')
   assert.ok(!safeBackend.prompts[0].includes('host.get_weather'), 'safe command contract must hide network host tools')
-  assert.ok(!openAITools({ allowArbitraryCommands: true, safeCommandOnly: true }).some((tool) => tool.function.name === 'host.get_weather'))
+  assert.ok(!safeBackend.prompts[0].includes('任意のhostコマンド実行が許可'), 'safe prompt must not claim arbitrary command permission')
+  assert.ok(safeBackend.prompts[0].includes('既存のワークスペース内通常ファイル1件'))
+  assert.ok(safeBackend.prompts[0].includes('answerで利用者へ許可を尋ねず'))
+  const safeTools = openAITools({ allowArbitraryCommands: true, safeCommandOnly: true })
+  assert.ok(!safeTools.some((tool) => tool.function.name === 'host.get_weather'))
+  const safeStart = safeTools.find((tool) => tool.function.name === 'host.start_process')
+  assert.ok(safeStart && !('url' in ((safeStart.function.parameters.properties ?? {}) as Record<string, unknown>)), 'safe start_process schema must omit url')
+  assert.ok(safeTools.find((tool) => tool.function.name === 'host.run_command')?.function.description.includes('任意シェル'))
   const deniedWeather = await runAgentTurn({ cfg, messages: [], userInput: '天気を教えて', ctx: safeCtx, io: ioStub(true), backend: new FakeBackend(['{"tool":"host.get_weather","args":{"location":"広島市"}}\nAGENT_END']) })
   assert.strictEqual(deniedWeather.aborted, true)
   assert.ok(deniedWeather.messages.at(-1)?.content?.includes('ネットワーク通信'))
@@ -831,10 +843,10 @@ async function testCopilotVisibleSessionPidLifecycle(): Promise<void> {
 }
 
 async function testCopilotResponseCompletion(): Promise<void> {
-  const empty = (): ResponseCompletionState => ({ stableLength: null, stableSinceMs: null })
+  const empty = (): ResponseCompletionState => ({ stableText: null, stableSinceMs: null })
   let result = updateResponseCompletionState(empty(), {
     observedAtMs: 0,
-    textLength: 5000,
+    text: 'a'.repeat(5000),
     generating: true,
     copyEnabled: true
   })
@@ -843,7 +855,7 @@ async function testCopilotResponseCompletion(): Promise<void> {
 
   result = updateResponseCompletionState(empty(), {
     observedAtMs: 0,
-    textLength: 5000,
+    text: 'a'.repeat(5000),
     generating: false,
     copyEnabled: false
   })
@@ -852,13 +864,13 @@ async function testCopilotResponseCompletion(): Promise<void> {
 
   result = updateResponseCompletionState(empty(), {
     observedAtMs: 100,
-    textLength: 5000,
+    text: 'a'.repeat(5000),
     generating: false,
     copyEnabled: true
   })
   result = updateResponseCompletionState(result.state, {
     observedAtMs: 1200,
-    textLength: 7000,
+    text: 'b'.repeat(7000),
     generating: false,
     copyEnabled: true
   })
@@ -867,14 +879,14 @@ async function testCopilotResponseCompletion(): Promise<void> {
 
   result = updateResponseCompletionState(result.state, {
     observedAtMs: 2000,
-    textLength: 7000,
+    text: 'b'.repeat(7000),
     generating: false,
     copyEnabled: true
   })
   assert.strictEqual(result.ready, false)
   result = updateResponseCompletionState(result.state, {
     observedAtMs: 2200,
-    textLength: 7000,
+    text: 'b'.repeat(7000),
     generating: false,
     copyEnabled: true
   })
@@ -882,7 +894,16 @@ async function testCopilotResponseCompletion(): Promise<void> {
 
   result = updateResponseCompletionState(result.state, {
     observedAtMs: 2300,
-    textLength: 7000,
+    text: 'c'.repeat(7000),
+    generating: false,
+    copyEnabled: true
+  })
+  assert.strictEqual(result.ready, false, 'same-length content replacement must reset response stability')
+  assert.strictEqual(result.state.stableSinceMs, 2300)
+
+  result = updateResponseCompletionState(result.state, {
+    observedAtMs: 2400,
+    text: 'c'.repeat(7000),
     generating: false,
     copyEnabled: false
   })
@@ -891,13 +912,13 @@ async function testCopilotResponseCompletion(): Promise<void> {
 
   result = updateResponseCompletionState(empty(), {
     observedAtMs: 3000,
-    textLength: 7000,
+    text: 'b'.repeat(7000),
     generating: false,
     copyEnabled: true
   })
   result = updateResponseCompletionState(result.state, {
     observedAtMs: 4100,
-    textLength: 7000,
+    text: 'b'.repeat(7000),
     generating: true,
     copyEnabled: true
   })
@@ -967,7 +988,7 @@ async function testCopilotResponseCompletion(): Promise<void> {
   type DeadlineInternals = {
     readScreenState: (timeoutMs?: number) => Promise<{ text: string; generating: boolean; copyEnabled: boolean; signinRequired: boolean }>
     finalizeAnswer: (text: string) => Promise<string>
-    waitResponse: (baseline: string) => Promise<string>
+    waitResponse: (baseline: string) => Promise<{ answer: string; generationWaitMs: number; completionRetrievalMs: number }>
   }
   const deadlineInternal = deadlineClient as unknown as DeadlineInternals
   let finalized = false
@@ -1077,11 +1098,33 @@ async function testCopilotResponseCompletion(): Promise<void> {
       boundaryNow = waitPolls === 1 ? 1000 : 2100
       return { text: 'complete response', generating: false, copyEnabled: true, signinRequired: false }
     }
+    let waitBoundaryFinalized = false
     waitBoundary.finalizeAnswer = async () => {
+      waitBoundaryFinalized = true
       boundaryNow = 6000
       return 'complete response'
     }
-    await assert.rejects(waitBoundary.waitResponse('baseline'), /タイムアウト/)
+    const directDomResponse = await waitBoundary.waitResponse('baseline')
+    assert.strictEqual(directDomResponse.answer, 'complete response')
+    assert.strictEqual(waitBoundaryFinalized, false, 'stable visible DOM response must not perform a clipboard round trip')
+
+    boundaryNow = 3000
+    const emptyDomClient = new CopilotEdgeClient({
+      baseURL: '',
+      model: '',
+      provider: 'copilot-edge',
+      copilot: { responseTimeoutSec: 5, pollIntervalMs: 500 }
+    })
+    const emptyDom = emptyDomClient as unknown as DeadlineInternals
+    let emptyPolls = 0
+    emptyDom.readScreenState = async () => {
+      emptyPolls++
+      boundaryNow = emptyPolls === 1 ? 3000 : 4100
+      return { text: 'AGENT_END', generating: false, copyEnabled: true, signinRequired: false }
+    }
+    emptyDom.finalizeAnswer = async () => 'clipboard fallback response'
+    const clipboardFallback = await emptyDom.waitResponse('baseline')
+    assert.strictEqual(clipboardFallback.answer, 'clipboard fallback response')
   } finally {
     Date.now = realDateNow
   }
@@ -1097,7 +1140,7 @@ async function testCopilotResponseCompletion(): Promise<void> {
     insertPrompt: () => Promise<void>
     readScreenState: () => Promise<{ text: string; generating: boolean; copyEnabled: boolean; signinRequired: boolean }>
     clickSend: () => Promise<void>
-    waitResponse: (baseline: string) => Promise<string>
+    waitResponse: (baseline: string) => Promise<{ answer: string; generationWaitMs: number; completionRetrievalMs: number }>
   }
   const orderInternal = orderClient as unknown as CompleteInternals
   const order: string[] = []
@@ -1113,7 +1156,7 @@ async function testCopilotResponseCompletion(): Promise<void> {
     return { text: 'old response', generating: false, copyEnabled: true, signinRequired: false }
   }
   orderInternal.clickSend = async () => { order.push('send') }
-  orderInternal.waitResponse = async (baseline) => { order.push(`wait:${baseline}`); return 'done' }
+  orderInternal.waitResponse = async (baseline) => { order.push(`wait:${baseline}`); return { answer: 'done', generationWaitMs: 1, completionRetrievalMs: 2 } }
   assert.strictEqual(await orderClient.complete('prompt'), 'done')
   assert.ok(order.indexOf('baseline') < order.indexOf('send'))
   assert.strictEqual(order[order.length - 1], 'wait:old response')
@@ -1302,32 +1345,44 @@ async function testLocalResponseConverter(): Promise<void> {
   const port = (server.address() as net.AddressInfo).port
   const settings = { enabled: true, baseURL: `http://127.0.0.1:${port}/v1`, model: 'fake', timeoutMs: 1000, apiKey: 'smoke-local-token' }
   try {
-    assert.strictEqual(await convertCopilotResponse(settings, 'raw', []), responseContent)
+    assert.strictEqual(await convertCopilotResponse(settings, 'raw', []), '{"answer":"raw"}')
+    assert.strictEqual(requestCount, 0, 'plain answers must stay on deterministic layer 1')
+    assert.strictEqual(await convertCopilotResponse(settings, 'write_file の判断情報が不足', [
+      { name: 'host.write_file', description: 'write', parameters: { type: 'object' } }
+    ]), responseContent)
     const direct = await convertCopilotResponse(settings, '{"tool":"write_file","path":"メモ.txt","content":"一言"}', [
       { name: 'host.write_file', description: 'write', parameters: { type: 'object' } }
     ])
     assert.strictEqual(direct, '{"tool":"host.write_file","args":{"path":"メモ.txt","content":"一言"}}')
     assert.strictEqual(requestCount, 1, 'strict JSON must not spend a local-model request')
-    await convertCopilotResponse(settings, 'search_filesを使い query=青', [
+    const deterministicSearch = await convertCopilotResponse(settings, 'search_filesを使い query=青', [
+      { name: 'host.list_files', description: 'list', parameters: { type: 'object' } },
+      { name: 'host.search_files', description: 'search', parameters: { type: 'object' } }
+    ])
+    assert.strictEqual(deterministicSearch, '{"tool":"host.search_files","args":{"query":"青"}}')
+    assert.strictEqual(requestCount, 1, 'explicit tool text must stay on deterministic layer 1')
+    await convertCopilotResponse(settings, 'search_files の判断情報が不足', [
       { name: 'host.list_files', description: 'list', parameters: { type: 'object' } },
       { name: 'host.search_files', description: 'search', parameters: { type: 'object' } }
     ])
     const converterInput = JSON.parse(lastUserContent) as { host_tools?: Array<{ name?: string }> }
     assert.deepStrictEqual(converterInput.host_tools?.map((tool) => tool.name), ['host.search_files'])
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'converter-smoke-'))
-    const converted = await runAgentTurn({ cfg: { baseURL: '', model: '', provider: 'copilot-edge', copilot: { agentMode: true }, localResponseConverter: settings }, messages: [], userInput: '答えて', ctx: makeCtx(root), io: ioStub(true), backend: new FakeBackend(['not json']) })
+    const converted = await runAgentTurn({ cfg: { baseURL: '', model: '', provider: 'copilot-edge', copilot: { agentMode: true }, localResponseConverter: settings }, messages: [], userInput: '答えて', ctx: makeCtx(root), io: ioStub(true), backend: new FakeBackend(['write_file の判断情報が不足']) })
     assert.strictEqual(converted.reply, '変換済み')
     responseContent = '{"tool":"host.write_file","args":{"unexpected":true}}'
-    const rejected = await runAgentTurn({ cfg: { baseURL: '', model: '', provider: 'copilot-edge', copilot: { agentMode: true }, localResponseConverter: settings }, messages: [], userInput: '書いて', ctx: makeCtx(root), io: ioStub(true), backend: new FakeBackend(['not json', '{"answer":"schema rejected"}\nAGENT_END']) })
-    assert.strictEqual(rejected.aborted, true); assert.ok(!fs.existsSync(path.join(root, 'unexpected')), 'schema-invalid converter args must not execute')
+    const rejected = await runAgentTurn({ cfg: { baseURL: '', model: '', provider: 'copilot-edge', copilot: { agentMode: true }, localResponseConverter: settings }, messages: [], userInput: '書いて', ctx: makeCtx(root), io: ioStub(true), backend: new FakeBackend(['write_file の判断情報が不足', '{"answer":"schema rejected"}\nAGENT_END']) })
+    assert.strictEqual(rejected.reply, 'schema rejected'); assert.ok(!fs.existsSync(path.join(root, 'unexpected')), 'schema-invalid converter args must not execute')
     fs.rmSync(root, { recursive: true, force: true })
     responseContent = 'invalid converter content'
-    const fallback = await runAgentTurn({ cfg: { baseURL: '', model: '', provider: 'copilot-edge', copilot: { agentMode: true }, localResponseConverter: settings }, messages: [], userInput: '答えて', ctx: makeCtx(os.tmpdir(), false), io: ioStub(true), backend: new FakeBackend(['{"answer":"fallback raw"}\nAGENT_END']) })
+    const fallback = await runAgentTurn({ cfg: { baseURL: '', model: '', provider: 'copilot-edge', copilot: { agentMode: true }, localResponseConverter: settings }, messages: [], userInput: '答えて', ctx: makeCtx(os.tmpdir(), false), io: ioStub(true), backend: new FakeBackend(['write_file の判断情報が不足', '{"answer":"fallback raw"}\nAGENT_END']) })
     assert.strictEqual(fallback.reply, 'fallback raw')
   } finally { await new Promise<void>((resolve) => server.close(() => resolve())) }
-  await assert.rejects(() => convertCopilotResponse({ enabled: true, baseURL: 'http://example.com/v1' }, 'raw', []), /loopback/u)
+  const ambiguousWrite = 'write_file の判断情報が不足'
+  const writeTool = [{ name: 'host.write_file', description: 'write', parameters: { type: 'object' } }]
+  await assert.rejects(() => convertCopilotResponse({ enabled: true, baseURL: 'http://example.com/v1' }, ambiguousWrite, writeTool), /loopback/u)
   await assert.rejects(
-    () => convertCopilotResponse({ enabled: true, baseURL: 'http://[::1]:9/v1', timeoutMs: 10 }, 'raw', []),
+    () => convertCopilotResponse({ enabled: true, baseURL: 'http://[::1]:9/v1', timeoutMs: 10 }, ambiguousWrite, writeTool),
     (err: unknown) => !/loopback/u.test(String((err as Error).message)),
     'IPv6 loopback must pass URL validation before connection failure'
   )

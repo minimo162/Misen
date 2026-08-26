@@ -34,13 +34,13 @@ export interface CopilotSettings {
 
 export interface ResponseCompletionSample {
   observedAtMs: number
-  textLength: number
+  text: string
   generating: boolean
   copyEnabled: boolean
 }
 
 export interface ResponseCompletionState {
-  stableLength: number | null
+  stableText: string | null
   stableSinceMs: number | null
 }
 
@@ -144,12 +144,12 @@ export function updateResponseCompletionState(
   previous: ResponseCompletionState,
   sample: ResponseCompletionSample
 ): { state: ResponseCompletionState; ready: boolean } {
-  if (sample.generating || !sample.copyEnabled || sample.textLength <= 0) {
-    return { state: { stableLength: null, stableSinceMs: null }, ready: false }
+  if (sample.generating || !sample.copyEnabled || sample.text.length <= 0) {
+    return { state: { stableText: null, stableSinceMs: null }, ready: false }
   }
-  if (previous.stableLength !== sample.textLength || previous.stableSinceMs === null) {
+  if (previous.stableText !== sample.text || previous.stableSinceMs === null) {
     return {
-      state: { stableLength: sample.textLength, stableSinceMs: sample.observedAtMs },
+      state: { stableText: sample.text, stableSinceMs: sample.observedAtMs },
       ready: false
     }
   }
@@ -318,6 +318,22 @@ function textMismatchDiagnostic(expected: string, actual: string): string {
   const actualSlice = actual.slice(start, end)
   const code = (value: string) => Array.from(value).map((char) => char.codePointAt(0)?.toString(16).padStart(4, '0')).join(' ')
   return `first=${index} expected=${JSON.stringify(expectedSlice)} [${code(expectedSlice)}] actual=${JSON.stringify(actualSlice)} [${code(actualSlice)}] lengths=${expected.length}/${actual.length}`
+}
+
+export interface CopilotPhaseTiming {
+  connectionMs: number
+  sessionCreationMs: number
+  inputReadyMs: number
+  modelSelectionMs: number
+  prePromptReadyMs: number
+  promptWriteMs: number
+  baselineReadMs: number
+  sendMs: number
+  generationWaitMs: number
+  completionRetrievalMs: number
+  totalMs: number
+  promptChars: number
+  responseChars: number
 }
 
 const CLEAR_EDITOR_JS = `(() => {
@@ -572,6 +588,7 @@ export class CopilotEdgeClient {
   private visibleEdgePid: number | null = null
   private edgeProfileDir: string | null = null
   private visibleSessionId: string | null = null
+  private lastTiming: CopilotPhaseTiming | null = null
 
   constructor(cfg: AgentConfig) {
     this.s = resolveCopilotSettings(cfg)
@@ -1094,12 +1111,13 @@ export class CopilotEdgeClient {
     }
   }
 
-  private async waitResponse(baseline: string, signal?: AbortSignal): Promise<string> {
+  private async waitResponse(baseline: string, signal?: AbortSignal): Promise<{ answer: string; generationWaitMs: number; completionRetrievalMs: number }> {
+    const startedAt = Date.now()
     const deadline = Date.now() + this.s.responseTimeoutSec * 1000
     let lastText = ''
     let lastChange = Date.now()
     let sawNewText = false
-    let completionState: ResponseCompletionState = { stableLength: null, stableSinceMs: null }
+    let completionState: ResponseCompletionState = { stableText: null, stableSinceMs: null }
     while (Date.now() < deadline) {
       throwIfAborted(signal)
       const remainingMs = deadline - Date.now()
@@ -1117,15 +1135,25 @@ export class CopilotEdgeClient {
       const quietFor = Date.now() - lastChange
       const completion = updateResponseCompletionState(completionState, {
         observedAtMs: Date.now(),
-        textLength: sawNewText && st.text === lastText ? lastText.length : 0,
+        text: sawNewText && st.text === lastText ? lastText : '',
         generating: st.generating,
         copyEnabled: st.copyEnabled
       })
       completionState = completion.state
       if (completion.ready) {
-        const answer = await this.finalizeAnswer(lastText, deadline)
+        const completionReadyAt = Date.now()
+        // The stable response candidate is already the same visible DOM text
+        // used by YakuLingo. Avoid a second copy-button/clipboard round trip
+        // after the strict completion gate; retain clipboard recovery only for
+        // the unexpected case where the DOM candidate cleans to an empty value.
+        const visibleAnswer = this.cleanResponse(lastText)
+        const answer = visibleAnswer || await this.finalizeAnswer(lastText, deadline)
         assertResponseDeadline(deadline, this.s.responseTimeoutSec)
-        return answer
+        return {
+          answer,
+          generationWaitMs: completionReadyAt - startedAt,
+          completionRetrievalMs: Date.now() - completionReadyAt
+        }
       }
       if (!st.generating && sawNewText && quietFor > this.s.stallTimeoutSec * 1000) {
         throw new Error('Copilot の応答が停滞したため諦めました')
@@ -1157,24 +1185,63 @@ export class CopilotEdgeClient {
   }
 
   async complete(prompt: string, signal?: AbortSignal): Promise<string> {
+    const totalStartedAt = Date.now()
+    this.lastTiming = null
     throwIfAborted(signal)
+    let phaseStartedAt = Date.now()
     await this.ensureEdge()
     await this.ensurePage()
+    const connectionMs = Date.now() - phaseStartedAt
+    phaseStartedAt = Date.now()
     await this.freshChat()
+    const sessionCreationMs = Date.now() - phaseStartedAt
+    phaseStartedAt = Date.now()
     await this.waitInputReady(120, signal)
     if (this.visibleSessionId) {
       await this.stampVisibleSessionMarker(this.visibleSessionId)
       await this.bringToFront()
     }
+    const inputReadyMs = Date.now() - phaseStartedAt
+    phaseStartedAt = Date.now()
     await this.selectModel()
+    const modelSelectionMs = Date.now() - phaseStartedAt
     throwIfAborted(signal)
+    phaseStartedAt = Date.now()
     await this.waitInputReady(30, signal)
     await this.assertTrustedOrigin()
+    const prePromptReadyMs = Date.now() - phaseStartedAt
+    phaseStartedAt = Date.now()
     await this.insertPrompt(prompt)
+    const promptWriteMs = Date.now() - phaseStartedAt
+    phaseStartedAt = Date.now()
     const baseline = (await this.readScreenState()).text
+    const baselineReadMs = Date.now() - phaseStartedAt
+    phaseStartedAt = Date.now()
     await this.clickSend()
+    const sendMs = Date.now() - phaseStartedAt
     throwIfAborted(signal)
-    return this.waitResponse(baseline, signal)
+    const response = await this.waitResponse(baseline, signal)
+    this.lastTiming = {
+      connectionMs,
+      sessionCreationMs,
+      inputReadyMs,
+      modelSelectionMs,
+      prePromptReadyMs,
+      promptWriteMs,
+      baselineReadMs,
+      sendMs,
+      generationWaitMs: response.generationWaitMs,
+      completionRetrievalMs: response.completionRetrievalMs,
+      totalMs: Date.now() - totalStartedAt,
+      promptChars: prompt.length,
+      responseChars: response.answer.length
+    }
+    console.log('[copilot-timing] ' + JSON.stringify(this.lastTiming))
+    return response.answer
+  }
+
+  getLastTiming(): CopilotPhaseTiming | null {
+    return this.lastTiming ? { ...this.lastTiming } : null
   }
 
   close(): void {

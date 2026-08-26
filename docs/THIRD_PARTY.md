@@ -9,7 +9,7 @@
 | ImportExcel | 7.8.10 | Apache-2.0 | `demo/renketsu-demo/workspace/vendor/ImportExcel/7.8.10/` | `tools/Read-Xlsx.ps1` から xlsx を読むための PowerShell モジュール |
 | EPPlus.dll | Assembly/File 4.5.3.2 | LGPL-3.0-or-later | `demo/renketsu-demo/workspace/vendor/ImportExcel/7.8.10/EPPlus.dll` | ImportExcel が xlsx を解析する CLR アセンブリ。legacy/unsupported parser のため、信頼した入力だけで使う |
 | iconv-lite | 0.6.3 | MIT | `apps/coding-agent/vendor/npm/node_modules/iconv-lite/` | CP932 等のテキスト decode 補助 |
-| jsonrepair | 3.15.0 | ISC | `apps/coding-agent/vendor/npm/node_modules/jsonrepair/` | 観測済みの未エスケープ `write_file` contentだけを限定修復し、再JSON parse・厳格protocol検証へ渡す補助 |
+| jsonrepair | 3.15.0 | ISC | `apps/coding-agent/vendor/npm/node_modules/jsonrepair/` | 層1で厳密parseに失敗したJSON候補を純JSで修復し、再parse・host tool schema検証へ渡す補助。追加exeなし |
 | safer-buffer | 2.1.2 | MIT | `apps/coding-agent/vendor/npm/node_modules/safer-buffer/` | iconv-lite の依存 buffer 実装 |
 
 `apps/coding-agent/vendor/npm/package-lock.json` の resolved/integrity と `package.json` の exact dependency も、上記 npm 3 パッケージの固定根拠です。ImportExcel の `ImportExcel.psd1` は ModuleVersion 7.8.10 と `EPPlus.dll` の required assembly を示します。
@@ -21,7 +21,7 @@
 - ImportExcel (Apache-2.0): `demo/renketsu-demo/workspace/vendor/ImportExcel/7.8.10/LICENSE.txt`。`ImportExcel.psd1` の LicenseUri は <https://github.com/dfinke/ImportExcel/blob/master/LICENSE.txt> です。
 - EPPlus 4.5.3.2 (LGPL-3.0-or-later): `demo/renketsu-demo/workspace/vendor/ImportExcel/7.8.10/EPPlus-LICENSE.txt`。取得元・NuGet package hash・DLL hash・版は同ディレクトリの `EPPlus-NOTICE.txt` に記録しています。ImportExcel の Apache 本文を EPPlus の license 本文として扱いません。
 - iconv-lite (MIT): `apps/coding-agent/vendor/npm/node_modules/iconv-lite/LICENSE`。
-- jsonrepair (ISC): `apps/coding-agent/vendor/npm/node_modules/jsonrepair/LICENSE.md`。
+- jsonrepair 3.15.0 (ISC): `apps/coding-agent/vendor/npm/node_modules/jsonrepair/LICENSE.md`。同梱実物の本文は Copyright (c) 2020-2026 Jos de Jong、package.json の license も ISC と確認しています。
 - safer-buffer (MIT): `apps/coding-agent/vendor/npm/node_modules/safer-buffer/LICENSE`。
 
 ## 取得と実行の境界
