@@ -58,7 +58,29 @@ llama.cppサーバーは `--live-converter` のときだけ必要です。フラ
 
 `allow` は既存の承認プロンプトだけを省略し、`ToolDef.run` と既存のワークスペース・危険コマンド・`allowArbitraryCommands`・`safeCommandOnly` ガードは必ず通ります。`ask` は読み取りツールを含めて既存の承認を必ず表示し、`deny` は実行前に停止します。複数の対象がある場合は、1件でも `deny` なら拒否、次に `ask` があれば確認、全件 `allow` のときだけ許可です。
 
+`write_file` の権限は他の実行前フックが適用された後の最終 `args.path` で判定します。その時点でファイルが存在すれば bare 名に `.overwrite` を付けた `write_file.overwrite`、存在しなければ `write_file` を評価します。対象パターンは従来どおりワークスペース相対です。`write_file.overwrite: ask` は既存の承認バインディング（存在状態と変更前ハッシュ）を捕捉し、承認後に再確認します。`allow` はこの既存承認だけを自動化し、承認後の再確認を追加せず、`ToolDef.run` とホスト側ガードは必ず実行します。
+
 `run_command` と `start_process` は、shell-quoteで安全に1コマンド1トークン列と判定できたときだけ `git status` や `npm run dev` などのコマンド接頭辞へ一致させます。`;`、`&&`、`|`、リダイレクト、glob、複数行、parse失敗を含む複雑な入力は全文を対象に `ask` へ保守的に降格され、`allow` でガードを回避できません。
+
+最小確認プロファイル（`config.example.json` と `config.flex.json` に収録）は、一覧・読み取り・検索・xlsx読み取り・新規書き込み・明示的なファイルオープンを `allow`、既存ファイルの上書きを `write_file.overwrite: ask`、任意の `run_command` を `ask` とします。`start_process: allow *` は `safeCommandOnly: true` を前提とし、既存のワークスペース内通常ファイル1件を開く操作だけに制限されます。permissions がこのハードガードを広げることはありません。`config.flex.json` は `agentLoop: "v1"` を既定のまま保持するため、これらの `permissions` は将来 v2 を選択したときだけ有効です。
+
+```json
+{
+  "permissions": [
+    { "permission": "list_files", "pattern": "*", "action": "allow" },
+    { "permission": "read_file", "pattern": "*", "action": "allow" },
+    { "permission": "read_files", "pattern": "*", "action": "allow" },
+    { "permission": "read_xlsx", "pattern": "*", "action": "allow" },
+    { "permission": "search_files", "pattern": "*", "action": "allow" },
+    { "permission": "write_file", "pattern": "*", "action": "allow" },
+    { "permission": "write_file.overwrite", "pattern": "*", "action": "ask" },
+    { "permission": "start_process", "pattern": "*", "action": "allow" },
+    { "permission": "run_command", "pattern": "*", "action": "ask" }
+  ]
+}
+```
+
+`allow` は宣言的権限だけの許可であり、ワークスペース境界、シンボリックリンク／再解析点、引数スキーマ、`safeCommandOnly`、危険なコマンド操作などの既存ハードガードを迂回できません。削除・破壊的操作はハードガードの段階で拒否され、permissions で承認可能な経路がないため、専用の権限規則は不要です。
 
 ```json
 {

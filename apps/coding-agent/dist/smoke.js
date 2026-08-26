@@ -40002,9 +40002,14 @@ function permissionTargets(tool2, args, ctx) {
   if (targets.length === 0) return [{ pattern: "*", allowEligible: !invalid }];
   return targets;
 }
-function evaluatedTargets(tool2, args, ctx, rules) {
-  const permission = bareToolName(tool2);
-  return permissionTargets(permission, args, ctx).map((target) => ({
+async function evaluatedTargets(tool2, args, ctx, rules) {
+  const bare = bareToolName(tool2);
+  let permission = bare;
+  if (findHostTool(tool2)?.kind === "write" && typeof args.path === "string") {
+    const { existedBefore } = await getFilePrecondition(args.path, ctx);
+    if (existedBefore) permission = `${bare}.overwrite`;
+  }
+  return permissionTargets(bare, args, ctx).map((target) => ({
     target,
     action: evaluate(permission, target.pattern, rules).action
   }));
@@ -40017,14 +40022,14 @@ function combineDecisions(items) {
   }
   return needsAsk ? "ask" : "allow";
 }
-function evaluateToolPermission(tool2, args, ctx, rules) {
-  return combineDecisions(evaluatedTargets(tool2, args, ctx, rules));
+async function evaluateToolPermission(tool2, args, ctx, rules) {
+  return combineDecisions(await evaluatedTargets(tool2, args, ctx, rules));
 }
 function createPermissionHook(rules) {
   const ruleset = [...rules];
   const decisions = /* @__PURE__ */ new WeakMap();
-  const hook = ({ tool: tool2, args, ctx }) => {
-    const evaluated = evaluatedTargets(tool2, args, ctx, ruleset);
+  const hook = async ({ tool: tool2, args, ctx }) => {
+    const evaluated = await evaluatedTargets(tool2, args, ctx, ruleset);
     const decision = combineDecisions(evaluated);
     if (decision === "deny") {
       const denied = evaluated.filter((item) => item.action === "deny").map((item) => item.target.pattern);
@@ -42414,9 +42419,9 @@ async function testV2PermissionActionsLastWins() {
     { permission: "write_file", pattern: "notes/**", action: "allow" },
     { permission: "write_file", pattern: "notes/private.txt", action: "deny" }
   ];
-  import_node_assert.default.strictEqual(evaluateToolPermission("host.write_file", { path: "notes/public.txt", content: "x" }, ctx, rules), "allow");
-  import_node_assert.default.strictEqual(evaluateToolPermission("host.write_file", { path: "notes/private.txt", content: "x" }, ctx, rules), "deny");
-  import_node_assert.default.strictEqual(evaluateToolPermission("host.write_file", { path: "other.txt", content: "x" }, ctx, rules), "ask");
+  import_node_assert.default.strictEqual(await evaluateToolPermission("host.write_file", { path: "notes/public.txt", content: "x" }, ctx, rules), "allow");
+  import_node_assert.default.strictEqual(await evaluateToolPermission("host.write_file", { path: "notes/private.txt", content: "x" }, ctx, rules), "deny");
+  import_node_assert.default.strictEqual(await evaluateToolPermission("host.write_file", { path: "other.txt", content: "x" }, ctx, rules), "ask");
   const controller = createPermissionHook(rules);
   const args = { path: "notes/public.txt", content: "x" };
   await controller.hook({ tool: "host.write_file", args, ctx });
@@ -42487,6 +42492,199 @@ async function testV2PermissionActionsLastWins() {
   import_node_assert.default.ok(!import_node_fs3.default.existsSync(import_node_path5.default.join(root, "notes/private.txt")));
   import_node_fs3.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS v2-permission-actions-last-wins");
+}
+async function testV2PermissionNewVsOverwrite() {
+  const root = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-v2-permission-overwrite-"));
+  const ctx = makeCtx(root);
+  const writeDef = TOOL_DEFS.find((toolDef) => toolDef.name === "write_file");
+  const rules = [
+    { permission: "write_file", pattern: "*", action: "allow" },
+    { permission: "write_file.overwrite", pattern: "*", action: "ask" }
+  ];
+  let approvals = 0;
+  const io = {
+    print: () => {
+    },
+    askYesNo: async () => {
+      approvals++;
+      return true;
+    }
+  };
+  try {
+    const first = await executeV2ToolCall(
+      { toolCallId: "new-write", toolName: "write_file", input: { path: "same.txt", content: "first" } },
+      writeDef,
+      { baseURL: "", model: "", permissions: rules },
+      ctx,
+      io,
+      []
+    );
+    import_node_assert.default.strictEqual(first.status, "succeeded");
+    import_node_assert.default.strictEqual(first.executed, true);
+    import_node_assert.default.strictEqual(approvals, 0, "new writes allowed by write_file must not prompt");
+    const second = await executeV2ToolCall(
+      { toolCallId: "overwrite-write", toolName: "write_file", input: { path: "same.txt", content: "second" } },
+      writeDef,
+      { baseURL: "", model: "", permissions: rules },
+      ctx,
+      io,
+      []
+    );
+    import_node_assert.default.strictEqual(second.status, "succeeded");
+    import_node_assert.default.strictEqual(second.executed, true);
+    import_node_assert.default.strictEqual(approvals, 1, "existing writes must use write_file.overwrite and ask");
+    import_node_assert.default.strictEqual(import_node_fs3.default.readFileSync(import_node_path5.default.join(root, "same.txt"), "utf8"), "second");
+  } finally {
+    import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+  }
+  console.log("PASS v2-permission-new-vs-overwrite");
+}
+async function testV2PermissionOverwriteLastWins() {
+  const root = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-v2-permission-overwrite-order-"));
+  const ctx = makeCtx(root);
+  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "existing.txt"), "before", "utf8");
+  const args = { path: "existing.txt", content: "after" };
+  try {
+    const askThenDeny = [
+      { permission: "write_file.overwrite", pattern: "*", action: "ask" },
+      { permission: "write_file.overwrite", pattern: "existing.txt", action: "deny" }
+    ];
+    const denyThenAsk = [
+      { permission: "write_file.overwrite", pattern: "existing.txt", action: "deny" },
+      { permission: "write_file.overwrite", pattern: "*", action: "ask" }
+    ];
+    import_node_assert.default.strictEqual(await evaluateToolPermission("host.write_file", args, ctx, askThenDeny), "deny");
+    import_node_assert.default.strictEqual(await evaluateToolPermission("host.write_file", args, ctx, denyThenAsk), "ask");
+  } finally {
+    import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+  }
+  console.log("PASS v2-permission-overwrite-last-wins");
+}
+async function testV2PermissionOverwritePrecondition() {
+  const root = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-v2-permission-overwrite-precondition-"));
+  const ctx = makeCtx(root);
+  const target = import_node_path5.default.join(root, "existing.txt");
+  import_node_fs3.default.writeFileSync(target, "before", "utf8");
+  const originalWriteDef = TOOL_DEFS.find((toolDef) => toolDef.name === "write_file");
+  let runs = 0;
+  const writeDef = {
+    ...originalWriteDef,
+    run: async (args, runCtx) => {
+      runs++;
+      return originalWriteDef.run(args, runCtx);
+    }
+  };
+  let approvals = 0;
+  const io = {
+    print: () => {
+    },
+    askYesNo: async () => {
+      approvals++;
+      import_node_fs3.default.writeFileSync(target, "external-change", "utf8");
+      return true;
+    }
+  };
+  try {
+    const result = await executeV2ToolCall(
+      { toolCallId: "overwrite-precondition", toolName: "write_file", input: { path: "existing.txt", content: "agent-change" } },
+      writeDef,
+      {
+        baseURL: "",
+        model: "",
+        permissions: [
+          { permission: "write_file", pattern: "*", action: "allow" },
+          { permission: "write_file.overwrite", pattern: "*", action: "ask" }
+        ]
+      },
+      ctx,
+      io,
+      []
+    );
+    import_node_assert.default.strictEqual(result.status, "denied");
+    import_node_assert.default.strictEqual(result.executed, false);
+    import_node_assert.default.strictEqual(runs, 0, "approval precondition denial must happen before ToolDef.run");
+    import_node_assert.default.strictEqual(approvals, 1);
+    import_node_assert.default.strictEqual(import_node_fs3.default.readFileSync(target, "utf8"), "external-change", "external content must be preserved");
+  } finally {
+    import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+  }
+  console.log("PASS v2-permission-overwrite-precondition");
+}
+async function testV2MinAskProfileZeroApprovals() {
+  const root = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-v2-min-ask-profile-"));
+  const profilePath = import_node_path5.default.join(process.cwd(), "config.flex.json");
+  const profile = JSON.parse(import_node_fs3.default.readFileSync(profilePath, "utf8"));
+  const exampleProfilePath = import_node_path5.default.join(process.cwd(), "config.example.json");
+  const exampleProfile = JSON.parse(import_node_fs3.default.readFileSync(exampleProfilePath, "utf8"));
+  import_node_assert.default.strictEqual(profile.agentLoop, "v1", "shipped flex profile must retain the v1 default");
+  import_node_assert.default.strictEqual(profile.safeCommandOnly, true);
+  import_node_assert.default.strictEqual(exampleProfile.safeCommandOnly, true, "shipped example profile must retain the safe command hard guard");
+  import_node_assert.default.deepStrictEqual(exampleProfile.permissions, profile.permissions, "shipped profiles must share the ask-minimal permissions");
+  import_node_assert.default.deepStrictEqual(profile.permissions, [
+    { permission: "list_files", pattern: "*", action: "allow" },
+    { permission: "read_file", pattern: "*", action: "allow" },
+    { permission: "read_files", pattern: "*", action: "allow" },
+    { permission: "read_xlsx", pattern: "*", action: "allow" },
+    { permission: "search_files", pattern: "*", action: "allow" },
+    { permission: "write_file", pattern: "*", action: "allow" },
+    { permission: "write_file.overwrite", pattern: "*", action: "ask" },
+    { permission: "start_process", pattern: "*", action: "allow" },
+    { permission: "run_command", pattern: "*", action: "ask" }
+  ]);
+  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "read.txt"), "needle in fixture", "utf8");
+  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "open.txt"), "open fixture", "utf8");
+  const scenarios = [
+    { userInput: "\u4E00\u89A7", tool_call: { name: "list_files", args: { path: ".", recursive: false } } },
+    { userInput: "\u8AAD\u3080", tool_call: { name: "read_file", args: { path: "read.txt" } } },
+    { userInput: "\u958B\u304F", tool_call: { name: "start_process", args: { command: "open.txt" } } },
+    { userInput: "\u65B0\u898F\u4F5C\u6210", tool_call: { name: "write_file", args: { path: "new.txt", content: "new fixture" } } },
+    { userInput: "\u691C\u7D22", tool_call: { name: "search_files", args: { query: "needle" } } }
+  ];
+  const steps = scenarios.flatMap((scenario, index) => [
+    { tool_call: scenario.tool_call },
+    { content: `scenario-${index}-done` }
+  ]);
+  const startProcessDef = TOOL_DEFS.find((toolDef) => toolDef.name === "start_process");
+  const originalStartProcessRun = startProcessDef.run;
+  let approvals = 0;
+  try {
+    startProcessDef.run = async () => "stub-opened";
+    await withServer(steps, async (baseCfg, requestBodies) => {
+      for (const scenario of scenarios) {
+        const cfg = {
+          ...baseCfg,
+          ...profile,
+          agentLoop: "v2",
+          baseURL: baseCfg.baseURL,
+          apiKey: baseCfg.apiKey,
+          model: baseCfg.model
+        };
+        const result = await runAgentTurnV2({
+          cfg,
+          messages: [],
+          userInput: scenario.userInput,
+          ctx: makeCtx(root, true),
+          io: {
+            print: () => {
+            },
+            askYesNo: async () => {
+              approvals++;
+              return true;
+            }
+          }
+        });
+        import_node_assert.default.strictEqual(result.aborted, false, `${scenario.userInput} turn should complete`);
+        import_node_assert.default.ok(result.reply.includes("scenario-"), `${scenario.userInput} turn should receive the model completion`);
+      }
+      import_node_assert.default.strictEqual(requestBodies.length, scenarios.length * 2);
+    });
+    import_node_assert.default.strictEqual(approvals, 0, "ask-minimal profile must complete all five turns with zero approvals");
+    import_node_assert.default.strictEqual(import_node_fs3.default.readFileSync(import_node_path5.default.join(root, "new.txt"), "utf8"), "new fixture");
+  } finally {
+    startProcessDef.run = originalStartProcessRun;
+    import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+  }
+  console.log("PASS v2-min-ask-profile-zero-approvals");
 }
 async function testV2PermissionCommandPrefix() {
   import_node_assert.default.deepStrictEqual(commandPermissionTarget("git status"), { target: "git status", allowEligible: true });
@@ -43826,6 +44024,10 @@ async function testDemoRecordingContract() {
   await testV2ToolLoopAndEventContract();
   await testV2HookDenialPropagation();
   await testV2PermissionActionsLastWins();
+  await testV2PermissionNewVsOverwrite();
+  await testV2PermissionOverwriteLastWins();
+  await testV2PermissionOverwritePrecondition();
+  await testV2MinAskProfileZeroApprovals();
   await testV2PermissionCommandPrefix();
   await testV2PermissionCommandConservative();
   await testV2PermissionHardGuardComposition();

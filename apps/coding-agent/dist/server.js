@@ -40085,9 +40085,14 @@ function permissionTargets(tool2, args, ctx2) {
   if (targets.length === 0) return [{ pattern: "*", allowEligible: !invalid }];
   return targets;
 }
-function evaluatedTargets(tool2, args, ctx2, rules) {
-  const permission = bareToolName(tool2);
-  return permissionTargets(permission, args, ctx2).map((target) => ({
+async function evaluatedTargets(tool2, args, ctx2, rules) {
+  const bare = bareToolName(tool2);
+  let permission = bare;
+  if (findHostTool(tool2)?.kind === "write" && typeof args.path === "string") {
+    const { existedBefore } = await getFilePrecondition(args.path, ctx2);
+    if (existedBefore) permission = `${bare}.overwrite`;
+  }
+  return permissionTargets(bare, args, ctx2).map((target) => ({
     target,
     action: evaluate(permission, target.pattern, rules).action
   }));
@@ -40103,8 +40108,8 @@ function combineDecisions(items) {
 function createPermissionHook(rules) {
   const ruleset = [...rules];
   const decisions = /* @__PURE__ */ new WeakMap();
-  const hook = ({ tool: tool2, args, ctx: ctx2 }) => {
-    const evaluated = evaluatedTargets(tool2, args, ctx2, ruleset);
+  const hook = async ({ tool: tool2, args, ctx: ctx2 }) => {
+    const evaluated = await evaluatedTargets(tool2, args, ctx2, ruleset);
     const decision = combineDecisions(evaluated);
     if (decision === "deny") {
       const denied = evaluated.filter((item) => item.action === "deny").map((item) => item.target.pattern);

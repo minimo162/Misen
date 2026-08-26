@@ -2,7 +2,7 @@ import path from 'node:path'
 import { parse as shellParse, type ParseEntry } from 'shell-quote'
 import type { PermissionRule } from './config'
 import type { ToolExecuteBeforeHook } from './hooks'
-import { bareToolName, type ToolContext } from './tools'
+import { bareToolName, findHostTool, getFilePrecondition, type ToolContext } from './tools'
 import { evaluate } from './vendor/opencode-permission/evaluate'
 import { prefix } from './vendor/opencode-permission/arity'
 
@@ -137,9 +137,17 @@ interface EvaluatedTarget {
   action: PermissionDecision
 }
 
-function evaluatedTargets(tool: string, args: Record<string, unknown>, ctx: ToolContext, rules: readonly PermissionRule[]): EvaluatedTarget[] {
-  const permission = bareToolName(tool)
-  return permissionTargets(permission, args, ctx).map((target) => ({
+async function evaluatedTargets(tool: string, args: Record<string, unknown>, ctx: ToolContext, rules: readonly PermissionRule[]): Promise<EvaluatedTarget[]> {
+  const bare = bareToolName(tool)
+  let permission = bare
+  // Permission matching is bound to the final arguments after earlier
+  // before-hooks.  Distinguish a write to an existing path so callers can
+  // require a separate overwrite approval without weakening host guards.
+  if (findHostTool(tool)?.kind === 'write' && typeof args.path === 'string') {
+    const { existedBefore } = await getFilePrecondition(args.path, ctx)
+    if (existedBefore) permission = `${bare}.overwrite`
+  }
+  return permissionTargets(bare, args, ctx).map((target) => ({
     target,
     action: evaluate(permission, target.pattern, rules).action
   }))
@@ -154,13 +162,13 @@ function combineDecisions(items: readonly EvaluatedTarget[]): PermissionDecision
   return needsAsk ? 'ask' : 'allow'
 }
 
-export function evaluateToolPermission(
+export async function evaluateToolPermission(
   tool: string,
   args: Record<string, unknown>,
   ctx: ToolContext,
   rules: readonly PermissionRule[]
-): PermissionDecision {
-  return combineDecisions(evaluatedTargets(tool, args, ctx, rules))
+): Promise<PermissionDecision> {
+  return combineDecisions(await evaluatedTargets(tool, args, ctx, rules))
 }
 
 export function createPermissionHook(rules: readonly PermissionRule[]): {
@@ -169,8 +177,8 @@ export function createPermissionHook(rules: readonly PermissionRule[]): {
 } {
   const ruleset = [...rules]
   const decisions = new WeakMap<Record<string, unknown>, PermissionDecision>()
-  const hook: ToolExecuteBeforeHook = ({ tool, args, ctx }) => {
-    const evaluated = evaluatedTargets(tool, args, ctx, ruleset)
+  const hook: ToolExecuteBeforeHook = async ({ tool, args, ctx }) => {
+    const evaluated = await evaluatedTargets(tool, args, ctx, ruleset)
     const decision = combineDecisions(evaluated)
     if (decision === 'deny') {
       const denied = evaluated.filter((item) => item.action === 'deny').map((item) => item.target.pattern)
