@@ -51,12 +51,12 @@ function Get-RenketsuArray {
     param([object]$Value)
 
     if ($null -eq $Value) {
-        return @()
+        Write-Output -NoEnumerate ([object[]]@())
+        return
     }
-    if ($Value -is [System.Array]) {
-        return $Value
-    }
-    return @($Value)
+    # PowerShell enumerates arrays returned from functions. Without -NoEnumerate,
+    # a one-item JSON array becomes a scalar and StrictMode makes .Count fail.
+    Write-Output -NoEnumerate ([object[]]@($Value))
 }
 
 function Find-RenketsuLedgerSheet {

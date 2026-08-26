@@ -386,6 +386,24 @@ try {
                 $missingQuotes.companies[0].PSObject.Properties.Remove('quotes')
                 Assert-DemoUpdateRejected -Name 'missing-quotes' -InputObject $missingQuotes -RatesPath $ratesPath -LedgerTemplate $ledgerPath -TempPath $tempRoot -UpdateScript $updateScript
 
+                $singleQuote = Copy-DemoJsonObject $dataObject
+                $singleQuote.companies[0].quotes = @($singleQuote.companies[0].quotes[0])
+                $singleQuoteLedger = Join-Path $tempRoot 'reject-single-quote.xlsx'
+                Copy-Item -LiteralPath $ledgerPath -Destination $singleQuoteLedger -Force
+                try {
+                    $singleQuoteJson = $singleQuote | ConvertTo-Json -Compress -Depth 40
+                    $null = Get-DemoChildJson -ScriptPath $updateScript -Arguments @($singleQuoteJson, $ratesPath, $singleQuoteLedger)
+                    Write-DemoNg 'negative validation accepted: single-quote-array'
+                }
+                catch {
+                    if ($_.Exception.Message -match 'quotes\[\].*exactly one quote') {
+                        Write-DemoOk 'negative validation rejected: single-quote-array'
+                    }
+                    else {
+                        Write-DemoNg ('single-quote-array returned the wrong error: ' + $_.Exception.Message)
+                    }
+                }
+
                 $missingIssues = Copy-DemoJsonObject $dataObject
                 $missingIssues.companies[0].PSObject.Properties.Remove('issues')
                 Assert-DemoUpdateRejected -Name 'missing-issues' -InputObject $missingIssues -RatesPath $ratesPath -LedgerTemplate $ledgerPath -TempPath $tempRoot -UpdateScript $updateScript
