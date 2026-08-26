@@ -1,32 +1,32 @@
-# 連結デモ（明朝 90 秒動画＋ライブ・アンコール）
+# 連結デモ（明朝 60 秒動画＋ライブ・アンコール）
 
-この資料は、`demo/renketsu-demo/workspace` だけを実行面にした連結デモの台本と、実機で止める判断を一枚にまとめたものです。主役は事前に成功条件を満たした **90 秒動画**、ライブ実演は上司から求められた場合だけのアンコールです。`validation` は workspace の外に置く真値・fixture であり、エージェントには見せません。ここに書いた Windows、Excel Desktop、Copilot、Edge、EDR の状態は、明朝の実機チェックが終わるまで未確認です。
+この資料は、`demo/renketsu-demo/workspace` だけを実行面にした連結デモの台本と、実機で止める判断を一枚にまとめたものです。主役は事前に成功条件を満たした **60 秒動画**、ライブ実演は上司から求められた場合だけのアンコールです。`validation` は workspace の外に置く真値・fixture であり、エージェントには見せません。ここに書いた Windows、Excel Desktop、Copilot、Edge、EDR の状態は、明朝の実機チェックが終わるまで未確認です。
 
 ## 0. 先に押さえる境界
 
 - 起動時の作業ディレクトリは `apps/coding-agent`。config は `..\..\demo\renketsu-demo\config.demo.json`、workspace は `..\..\demo\renketsu-demo\workspace` です。
 - M365 Copilot は対話面（Copilot Edge）として使い、ローカルの coding-agent は `host.*` のファイル読み書きとコマンドを workspace 内で実行します。この資料だけでは「組織外へデータが出ない」とは断定しません。説明は「承認済み M365 Copilot／ローカルホスト境界で、テナント・認証・ネットワーク・EDR は実機確認待ち」に統一します。
 - `reports/` と `rates/` は読み取り専用。モデルが読むのは workspace 内だけで、`../validation`、正解値、兄弟 fixture は読ませません。作業ファイルは `work/`、書込み先は `work/extracted.json` と `Update-Ledger.ps1` が扱う ledger、任意の `out/`／`backup/` に限定します。
-- 新しい launcher は作りません。PowerShell の実行ポリシーを緩める起動（`Bypass` など）や、見えないウィンドウ・エンコード済みコマンド・インタープリター連鎖・実行時ダウンロードは使いません。読みやすい直接コマンドを、ローカルコピーに対して実行します。
+- 新しい launcher は作らず、launcher に `-ExecutionPolicy Bypass` を追加しません。デモ中の読みやすい直接コマンドでは `-ExecutionPolicy Bypass` の有無を問題にせず、削除・ネットワーク・プロセス／サービス・レジストリ変更・`-EncodedCommand` と workspace 外書込みを拒否します。見えないウィンドウ、インタープリター連鎖、実行時ダウンロードは使いません。
 
-## 1. 90 秒動画（主役）
+## 1. 60 秒動画（主役）
 
 ### 録画前の画面と証跡
 
 - 実機チェックと 3 回連続リハーサルが全て pass した Run を録画する。録画開始後に固定リクエストを貼り付け、先に実行してから録画を始めない。
 - 画面は左に coding-agent のブラウザー／実行ログ、右に Excel の `集計台帳.xlsx` を並べる。通知、個人情報、他案件のタブは閉じる。
 - Windows の `Win+G` から画面収録する。編集前の無加工録画を証跡として残し、Run ID、時刻、turn 数、入力・出力 hash と対応付ける。
-- Clipchamp では待ち時間だけを速度調整し、各場面に短い字幕を付ける。値や操作順を編集で入れ替えず、90 秒版とは別に無加工版を保存する。
+- Clipchamp では待ち時間だけを速度調整し、各場面に短い字幕を付ける。値や操作順を編集で入れ替えず、60 秒版とは別に無加工版を保存する。
 
-### 90 秒構成
+### 60 秒構成
 
 | 時間 | 画面・字幕 |
 | --- | --- |
-| 0–10 秒 | 19 ファイルの報告一覧をスクロールし、「形式・通貨・単位がばらばら、1 社未提出」と問題を提示する。 |
-| 10–20 秒 | 固定リクエストを一度だけ貼り付け、「一つの指示」と字幕を出す。 |
-| 20–50 秒 | `read_files` → xlsx 読取 → 抽出 JSON → `Update-Ledger.ps1` の順を速度調整して見せ、「抽出は LLM／計算と転記はスクリプト」と字幕を出す。 |
-| 50–75 秒 | 右側の更新済み台帳、`確認事項`、原文 quote を見せ、件数と totals はその Run の一行 JSONから読む。 |
-| 75–90 秒 | 「多数の報告から、根拠付きの台帳更新までを一つの依頼でつないだ」と締める。 |
+| 0–7 秒 | 19 ファイルの報告一覧を見せ、「形式・通貨・単位がばらばら、1 社未提出」と問題を提示する。 |
+| 7–14 秒 | 固定リクエストを一度だけ貼り付け、「一つの指示」と字幕を出す。 |
+| 14–36 秒 | `read_files` → xlsx 読取 → 抽出 JSON → `Update-Ledger.ps1` の順を速度調整して見せ、「抽出は LLM／計算と転記はスクリプト」と字幕を出す。 |
+| 36–53 秒 | 右側の更新済み台帳、`確認事項`、原文 quote を見せ、件数と totals はその Run の一行 JSONから読む。 |
+| 53–60 秒 | 「多数の報告から、根拠付きの台帳更新までを一つの依頼でつないだ」と締める。 |
 
 「データが社外に出ない」は、対象テナント・認証・ネットワーク境界を明朝に確認できた場合だけ使います。「1 時間が 3 分」は同じ業務範囲の実測記録がある場合だけ使います。どちらも未確認なら、上表の控えめな締めに固定し、推測値や絶対表現へ差し替えません。
 
@@ -97,9 +97,21 @@ Update-Ledger の一行目は少なくとも次のキーを含む JSON です。
    powershell.exe -NoProfile -File tools\Read-Xlsx.ps1 -Path reports\<報告ファイル>.xlsx
    ```
 
+3. **OSキャプチャが使えない場合の手動録画待ち** — 録画ソフト側で次の保存先を指定して待機し、別の通常PowerShellから実行します。`MANUAL CAPTURE READY`が表示されたら録画を開始してEnter、最後の停止案内で録画を停止してEnterを押します。エージェント進行、fresh session、真値照合、Excel表示は従来どおり自動です。
+
+   ```powershell
+   Set-Location C:\Users\yuuki\company-apps-share
+   powershell.exe -NoProfile -File demo\renketsu-demo\Record-Demo.ps1 `
+     -NoCapture `
+     -OutputPath demo\renketsu-demo\recordings\manual-take.mp4 `
+     -RepoRoot C:\Users\yuuki\company-apps-share
+   ```
+
+   `ok:true`は、指定した動画ファイルが実在して空でないこと、抽出値が真値と一致すること、Update-Ledgerの合計・件数が一致することをすべて確認できた場合だけ返します。
+
    `Read-Xlsx.ps1` または ImportExcel/EPPlus が実機で使えない場合、元の Excel を開いて必要セルと単位をメモし、JSON を手動レビューします。値を空欄のまま転記して pass にしません。
 
-3. **抽出 fixture の緊急コピー** — Copilot の初回拒否または接続断で、かつ人が fixture の出所・日付を確認できる場合だけ、次のように workspace 内へコピーします。これは scripted insurance であり、LLM が抽出した結果とは表示しません。
+4. **抽出 fixture の緊急コピー** — Copilot の初回拒否または接続断で、かつ人が fixture の出所・日付を確認できる場合だけ、次のように workspace 内へコピーします。これは scripted insurance であり、LLM が抽出した結果とは表示しません。
 
    ```powershell
    Set-Location C:\Users\yuuki\company-apps-share\demo\renketsu-demo\workspace
@@ -110,7 +122,7 @@ Update-Ledger の一行目は少なくとも次のキーを含む JSON です。
 
    この fixture の出所と更新時刻を朝に確認します。モデルへの入力にはこのパスを含めません。
 
-4. **台帳更新** — `work/extracted.json` を人が確認した後、同じ workspace ルートで一度だけ実行します。
+5. **台帳更新** — `work/extracted.json` を人が確認した後、同じ workspace ルートで一度だけ実行します。
 
    ```powershell
    powershell.exe -NoProfile -File tools\Update-Ledger.ps1 -Extracted work\extracted.json -Rates rates\レート表.csv -Ledger 集計台帳.xlsx
@@ -118,16 +130,16 @@ Update-Ledger の一行目は少なくとも次のキーを含む JSON です。
 
    一行目の JSON を保存し、`ok`、各 count、`totals` を読み上げます。失敗時に ledger を初期化して再実行しません。
 
-5. **開く／検査する** — `集計台帳.xlsx` を `Invoke-Item .\集計台帳.xlsx` で開き、会社別と `確認事項` を目視します。保存日時と確認者を記録し、元の `reports/` と `rates/` の更新日時が変わっていないことを確認します。
+6. **開く／検査する** — `集計台帳.xlsx` を `Invoke-Item .\集計台帳.xlsx` で開き、会社別と `確認事項` を目視します。保存日時と確認者を記録し、元の `reports/` と `rates/` の更新日時が変わっていないことを確認します。
 
 ## 4. 明朝チェックリスト（順序を変えない）
 
 - [ ] **1. Test-DemoSetup** — workspace の通常ターミナルで `powershell.exe -NoProfile -File tools\Test-DemoSetup.ps1` を実行する。`workspace`、`reports/`、`rates/`、`tools/Read-Xlsx.ps1`、`tools/Update-Ledger.ps1`、`集計台帳.xlsx`、ImportExcel DLL、Node、Edgeを診断し、テンプレートの一時コピーに正解fixtureを転記して `validation/expected.json` と一致することまで確認する。`RESULT ALL OK` と時刻を記録する。
 - [ ] **2. fallback end-to-end** — LLM を使わず、既知の extracted fixture を `work/` に置く scripted insurance → Update-Ledger → Excel の会社別／確認事項を最後まで通す。
 - [ ] **3. Copilot lightweight connectivity** — Edge の Copilot 接続、`agentMode=true`、foreground 表示、最初の軽量な `list_files` までを確認する。ここで拒否・#0・タイムアウトなら中止。
-- [ ] **4. full rehearsal** — 同じ固定指示を変更せず **3 回連続**、各 Run **8 ターン以下**で実施する。各 Run の extracted values が、人だけが参照する `validation` の真値と全項目一致し、counts・quotes・ledger の一行 JSON が記録されることを合格条件にする。エージェントは validation を読まない。
-- [ ] **5. record** — 録画を開始してから固定リクエストを貼り付ける。Run ID、時刻、turn 数、host 操作、count、hash、停止理由、Excel 表示結果を記録し、無加工版を保存する。Clipchamp で待ち時間の速度調整と字幕を加え、上記構成の 90 秒版を書き出す。機械的な back-check が無い／形式が壊れている場合は「未確認」と書く。
-- [ ] **6. go/no-go** — 1–5 の証跡が全て pass なら 90 秒動画を主役として披露する。ライブは上司から求められ、かつ同じ朝の全ゲートが pass している場合だけアンコールで行う。どれか一つでも fail／未確認ならライブを中止し、過去の pass 証跡に対応する録画があれば動画、なければ概念説明・進捗共有に切り替える。
+- [ ] **4. full rehearsal** — config変更後や各 Run の開始前に、UIの「新しいセッション」または `POST /api/sessions` で必ず新規セッションを作る（`Record-Demo.ps1` は自動実行）。そのうえで同じ固定指示を変更せず **3 回連続**、各 Run **8 ターン以下**で実施する。各 Run の extracted values が、人だけが参照する `validation` の真値と全項目一致し、counts・quotes・ledger の一行 JSON が記録されることを合格条件にする。エージェントは validation を読まない。
+- [ ] **5. record** — 録画を開始してから固定リクエストを貼り付ける。Run ID、session ID、時刻、turn 数、host 操作、count、hash、停止理由、Excel 表示結果を記録し、無加工版を保存する。Clipchamp で待ち時間の速度調整と字幕を加え、上記構成の 60 秒版を書き出す。機械的な back-check が無い／形式が壊れている場合は「未確認」と書く。
+- [ ] **6. go/no-go** — 1–5 の証跡が全て pass なら 60 秒動画を主役として披露する。ライブは上司から求められ、かつ同じ朝の全ゲートが pass している場合だけアンコールで行う。どれか一つでも fail／未確認ならライブを中止し、過去の pass 証跡に対応する録画があれば動画、なければ概念説明・進捗共有に切り替える。
 
 次の項目は **実機だけの確認** です。現在のローカル/static 検査で確認済みとは書きません。
 
@@ -147,7 +159,9 @@ Update-Ledger の一行目は少なくとも次のキーを含む JSON です。
 | xlsx が読めない／シートが空 | `Read-Xlsx.ps1` を対象ファイル一つで再実行。ImportExcel/EPPlus の版・DLL・権限を記録し、Excel での目視メモを人手フォールバックにする。 |
 | プロンプトが 80k 付近で切れる／応答が分割される | 入力を会社単位の小さな束に分け、同じ固定指示のまま 8 ターン以内に収まるか確認。分割で values や quotes が欠けたら中止。`maxPromptChars=120000` は上限であり成功保証ではない。 |
 | ImportExcel／EPPlus のロード警告、EDR 隔離 | 再試行を繰り返さず、DLL の版・場所・hash と EDR イベントを記録。ローカルコピーの scripted fallback を使い、事前登録や承認が無いまま配布 DLL を追加しない。 |
-| PowerShell の実行ポリシーで止まる | `Get-ExecutionPolicy -List` とエラーを記録し、承認済みの通常ターミナル／ローカルコピーで再試行する。ポリシーを恒久変更したり、回避スイッチを追加したりしない。 |
+| PowerShell の実行ポリシーで止まる | `Get-ExecutionPolicy -List` とエラーを記録し、承認済みの通常ターミナル／ローカルコピーで `-ExecutionPolicy Bypass` を付けて再試行してよい。launcher 自体は変更しない。 |
+| config変更後も旧指示で動く／入力位置不一致 | サーバー再起動だけでは永続セッションのsystemPromptは更新されない。`Record-Demo.ps1` は各テイク前に新規セッションを自動作成する。手動検証でもUIの「新しいセッション」または `POST /api/sessions` を実行してから固定指示を送る。 |
+| `gdigrab error 5`／`ddagrab`のDXGI出力なし／`CopyFromScreen`のhandle invalid | キャプチャだけの5秒試験を先に行う。3方式とも失敗する環境では本番ランを開始せず、`Record-Demo.ps1 -NoCapture`で外部録画の開始・停止を人に委ねる。スクリプトは指定動画の存在とサイズも最後に検証する。 |
 | 共有フォルダー上でだけ失敗 | リポジトリを承認済みのローカル作業フォルダーへコピーし、同じ相対パスで実行。コピー元・先、時刻、hash を記録し、共有元へ書き戻さない。 |
 | 会社が欠落、未提出判定が違う | `reports/` の全件 list と入力一覧を突合し、`missing` の `quote` を確認。モデルの推測で会社を追加せず、原文・ファイル名・時刻を記録して中止判断。 |
 | リハーサル間で ledger がリセット／追記される | 各 Run 前後の ledger hash と保存日時を記録。既存 ledger を削除・初期化せず、Run ごとのコピー／backup で比較し、Update-Ledger を一回だけ通す。 |

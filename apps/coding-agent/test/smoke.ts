@@ -7,7 +7,18 @@ import path from 'node:path'
 import { extractJsonReply, runAgentTurn, type AgentIO, type TextBackend } from '../src/agent'
 import { capabilityPolicy, type AgentConfig } from '../src/config'
 import type { ChatMessage } from '../src/llm'
-import { CopilotEdgeClient, resolveCopilotSettings } from '../src/copilot'
+import {
+  COPILOT_CLICK_COPY_JS,
+  isResponseCopyControl,
+  COPILOT_SCREEN_STATE_JS,
+  CopilotEdgeClient,
+  assertResponseDeadline,
+  isStopGenerationControl,
+  resolveCopilotSettings,
+  selectLatestResponseCandidate,
+  updateResponseCompletionState,
+  type ResponseCompletionState
+} from '../src/copilot'
 
 import { getFileSnapshot, normalizeRunCommand, openAITools, parseToolResultMeta, rollbackFileChange, validateToolArgs, TOOL_DEFS, type ToolContext } from '../src/tools'
 import { listApprovals, requestApproval, resolveApproval } from '../src/approvals'
@@ -77,6 +88,11 @@ async function testTools(): Promise<void> {
   const ctx = makeCtx(root)
   const get = (n: string) => TOOL_DEFS.find((t) => t.name === n)!
 
+  fs.mkdirSync(path.join(root, 'tools'), { recursive: true })
+  fs.writeFileSync(path.join(root, 'tools', 'Read-Xlsx.ps1'), "param([string]$Path)\nWrite-Output ('READ_OK:' + $Path)\n")
+  fs.writeFileSync(path.join(root, 'tools', 'Update-Ledger.ps1'), "param([string]$Extracted,[string]$Rates,[string]$Ledger)\nWrite-Output ('UPDATE_OK:' + $Ledger)\n")
+  fs.writeFileSync(path.join(root, 'safe-read.txt'), 'safe-read-ok')
+
   await get('write_file').run({ path: 'a/hello.txt', content: 'line1\nline2 unique\n' }, ctx)
   const read = await get('read_file').run({ path: 'a/hello.txt' }, ctx)
   assert.ok(read.includes('unique'))
@@ -108,6 +124,8 @@ async function testTools(): Promise<void> {
   fs.writeFileSync(path.join(root, 'other', 'note.md'), '別glob')
   const batch = await get('read_files').run({ patterns: ['batch/*.txt', 'other/*.md'] }, ctx)
   assert.ok(batch.includes('UTF-8本文') && batch.includes('BOM本文') && batch.includes('CP932:日本') && batch.includes('別glob'))
+  const directoryPatterns = await get('read_files').run({ patterns: ['batch/', 'other/'] }, ctx)
+  assert.ok(directoryPatterns.includes('UTF-8本文') && directoryPatterns.includes('別glob'), 'trailing-slash directory patterns must read immediate files')
   assert.ok(batch.includes('===== batch/empty.txt ====='), 'empty files must be successful results')
   assert.ok(batch.indexOf('batch/bom.txt') < batch.indexOf('batch/cp932.txt'), 'read_files ordering must be stable')
   const xlsx = await get('read_files').run({ paths: ['batch/ledger.xlsx', 'batch/utf8.txt', 'batch/utf8.txt'] }, ctx)
@@ -158,31 +176,42 @@ async function testTools(): Promise<void> {
     normalizeRunCommand('powershell.exe -File tools\\Update-Ledger.ps1 -Ledger 集計台帳.xlsx -Extracted work\\extracted.json -Rates rates\\レート表.csv'),
     'powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\レート表.csv -Ledger 集計台帳.xlsx'
   )
-  let executionPolicyBlocked = false
-  try {
-    await get('run_command').run({
-      command: 'powershell.exe -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'
-    }, ctx)
-  } catch (err) {
-    const message = String((err as Error).message)
-    executionPolicyBlocked = message.includes('-ExecutionPolicy の指定は禁止') && message.includes('powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path <パス>')
-  }
-  assert.ok(executionPolicyBlocked, 'forbidden PowerShell policy flags must return self-correctable guidance')
-  assert.throws(
-    () => normalizeRunCommand('powershell.exe "-ExecutionPolicy" Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'),
-    /-ExecutionPolicy の指定は禁止/u
+  assert.strictEqual(
+    normalizeRunCommand('powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'),
+    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx'
   )
-  assert.throws(
-    () => normalizeRunCommand('powershell.exe -ExecutionPolicy:Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'),
-    /-ExecutionPolicy の指定は禁止/u
+  assert.strictEqual(
+    normalizeRunCommand('powershell.exe "-ExecutionPolicy" Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'),
+    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx'
   )
-  for (const flag of ['-Ex', '-Execution', '-ExecutionP', '-EP']) {
-    assert.throws(
-      () => normalizeRunCommand(`powershell.exe ${flag} Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx`),
-      /-ExecutionPolicy の指定は禁止/u,
-      `${flag} must be rejected as a PowerShell execution-policy abbreviation`
-    )
+  assert.strictEqual(
+    normalizeRunCommand('powershell.exe -ExecutionPolicy:Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'),
+    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx'
+  )
+  const bypassReadXlsx = await get('run_command').run({
+    command: 'powershell.exe -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'
+  }, ctx)
+  assert.ok(bypassReadXlsx.includes('READ_OK:reports\\OS04.xlsx'), 'known Read-Xlsx with Bypass must execute after normalization')
+  const bypassUpdateLedger = await get('run_command').run({
+    command: 'powershell.exe -ExecutionPolicy Bypass -File tools\\Update-Ledger.ps1 work\\extracted.json rates\\rates.csv ledger.xlsx'
+  }, ctx)
+  assert.ok(bypassUpdateLedger.includes('UPDATE_OK:ledger.xlsx'), 'known Update-Ledger with Bypass must execute after normalization')
+  const bypassGeneralRead = await get('run_command').run({
+    command: 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -LiteralPath safe-read.txt"'
+  }, ctx)
+  assert.ok(bypassGeneralRead.includes('safe-read-ok'), 'harmless general read with Bypass must execute')
+  for (const harmlessRead of [
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -LiteralPath safe-read.txt | Select-Object -ExpandProperty Name"',
+    'cmd.exe /c dir safe-read.txt',
+    'cmd.exe /c type safe-read.txt'
+  ]) {
+    const result = await get('run_command').run({ command: harmlessRead }, ctx)
+    assert.ok(result.includes('safe-read'), `harmless read command must execute: ${harmlessRead}`)
   }
+  await get('run_command').run({
+    command: 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-Content -LiteralPath safe-write.txt -Value inside-ok"'
+  }, ctx)
+  assert.ok(fs.readFileSync(path.join(root, 'safe-write.txt'), 'utf8').includes('inside-ok'), 'workspace-local writes must remain allowed')
   assert.throws(
     () => normalizeRunCommand('powershell.exe -File tools\\Read-Xlsx.ps1 "reports\\x&whoami.xlsx"'),
     /複合コマンド/u,
@@ -203,16 +232,36 @@ async function testTools(): Promise<void> {
     /未許可の引数/u,
     'known-tool normalization must not load a caller-selected PowerShell module'
   )
-  let updatePolicyBlocked = false
-  try {
-    await get('run_command').run({
-      command: 'powershell.exe -ExecutionPolicy Bypass -File tools\\Update-Ledger.ps1 work\\extracted.json rates\\レート表.csv 集計台帳.xlsx'
-    }, ctx)
-  } catch (err) {
-    const message = String((err as Error).message)
-    updatePolicyBlocked = message.includes('-ExecutionPolicy の指定は禁止') && message.includes('powershell.exe -NoProfile -File tools\\Update-Ledger.ps1')
+  for (const blockedCommand of [
+    'powershell.exe -ExecutionPolicy Bypass -Command "Remove-Item -LiteralPath safe-read.txt"',
+    'cmd.exe /c del safe-read.txt',
+    'powershell.exe -ExecutionPolicy Bypass -Command "Invoke-WebRequest https://example.com"',
+    'curl.exe https://example.com',
+    'powershell.exe -ExecutionPolicy Bypass -Command "Stop-Process -Id 999999"',
+    'reg.exe add HKCU\\Software\\CodingAgentSmoke /v Test /d 1',
+    'powershell.exe -EncodedCommand RwBlAHQALQBEAGEAdABlAA=='
+  ]) {
+    await assert.rejects(
+      () => get('run_command').run({ command: blockedCommand }, ctx),
+      /run_command拒否/u,
+      `dangerous operation must be rejected: ${blockedCommand}`
+    )
   }
-  assert.ok(updatePolicyBlocked, 'Update-Ledger policy rejection must include its correct invocation')
+  const outsideName = `ca-smoke-outside-${process.pid}.txt`
+  await assert.rejects(
+    () => get('run_command').run({
+      command: `powershell.exe -ExecutionPolicy Bypass -Command "Set-Content -LiteralPath ..\\${outsideName} -Value blocked"`
+    }, ctx),
+    /ワークスペース外への書き込みは禁止/u
+  )
+  assert.ok(!fs.existsSync(path.resolve(root, '..', outsideName)), 'outside write rejection must happen before execution')
+  await assert.rejects(
+    () => get('run_command').run({
+      command: `cmd.exe /c "echo blocked > ..\\${outsideName}"`
+    }, ctx),
+    /ワークスペース外への書き込みは禁止/u
+  )
+  assert.ok(!fs.existsSync(path.resolve(root, '..', outsideName)), 'outside redirection must be rejected before execution')
 
   let wttrBlocked = false
   try {
@@ -373,7 +422,7 @@ async function testCopilotChoosesFirstAction(): Promise<void> {
   fs.writeFileSync(path.join(answerRoot, 'evidence.txt'), 'bootstrap evidence')
   const answerBackend = new FakeBackend(['{"answer":"こんにちは！"}\nAGENT_END'])
   const answerEvents: string[] = []
-  const cfg = { baseURL: '', model: '', provider: 'copilot-edge' as const, copilot: { agentMode: true } }
+  const cfg = { baseURL: '', model: '', provider: 'copilot-edge' as const, systemPrompt: 'WORK_SYSTEM_PROMPT_SENTINEL', copilot: { agentMode: true } }
   const answer = await runAgentTurn({
     cfg,
     messages: [],
@@ -387,6 +436,7 @@ async function testCopilotChoosesFirstAction(): Promise<void> {
   assert.strictEqual(answerBackend.calls, 1)
   assert.deepStrictEqual(answerEvents, ['tool.requested', 'tool.succeeded'])
   assert.ok(answerBackend.prompts[0].includes('TOOL_RESULT (第0ターン自動実行'))
+  assert.ok(answerBackend.prompts[0].includes('[業務固有指示]') && answerBackend.prompts[0].includes('WORK_SYSTEM_PROMPT_SENTINEL'), 'work-mode prompts must include configured system instructions')
   assert.ok(answerBackend.prompts[0].includes('BEGIN_UNTRUSTED_HOST_RESULT'))
   assert.ok(answerBackend.prompts[0].includes('evidence.txt'))
   assert.ok(answerBackend.prompts[0].includes('host.get_weather') && !answerBackend.prompts[0].includes('host.run_command(command)'))
@@ -571,6 +621,290 @@ async function testCopilotEdgeIsolation(): Promise<void> {
   assert.strictEqual(attached.cdpPort, 9444)
   console.log('PASS copilot-edge-isolation')
 }
+async function testCopilotResponseCompletion(): Promise<void> {
+  const empty = (): ResponseCompletionState => ({ stableLength: null, stableSinceMs: null })
+  let result = updateResponseCompletionState(empty(), {
+    observedAtMs: 0,
+    textLength: 5000,
+    generating: true,
+    copyEnabled: true
+  })
+  assert.strictEqual(result.ready, false)
+  assert.strictEqual(result.state.stableSinceMs, null)
+
+  result = updateResponseCompletionState(empty(), {
+    observedAtMs: 0,
+    textLength: 5000,
+    generating: false,
+    copyEnabled: false
+  })
+  assert.strictEqual(result.ready, false)
+  assert.strictEqual(result.state.stableSinceMs, null)
+
+  result = updateResponseCompletionState(empty(), {
+    observedAtMs: 100,
+    textLength: 5000,
+    generating: false,
+    copyEnabled: true
+  })
+  result = updateResponseCompletionState(result.state, {
+    observedAtMs: 1200,
+    textLength: 7000,
+    generating: false,
+    copyEnabled: true
+  })
+  assert.strictEqual(result.ready, false)
+  assert.strictEqual(result.state.stableSinceMs, 1200)
+
+  result = updateResponseCompletionState(result.state, {
+    observedAtMs: 2000,
+    textLength: 7000,
+    generating: false,
+    copyEnabled: true
+  })
+  assert.strictEqual(result.ready, false)
+  result = updateResponseCompletionState(result.state, {
+    observedAtMs: 2200,
+    textLength: 7000,
+    generating: false,
+    copyEnabled: true
+  })
+  assert.strictEqual(result.ready, true)
+
+  result = updateResponseCompletionState(result.state, {
+    observedAtMs: 2300,
+    textLength: 7000,
+    generating: false,
+    copyEnabled: false
+  })
+  assert.strictEqual(result.ready, false)
+  assert.strictEqual(result.state.stableSinceMs, null)
+
+  result = updateResponseCompletionState(empty(), {
+    observedAtMs: 3000,
+    textLength: 7000,
+    generating: false,
+    copyEnabled: true
+  })
+  result = updateResponseCompletionState(result.state, {
+    observedAtMs: 4100,
+    textLength: 7000,
+    generating: true,
+    copyEnabled: true
+  })
+  assert.strictEqual(result.ready, false)
+  assert.strictEqual(result.state.stableSinceMs, null)
+
+  const olderCopyOnly = selectLatestResponseCandidate([
+    { text: 'old', bottom: 100, order: 0, copyEnabled: true },
+    { text: 'latest', bottom: 200, order: 1, copyEnabled: false }
+  ])
+  assert.strictEqual(olderCopyOnly?.text, 'latest')
+  assert.strictEqual(olderCopyOnly?.copyEnabled, false)
+  const latestCopy = selectLatestResponseCandidate([
+    { text: 'old', bottom: 100, order: 0, copyEnabled: true },
+    { text: 'latest', bottom: 200, order: 1, copyEnabled: true }
+  ])
+  assert.strictEqual(latestCopy?.copyEnabled, true)
+
+  assert.strictEqual(isStopGenerationControl({ label: '', selector: '.fai-SendButton__stopBackground' }), true)
+  assert.strictEqual(isStopGenerationControl({ label: '応答の生成を停止する', selector: '[aria-label*="停止"]' }), true)
+  assert.strictEqual(isStopGenerationControl({ label: 'Stop generating', selector: '[aria-label*="Stop"]' }), true)
+  assert.strictEqual(isStopGenerationControl({ label: 'コピー', selector: 'button' }), false)
+  const responseCopy = { label: '応答のコピー', testId: 'CopyButtonTestId', inResponseToolbar: true, inCodeBlock: false, disabled: false, ariaDisabled: false }
+  const codeCopy = { label: 'コードをコピー', testId: 'CodeCopyButtonTestId', inResponseToolbar: false, inCodeBlock: true, disabled: false, ariaDisabled: false }
+  assert.strictEqual(isResponseCopyControl(responseCopy), true)
+  assert.strictEqual(isResponseCopyControl(codeCopy), false)
+  assert.strictEqual(isResponseCopyControl({ ...responseCopy, testId: '', label: 'Copy response' }), true)
+  assert.strictEqual(isResponseCopyControl({ ...responseCopy, testId: '', label: 'Copy', inResponseToolbar: true }), true)
+  assert.strictEqual(isResponseCopyControl({ ...responseCopy, disabled: true }), false)
+  const latestWithCodeCopyOnly = selectLatestResponseCandidate([
+    { text: 'old', bottom: 100, order: 0, copyEnabled: isResponseCopyControl(responseCopy) },
+    { text: 'latest', bottom: 200, order: 1, copyEnabled: isResponseCopyControl(codeCopy) }
+  ])
+  assert.strictEqual(latestWithCodeCopyOnly?.text, 'latest')
+  assert.strictEqual(latestWithCodeCopyOnly?.copyEnabled, false)
+  const latestWithResponseCopy = selectLatestResponseCandidate([
+    { text: 'old', bottom: 100, order: 0, copyEnabled: isResponseCopyControl(responseCopy) },
+    { text: 'latest', bottom: 200, order: 1, copyEnabled: isResponseCopyControl(responseCopy) }
+  ])
+  assert.strictEqual(latestWithResponseCopy?.copyEnabled, true)
+  for (const required of ['shadowRoot', 'contentDocument', 'stopGeneratingButton', 'stop-button', 'fai-SendButton__stopBackground', '[role="article"][class*="CopilotMessage" i]', '[data-testid="copilot-message-div"]']) {
+    assert.ok(COPILOT_SCREEN_STATE_JS.includes(required), `screen-state detector missing ${required}`)
+    if (required.includes('CopilotMessage') || required.includes('copilot-message-div')) {
+      assert.ok(COPILOT_CLICK_COPY_JS.includes(required), `copy detector missing ${required}`)
+    }
+  }
+  new Function('document', 'window', `return ${COPILOT_SCREEN_STATE_JS}`)
+  new Function('document', 'window', `return ${COPILOT_CLICK_COPY_JS}`)
+  assert.ok(COPILOT_CLICK_COPY_JS.includes('scope=latest'))
+  assert.ok(COPILOT_CLICK_COPY_JS.includes('others.length>0'))
+  for (const required of ['CopyButtonTestId', 'CopyButtonContainerTestId', 'pre,code', 'copy\\s*(?:response|answer)']) {
+    assert.ok(COPILOT_SCREEN_STATE_JS.includes(required), `screen-state response-copy detector missing ${required}`)
+    assert.ok(COPILOT_CLICK_COPY_JS.includes(required), `click response-copy detector missing ${required}`)
+  }
+
+  const deadlineClient = new CopilotEdgeClient({
+    baseURL: '',
+    model: '',
+    provider: 'copilot-edge',
+    copilot: { responseTimeoutSec: 0.01 }
+  })
+  type DeadlineInternals = {
+    readScreenState: (timeoutMs?: number) => Promise<{ text: string; generating: boolean; copyEnabled: boolean; signinRequired: boolean }>
+    finalizeAnswer: (text: string) => Promise<string>
+    waitResponse: (baseline: string) => Promise<string>
+  }
+  const deadlineInternal = deadlineClient as unknown as DeadlineInternals
+  let finalized = false
+  deadlineInternal.readScreenState = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    return { text: 'complete', generating: false, copyEnabled: true, signinRequired: false }
+  }
+  deadlineInternal.finalizeAnswer = async (text) => { finalized = true; return text }
+  await assert.rejects(deadlineInternal.waitResponse('baseline'), /タイムアウト/)
+  assert.strictEqual(finalized, false)
+
+  const recoveryClient = new CopilotEdgeClient({
+    baseURL: '',
+    model: '',
+    provider: 'copilot-edge',
+    copilot: { responseTimeoutSec: 0.05 }
+  })
+  type RecoveryInternals = {
+    bringToFront: (deadlineMs?: number) => Promise<void>
+    grantClipboard: (deadlineMs?: number) => Promise<void>
+    readSystemClipboard: (deadlineMs?: number) => string
+    evalWithReconnect: (expression: string, timeoutMs?: number) => Promise<unknown>
+    finalizeAnswer: (fallbackText: string, deadlineMs?: number) => Promise<string>
+  }
+  const recoveryInternal = recoveryClient as unknown as RecoveryInternals
+  recoveryInternal.bringToFront = async () => {}
+  recoveryInternal.grantClipboard = async () => {}
+  recoveryInternal.readSystemClipboard = () => ''
+  let recoveryEvalCalls = 0
+  recoveryInternal.evalWithReconnect = async () => {
+    recoveryEvalCalls++
+    return recoveryEvalCalls === 1 ? 'old clipboard' : JSON.stringify({ clicked: true })
+  }
+  const recoveryStarted = Date.now()
+  await assert.rejects(
+    recoveryInternal.finalizeAnswer('fallback response', recoveryStarted + 30),
+    /タイムアウト/
+  )
+  assert.ok(Date.now() - recoveryStarted < 250)
+  assert.doesNotThrow(() => assertResponseDeadline(101, 300, 100))
+  assert.throws(() => assertResponseDeadline(100, 300, 100), /タイムアウト/)
+
+  type ReturnBoundaryInternals = RecoveryInternals & {
+    stripOuterFence: (text: string) => string
+    cleanResponse: (text: string) => string
+  }
+  const realDateNow = Date.now
+  let boundaryNow = 100
+  Date.now = () => boundaryNow
+  try {
+    const clipboardBoundaryClient = new CopilotEdgeClient({ baseURL: '', model: '', provider: 'copilot-edge' })
+    const clipboardBoundary = clipboardBoundaryClient as unknown as ReturnBoundaryInternals
+    clipboardBoundary.bringToFront = async () => {}
+    clipboardBoundary.grantClipboard = async () => {}
+    clipboardBoundary.readSystemClipboard = () => ''
+    let clipboardEvalCalls = 0
+    clipboardBoundary.evalWithReconnect = async () => {
+      clipboardEvalCalls++
+      if (clipboardEvalCalls === 1) return 'old clipboard'
+      if (clipboardEvalCalls === 2) return JSON.stringify({ clicked: true })
+      return 'new clipboard response'
+    }
+    clipboardBoundary.stripOuterFence = () => {
+      boundaryNow = 102
+      return 'new clipboard response'
+    }
+    await assert.rejects(clipboardBoundary.finalizeAnswer('fallback', 102), /タイムアウト/)
+
+    boundaryNow = 200
+    const fallbackBoundaryClient = new CopilotEdgeClient({ baseURL: '', model: '', provider: 'copilot-edge' })
+    const fallbackBoundary = fallbackBoundaryClient as unknown as ReturnBoundaryInternals
+    fallbackBoundary.bringToFront = async () => {}
+    fallbackBoundary.grantClipboard = async () => {}
+    fallbackBoundary.readSystemClipboard = () => ''
+    let fallbackEvalCalls = 0
+    fallbackBoundary.evalWithReconnect = async () => {
+      fallbackEvalCalls++
+      return fallbackEvalCalls === 1 ? 'old clipboard' : JSON.stringify({ clicked: false })
+    }
+    fallbackBoundary.cleanResponse = () => {
+      boundaryNow = 202
+      return 'fallback response'
+    }
+    await assert.rejects(fallbackBoundary.finalizeAnswer('fallback', 202), /タイムアウト/)
+
+    boundaryNow = 300
+    const systemClipboardClient = new CopilotEdgeClient({ baseURL: '', model: '', provider: 'copilot-edge' })
+    const systemClipboard = systemClipboardClient as unknown as ReturnBoundaryInternals
+    systemClipboard.bringToFront = async () => {}
+    systemClipboard.grantClipboard = async () => {}
+    let systemClipboardReads = 0
+    systemClipboard.readSystemClipboard = () => (++systemClipboardReads === 1 ? 'old clipboard' : 'new clipboard response')
+    systemClipboard.evalWithReconnect = async () => JSON.stringify({ clicked: true })
+    assert.strictEqual(await systemClipboard.finalizeAnswer('fallback', 5000), 'new clipboard response')
+
+    boundaryNow = 1000
+    const waitBoundaryClient = new CopilotEdgeClient({
+      baseURL: '',
+      model: '',
+      provider: 'copilot-edge',
+      copilot: { responseTimeoutSec: 5, pollIntervalMs: 500 }
+    })
+    const waitBoundary = waitBoundaryClient as unknown as DeadlineInternals
+    let waitPolls = 0
+    waitBoundary.readScreenState = async () => {
+      waitPolls++
+      boundaryNow = waitPolls === 1 ? 1000 : 2100
+      return { text: 'complete response', generating: false, copyEnabled: true, signinRequired: false }
+    }
+    waitBoundary.finalizeAnswer = async () => {
+      boundaryNow = 6000
+      return 'complete response'
+    }
+    await assert.rejects(waitBoundary.waitResponse('baseline'), /タイムアウト/)
+  } finally {
+    Date.now = realDateNow
+  }
+
+  const orderClient = new CopilotEdgeClient({ baseURL: '', model: '', provider: 'copilot-edge' })
+  type CompleteInternals = {
+    ensureEdge: () => Promise<void>
+    ensurePage: () => Promise<void>
+    freshChat: () => Promise<void>
+    waitInputReady: () => Promise<void>
+    selectModel: () => Promise<void>
+    assertTrustedOrigin: () => Promise<void>
+    insertPrompt: () => Promise<void>
+    readScreenState: () => Promise<{ text: string; generating: boolean; copyEnabled: boolean; signinRequired: boolean }>
+    clickSend: () => Promise<void>
+    waitResponse: (baseline: string) => Promise<string>
+  }
+  const orderInternal = orderClient as unknown as CompleteInternals
+  const order: string[] = []
+  orderInternal.ensureEdge = async () => { order.push('edge') }
+  orderInternal.ensurePage = async () => { order.push('page') }
+  orderInternal.freshChat = async () => { order.push('fresh') }
+  orderInternal.waitInputReady = async () => { order.push('input') }
+  orderInternal.selectModel = async () => { order.push('model') }
+  orderInternal.assertTrustedOrigin = async () => { order.push('origin') }
+  orderInternal.insertPrompt = async () => { order.push('insert') }
+  orderInternal.readScreenState = async () => {
+    order.push('baseline')
+    return { text: 'old response', generating: false, copyEnabled: true, signinRequired: false }
+  }
+  orderInternal.clickSend = async () => { order.push('send') }
+  orderInternal.waitResponse = async (baseline) => { order.push(`wait:${baseline}`); return 'done' }
+  assert.strictEqual(await orderClient.complete('prompt'), 'done')
+  assert.ok(order.indexOf('baseline') < order.indexOf('send'))
+  assert.strictEqual(order[order.length - 1], 'wait:old response')
+  console.log('PASS copilot-response-completion')
+}
 async function testCopilotChunkFallback(): Promise<void> {
   const client = new CopilotEdgeClient({ baseURL: '', model: '', provider: 'copilot-edge', copilot: { maxPromptChars: 5000 } })
   type Internals = {
@@ -674,6 +1008,8 @@ async function testCopilotToolResultBudgets(): Promise<void> {
     backend: commandBackend
   })
   assert.strictEqual(commandResult.reply, 'command complete')
+  assert.ok(commandBackend.prompts[0].includes('任意のhostコマンド実行は自動承認済みです'), 'auto-approved command prompt must state that approval is already granted')
+  assert.ok(!commandBackend.prompts[0].includes('実行前に承認を取得してください'), 'auto-approved command prompt must not ask the model to request approval')
   assert.ok(commandBackend.prompts[1].includes('last.xlsx FINAL_WORKBOOK_MARKER'), 'final command workbook must reach the next prompt')
   fs.rmSync(commandRoot, { recursive: true, force: true })
   console.log('PASS copilot-tool-result-budgets')
@@ -748,6 +1084,7 @@ async function testUiContract(): Promise<void> {
   await testCopilotChoosesFirstAction()
   await testModeBoundaries()
   await testCopilotEdgeIsolation()
+  await testCopilotResponseCompletion()
   await testCopilotChunkFallback()
   await testCopilotLoop()
   await testCopilotToolResultBudgets()

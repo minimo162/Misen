@@ -245,14 +245,16 @@ function pausedResult(messages: ChatMessage[], userInput: string, steps: string[
   }
 }
 
-function buildProtocolRules(mode: TurnMode = 'work', allowArbitraryCommands = false): string {
+function buildProtocolRules(mode: TurnMode = 'work', allowArbitraryCommands = false, autoApproveCommand = false): string {
   const toolDocs = TOOL_DEFS.filter((t) => allowArbitraryCommands || t.name !== 'run_command').map((t) => {
     const req = ((t.parameters as { required?: string[] }).required ?? [])
     const props = Object.keys((t.parameters as { properties?: Record<string, unknown> }).properties ?? {})
     return `- ${qualifiedToolName(t.name)}(${props.join(', ')}):${req.length ? ` 必須=${req.join(',')};` : ''} ${t.description}`
   }).join('\n')
   const commandRule = allowArbitraryCommands
-    ? '明示設定により任意のhostコマンド実行が許可されています。実行前に承認を取得してください。'
+    ? autoApproveCommand
+      ? '明示設定により任意のhostコマンド実行は自動承認済みです。承認を求めるanswerを返さず、必要なhost.run_commandを直ちに要求してください。'
+      : '明示設定により任意のhostコマンド実行が許可されています。実行前に承認を取得してください。'
     : '任意のコマンド実行はこのRunでは無効です。既知の検証手順や管理プロセスを使い、コマンド実行を要求しないでください。'
   if (mode !== 'work') {
     const label = mode === 'research' ? '調査' : '通常回答'
@@ -384,11 +386,12 @@ async function approvalPreconditionChanged(binding: ApprovalBinding, ctx: ToolCo
   return state.existedBefore !== binding.existedBefore || state.beforeHash !== binding.beforeHash
 }
 
-function composeCopilotPrompt(mode: TurnMode, userInput: string, steps: string[], budget = 120000, history: { role: string; content: string }[] = [], allowArbitraryCommands = false): string {
+function composeCopilotPrompt(mode: TurnMode, userInput: string, steps: string[], budget = 120000, history: { role: string; content: string }[] = [], allowArbitraryCommands = false, autoApproveCommand = false, systemInstructions = ''): string {
   const histBlock = history.length > 0
     ? ['', '[これまでのやりとり]', ...history.map((h) => `${h.role}: ${h.content.replace(/\r?\n+/g, ' ')}`)]
     : []
-  const head = [buildProtocolRules(mode, allowArbitraryCommands), ...histBlock, '', '[依頼]', userInput]
+  const systemBlock = systemInstructions.trim() ? ['', '[業務固有指示]', systemInstructions.trim()] : []
+  const head = [buildProtocolRules(mode, allowArbitraryCommands, autoApproveCommand), ...systemBlock, ...histBlock, '', '[依頼]', userInput]
   const tail = [
     '',
     '[指示]',
@@ -422,6 +425,11 @@ async function runCopilotTurn(opts: {
     .filter((m: ChatMessage) => m.role !== 'system')
     .map((m) => ({ role: m.role === 'assistant' ? 'アシスタント' : 'ユーザー', content: String(m.content ?? '').slice(0, 400) }))
     .slice(-12)
+  const systemInstructions = opts.messages
+    .filter((m: ChatMessage) => m.role === 'system')
+    .map((m) => String(m.content ?? ''))
+    .filter((content) => content.trim())
+    .join('\n\n') || cfg.systemPrompt || ''
   const turnMessages = (assistantContent: string): ChatMessage[] => [
     ...opts.messages,
     { role: 'user', content: opts.userInput },
@@ -486,7 +494,7 @@ async function runCopilotTurn(opts: {
     if (io.isPaused?.()) return { reply: '', messages: turnMessages('[一時停止] チェックポイントを保存しました'), aborted: true, paused: true, checkpoint: steps.slice(-20) }
     let raw: string
     try {
-      raw = await backend.complete(composeCopilotPrompt('work', opts.userInput, steps, cfg.copilot?.maxPromptChars ?? 120000, history, policy.allowArbitraryCommands), io.signal)
+      raw = await backend.complete(composeCopilotPrompt('work', opts.userInput, steps, cfg.copilot?.maxPromptChars ?? 120000, history, policy.allowArbitraryCommands, policy.autoApproveCommand, systemInstructions), io.signal)
       raw = raw.replace(/＜/g, '<').replace(/＞/g, '>').replace(/｀/g, String.fromCharCode(96))
       io.event?.({ type: 'model.decision', summary: 'Copilotの次の1手を受信しました', origin: 'copilot', namespace: 'native', authority: 'claimed' })
     } catch (err) {

@@ -386,6 +386,24 @@ try {
                 $missingQuotes.companies[0].PSObject.Properties.Remove('quotes')
                 Assert-DemoUpdateRejected -Name 'missing-quotes' -InputObject $missingQuotes -RatesPath $ratesPath -LedgerTemplate $ledgerPath -TempPath $tempRoot -UpdateScript $updateScript
 
+                $singleQuote = Copy-DemoJsonObject $dataObject
+                $singleQuote.companies[0].quotes = @($singleQuote.companies[0].quotes[0])
+                $singleQuoteLedger = Join-Path $tempRoot 'reject-single-quote.xlsx'
+                Copy-Item -LiteralPath $ledgerPath -Destination $singleQuoteLedger -Force
+                try {
+                    $singleQuoteJson = $singleQuote | ConvertTo-Json -Compress -Depth 40
+                    $null = Get-DemoChildJson -ScriptPath $updateScript -Arguments @($singleQuoteJson, $ratesPath, $singleQuoteLedger)
+                    Write-DemoNg 'negative validation accepted: single-quote-array'
+                }
+                catch {
+                    if ($_.Exception.Message -match 'quotes\[\].*exactly one quote') {
+                        Write-DemoOk 'negative validation rejected: single-quote-array'
+                    }
+                    else {
+                        Write-DemoNg ('single-quote-array returned the wrong error: ' + $_.Exception.Message)
+                    }
+                }
+
                 $missingIssues = Copy-DemoJsonObject $dataObject
                 $missingIssues.companies[0].PSObject.Properties.Remove('issues')
                 Assert-DemoUpdateRejected -Name 'missing-issues' -InputObject $missingIssues -RatesPath $ratesPath -LedgerTemplate $ledgerPath -TempPath $tempRoot -UpdateScript $updateScript
@@ -442,6 +460,31 @@ try {
     }
     else {
         Write-DemoNg 'coding-agent dist/server.js, dist/smoke.js, or node.exe missing'
+    }
+
+    $recordDemoPath = Join-Path $RepoPath 'demo\renketsu-demo\Record-Demo.ps1'
+    if (Test-Path -LiteralPath $recordDemoPath -PathType Leaf) {
+        $recordDemoText = [System.IO.File]::ReadAllText($recordDemoPath, [System.Text.Encoding]::UTF8)
+        if ($recordDemoText.Contains("'/api/sessions'") -and $recordDemoText.Contains('sessionId = $sessionId') -and $recordDemoText.Contains('$retrySessionResponse') -and -not $recordDemoText.Contains("'/retry'")) {
+            Write-DemoOk 'recording script creates fresh sessions for take and input retry'
+        }
+        else {
+            Write-DemoNg 'recording script does not require fresh sessions for take and input retry'
+        }
+        $manualReadyIndex = $recordDemoText.IndexOf('MANUAL CAPTURE READY', [System.StringComparison]::Ordinal)
+        $turnIndex = $recordDemoText.IndexOf("'/api/turn'", [System.StringComparison]::Ordinal)
+        $issuesDisplayIndex = $recordDemoText.IndexOf('$issuesSheet.Activate()', [System.StringComparison]::Ordinal)
+        $manualStopIndex = $recordDemoText.IndexOf('Stop recording now, then press Enter to finish verification', [System.StringComparison]::Ordinal)
+        $manualFileCheckIndex = $recordDemoText.IndexOf('Manual recording file was not created or is empty.', [System.StringComparison]::Ordinal)
+        if ($recordDemoText.Contains('[switch]$NoCapture') -and $recordDemoText.Contains("captureMode = if (`$NoCapture) { 'manual' } else { 'ffmpeg' }") -and $manualReadyIndex -ge 0 -and $manualReadyIndex -lt $turnIndex -and $issuesDisplayIndex -ge 0 -and $manualStopIndex -gt $issuesDisplayIndex -and $manualFileCheckIndex -gt $manualStopIndex) {
+            Write-DemoOk 'recording script supports explicit manual capture handoff'
+        }
+        else {
+            Write-DemoNg 'recording script manual capture handoff is missing'
+        }
+    }
+    else {
+        Write-DemoNg 'Record-Demo.ps1 missing'
     }
 
     $edgeCandidates = @(
