@@ -16,6 +16,7 @@ npm run gate
 | flex-validate | `node dist/flex-harness.js` | PASS / FAIL |
 | live-converter | `node dist/flex-harness.js --live` | フラグなしはSKIP |
 | live-copilot | `node test/measure-flex-copilot.mjs` | フラグなしはSKIP |
+| live-copilot-v2 | `node test/measure-flex-copilot-v2.mjs` | フラグなしはSKIP |
 
 4B変換係まで実行する場合は、llama.cppサーバーを `127.0.0.1:8080` で起動してから `npm run gate -- --live-converter` を使います。
 
@@ -26,6 +27,30 @@ npm run gate -- --live-copilot http://127.0.0.1:3951 .tmp/flex-copilot-performan
 ```
 
 機械可読な全段の結果は、実行のたびに `.tmp/gate-result.json` へUTF-8のJSONとして保存されます。
+
+## ループv2（実験的）
+
+Vercel AI SDKを使うループv2は並行実装です。既定の `agentLoop` は引き続き `"v1"` で、v1/v2の全ゲートが同等以上になったことを確認してから切替を別途判断します。v2でも既存ホストツールの引数検証、実行前フック、承認、コマンド／ファイルガードを順番に通り、各実行上限とno-progress停止を適用します。
+
+v2を試すローカル設定では、Copilot OpenAI互換bridgeの `/v1` を `baseURL` に指定し、bridgeと同じトークンを `apiKey` または `apiKeyEnv` で渡します。
+
+```json
+{
+  "agentLoop": "v2",
+  "provider": "copilot-edge",
+  "baseURL": "http://127.0.0.1:3952/v1",
+  "apiKeyEnv": "COPILOT_BRIDGE_TOKEN",
+  "model": "copilot-edge"
+}
+```
+
+通常の `npm run gate` にはモックOpenAI互換応答を使うv2決定論テストが含まれ、実サービスには接続しません。実Copilotの5種計測は、Edge Copilotセッションを使うbridgeと、上記v2設定で起動した `dist/server.js` を準備してから、次のopt-inフラグで実行します。baseURL、workspace、結果パスの追加引数はv1計測と同じです。
+
+```powershell
+npm run gate -- --live-copilot-v2 http://127.0.0.1:3951 .tmp/flex-copilot-v2-performance .tmp/flex-copilot-v2-result.json
+```
+
+llama.cppサーバーは `--live-converter` のときだけ必要です。フラグを付けないlive段はSKIPとなり、全段の結果は `.tmp/gate-result.json` に保存されます。
 
 Layer 1 is the default and needs neither llama.cpp nor a local model. From `apps/coding-agent`, start the agent for any existing folder; that folder is the only file-operation boundary:
 

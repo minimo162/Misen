@@ -5,7 +5,8 @@ import util from 'node:util'
 import fs from 'node:fs'
 import path from 'node:path'
 import { capabilityPolicy, loadConfig, type AgentConfig, type CapabilityPolicy, type TurnMode } from './config'
-import { runAgentTurn, type AgentEvent, type AgentIO, type ResearchBundle, type TextBackend } from './agent'
+import type { AgentEvent, AgentIO, ResearchBundle, TextBackend } from './agent'
+import { runConfiguredAgentTurn } from './agent-loop'
 import { CopilotEdgeClient } from './copilot'
 import type { ChatMessage } from './llm'
 import { bareToolName, getFileSnapshot, rollbackFileChange, type ToolContext } from './tools'
@@ -221,6 +222,7 @@ function activeSession(): SessionData {
 newSession()
 
 function getBackend(mode: TurnMode): TextBackend | undefined {
+  if ((cfg.agentLoop ?? 'v1') === 'v2') return undefined
   if (cfg.provider !== 'copilot-edge') return undefined
   const existing = copilotBackends.get(mode)
   if (existing) return existing
@@ -706,7 +708,7 @@ async function executeRun(run: RunData, session: SessionData, input: string, mod
   const effCfg: AgentConfig = { ...cfg, turnMode: mode, copilot: { ...(cfg.copilot ?? {}), agentMode: mode === 'work' && (cfg.copilot?.agentMode ?? true) } }
   try {
     const backend = getBackend(mode)
-    const result = await runAgentTurn({
+    const result = await runConfiguredAgentTurn({
       cfg: effCfg,
       messages: session.messages,
       userInput: input,

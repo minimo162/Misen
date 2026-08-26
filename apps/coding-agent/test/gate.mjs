@@ -9,7 +9,8 @@ const resultPath = path.join(projectRoot, '.tmp', 'gate-result.json')
 const requestedArgs = process.argv.slice(2)
 const liveConverter = requestedArgs.includes('--live-converter')
 const liveCopilot = requestedArgs.includes('--live-copilot')
-const liveCopilotArgs = requestedArgs.filter((arg) => arg !== '--live-converter' && arg !== '--live-copilot')
+const liveCopilotV2 = requestedArgs.includes('--live-copilot-v2')
+const liveCopilotArgs = requestedArgs.filter((arg) => arg !== '--live-converter' && arg !== '--live-copilot' && arg !== '--live-copilot-v2')
 const nodeCommand = process.execPath
 
 const typecheckCommand = process.platform === 'win32'
@@ -39,6 +40,14 @@ const stages = [
     enabled: liveCopilot,
     requiresBuild: true,
     skipReason: 'enable with --live-copilot'
+  },
+  {
+    name: 'live-copilot-v2',
+    command: nodeCommand,
+    args: ['test/measure-flex-copilot-v2.mjs', ...liveCopilotArgs],
+    enabled: liveCopilotV2,
+    requiresBuild: true,
+    skipReason: 'enable with --live-copilot-v2'
   }
 ]
 

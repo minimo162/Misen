@@ -1,6 +1,7 @@
 ﻿import readline from 'node:readline'
 import type { AgentConfig } from './config'
-import { runAgentTurn, type AgentIO, type TextBackend } from './agent'
+import type { AgentIO, TextBackend } from './agent'
+import { runConfiguredAgentTurn } from './agent-loop'
 import { CopilotEdgeClient } from './copilot'
 import type { ChatMessage } from './llm'
 import { appendSession } from './session'
@@ -84,8 +85,8 @@ export async function startRepl(cfg: AgentConfig, ctx: ToolContext): Promise<voi
       console.log(`不明なコマンド: ${cmd}`)
       continue
     }
-    const backend = cfg.provider === 'copilot-edge' ? (copilotBackend ??= new CopilotEdgeClient(cfg)) : undefined
-    const result = await runAgentTurn({ cfg, messages, userInput: input, ctx, io, backend })
+    const backend = (cfg.agentLoop ?? 'v1') === 'v1' && cfg.provider === 'copilot-edge' ? (copilotBackend ??= new CopilotEdgeClient(cfg)) : undefined
+    const result = await runConfiguredAgentTurn({ cfg, messages, userInput: input, ctx, io, backend })
     if (result.reply) console.log(result.reply + '\n')
     messages = result.messages
     appendSession(input, result.messages)

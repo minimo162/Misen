@@ -24,6 +24,7 @@ export interface CapabilityPolicy {
 }
 
 export type LlmProvider = 'openai' | 'copilot-edge'
+export type AgentLoop = 'v1' | 'v2'
 
 export interface CopilotSettingsPartial {
   url?: string
@@ -57,6 +58,8 @@ export interface LocalResponseConverterSettings {
 }
 
 export interface AgentConfig {
+  /** Runtime-selectable agent loop. v1 remains the production default. */
+  agentLoop?: AgentLoop
   baseURL: string
   model: string
   apiKey?: string
@@ -84,6 +87,7 @@ export interface AgentConfig {
 }
 
 const DEFAULT_CONFIG: AgentConfig = {
+  agentLoop: 'v1',
   baseURL: '',
   model: '',
   provider: 'copilot-edge',
@@ -104,6 +108,9 @@ function appDataConfigPath(): string {
 
 function parseConfig(found: string): AgentConfig {
   const raw = JSON.parse(fs.readFileSync(found, 'utf8')) as AgentConfig
+  if (raw.agentLoop !== undefined && raw.agentLoop !== 'v1' && raw.agentLoop !== 'v2') {
+    throw new Error(`agentLoop は v1 または v2 を指定してください: ${found}`)
+  }
   const provider = raw.provider ?? 'openai'
   if (provider === 'openai' && (!raw.baseURL || !raw.model)) {
     throw new Error(`provider=openai には baseURL / model が必要です: ${found}`)
