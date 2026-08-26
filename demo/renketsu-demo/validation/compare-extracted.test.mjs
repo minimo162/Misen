@@ -26,11 +26,11 @@ try {
   for (const company of natural.companies) {
     for (const issue of company.issues) {
       issue.message = issue.type === 'unit_variation'
-        ? company.id
-        : issue.field
+        ? 'unit variation'
+        : 'account variation'
     }
   }
-  natural.missing[0].quote = 'OS16 提出ファイルなし'
+  natural.missing[0].quote = '提出ファイルなし'
   const pass = run(natural)
   assert.equal(pass.status, 0, pass.stderr)
   const result = JSON.parse(pass.stdout)
@@ -52,6 +52,22 @@ try {
   wrongClassification.companies.find((company) => company.id === 'OS02').issues[0].type = 'account_variation'
   assert.notEqual(run(wrongClassification).status, 0, 'issue classification differences must fail')
 
+  const wrongIssueField = clone(natural)
+  wrongIssueField.companies.find((company) => company.id === 'OS02').issues[0].field = 'operatingProfit'
+  assert.notEqual(run(wrongIssueField).status, 0, 'issue field differences must fail')
+
+  const missingIssue = clone(natural)
+  missingIssue.companies.find((company) => company.id === 'OS02').issues.pop()
+  assert.notEqual(run(missingIssue).status, 0, 'missing issues must fail')
+
+  const extraIssue = clone(natural)
+  extraIssue.companies.find((company) => company.id === 'OS02').issues.push({
+    type: 'unit_variation',
+    field: 'revenue',
+    message: 'another unit variation',
+  })
+  assert.notEqual(run(extraIssue).status, 0, 'extra issues must fail')
+
   const wrongQuoteCount = clone(natural)
   wrongQuoteCount.companies[0].quotes.pop()
   assert.notEqual(run(wrongQuoteCount).status, 0, 'quote count differences must fail')
@@ -60,21 +76,53 @@ try {
   contradictoryIssue.companies.find((company) => company.id === 'OS02').issues[0].message = 'OS02 revenue has no unit difference; unit variation'
   assert.notEqual(run(contradictoryIssue).status, 0, 'contradictory issue text must fail')
 
+  const indirectEnglishContradiction = clone(natural)
+  indirectEnglishContradiction.companies.find((company) => company.id === 'OS02').issues[0].message = 'There is not a unit variation'
+  assert.notEqual(run(indirectEnglishContradiction).status, 0, 'indirect English contradiction must fail')
+
+  const japaneseContradiction = clone(natural)
+  japaneseContradiction.companies.find((company) => company.id === 'OS02').issues[0].message = '単位差異はありません'
+  assert.notEqual(run(japaneseContradiction).status, 0, 'Japanese contradiction must fail')
+
+  const englishDoesNotHave = clone(natural)
+  englishDoesNotHave.companies.find((company) => company.id === 'OS02').issues[0].message = 'The report does not have a unit variation'
+  assert.notEqual(run(englishDoesNotHave).status, 0, 'does-not-have contradiction must fail')
+
+  const japaneseGaContradiction = clone(natural)
+  japaneseGaContradiction.companies.find((company) => company.id === 'OS02').issues[0].message = '単位差異がありません'
+  assert.notEqual(run(japaneseGaContradiction).status, 0, 'Japanese ga-particle contradiction must fail')
+
+  const accountContradiction = clone(natural)
+  accountContradiction.companies.find((company) => company.id === 'OS06').issues[0].message = 'There is not an account variation'
+  assert.notEqual(run(accountContradiction).status, 0, 'account contradiction must fail')
+
+  const accountDoesNotExist = clone(natural)
+  accountDoesNotExist.companies.find((company) => company.id === 'OS06').issues[0].message = 'Account variation does not exist'
+  assert.notEqual(run(accountDoesNotExist).status, 0, 'does-not-exist account contradiction must fail')
+
+  const japaneseAccountContradiction = clone(natural)
+  japaneseAccountContradiction.companies.find((company) => company.id === 'OS06').issues[0].message = '科目の差異はありません'
+  assert.notEqual(run(japaneseAccountContradiction).status, 0, 'Japanese account contradiction must fail')
+
   const contradictoryMissing = clone(natural)
   contradictoryMissing.missing[0].quote = 'OS16 submitted; no file needed'
-  assert.notEqual(run(contradictoryMissing).status, 0, 'contradictory missing text must fail')
+  assert.equal(run(contradictoryMissing).status, 0, 'missing quote prose is not an acceptance field')
 
   const missingIssueTarget = clone(natural)
   missingIssueTarget.companies.find((company) => company.id === 'OS02').issues[0].message = 'unit variation'
-  assert.notEqual(run(missingIssueTarget).status, 0, 'issue message without a target must fail')
+  assert.equal(run(missingIssueTarget).status, 0, 'issue target is carried by the structured company and field')
 
   const missingCompanyTarget = clone(natural)
   missingCompanyTarget.missing[0].quote = '提出ファイルなし'
-  assert.notEqual(run(missingCompanyTarget).status, 0, 'missing quote without a target must fail')
+  assert.equal(run(missingCompanyTarget).status, 0, 'missing target is carried by the structured id')
 
   const companyNameOnly = clone(natural)
   companyNameOnly.missing[0].quote = '架空OS子会社16 提出ファイルなし'
-  assert.notEqual(run(companyNameOnly).status, 0, 'missing quote with company name but no ID must fail')
+  assert.equal(run(companyNameOnly).status, 0, 'missing quote wording is not an acceptance field')
+
+  const emptyMissingQuote = clone(natural)
+  emptyMissingQuote.missing[0].quote = ''
+  assert.equal(run(emptyMissingQuote).status, 0, 'empty missing quote must pass when the structured id is correct')
 
   const wrongEvidence = clone(natural)
   wrongEvidence.companies.find((company) => company.id === 'OS02').issues[0].quote = ''
@@ -83,6 +131,14 @@ try {
   const wrongId = clone(natural)
   wrongId.companies.find((company) => company.id === 'OS02').id = ' OS02 '
   assert.notEqual(run(wrongId).status, 0, 'whitespace-altered company ID must fail')
+
+  const wrongMissingId = clone(natural)
+  wrongMissingId.missing[0].id = 'OS17'
+  assert.notEqual(run(wrongMissingId).status, 0, 'wrong missing company ID must fail')
+
+  const wrongMissingType = clone(natural)
+  wrongMissingType.missing[0].type = 'submitted'
+  assert.notEqual(run(wrongMissingType).status, 0, 'wrong missing type must fail')
 
   const truthfulIssueNegation = clone(natural)
   truthfulIssueNegation.companies.find((company) => company.id === 'OS02').issues[0].message = 'OS02 revenue は正常ではなく千単位の差異なので補正する'
@@ -94,7 +150,7 @@ try {
 
   const misleadingMissing = clone(natural)
   misleadingMissing.missing[0].quote = 'OS16 は昨日提出したが現在ファイルなし'
-  assert.notEqual(run(misleadingMissing).status, 0, 'submitted-but-missing prose must fail')
+  assert.equal(run(misleadingMissing).status, 0, 'missing quote prose is not an acceptance field')
 
   const negatedUnit = clone(natural)
   negatedUnit.companies.find((company) => company.id === 'OS02').issues[0].message = 'OS02 revenue is not thousand; unit variation'
@@ -110,15 +166,19 @@ try {
 
   const partialIssueId = clone(natural)
   partialIssueId.companies.find((company) => company.id === 'OS02').issues[0].message = 'OS020'
-  assert.notEqual(run(partialIssueId).status, 0, 'partial company ID must not identify an issue target')
+  assert.equal(run(partialIssueId).status, 0, 'issue message need not duplicate the structured target')
 
   const partialMissingId = clone(natural)
   partialMissingId.missing[0].quote = 'OS160'
-  assert.notEqual(run(partialMissingId).status, 0, 'partial company ID must not identify a missing target')
+  assert.equal(run(partialMissingId).status, 0, 'missing quote need not duplicate the structured target')
 
   const completedSubmission = clone(natural)
   completedSubmission.missing[0].quote = 'OS16 提出完了、ファイルなし'
-  assert.notEqual(run(completedSubmission).status, 0, 'completed-submission prose must fail')
+  assert.equal(run(completedSubmission).status, 0, 'missing quote prose is not an acceptance field')
+
+  const emptyIssueMessage = clone(natural)
+  emptyIssueMessage.companies.find((company) => company.id === 'OS02').issues[0].message = ''
+  assert.notEqual(run(emptyIssueMessage).status, 0, 'empty issue message must fail')
 
   process.stdout.write('compare-extracted: ALL PASS\n')
 } finally {
