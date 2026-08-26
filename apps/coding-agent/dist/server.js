@@ -4022,7 +4022,7 @@ var require_dbcs_data = __commonJS({
       // == Japanese/ShiftJIS ====================================================
       // All japanese encodings are based on JIS X set of standards:
       // JIS X 0201 - Single-byte encoding of ASCII + ¥ + Kana chars at 0xA1-0xDF.
-      // JIS X 0208 - Main set of 6879 characters, placed in 94x94 plane, to be encoded by 2 bytes.
+      // JIS X 0208 - Main set of 6879 characters, placed in 94x94 plane, to be encoded by 2 bytes. 
       //              Has several variations in 1978, 1983, 1990 and 1997.
       // JIS X 0212 - Supplementary plane of 6067 chars in 94x94 plane. 1990. Effectively dead.
       // JIS X 0213 - Extension and modern replacement of 0208 and 0212. Total chars: 11233.
@@ -4039,7 +4039,7 @@ var require_dbcs_data = __commonJS({
       //               0x8F, (0xA1-0xFE)x2 - 0212 plane (94x94).
       //  * JIS X 208: 7-bit, direct encoding of 0208. Byte ranges: 0x21-0x7E (94 values). Uncommon.
       //               Used as-is in ISO2022 family.
-      //  * ISO2022-JP: Stateful encoding, with escape sequences to switch between ASCII,
+      //  * ISO2022-JP: Stateful encoding, with escape sequences to switch between ASCII, 
       //                0201-1976 Roman, 0208-1978, 0208-1983.
       //  * ISO2022-JP-1: Adds esc seq for 0212-1990.
       //  * ISO2022-JP-2: Adds esc seq for GB2313-1980, KSX1001-1992, ISO8859-1, ISO8859-7.
@@ -4150,7 +4150,7 @@ var require_dbcs_data = __commonJS({
       //  * Windows CP 951: Microsoft variant of Big5-HKSCS-2001. Seems to be never public. http://me.abelcheung.org/articles/research/what-is-cp951/
       //  * Big5-2003 (Taiwan standard) almost superset of cp950.
       //  * Unicode-at-on (UAO) / Mozilla 1.8. Falling out of use on the Web. Not supported by other browsers.
-      //  * Big5-HKSCS (-2001, -2004, -2008). Hong Kong standard.
+      //  * Big5-HKSCS (-2001, -2004, -2008). Hong Kong standard. 
       //    many unicode code points moved from PUA to Supplementary plane (U+2XXXX) over the years.
       //    Plus, it has 4 combining sequences.
       //    Seems that Mozilla refused to support it for 10 yrs. https://bugzilla.mozilla.org/show_bug.cgi?id=162431 https://bugzilla.mozilla.org/show_bug.cgi?id=310299
@@ -4161,7 +4161,7 @@ var require_dbcs_data = __commonJS({
       //    In the encoder, it might make sense to support encoding old PUA mappings to Big5 bytes seq-s.
       //    Official spec: http://www.ogcio.gov.hk/en/business/tech_promotion/ccli/terms/doc/2003cmp_2008.txt
       //                   http://www.ogcio.gov.hk/tc/business/tech_promotion/ccli/terms/doc/hkscs-2008-big5-iso.txt
-      //
+      // 
       // Current understanding of how to deal with Big5(-HKSCS) is in the Encoding Standard, http://encoding.spec.whatwg.org/#big5-encoder
       // Unicode mapping (http://www.unicode.org/Public/MAPPINGS/OBSOLETE/EASTASIA/OTHER/BIG5.TXT) is said to be wrong.
       "windows950": "cp950",
@@ -6553,7 +6553,22 @@ var import_node_child_process3 = require("node:child_process");
 var import_node_net = __toESM(require("node:net"));
 var import_node_fs3 = __toESM(require("node:fs"));
 var import_node_path4 = __toESM(require("node:path"));
+function selectBrowserProcessId(processInfo) {
+  if (!Array.isArray(processInfo)) return null;
+  const browser = processInfo.find((item) => {
+    if (!item || typeof item !== "object") return false;
+    const candidate = item;
+    return String(candidate.type ?? "").toLowerCase() === "browser" && typeof candidate.id === "number" && Number.isSafeInteger(candidate.id) && candidate.id > 0;
+  });
+  return browser && typeof browser.id === "number" ? browser.id : null;
+}
 var RESPONSE_STABILITY_MS = 1e3;
+var VISIBLE_SESSION_MARKER_PREFIX = "company-apps-coding-agent:";
+function makeVisibleSessionMarker(sessionId) {
+  const normalized = sessionId.trim();
+  if (!/^[a-z0-9_-]{6,80}$/i.test(normalized)) throw new Error("\u8868\u793A\u30BB\u30C3\u30B7\u30E7\u30F3ID\u304C\u4E0D\u6B63\u3067\u3059");
+  return VISIBLE_SESSION_MARKER_PREFIX + normalized;
+}
 function assertResponseDeadline(deadlineMs, responseTimeoutSec, nowMs = Date.now()) {
   if (nowMs >= deadlineMs) throw new Error(`Copilot \u306E\u5FDC\u7B54\u304C\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8\u3057\u307E\u3057\u305F (${responseTimeoutSec}\u79D2)`);
 }
@@ -6649,7 +6664,7 @@ var COPILOT_SCREEN_STATE_JS = `(() => {
   const signIn = buttons.find(el => __vis(el) && /sign\\s*in|log\\s*in|\u30B5\u30A4\u30F3\u30A4\u30F3|\u30ED\u30B0\u30A4\u30F3/i.test((el.innerText || el.textContent || el.getAttribute('aria-label') || el.title || '').trim()));
   const url = String(location.href || '');
   const signinRequired = /(?:login|signin|sign-in|auth)/i.test(url) || (!input && !!signIn);
-  return JSON.stringify({ inputReady: !!input, stopCandidates, responseCandidates, signinRequired, url });
+  return JSON.stringify({ inputReady: !!input, stopCandidates, responseCandidates, signinRequired, url, title: String(document.title || ''), windowName: String(window.name || ''), sessionMarker: String(document.documentElement.getAttribute('data-company-apps-session') || '') });
 })()`;
 var FRESH_CHAT_JS = `(() => {
   ${VISIBLE_JS}
@@ -6961,7 +6976,9 @@ var CopilotEdgeClient = class {
   cdp = null;
   clipGranted = false;
   ownedEdgePid = null;
+  visibleEdgePid = null;
   edgeProfileDir = null;
+  visibleSessionId = null;
   constructor(cfg2) {
     this.s = resolveCopilotSettings(cfg2);
   }
@@ -6988,6 +7005,23 @@ var CopilotEdgeClient = class {
       bws.close();
     }
     this.clipGranted = true;
+  }
+  async refreshBrowserProcessId(deadlineMs = Number.POSITIVE_INFINITY) {
+    this.visibleEdgePid = null;
+    const ver = await (await fetch(`http://127.0.0.1:${this.s.cdpPort}/json/version`, {
+      signal: AbortSignal.timeout(this.remainingTimeoutMs(deadlineMs, 5e3))
+    })).json();
+    const browserWs = String(ver.webSocketDebuggerUrl ?? "");
+    if (!browserWs) throw new Error("browser WebSocket \u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093");
+    const bws = await CdpConnection.connect(browserWs, this.remainingTimeoutMs(deadlineMs, 1e4));
+    try {
+      const result = await bws.method("SystemInfo.getProcessInfo", {}, this.remainingTimeoutMs(deadlineMs, 1e4));
+      const browserPid = selectBrowserProcessId(result?.processInfo);
+      if (browserPid === null) throw new Error("CDP\u304B\u3089Edge\u30D6\u30E9\u30A6\u30B6\u30FC\u672C\u4F53PID\u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
+      this.visibleEdgePid = browserPid;
+    } finally {
+      bws.close();
+    }
   }
   stripOuterFence(t) {
     let s = t.trim();
@@ -7133,6 +7167,7 @@ var CopilotEdgeClient = class {
     args.push(this.s.url);
     const child = (0, import_node_child_process3.spawn)(findEdgePath(), args, { detached: true, stdio: "ignore" });
     this.ownedEdgePid = child.pid ?? null;
+    this.visibleEdgePid = null;
     child.unref();
     const deadline = Date.now() + 3e4;
     while (Date.now() < deadline) {
@@ -7228,6 +7263,49 @@ var CopilotEdgeClient = class {
     } else {
       await sleep(450);
     }
+  }
+  async stampVisibleSessionMarker(sessionId) {
+    const marker = makeVisibleSessionMarker(sessionId);
+    const result = await this.evalWithReconnect(`(() => { const marker = ${JSON.stringify(marker)}; window.name = marker; document.documentElement.setAttribute('data-company-apps-session', marker); return JSON.stringify({ windowName: window.name, sessionMarker: document.documentElement.getAttribute('data-company-apps-session') }); })()`);
+    const stamped = JSON.parse(String(result));
+    if (stamped.windowName !== marker || stamped.sessionMarker !== marker) throw new Error("Copilot\u8868\u793A\u30BF\u30D6\u3078\u30BB\u30C3\u30B7\u30E7\u30F3\u8B58\u5225\u5B50\u3092\u8A2D\u5B9A\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
+  }
+  async prepareVisibleSession(sessionId) {
+    makeVisibleSessionMarker(sessionId);
+    await this.ensureEdge();
+    await this.ensurePage();
+    await this.refreshBrowserProcessId();
+    await this.cdpMethod("Page.navigate", { url: this.s.url });
+    await sleep(3e3);
+    await this.waitInputReady(120);
+    await this.assertTrustedOrigin();
+    this.visibleSessionId = sessionId;
+    await this.stampVisibleSessionMarker(sessionId);
+    await this.bringToFront();
+    return this.inspectVisibleSession(sessionId);
+  }
+  async inspectVisibleSession(sessionId) {
+    const expectedMarker = makeVisibleSessionMarker(sessionId);
+    if (!this.cdp) throw new Error("Copilot\u8868\u793A\u30BF\u30D6\u306F\u6E96\u5099\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
+    const raw = await this.evalWithReconnect(COPILOT_SCREEN_STATE_JS, 15e3);
+    const parsed = JSON.parse(String(raw));
+    const responses = parsed.responseCandidates ?? [];
+    const latest = selectLatestResponseCandidate(responses);
+    const marker = String(parsed.sessionMarker ?? "");
+    return {
+      sessionId,
+      marker,
+      markerMatches: marker === expectedMarker && String(parsed.windowName ?? "") === expectedMarker,
+      pid: this.visibleEdgePid,
+      cdpPort: this.s.cdpPort,
+      url: String(parsed.url ?? ""),
+      title: String(parsed.title ?? ""),
+      inputReady: parsed.inputReady === true,
+      responseCount: responses.length,
+      latestResponseLength: latest?.text.length ?? 0,
+      generating: (parsed.stopCandidates ?? []).some(isStopGenerationControl),
+      copyEnabled: latest?.copyEnabled === true
+    };
   }
   async cdpMethod(name, params, timeoutMs = 3e4) {
     if (!this.cdp) throw new Error("Copilot \u30DA\u30FC\u30B8\u672A\u63A5\u7D9A\u3067\u3059");
@@ -7448,6 +7526,10 @@ var CopilotEdgeClient = class {
     await this.ensurePage();
     await this.freshChat();
     await this.waitInputReady(120, signal);
+    if (this.visibleSessionId) {
+      await this.stampVisibleSessionMarker(this.visibleSessionId);
+      await this.bringToFront();
+    }
     await this.selectModel();
     throwIfAborted(signal);
     await this.waitInputReady(30, signal);
@@ -8113,6 +8195,44 @@ var server = import_node_http2.default.createServer(async (req, res) => {
     json(res, 200, { model: cfg.model || (cfg.provider ?? ""), provider: cfg.provider ?? "openai", workspace, project: import_node_path5.default.basename(workspace), version: "0.10.8", distribution: readDistributionState() });
     return;
   }
+  if (url.pathname === "/api/copilot/visible-session") {
+    const backend = getBackend("work");
+    if (!(backend instanceof CopilotEdgeClient)) {
+      json(res, 409, { error: "copilot-edge provider is required" });
+      return;
+    }
+    try {
+      if (req.method === "POST") {
+        if (activeRunId) {
+          json(res, 409, { error: "\u5B9F\u884C\u4E2D\u306F\u8868\u793A\u30BB\u30C3\u30B7\u30E7\u30F3\u3092\u5207\u308A\u66FF\u3048\u3089\u308C\u307E\u305B\u3093" });
+          return;
+        }
+        const body = JSON.parse(await readBody(req));
+        const sessionId = String(body.sessionId ?? "");
+        if (!sessions.has(sessionId)) {
+          json(res, 404, { error: "session not found" });
+          return;
+        }
+        activeId = sessionId;
+        const state = await backend.prepareVisibleSession(sessionId);
+        persistState();
+        json(res, 200, state);
+        return;
+      }
+      if (req.method === "GET") {
+        const sessionId = String(url.searchParams.get("sessionId") ?? "");
+        if (!sessions.has(sessionId)) {
+          json(res, 404, { error: "session not found" });
+          return;
+        }
+        json(res, 200, await backend.inspectVisibleSession(sessionId));
+        return;
+      }
+    } catch (err) {
+      json(res, 500, { error: err.message });
+      return;
+    }
+  }
   if (req.method === "GET" && url.pathname === "/api/distribution") {
     json(res, 200, readDistributionState());
     return;
@@ -8550,18 +8670,25 @@ var server = import_node_http2.default.createServer(async (req, res) => {
     let input = "";
     let mode = "work";
     let requestedParentRunId;
+    let requestedSessionId;
     try {
       const b = JSON.parse(await readBody(req));
       input = String(b.message ?? "").trim();
       if (b.mode === "chat" || b.mode === "research" || b.mode === "work") mode = b.mode;
       requestedParentRunId = typeof b.parentRunId === "string" ? b.parentRunId : void 0;
+      requestedSessionId = typeof b.sessionId === "string" ? b.sessionId : void 0;
     } catch {
     }
     if (!input) {
       json(res, 400, { error: "message \u304C\u7A7A\u3067\u3059" });
       return;
     }
-    const s = activeSession();
+    const s = requestedSessionId ? sessions.get(requestedSessionId) : activeSession();
+    if (!s) {
+      json(res, 404, { error: "session not found" });
+      return;
+    }
+    activeId = s.id;
     if (s.title === "\u65B0\u3057\u3044\u30BB\u30C3\u30B7\u30E7\u30F3") s.title = input.slice(0, 30);
     let parentRunId;
     if (requestedParentRunId) {

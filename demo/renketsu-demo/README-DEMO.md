@@ -11,6 +11,8 @@
 
 ## 1. 60 秒動画（主役）
 
+> `demo/video/output/デモ紹介_v1.mp4` は、表示セッション追従を検証済みの `manual-retake.mp4` へ実写を差し替え、2026-08-26に生素材・完成版の動きQAと62秒版QAを通過済みです。詳細は `demo/video/qa/QA-REPORT.md` を参照してください。
+
 ### 録画前の画面と証跡
 
 - 実機チェックと 3 回連続リハーサルが全て pass した Run を録画する。録画開始後に固定リクエストを貼り付け、先に実行してから録画を始めない。
@@ -18,15 +20,17 @@
 - Windows の `Win+G` から画面収録する。編集前の無加工録画を証跡として残し、Run ID、時刻、turn 数、入力・出力 hash と対応付ける。
 - Clipchamp では待ち時間だけを速度調整し、各場面に短い字幕を付ける。値や操作順を編集で入れ替えず、60 秒版とは別に無加工版を保存する。
 
-### 60 秒構成
+### 62 秒構成（60±10 秒）
 
 | 時間 | 画面・字幕 |
 | --- | --- |
-| 0–7 秒 | 19 ファイルの報告一覧を見せ、「形式・通貨・単位がばらばら、1 社未提出」と問題を提示する。 |
-| 7–14 秒 | 固定リクエストを一度だけ貼り付け、「一つの指示」と字幕を出す。 |
-| 14–36 秒 | `read_files` → xlsx 読取 → 抽出 JSON → `Update-Ledger.ps1` の順を速度調整して見せ、「抽出は LLM／計算と転記はスクリプト」と字幕を出す。 |
-| 36–53 秒 | 右側の更新済み台帳、`確認事項`、原文 quote を見せ、件数と totals はその Run の一行 JSONから読む。 |
-| 53–60 秒 | 「多数の報告から、根拠付きの台帳更新までを一つの依頼でつないだ」と締める。 |
+| 0–5 秒 | シナリオカード。「20社の子会社報告を、1つの台帳へ」と架空データであることを示す。 |
+| 5–16 秒 | 録画メタデータの固定リクエストをタイプ表示し、全文テロップで「全部読んで」「円換算」「台帳に転記」「確認事項」「保存」を強調する。 |
+| 16–42 秒 | 対象セッションの実写0–104秒を4倍速で見せ、指示と同じ5語で進行を示す。 |
+| 42–48 秒 | 元素材100–106秒を等速で見せ、更新済み台帳の19社提出・1社未提出を披露する。 |
+| 48–54 秒 | 元素材108–114秒を等速で見せ、`確認事項` 5件（単位差異3、科目名差異1、未提出1）を披露する。 |
+| 54–58 秒 | 「承認済みCopilotのみ」「社外送信なし」「架空データ」と、録画メタデータの実測94.221秒（1.57分）を表示する。 |
+| 58–62 秒 | 「次のステップ: 実業務データでの検証」で締める。 |
 
 「データが社外に出ない」は、対象テナント・認証・ネットワーク境界を明朝に確認できた場合だけ使います。「1 時間が 3 分」は同じ業務範囲の実測記録がある場合だけ使います。どちらも未確認なら、上表の控えめな締めに固定し、推測値や絶対表現へ差し替えません。
 
@@ -97,7 +101,7 @@ Update-Ledger の一行目は少なくとも次のキーを含む JSON です。
    powershell.exe -NoProfile -File tools\Read-Xlsx.ps1 -Path reports\<報告ファイル>.xlsx
    ```
 
-3. **OSキャプチャが使えない場合の手動録画待ち** — 録画ソフト側で次の保存先を指定して待機し、別の通常PowerShellから実行します。`MANUAL CAPTURE READY`が表示されたら録画を開始してEnter、最後の停止案内で録画を停止してEnterを押します。エージェント進行、fresh session、真値照合、Excel表示は従来どおり自動です。
+3. **OSキャプチャが使えない場合の手動録画待ち** — 録画ソフト側で次の保存先を指定して待機し、別の通常PowerShellから実行します。スクリプトはfresh sessionを作成し、copilot-edgeが所有する正確なEdge PIDへ表示を切り替え、画面DOMのセッション識別子と入力欄を検証します。`MANUAL CAPTURE READY session=<ID> edgePid=<PID>`が表示されるまでは録画を始めません。表示後に録画を開始してEnter、最後の停止案内で録画を停止してEnterを押します。実行中に表示回答要素が1件も増えなければテイクは失敗します。
 
    ```powershell
    Set-Location C:\Users\yuuki\company-apps-share
@@ -107,7 +111,16 @@ Update-Ledger の一行目は少なくとも次のキーを含む JSON です。
      -RepoRoot C:\Users\yuuki\company-apps-share
    ```
 
-   `ok:true`は、指定した動画ファイルが実在して空でないこと、抽出値が真値と一致すること、Update-Ledgerの合計・件数が一致することをすべて確認できた場合だけ返します。
+   `ok:true`は、表示セッション一致、表示回答要素の増加、指定動画の存在・非空、抽出値の真値一致、Update-Ledgerの合計・件数一致をすべて確認できた場合だけ返します。JSONの `visibleSessionVerified:true`、`visibleActivityVerified:true`、`sessionId`、`displayEdgePid` も保存します。
+
+   新しい素材を受け取ったら、編集前に生素材単体の動きQAを実行します。完成動画の実写差替え後は `-FinalPath` も渡し、生素材と完成動画の実写ROIを同時に検査します。2秒間隔の隣接フレーム差分、動いた組数・比率、最長静止時間の全条件を満たさない動画は使用しません。
+
+   ```powershell
+   powershell.exe -NoProfile -File demo\video\qa\Test-VideoMotion.ps1 `
+     -RawPath demo\renketsu-demo\recordings\manual-take-2.mp4 `
+     -RawMetadataPath demo\renketsu-demo\recordings\manual-take-2.json `
+     -FfmpegPath "<ffmpeg.exeの絶対パス>"
+   ```
 
    `Read-Xlsx.ps1` または ImportExcel/EPPlus が実機で使えない場合、元の Excel を開いて必要セルと単位をメモし、JSON を手動レビューします。値を空欄のまま転記して pass にしません。
 
@@ -138,7 +151,7 @@ Update-Ledger の一行目は少なくとも次のキーを含む JSON です。
 - [ ] **2. fallback end-to-end** — LLM を使わず、既知の extracted fixture を `work/` に置く scripted insurance → Update-Ledger → Excel の会社別／確認事項を最後まで通す。
 - [ ] **3. Copilot lightweight connectivity** — Edge の Copilot 接続、`agentMode=true`、foreground 表示、最初の軽量な `list_files` までを確認する。ここで拒否・#0・タイムアウトなら中止。
 - [ ] **4. full rehearsal** — config変更後や各 Run の開始前に、UIの「新しいセッション」または `POST /api/sessions` で必ず新規セッションを作る（`Record-Demo.ps1` は自動実行）。そのうえで同じ固定指示を変更せず **3 回連続**、各 Run **8 ターン以下**で実施する。各 Run の extracted values が、人だけが参照する `validation` の真値と全項目一致し、counts・quotes・ledger の一行 JSON が記録されることを合格条件にする。エージェントは validation を読まない。
-- [ ] **5. record** — 録画を開始してから固定リクエストを貼り付ける。Run ID、session ID、時刻、turn 数、host 操作、count、hash、停止理由、Excel 表示結果を記録し、無加工版を保存する。Clipchamp で待ち時間の速度調整と字幕を加え、上記構成の 60 秒版を書き出す。機械的な back-check が無い／形式が壊れている場合は「未確認」と書く。
+- [ ] **5. record** — `Record-Demo.ps1 -NoCapture` の `MANUAL CAPTURE READY`に表示されたsession IDとEdge PIDを記録してから録画を開始する。Run後は `visibleSessionVerified:true` と `visibleActivityVerified:true`、Run ID、時刻、turn数、host操作、count、hash、停止理由、Excel表示結果を保存する。無加工素材を `Test-VideoMotion.ps1` へ通し、実写差替え後の60秒版も同じスクリプトの `-FinalPath` 付きで通す。いずれかがfail／未確認なら動画を披露しない。
 - [ ] **6. go/no-go** — 1–5 の証跡が全て pass なら 60 秒動画を主役として披露する。ライブは上司から求められ、かつ同じ朝の全ゲートが pass している場合だけアンコールで行う。どれか一つでも fail／未確認ならライブを中止し、過去の pass 証跡に対応する録画があれば動画、なければ概念説明・進捗共有に切り替える。
 
 次の項目は **実機だけの確認** です。現在のローカル/static 検査で確認済みとは書きません。
@@ -161,6 +174,8 @@ Update-Ledger の一行目は少なくとも次のキーを含む JSON です。
 | ImportExcel／EPPlus のロード警告、EDR 隔離 | 再試行を繰り返さず、DLL の版・場所・hash と EDR イベントを記録。ローカルコピーの scripted fallback を使い、事前登録や承認が無いまま配布 DLL を追加しない。 |
 | PowerShell の実行ポリシーで止まる | `Get-ExecutionPolicy -List` とエラーを記録し、承認済みの通常ターミナル／ローカルコピーで `-ExecutionPolicy Bypass` を付けて再試行してよい。launcher 自体は変更しない。 |
 | config変更後も旧指示で動く／入力位置不一致 | サーバー再起動だけでは永続セッションのsystemPromptは更新されない。`Record-Demo.ps1` は各テイク前に新規セッションを自動作成する。手動検証でもUIの「新しいセッション」または `POST /api/sessions` を実行してから固定指示を送る。 |
+| `The exact Copilot Edge window was not found for PID ...` で録画前に停止 | Edgeの起動PIDが一時プロセスで、実ウィンドウを持つブラウザー本体PIDへ引き継がれた旧版の症状。別のEdgeウィンドウを選ばず停止する。現行版はCDPからブラウザー本体PIDを取得するため、`typecheck`・`build`・smoke後の `dist/server.js` でcoding-agentを再起動し、再実行する。 |
+| Runは成功したのに録画中のCopilot画面が静止／別回答のまま | 録画を無効化する。旧実装は最新のEdgeウィンドウを選んだだけで、APIのfresh sessionと表示タブを対応付けていなかった。現行 `Record-Demo.ps1` はcopilot-edge所有PID、画面DOMのsession marker、表示回答要素の増加を検証する。`MANUAL CAPTURE READY`前に録画せず、完了JSONの `visibleSessionVerified`／`visibleActivityVerified` がtrueでない素材は編集しない。 |
 | `gdigrab error 5`／`ddagrab`のDXGI出力なし／`CopyFromScreen`のhandle invalid | キャプチャだけの5秒試験を先に行う。3方式とも失敗する環境では本番ランを開始せず、`Record-Demo.ps1 -NoCapture`で外部録画の開始・停止を人に委ねる。スクリプトは指定動画の存在とサイズも最後に検証する。 |
 | 共有フォルダー上でだけ失敗 | リポジトリを承認済みのローカル作業フォルダーへコピーし、同じ相対パスで実行。コピー元・先、時刻、hash を記録し、共有元へ書き戻さない。 |
 | 会社が欠落、未提出判定が違う | `reports/` の全件 list と入力一覧を突合し、`missing` の `quote` を確認。モデルの推測で会社を追加せず、原文・ファイル名・時刻を記録して中止判断。 |

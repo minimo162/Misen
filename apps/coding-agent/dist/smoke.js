@@ -4022,7 +4022,7 @@ var require_dbcs_data = __commonJS({
       // == Japanese/ShiftJIS ====================================================
       // All japanese encodings are based on JIS X set of standards:
       // JIS X 0201 - Single-byte encoding of ASCII + ¥ + Kana chars at 0xA1-0xDF.
-      // JIS X 0208 - Main set of 6879 characters, placed in 94x94 plane, to be encoded by 2 bytes.
+      // JIS X 0208 - Main set of 6879 characters, placed in 94x94 plane, to be encoded by 2 bytes. 
       //              Has several variations in 1978, 1983, 1990 and 1997.
       // JIS X 0212 - Supplementary plane of 6067 chars in 94x94 plane. 1990. Effectively dead.
       // JIS X 0213 - Extension and modern replacement of 0208 and 0212. Total chars: 11233.
@@ -4039,7 +4039,7 @@ var require_dbcs_data = __commonJS({
       //               0x8F, (0xA1-0xFE)x2 - 0212 plane (94x94).
       //  * JIS X 208: 7-bit, direct encoding of 0208. Byte ranges: 0x21-0x7E (94 values). Uncommon.
       //               Used as-is in ISO2022 family.
-      //  * ISO2022-JP: Stateful encoding, with escape sequences to switch between ASCII,
+      //  * ISO2022-JP: Stateful encoding, with escape sequences to switch between ASCII, 
       //                0201-1976 Roman, 0208-1978, 0208-1983.
       //  * ISO2022-JP-1: Adds esc seq for 0212-1990.
       //  * ISO2022-JP-2: Adds esc seq for GB2313-1980, KSX1001-1992, ISO8859-1, ISO8859-7.
@@ -4150,7 +4150,7 @@ var require_dbcs_data = __commonJS({
       //  * Windows CP 951: Microsoft variant of Big5-HKSCS-2001. Seems to be never public. http://me.abelcheung.org/articles/research/what-is-cp951/
       //  * Big5-2003 (Taiwan standard) almost superset of cp950.
       //  * Unicode-at-on (UAO) / Mozilla 1.8. Falling out of use on the Web. Not supported by other browsers.
-      //  * Big5-HKSCS (-2001, -2004, -2008). Hong Kong standard.
+      //  * Big5-HKSCS (-2001, -2004, -2008). Hong Kong standard. 
       //    many unicode code points moved from PUA to Supplementary plane (U+2XXXX) over the years.
       //    Plus, it has 4 combining sequences.
       //    Seems that Mozilla refused to support it for 10 yrs. https://bugzilla.mozilla.org/show_bug.cgi?id=162431 https://bugzilla.mozilla.org/show_bug.cgi?id=310299
@@ -4161,7 +4161,7 @@ var require_dbcs_data = __commonJS({
       //    In the encoder, it might make sense to support encoding old PUA mappings to Big5 bytes seq-s.
       //    Official spec: http://www.ogcio.gov.hk/en/business/tech_promotion/ccli/terms/doc/2003cmp_2008.txt
       //                   http://www.ogcio.gov.hk/tc/business/tech_promotion/ccli/terms/doc/hkscs-2008-big5-iso.txt
-      //
+      // 
       // Current understanding of how to deal with Big5(-HKSCS) is in the Encoding Standard, http://encoding.spec.whatwg.org/#big5-encoder
       // Unicode mapping (http://www.unicode.org/Public/MAPPINGS/OBSOLETE/EASTASIA/OTHER/BIG5.TXT) is said to be wrong.
       "windows950": "cp950",
@@ -6486,7 +6486,25 @@ var import_node_child_process3 = require("node:child_process");
 var import_node_net = __toESM(require("node:net"));
 var import_node_fs2 = __toESM(require("node:fs"));
 var import_node_path3 = __toESM(require("node:path"));
+function selectBrowserProcessId(processInfo) {
+  if (!Array.isArray(processInfo)) return null;
+  const browser = processInfo.find((item) => {
+    if (!item || typeof item !== "object") return false;
+    const candidate = item;
+    return String(candidate.type ?? "").toLowerCase() === "browser" && typeof candidate.id === "number" && Number.isSafeInteger(candidate.id) && candidate.id > 0;
+  });
+  return browser && typeof browser.id === "number" ? browser.id : null;
+}
 var RESPONSE_STABILITY_MS = 1e3;
+var VISIBLE_SESSION_MARKER_PREFIX = "company-apps-coding-agent:";
+function makeVisibleSessionMarker(sessionId) {
+  const normalized = sessionId.trim();
+  if (!/^[a-z0-9_-]{6,80}$/i.test(normalized)) throw new Error("\u8868\u793A\u30BB\u30C3\u30B7\u30E7\u30F3ID\u304C\u4E0D\u6B63\u3067\u3059");
+  return VISIBLE_SESSION_MARKER_PREFIX + normalized;
+}
+function visibleSessionMarkerMatches(sessionId, marker) {
+  return marker === makeVisibleSessionMarker(sessionId);
+}
 function assertResponseDeadline(deadlineMs, responseTimeoutSec, nowMs = Date.now()) {
   if (nowMs >= deadlineMs) throw new Error(`Copilot \u306E\u5FDC\u7B54\u304C\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8\u3057\u307E\u3057\u305F (${responseTimeoutSec}\u79D2)`);
 }
@@ -6588,7 +6606,7 @@ var COPILOT_SCREEN_STATE_JS = `(() => {
   const signIn = buttons.find(el => __vis(el) && /sign\\s*in|log\\s*in|\u30B5\u30A4\u30F3\u30A4\u30F3|\u30ED\u30B0\u30A4\u30F3/i.test((el.innerText || el.textContent || el.getAttribute('aria-label') || el.title || '').trim()));
   const url = String(location.href || '');
   const signinRequired = /(?:login|signin|sign-in|auth)/i.test(url) || (!input && !!signIn);
-  return JSON.stringify({ inputReady: !!input, stopCandidates, responseCandidates, signinRequired, url });
+  return JSON.stringify({ inputReady: !!input, stopCandidates, responseCandidates, signinRequired, url, title: String(document.title || ''), windowName: String(window.name || ''), sessionMarker: String(document.documentElement.getAttribute('data-company-apps-session') || '') });
 })()`;
 var FRESH_CHAT_JS = `(() => {
   ${VISIBLE_JS}
@@ -6900,7 +6918,9 @@ var CopilotEdgeClient = class {
   cdp = null;
   clipGranted = false;
   ownedEdgePid = null;
+  visibleEdgePid = null;
   edgeProfileDir = null;
+  visibleSessionId = null;
   constructor(cfg) {
     this.s = resolveCopilotSettings(cfg);
   }
@@ -6927,6 +6947,23 @@ var CopilotEdgeClient = class {
       bws.close();
     }
     this.clipGranted = true;
+  }
+  async refreshBrowserProcessId(deadlineMs = Number.POSITIVE_INFINITY) {
+    this.visibleEdgePid = null;
+    const ver = await (await fetch(`http://127.0.0.1:${this.s.cdpPort}/json/version`, {
+      signal: AbortSignal.timeout(this.remainingTimeoutMs(deadlineMs, 5e3))
+    })).json();
+    const browserWs = String(ver.webSocketDebuggerUrl ?? "");
+    if (!browserWs) throw new Error("browser WebSocket \u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093");
+    const bws = await CdpConnection.connect(browserWs, this.remainingTimeoutMs(deadlineMs, 1e4));
+    try {
+      const result = await bws.method("SystemInfo.getProcessInfo", {}, this.remainingTimeoutMs(deadlineMs, 1e4));
+      const browserPid = selectBrowserProcessId(result?.processInfo);
+      if (browserPid === null) throw new Error("CDP\u304B\u3089Edge\u30D6\u30E9\u30A6\u30B6\u30FC\u672C\u4F53PID\u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
+      this.visibleEdgePid = browserPid;
+    } finally {
+      bws.close();
+    }
   }
   stripOuterFence(t) {
     let s = t.trim();
@@ -7072,6 +7109,7 @@ var CopilotEdgeClient = class {
     args.push(this.s.url);
     const child = (0, import_node_child_process3.spawn)(findEdgePath(), args, { detached: true, stdio: "ignore" });
     this.ownedEdgePid = child.pid ?? null;
+    this.visibleEdgePid = null;
     child.unref();
     const deadline = Date.now() + 3e4;
     while (Date.now() < deadline) {
@@ -7167,6 +7205,49 @@ var CopilotEdgeClient = class {
     } else {
       await sleep(450);
     }
+  }
+  async stampVisibleSessionMarker(sessionId) {
+    const marker = makeVisibleSessionMarker(sessionId);
+    const result = await this.evalWithReconnect(`(() => { const marker = ${JSON.stringify(marker)}; window.name = marker; document.documentElement.setAttribute('data-company-apps-session', marker); return JSON.stringify({ windowName: window.name, sessionMarker: document.documentElement.getAttribute('data-company-apps-session') }); })()`);
+    const stamped = JSON.parse(String(result));
+    if (stamped.windowName !== marker || stamped.sessionMarker !== marker) throw new Error("Copilot\u8868\u793A\u30BF\u30D6\u3078\u30BB\u30C3\u30B7\u30E7\u30F3\u8B58\u5225\u5B50\u3092\u8A2D\u5B9A\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
+  }
+  async prepareVisibleSession(sessionId) {
+    makeVisibleSessionMarker(sessionId);
+    await this.ensureEdge();
+    await this.ensurePage();
+    await this.refreshBrowserProcessId();
+    await this.cdpMethod("Page.navigate", { url: this.s.url });
+    await sleep(3e3);
+    await this.waitInputReady(120);
+    await this.assertTrustedOrigin();
+    this.visibleSessionId = sessionId;
+    await this.stampVisibleSessionMarker(sessionId);
+    await this.bringToFront();
+    return this.inspectVisibleSession(sessionId);
+  }
+  async inspectVisibleSession(sessionId) {
+    const expectedMarker = makeVisibleSessionMarker(sessionId);
+    if (!this.cdp) throw new Error("Copilot\u8868\u793A\u30BF\u30D6\u306F\u6E96\u5099\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
+    const raw = await this.evalWithReconnect(COPILOT_SCREEN_STATE_JS, 15e3);
+    const parsed = JSON.parse(String(raw));
+    const responses = parsed.responseCandidates ?? [];
+    const latest = selectLatestResponseCandidate(responses);
+    const marker = String(parsed.sessionMarker ?? "");
+    return {
+      sessionId,
+      marker,
+      markerMatches: marker === expectedMarker && String(parsed.windowName ?? "") === expectedMarker,
+      pid: this.visibleEdgePid,
+      cdpPort: this.s.cdpPort,
+      url: String(parsed.url ?? ""),
+      title: String(parsed.title ?? ""),
+      inputReady: parsed.inputReady === true,
+      responseCount: responses.length,
+      latestResponseLength: latest?.text.length ?? 0,
+      generating: (parsed.stopCandidates ?? []).some(isStopGenerationControl),
+      copyEnabled: latest?.copyEnabled === true
+    };
   }
   async cdpMethod(name, params, timeoutMs = 3e4) {
     if (!this.cdp) throw new Error("Copilot \u30DA\u30FC\u30B8\u672A\u63A5\u7D9A\u3067\u3059");
@@ -7387,6 +7468,10 @@ var CopilotEdgeClient = class {
     await this.ensurePage();
     await this.freshChat();
     await this.waitInputReady(120, signal);
+    if (this.visibleSessionId) {
+      await this.stampVisibleSessionMarker(this.visibleSessionId);
+      await this.bringToFront();
+    }
     await this.selectModel();
     throwIfAborted(signal);
     await this.waitInputReady(30, signal);
@@ -8038,7 +8123,149 @@ async function testCopilotEdgeIsolation() {
   const attached = resolveCopilotSettings({ ...base, copilot: { cdpPort: 9444, reuseExistingEdge: true } });
   import_node_assert.default.strictEqual(attached.reuseExistingEdge, true);
   import_node_assert.default.strictEqual(attached.cdpPort, 9444);
+  const sessionMarker = makeVisibleSessionMarker("mt9icyqzvay6");
+  import_node_assert.default.strictEqual(sessionMarker, "company-apps-coding-agent:mt9icyqzvay6");
+  import_node_assert.default.strictEqual(visibleSessionMarkerMatches("mt9icyqzvay6", sessionMarker), true);
+  import_node_assert.default.strictEqual(visibleSessionMarkerMatches("mt9gbgtilhj0", sessionMarker), false);
+  import_node_assert.default.throws(() => makeVisibleSessionMarker("../wrong-session"), /表示セッションIDが不正/);
+  import_node_assert.default.strictEqual(selectBrowserProcessId([
+    { type: "renderer", id: 23468 },
+    { type: "browser", id: 38124 },
+    { type: "GPU", id: 13292 }
+  ]), 38124);
+  import_node_assert.default.strictEqual(selectBrowserProcessId([{ type: "browser", id: 0 }]), null);
+  import_node_assert.default.strictEqual(selectBrowserProcessId([{ type: "browser", id: 38124.5 }]), null);
+  import_node_assert.default.strictEqual(selectBrowserProcessId({ type: "browser", id: 38124 }), null);
   console.log("PASS copilot-edge-isolation");
+}
+async function testCopilotVisibleSessionPidLifecycle() {
+  const originalFetch = globalThis.fetch;
+  const originalWebSocket = globalThis.WebSocket;
+  let processInfo = void 0;
+  const cdpMethods = [];
+  let closedConnections = 0;
+  class FakeBrowserWebSocket {
+    listeners = /* @__PURE__ */ new Map();
+    constructor(_url) {
+      queueMicrotask(() => this.emit("open", {}));
+    }
+    addEventListener(type, cb, options) {
+      const listeners = this.listeners.get(type) ?? [];
+      listeners.push({ cb, once: options?.once === true });
+      this.listeners.set(type, listeners);
+    }
+    send(data) {
+      const request = JSON.parse(data);
+      cdpMethods.push(request.method);
+      queueMicrotask(() => this.emit("message", {
+        data: JSON.stringify({ id: request.id, result: { processInfo } })
+      }));
+    }
+    close() {
+      closedConnections++;
+    }
+    emit(type, event) {
+      const listeners = this.listeners.get(type) ?? [];
+      this.listeners.set(type, listeners.filter((listener) => {
+        listener.cb(event);
+        return !listener.once;
+      }));
+    }
+  }
+  try {
+    globalThis.fetch = (async () => ({
+      ok: true,
+      json: async () => ({ webSocketDebuggerUrl: "ws://fake-browser" })
+    }));
+    globalThis.WebSocket = FakeBrowserWebSocket;
+    const client = new CopilotEdgeClient({ baseURL: "", model: "", provider: "copilot-edge" });
+    const internal = client;
+    const lifecycle = [];
+    internal.s.cdpPort = 61027;
+    internal.ownedEdgePid = 22468;
+    const ensureEdge = internal.ensureEdge.bind(client);
+    internal.ensureEdge = async () => {
+      lifecycle.push("ensureEdge");
+      await ensureEdge();
+    };
+    internal.ensurePage = async () => {
+      lifecycle.push("ensurePage");
+    };
+    const refreshBrowserProcessId = internal.refreshBrowserProcessId.bind(client);
+    internal.refreshBrowserProcessId = async () => {
+      lifecycle.push("refreshBrowserProcessId");
+      await refreshBrowserProcessId();
+    };
+    internal.cdpMethod = async (name) => {
+      lifecycle.push(name);
+    };
+    internal.waitInputReady = async () => {
+      lifecycle.push("waitInputReady");
+    };
+    internal.assertTrustedOrigin = async () => {
+      lifecycle.push("assertTrustedOrigin");
+    };
+    internal.stampVisibleSessionMarker = async () => {
+      lifecycle.push("stampVisibleSessionMarker");
+    };
+    internal.bringToFront = async () => {
+      lifecycle.push("bringToFront");
+    };
+    internal.inspectVisibleSession = async (sessionId) => {
+      lifecycle.push("inspectVisibleSession");
+      return {
+        sessionId,
+        marker: makeVisibleSessionMarker(sessionId),
+        markerMatches: true,
+        pid: internal.visibleEdgePid,
+        cdpPort: internal.s.cdpPort,
+        url: "https://m365.cloud.microsoft/chat/",
+        title: "Copilot",
+        inputReady: true,
+        responseCount: 0,
+        latestResponseLength: 0,
+        generating: false,
+        copyEnabled: false
+      };
+    };
+    await import_node_assert.default.rejects(
+      () => client.prepareVisibleSession("mt9pidlifecycle"),
+      /CDPからEdgeブラウザー本体PIDを取得できませんでした/
+    );
+    import_node_assert.default.strictEqual(internal.ownedEdgePid, 22468);
+    import_node_assert.default.strictEqual(internal.visibleEdgePid, null);
+    import_node_assert.default.strictEqual(internal.s.cdpPort, 61027);
+    import_node_assert.default.deepStrictEqual(cdpMethods, ["SystemInfo.getProcessInfo"]);
+    import_node_assert.default.deepStrictEqual(lifecycle, ["ensureEdge", "ensurePage", "refreshBrowserProcessId"]);
+    processInfo = [
+      { type: "renderer", id: 23468 },
+      { type: "browser", id: 38124 }
+    ];
+    cdpMethods.length = 0;
+    lifecycle.length = 0;
+    const visible = await client.prepareVisibleSession("mt9pidlifecycle");
+    import_node_assert.default.strictEqual(visible.pid, 38124);
+    import_node_assert.default.strictEqual(internal.ownedEdgePid, 22468);
+    import_node_assert.default.strictEqual(internal.visibleEdgePid, 38124);
+    import_node_assert.default.strictEqual(internal.s.cdpPort, 61027);
+    import_node_assert.default.deepStrictEqual(cdpMethods, ["SystemInfo.getProcessInfo"]);
+    import_node_assert.default.deepStrictEqual(lifecycle, [
+      "ensureEdge",
+      "ensurePage",
+      "refreshBrowserProcessId",
+      "Page.navigate",
+      "waitInputReady",
+      "assertTrustedOrigin",
+      "stampVisibleSessionMarker",
+      "bringToFront",
+      "inspectVisibleSession"
+    ]);
+    import_node_assert.default.strictEqual(closedConnections, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.WebSocket = originalWebSocket;
+  }
+  console.log("PASS copilot-visible-session-pid-lifecycle");
 }
 async function testCopilotResponseCompletion() {
   const empty = () => ({ stableLength: null, stableSinceMs: null });
@@ -8141,7 +8368,7 @@ async function testCopilotResponseCompletion() {
     { text: "latest", bottom: 200, order: 1, copyEnabled: isResponseCopyControl(responseCopy) }
   ]);
   import_node_assert.default.strictEqual(latestWithResponseCopy?.copyEnabled, true);
-  for (const required of ["shadowRoot", "contentDocument", "stopGeneratingButton", "stop-button", "fai-SendButton__stopBackground", '[role="article"][class*="CopilotMessage" i]', '[data-testid="copilot-message-div"]']) {
+  for (const required of ["shadowRoot", "contentDocument", "stopGeneratingButton", "stop-button", "fai-SendButton__stopBackground", '[role="article"][class*="CopilotMessage" i]', '[data-testid="copilot-message-div"]', "windowName", "data-company-apps-session"]) {
     import_node_assert.default.ok(COPILOT_SCREEN_STATE_JS.includes(required), `screen-state detector missing ${required}`);
     if (required.includes("CopilotMessage") || required.includes("copilot-message-div")) {
       import_node_assert.default.ok(COPILOT_CLICK_COPY_JS.includes(required), `copy detector missing ${required}`);
@@ -8470,6 +8697,26 @@ async function testUiContract() {
   for (const required of ["run-plan", "run-eyebrow", "run-pause", "run-resume", "run-retry", "run-complete", "\u56DE\u7B54\u5B8C\u4E86", "activity-details", "\u5B9F\u969B\u306E\u5DEE\u5206\u3092\u8868\u793A", "\u5DEE\u5206\u306E\u7D9A\u304D", "preview-frame", "verification-list", "\u8A3A\u65ADJSON", "approval-meta", "parentRunId", "/api/runs/", "/api/changes/", "compositionstart", "aria-live", "mode-select", "\u3053\u306EPC\u3067\u5B9F\u884C", "Copilot\u5185\u3067\u89B3\u6E2C", "@media (max-width: 720px)"]) import_node_assert.default.ok(html.includes(required), `UI contract missing: ${required}`);
   console.log("PASS ui-contract");
 }
+async function testDemoRecordingContract() {
+  const repoRoot = import_node_path4.default.resolve(process.cwd(), "..", "..");
+  const recorder = import_node_fs3.default.readFileSync(import_node_path4.default.join(repoRoot, "demo", "renketsu-demo", "Record-Demo.ps1"), "utf8");
+  for (const required of [
+    "/api/copilot/visible-session",
+    "sessionId = $TargetSessionId",
+    "Get-VisibleEdgeWindow -ProcessId",
+    "Visible Copilot action log did not grow",
+    "visibleSessionVerified",
+    "visibleActivityVerified"
+  ]) {
+    import_node_assert.default.ok(recorder.includes(required), `Record-Demo visibility contract missing: ${required}`);
+  }
+  import_node_assert.default.ok(!recorder.includes("Sort-Object StartTime -Descending"), "Record-Demo must not choose an unrelated newest Edge window");
+  const motionGate = import_node_fs3.default.readFileSync(import_node_path4.default.join(repoRoot, "demo", "video", "qa", "Test-VideoMotion.ps1"), "utf8");
+  for (const required of ["SampleIntervalSec = 2", "tblend=all_mode=difference", "signalstats", "MinimumMovingPairs", "MinimumMovingRatio", "MaximumStaticSec", "crop=430:900:260:85"]) {
+    import_node_assert.default.ok(motionGate.includes(required), `video motion gate missing: ${required}`);
+  }
+  console.log("PASS demo-recording-contract");
+}
 (async () => {
   await testWeather();
   await testApprovals();
@@ -8480,6 +8727,7 @@ async function testUiContract() {
   await testCopilotChoosesFirstAction();
   await testModeBoundaries();
   await testCopilotEdgeIsolation();
+  await testCopilotVisibleSessionPidLifecycle();
   await testCopilotResponseCompletion();
   await testCopilotChunkFallback();
   await testCopilotLoop();
@@ -8488,6 +8736,7 @@ async function testUiContract() {
   await testCopilotPlainMode();
   await testCopilotFenceMode();
   await testUiContract();
+  await testDemoRecordingContract();
   console.log("ALL PASS");
 })().catch((err) => {
   console.error(err);

@@ -14,9 +14,12 @@ import {
   CopilotEdgeClient,
   assertResponseDeadline,
   isStopGenerationControl,
+  makeVisibleSessionMarker,
   resolveCopilotSettings,
+  selectBrowserProcessId,
   selectLatestResponseCandidate,
   updateResponseCompletionState,
+  visibleSessionMarkerMatches,
   type ResponseCompletionState
 } from '../src/copilot'
 
@@ -619,8 +622,150 @@ async function testCopilotEdgeIsolation(): Promise<void> {
   const attached = resolveCopilotSettings({ ...base, copilot: { cdpPort: 9444, reuseExistingEdge: true } })
   assert.strictEqual(attached.reuseExistingEdge, true)
   assert.strictEqual(attached.cdpPort, 9444)
+  const sessionMarker = makeVisibleSessionMarker('mt9icyqzvay6')
+  assert.strictEqual(sessionMarker, 'company-apps-coding-agent:mt9icyqzvay6')
+  assert.strictEqual(visibleSessionMarkerMatches('mt9icyqzvay6', sessionMarker), true)
+  assert.strictEqual(visibleSessionMarkerMatches('mt9gbgtilhj0', sessionMarker), false)
+  assert.throws(() => makeVisibleSessionMarker('../wrong-session'), /表示セッションIDが不正/)
+  assert.strictEqual(selectBrowserProcessId([
+    { type: 'renderer', id: 23468 },
+    { type: 'browser', id: 38124 },
+    { type: 'GPU', id: 13292 }
+  ]), 38124)
+  assert.strictEqual(selectBrowserProcessId([{ type: 'browser', id: 0 }]), null)
+  assert.strictEqual(selectBrowserProcessId([{ type: 'browser', id: 38124.5 }]), null)
+  assert.strictEqual(selectBrowserProcessId({ type: 'browser', id: 38124 }), null)
   console.log('PASS copilot-edge-isolation')
 }
+
+async function testCopilotVisibleSessionPidLifecycle(): Promise<void> {
+  const originalFetch = globalThis.fetch
+  const originalWebSocket = (globalThis as Record<string, unknown>).WebSocket
+  let processInfo: unknown = undefined
+  const cdpMethods: string[] = []
+  let closedConnections = 0
+
+  class FakeBrowserWebSocket {
+    private listeners = new Map<string, Array<{ cb: (event: { data?: unknown }) => void; once: boolean }>>()
+
+    constructor(_url: string) {
+      queueMicrotask(() => this.emit('open', {}))
+    }
+
+    addEventListener(type: string, cb: (event: { data?: unknown }) => void, options?: { once?: boolean }): void {
+      const listeners = this.listeners.get(type) ?? []
+      listeners.push({ cb, once: options?.once === true })
+      this.listeners.set(type, listeners)
+    }
+
+    send(data: string): void {
+      const request = JSON.parse(data) as { id: number; method: string }
+      cdpMethods.push(request.method)
+      queueMicrotask(() => this.emit('message', {
+        data: JSON.stringify({ id: request.id, result: { processInfo } })
+      }))
+    }
+
+    close(): void {
+      closedConnections++
+    }
+
+    private emit(type: string, event: { data?: unknown }): void {
+      const listeners = this.listeners.get(type) ?? []
+      this.listeners.set(type, listeners.filter((listener) => {
+        listener.cb(event)
+        return !listener.once
+      }))
+    }
+  }
+
+  try {
+    globalThis.fetch = (async () => ({
+      ok: true,
+      json: async () => ({ webSocketDebuggerUrl: 'ws://fake-browser' })
+    })) as unknown as typeof fetch
+    ;(globalThis as Record<string, unknown>).WebSocket = FakeBrowserWebSocket
+
+    const client = new CopilotEdgeClient({ baseURL: '', model: '', provider: 'copilot-edge' })
+    const internal = client as unknown as Record<string, any>
+    const lifecycle: string[] = []
+    internal.s.cdpPort = 61027
+    internal.ownedEdgePid = 22468
+    const ensureEdge = internal.ensureEdge.bind(client) as () => Promise<void>
+    internal.ensureEdge = async () => {
+      lifecycle.push('ensureEdge')
+      await ensureEdge()
+    }
+    internal.ensurePage = async () => { lifecycle.push('ensurePage') }
+    const refreshBrowserProcessId = internal.refreshBrowserProcessId.bind(client) as () => Promise<void>
+    internal.refreshBrowserProcessId = async () => {
+      lifecycle.push('refreshBrowserProcessId')
+      await refreshBrowserProcessId()
+    }
+    internal.cdpMethod = async (name: string) => { lifecycle.push(name) }
+    internal.waitInputReady = async () => { lifecycle.push('waitInputReady') }
+    internal.assertTrustedOrigin = async () => { lifecycle.push('assertTrustedOrigin') }
+    internal.stampVisibleSessionMarker = async () => { lifecycle.push('stampVisibleSessionMarker') }
+    internal.bringToFront = async () => { lifecycle.push('bringToFront') }
+    internal.inspectVisibleSession = async (sessionId: string) => {
+      lifecycle.push('inspectVisibleSession')
+      return {
+        sessionId,
+        marker: makeVisibleSessionMarker(sessionId),
+        markerMatches: true,
+        pid: internal.visibleEdgePid,
+        cdpPort: internal.s.cdpPort,
+        url: 'https://m365.cloud.microsoft/chat/',
+        title: 'Copilot',
+        inputReady: true,
+        responseCount: 0,
+        latestResponseLength: 0,
+        generating: false,
+        copyEnabled: false
+      }
+    }
+
+    await assert.rejects(
+      () => client.prepareVisibleSession('mt9pidlifecycle'),
+      /CDPからEdgeブラウザー本体PIDを取得できませんでした/
+    )
+    assert.strictEqual(internal.ownedEdgePid, 22468)
+    assert.strictEqual(internal.visibleEdgePid, null)
+    assert.strictEqual(internal.s.cdpPort, 61027)
+    assert.deepStrictEqual(cdpMethods, ['SystemInfo.getProcessInfo'])
+    assert.deepStrictEqual(lifecycle, ['ensureEdge', 'ensurePage', 'refreshBrowserProcessId'])
+
+    processInfo = [
+      { type: 'renderer', id: 23468 },
+      { type: 'browser', id: 38124 }
+    ]
+    cdpMethods.length = 0
+    lifecycle.length = 0
+    const visible = await client.prepareVisibleSession('mt9pidlifecycle')
+    assert.strictEqual(visible.pid, 38124)
+    assert.strictEqual(internal.ownedEdgePid, 22468)
+    assert.strictEqual(internal.visibleEdgePid, 38124)
+    assert.strictEqual(internal.s.cdpPort, 61027)
+    assert.deepStrictEqual(cdpMethods, ['SystemInfo.getProcessInfo'])
+    assert.deepStrictEqual(lifecycle, [
+      'ensureEdge',
+      'ensurePage',
+      'refreshBrowserProcessId',
+      'Page.navigate',
+      'waitInputReady',
+      'assertTrustedOrigin',
+      'stampVisibleSessionMarker',
+      'bringToFront',
+      'inspectVisibleSession'
+    ])
+    assert.strictEqual(closedConnections, 2)
+  } finally {
+    globalThis.fetch = originalFetch
+    ;(globalThis as Record<string, unknown>).WebSocket = originalWebSocket
+  }
+  console.log('PASS copilot-visible-session-pid-lifecycle')
+}
+
 async function testCopilotResponseCompletion(): Promise<void> {
   const empty = (): ResponseCompletionState => ({ stableLength: null, stableSinceMs: null })
   let result = updateResponseCompletionState(empty(), {
@@ -729,7 +874,7 @@ async function testCopilotResponseCompletion(): Promise<void> {
     { text: 'latest', bottom: 200, order: 1, copyEnabled: isResponseCopyControl(responseCopy) }
   ])
   assert.strictEqual(latestWithResponseCopy?.copyEnabled, true)
-  for (const required of ['shadowRoot', 'contentDocument', 'stopGeneratingButton', 'stop-button', 'fai-SendButton__stopBackground', '[role="article"][class*="CopilotMessage" i]', '[data-testid="copilot-message-div"]']) {
+  for (const required of ['shadowRoot', 'contentDocument', 'stopGeneratingButton', 'stop-button', 'fai-SendButton__stopBackground', '[role="article"][class*="CopilotMessage" i]', '[data-testid="copilot-message-div"]', 'windowName', 'data-company-apps-session']) {
     assert.ok(COPILOT_SCREEN_STATE_JS.includes(required), `screen-state detector missing ${required}`)
     if (required.includes('CopilotMessage') || required.includes('copilot-message-div')) {
       assert.ok(COPILOT_CLICK_COPY_JS.includes(required), `copy detector missing ${required}`)
@@ -1074,6 +1219,28 @@ async function testUiContract(): Promise<void> {
   console.log('PASS ui-contract')
 }
 
+async function testDemoRecordingContract(): Promise<void> {
+  const repoRoot = path.resolve(process.cwd(), '..', '..')
+  const recorder = fs.readFileSync(path.join(repoRoot, 'demo', 'renketsu-demo', 'Record-Demo.ps1'), 'utf8')
+  for (const required of [
+    '/api/copilot/visible-session',
+    "sessionId = $TargetSessionId",
+    'Get-VisibleEdgeWindow -ProcessId',
+    'Visible Copilot action log did not grow',
+    'visibleSessionVerified',
+    'visibleActivityVerified'
+  ]) {
+    assert.ok(recorder.includes(required), `Record-Demo visibility contract missing: ${required}`)
+  }
+  assert.ok(!recorder.includes('Sort-Object StartTime -Descending'), 'Record-Demo must not choose an unrelated newest Edge window')
+
+  const motionGate = fs.readFileSync(path.join(repoRoot, 'demo', 'video', 'qa', 'Test-VideoMotion.ps1'), 'utf8')
+  for (const required of ['SampleIntervalSec = 2', 'tblend=all_mode=difference', 'signalstats', 'MinimumMovingPairs', 'MinimumMovingRatio', 'MaximumStaticSec', 'crop=430:900:260:85']) {
+    assert.ok(motionGate.includes(required), `video motion gate missing: ${required}`)
+  }
+  console.log('PASS demo-recording-contract')
+}
+
 (async () => {
   await testWeather()
   await testApprovals()
@@ -1084,6 +1251,7 @@ async function testUiContract(): Promise<void> {
   await testCopilotChoosesFirstAction()
   await testModeBoundaries()
   await testCopilotEdgeIsolation()
+  await testCopilotVisibleSessionPidLifecycle()
   await testCopilotResponseCompletion()
   await testCopilotChunkFallback()
   await testCopilotLoop()
@@ -1092,6 +1260,7 @@ async function testUiContract(): Promise<void> {
   await testCopilotPlainMode()
   await testCopilotFenceMode()
   await testUiContract()
+  await testDemoRecordingContract()
   console.log('ALL PASS')
 })().catch((err) => {
   console.error(err)

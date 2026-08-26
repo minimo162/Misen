@@ -471,8 +471,14 @@ try {
         else {
             Write-DemoNg 'recording script does not require fresh sessions for take and input retry'
         }
+        if ($recordDemoText.Contains("'/api/copilot/visible-session'") -and $recordDemoText.Contains('Get-VisibleEdgeWindow -ProcessId') -and $recordDemoText.Contains('sessionId = $TargetSessionId') -and $recordDemoText.Contains('Visible Copilot action log did not grow') -and $recordDemoText.Contains('visibleSessionVerified') -and $recordDemoText.Contains('visibleActivityVerified') -and -not $recordDemoText.Contains('Sort-Object StartTime -Descending')) {
+            Write-DemoOk 'recording script binds and verifies the visible Copilot session'
+        }
+        else {
+            Write-DemoNg 'recording script visible-session binding is missing'
+        }
         $manualReadyIndex = $recordDemoText.IndexOf('MANUAL CAPTURE READY', [System.StringComparison]::Ordinal)
-        $turnIndex = $recordDemoText.IndexOf("'/api/turn'", [System.StringComparison]::Ordinal)
+        $turnIndex = $recordDemoText.IndexOf('$instructionSentAt = Get-Date', [System.StringComparison]::Ordinal)
         $issuesDisplayIndex = $recordDemoText.IndexOf('$issuesSheet.Activate()', [System.StringComparison]::Ordinal)
         $manualStopIndex = $recordDemoText.IndexOf('Stop recording now, then press Enter to finish verification', [System.StringComparison]::Ordinal)
         $manualFileCheckIndex = $recordDemoText.IndexOf('Manual recording file was not created or is empty.', [System.StringComparison]::Ordinal)
@@ -485,6 +491,20 @@ try {
     }
     else {
         Write-DemoNg 'Record-Demo.ps1 missing'
+    }
+
+    $motionTestPath = Join-Path $RepoPath 'demo\video\qa\Test-VideoMotion.ps1'
+    if (Test-Path -LiteralPath $motionTestPath -PathType Leaf) {
+        $motionTestText = [System.IO.File]::ReadAllText($motionTestPath, [System.Text.Encoding]::UTF8)
+        if ($motionTestText.Contains('[double]$SampleIntervalSec = 2') -and $motionTestText.Contains('tblend=all_mode=difference') -and $motionTestText.Contains('signalstats') -and $motionTestText.Contains('MinimumMovingPairs') -and $motionTestText.Contains('MinimumMovingRatio') -and $motionTestText.Contains('MaximumStaticSec') -and $motionTestText.Contains('crop=430:900:260:85')) {
+            Write-DemoOk 'raw and final live-ROI motion gate present'
+        }
+        else {
+            Write-DemoNg 'video motion gate contract is incomplete'
+        }
+    }
+    else {
+        Write-DemoNg 'Test-VideoMotion.ps1 missing'
     }
 
     $edgeCandidates = @(

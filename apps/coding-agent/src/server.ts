@@ -780,6 +780,45 @@ const server = http.createServer(async (req, res) => {
     return
   }
 
+  if (url.pathname === '/api/copilot/visible-session') {
+    const backend = getBackend('work')
+    if (!(backend instanceof CopilotEdgeClient)) {
+      json(res, 409, { error: 'copilot-edge provider is required' })
+      return
+    }
+    try {
+      if (req.method === 'POST') {
+        if (activeRunId) {
+          json(res, 409, { error: '実行中は表示セッションを切り替えられません' })
+          return
+        }
+        const body = JSON.parse(await readBody(req)) as { sessionId?: string }
+        const sessionId = String(body.sessionId ?? '')
+        if (!sessions.has(sessionId)) {
+          json(res, 404, { error: 'session not found' })
+          return
+        }
+        activeId = sessionId
+        const state = await backend.prepareVisibleSession(sessionId)
+        persistState()
+        json(res, 200, state)
+        return
+      }
+      if (req.method === 'GET') {
+        const sessionId = String(url.searchParams.get('sessionId') ?? '')
+        if (!sessions.has(sessionId)) {
+          json(res, 404, { error: 'session not found' })
+          return
+        }
+        json(res, 200, await backend.inspectVisibleSession(sessionId))
+        return
+      }
+    } catch (err) {
+      json(res, 500, { error: (err as Error).message })
+      return
+    }
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/distribution') {
     json(res, 200, readDistributionState())
     return
@@ -1134,14 +1173,18 @@ const server = http.createServer(async (req, res) => {
     let input = ''
     let mode: TurnMode = 'work'
     let requestedParentRunId: string | undefined
+    let requestedSessionId: string | undefined
     try {
-      const b = JSON.parse(await readBody(req)) as { message?: string; mode?: string; parentRunId?: string }
+      const b = JSON.parse(await readBody(req)) as { message?: string; mode?: string; parentRunId?: string; sessionId?: string }
       input = String(b.message ?? '').trim()
       if (b.mode === 'chat' || b.mode === 'research' || b.mode === 'work') mode = b.mode
       requestedParentRunId = typeof b.parentRunId === 'string' ? b.parentRunId : undefined
+      requestedSessionId = typeof b.sessionId === 'string' ? b.sessionId : undefined
     } catch {}
     if (!input) { json(res, 400, { error: 'message が空です' }); return }
-    const s = activeSession()
+    const s = requestedSessionId ? sessions.get(requestedSessionId) : activeSession()
+    if (!s) { json(res, 404, { error: 'session not found' }); return }
+    activeId = s.id
     if (s.title === '新しいセッション') s.title = input.slice(0, 30)
     let parentRunId: string | undefined
     if (requestedParentRunId) {

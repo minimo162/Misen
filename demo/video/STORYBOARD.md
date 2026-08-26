@@ -29,7 +29,7 @@
 ## Frame 4 — 0:42–0:48 — 台帳
 
 - Status: outline
-- Source: `assets/raw-demo.mp4`, source 104–110秒、等速。
+- Source: `assets/raw-demo.mp4`, source 100–106秒、等速。
 - Visual: Excel台帳部分へズームし、縦方向にゆっくりパンして転記結果を見せる。
 - Copy: 「台帳に転記」「19社提出 / 未提出1社」
 - Motion: seek-safe transform pan only; captured pixels are not recolored.
@@ -38,7 +38,7 @@
 ## Frame 5 — 0:48–0:54 — 確認事項
 
 - Status: outline
-- Source: `assets/raw-demo.mp4`, source 110–116秒、等速。
+- Source: `assets/raw-demo.mp4`, source 108–114秒、等速。
 - Visual: Excelの確認事項シートへズーム。5件の構成を左のラベルで補助する。
 - Copy: 「確認事項 5件」「単位差異3 / 科目名差異1 / 未提出1」
 - Motion: camera crop locks in; labels assemble with a short waterfall entry.
@@ -48,7 +48,7 @@
 
 - Status: outline
 - Visual: 大きな実測値を右、運用境界を左に分けたカード。
-- Copy: 「承認済みCopilotのみ」「社外送信なし」「手作業想定1時間 → 実測1.61分」「架空データ」
+- Copy: 「承認済みCopilotのみ」「社外送信なし」「手作業想定1時間 → 実測1.57分」「架空データ」
 - Motion: metric bloom and fast structural line draw.
 - Transition: 58秒で次のステップへハードカット。
 

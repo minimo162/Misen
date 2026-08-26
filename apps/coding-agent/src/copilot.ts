@@ -65,7 +65,51 @@ export interface CopilotCopyCandidate {
   ariaDisabled: boolean
 }
 
+export interface CopilotVisibleSessionState {
+  sessionId: string
+  marker: string
+  markerMatches: boolean
+  pid: number | null
+  cdpPort: number
+  url: string
+  title: string
+  inputReady: boolean
+  responseCount: number
+  latestResponseLength: number
+  generating: boolean
+  copyEnabled: boolean
+}
+
+interface CdpProcessInfo {
+  type?: unknown
+  id?: unknown
+}
+
+export function selectBrowserProcessId(processInfo: unknown): number | null {
+  if (!Array.isArray(processInfo)) return null
+  const browser = processInfo.find((item): item is CdpProcessInfo => {
+    if (!item || typeof item !== 'object') return false
+    const candidate = item as CdpProcessInfo
+    return String(candidate.type ?? '').toLowerCase() === 'browser'
+      && typeof candidate.id === 'number'
+      && Number.isSafeInteger(candidate.id)
+      && candidate.id > 0
+  })
+  return browser && typeof browser.id === 'number' ? browser.id : null
+}
+
 export const RESPONSE_STABILITY_MS = 1000
+export const VISIBLE_SESSION_MARKER_PREFIX = 'company-apps-coding-agent:'
+
+export function makeVisibleSessionMarker(sessionId: string): string {
+  const normalized = sessionId.trim()
+  if (!/^[a-z0-9_-]{6,80}$/i.test(normalized)) throw new Error('表示セッションIDが不正です')
+  return VISIBLE_SESSION_MARKER_PREFIX + normalized
+}
+
+export function visibleSessionMarkerMatches(sessionId: string, marker: string): boolean {
+  return marker === makeVisibleSessionMarker(sessionId)
+}
 
 export function assertResponseDeadline(deadlineMs: number, responseTimeoutSec: number, nowMs = Date.now()): void {
   if (nowMs >= deadlineMs) throw new Error(`Copilot の応答がタイムアウトしました (${responseTimeoutSec}秒)`)
@@ -180,7 +224,7 @@ export const COPILOT_SCREEN_STATE_JS = `(() => {
   const signIn = buttons.find(el => __vis(el) && /sign\\s*in|log\\s*in|サインイン|ログイン/i.test((el.innerText || el.textContent || el.getAttribute('aria-label') || el.title || '').trim()));
   const url = String(location.href || '');
   const signinRequired = /(?:login|signin|sign-in|auth)/i.test(url) || (!input && !!signIn);
-  return JSON.stringify({ inputReady: !!input, stopCandidates, responseCandidates, signinRequired, url });
+  return JSON.stringify({ inputReady: !!input, stopCandidates, responseCandidates, signinRequired, url, title: String(document.title || ''), windowName: String(window.name || ''), sessionMarker: String(document.documentElement.getAttribute('data-company-apps-session') || '') });
 })()`
 
 const FRESH_CHAT_JS = `(() => {
@@ -501,7 +545,9 @@ export class CopilotEdgeClient {
   private cdp: CdpConnection | null = null
   private clipGranted = false
   private ownedEdgePid: number | null = null
+  private visibleEdgePid: number | null = null
   private edgeProfileDir: string | null = null
+  private visibleSessionId: string | null = null
 
   constructor(cfg: AgentConfig) {
     this.s = resolveCopilotSettings(cfg)
@@ -531,6 +577,26 @@ export class CopilotEdgeClient {
       bws.close()
     }
     this.clipGranted = true
+  }
+
+  private async refreshBrowserProcessId(deadlineMs = Number.POSITIVE_INFINITY): Promise<void> {
+    this.visibleEdgePid = null
+    const ver = await (await fetch(`http://127.0.0.1:${this.s.cdpPort}/json/version`, {
+      signal: AbortSignal.timeout(this.remainingTimeoutMs(deadlineMs, 5000))
+    })).json()
+    const browserWs = String((ver as { webSocketDebuggerUrl?: string }).webSocketDebuggerUrl ?? '')
+    if (!browserWs) throw new Error('browser WebSocket を取得できません')
+    const bws = await CdpConnection.connect(browserWs, this.remainingTimeoutMs(deadlineMs, 10000))
+    try {
+      const result = await bws.method('SystemInfo.getProcessInfo', {}, this.remainingTimeoutMs(deadlineMs, 10000)) as {
+        processInfo?: unknown
+      }
+      const browserPid = selectBrowserProcessId(result?.processInfo)
+      if (browserPid === null) throw new Error('CDPからEdgeブラウザー本体PIDを取得できませんでした')
+      this.visibleEdgePid = browserPid
+    } finally {
+      bws.close()
+    }
   }
 
   private stripOuterFence(t: string): string {
@@ -677,6 +743,7 @@ export class CopilotEdgeClient {
     args.push(this.s.url)
     const child = spawn(findEdgePath(), args, { detached: true, stdio: 'ignore' })
     this.ownedEdgePid = child.pid ?? null
+    this.visibleEdgePid = null
     child.unref()
     const deadline = Date.now() + 30000
     while (Date.now() < deadline) {
@@ -770,6 +837,60 @@ export class CopilotEdgeClient {
       await sleep(3000)
     } else {
       await sleep(450)
+    }
+  }
+
+  private async stampVisibleSessionMarker(sessionId: string): Promise<void> {
+    const marker = makeVisibleSessionMarker(sessionId)
+    const result = await this.evalWithReconnect(`(() => { const marker = ${JSON.stringify(marker)}; window.name = marker; document.documentElement.setAttribute('data-company-apps-session', marker); return JSON.stringify({ windowName: window.name, sessionMarker: document.documentElement.getAttribute('data-company-apps-session') }); })()`)
+    const stamped = JSON.parse(String(result)) as { windowName?: string; sessionMarker?: string }
+    if (stamped.windowName !== marker || stamped.sessionMarker !== marker) throw new Error('Copilot表示タブへセッション識別子を設定できませんでした')
+  }
+
+  async prepareVisibleSession(sessionId: string): Promise<CopilotVisibleSessionState> {
+    makeVisibleSessionMarker(sessionId)
+    await this.ensureEdge()
+    await this.ensurePage()
+    await this.refreshBrowserProcessId()
+    await this.cdpMethod('Page.navigate', { url: this.s.url })
+    await sleep(3000)
+    await this.waitInputReady(120)
+    await this.assertTrustedOrigin()
+    this.visibleSessionId = sessionId
+    await this.stampVisibleSessionMarker(sessionId)
+    await this.bringToFront()
+    return this.inspectVisibleSession(sessionId)
+  }
+
+  async inspectVisibleSession(sessionId: string): Promise<CopilotVisibleSessionState> {
+    const expectedMarker = makeVisibleSessionMarker(sessionId)
+    if (!this.cdp) throw new Error('Copilot表示タブは準備されていません')
+    const raw = await this.evalWithReconnect(COPILOT_SCREEN_STATE_JS, 15000)
+    const parsed = JSON.parse(String(raw)) as {
+      inputReady?: boolean
+      responseCandidates?: CopilotResponseCandidate[]
+      stopCandidates?: CopilotStopCandidate[]
+      url?: string
+      title?: string
+      windowName?: string
+      sessionMarker?: string
+    }
+    const responses = parsed.responseCandidates ?? []
+    const latest = selectLatestResponseCandidate(responses)
+    const marker = String(parsed.sessionMarker ?? '')
+    return {
+      sessionId,
+      marker,
+      markerMatches: marker === expectedMarker && String(parsed.windowName ?? '') === expectedMarker,
+      pid: this.visibleEdgePid,
+      cdpPort: this.s.cdpPort,
+      url: String(parsed.url ?? ''),
+      title: String(parsed.title ?? ''),
+      inputReady: parsed.inputReady === true,
+      responseCount: responses.length,
+      latestResponseLength: latest?.text.length ?? 0,
+      generating: (parsed.stopCandidates ?? []).some(isStopGenerationControl),
+      copyEnabled: latest?.copyEnabled === true
     }
   }
 
@@ -1011,6 +1132,10 @@ export class CopilotEdgeClient {
     await this.ensurePage()
     await this.freshChat()
     await this.waitInputReady(120, signal)
+    if (this.visibleSessionId) {
+      await this.stampVisibleSessionMarker(this.visibleSessionId)
+      await this.bringToFront()
+    }
     await this.selectModel()
     throwIfAborted(signal)
     await this.waitInputReady(30, signal)
