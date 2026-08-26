@@ -80,6 +80,24 @@ export interface CopilotVisibleSessionState {
   copyEnabled: boolean
 }
 
+interface CdpProcessInfo {
+  type?: unknown
+  id?: unknown
+}
+
+export function selectBrowserProcessId(processInfo: unknown): number | null {
+  if (!Array.isArray(processInfo)) return null
+  const browser = processInfo.find((item): item is CdpProcessInfo => {
+    if (!item || typeof item !== 'object') return false
+    const candidate = item as CdpProcessInfo
+    return String(candidate.type ?? '').toLowerCase() === 'browser'
+      && typeof candidate.id === 'number'
+      && Number.isSafeInteger(candidate.id)
+      && candidate.id > 0
+  })
+  return browser && typeof browser.id === 'number' ? browser.id : null
+}
+
 export const RESPONSE_STABILITY_MS = 1000
 export const VISIBLE_SESSION_MARKER_PREFIX = 'company-apps-coding-agent:'
 
@@ -527,6 +545,7 @@ export class CopilotEdgeClient {
   private cdp: CdpConnection | null = null
   private clipGranted = false
   private ownedEdgePid: number | null = null
+  private visibleEdgePid: number | null = null
   private edgeProfileDir: string | null = null
   private visibleSessionId: string | null = null
 
@@ -558,6 +577,26 @@ export class CopilotEdgeClient {
       bws.close()
     }
     this.clipGranted = true
+  }
+
+  private async refreshBrowserProcessId(deadlineMs = Number.POSITIVE_INFINITY): Promise<void> {
+    this.visibleEdgePid = null
+    const ver = await (await fetch(`http://127.0.0.1:${this.s.cdpPort}/json/version`, {
+      signal: AbortSignal.timeout(this.remainingTimeoutMs(deadlineMs, 5000))
+    })).json()
+    const browserWs = String((ver as { webSocketDebuggerUrl?: string }).webSocketDebuggerUrl ?? '')
+    if (!browserWs) throw new Error('browser WebSocket を取得できません')
+    const bws = await CdpConnection.connect(browserWs, this.remainingTimeoutMs(deadlineMs, 10000))
+    try {
+      const result = await bws.method('SystemInfo.getProcessInfo', {}, this.remainingTimeoutMs(deadlineMs, 10000)) as {
+        processInfo?: unknown
+      }
+      const browserPid = selectBrowserProcessId(result?.processInfo)
+      if (browserPid === null) throw new Error('CDPからEdgeブラウザー本体PIDを取得できませんでした')
+      this.visibleEdgePid = browserPid
+    } finally {
+      bws.close()
+    }
   }
 
   private stripOuterFence(t: string): string {
@@ -704,6 +743,7 @@ export class CopilotEdgeClient {
     args.push(this.s.url)
     const child = spawn(findEdgePath(), args, { detached: true, stdio: 'ignore' })
     this.ownedEdgePid = child.pid ?? null
+    this.visibleEdgePid = null
     child.unref()
     const deadline = Date.now() + 30000
     while (Date.now() < deadline) {
@@ -811,6 +851,7 @@ export class CopilotEdgeClient {
     makeVisibleSessionMarker(sessionId)
     await this.ensureEdge()
     await this.ensurePage()
+    await this.refreshBrowserProcessId()
     await this.cdpMethod('Page.navigate', { url: this.s.url })
     await sleep(3000)
     await this.waitInputReady(120)
@@ -841,7 +882,7 @@ export class CopilotEdgeClient {
       sessionId,
       marker,
       markerMatches: marker === expectedMarker && String(parsed.windowName ?? '') === expectedMarker,
-      pid: this.ownedEdgePid,
+      pid: this.visibleEdgePid,
       cdpPort: this.s.cdpPort,
       url: String(parsed.url ?? ''),
       title: String(parsed.title ?? ''),

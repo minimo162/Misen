@@ -172,6 +172,7 @@ Update-Ledger の一行目は少なくとも次のキーを含む JSON です。
 | ImportExcel／EPPlus のロード警告、EDR 隔離 | 再試行を繰り返さず、DLL の版・場所・hash と EDR イベントを記録。ローカルコピーの scripted fallback を使い、事前登録や承認が無いまま配布 DLL を追加しない。 |
 | PowerShell の実行ポリシーで止まる | `Get-ExecutionPolicy -List` とエラーを記録し、承認済みの通常ターミナル／ローカルコピーで `-ExecutionPolicy Bypass` を付けて再試行してよい。launcher 自体は変更しない。 |
 | config変更後も旧指示で動く／入力位置不一致 | サーバー再起動だけでは永続セッションのsystemPromptは更新されない。`Record-Demo.ps1` は各テイク前に新規セッションを自動作成する。手動検証でもUIの「新しいセッション」または `POST /api/sessions` を実行してから固定指示を送る。 |
+| `The exact Copilot Edge window was not found for PID ...` で録画前に停止 | Edgeの起動PIDが一時プロセスで、実ウィンドウを持つブラウザー本体PIDへ引き継がれた旧版の症状。別のEdgeウィンドウを選ばず停止する。現行版はCDPからブラウザー本体PIDを取得するため、`typecheck`・`build`・smoke後の `dist/server.js` でcoding-agentを再起動し、再実行する。 |
 | Runは成功したのに録画中のCopilot画面が静止／別回答のまま | 録画を無効化する。旧実装は最新のEdgeウィンドウを選んだだけで、APIのfresh sessionと表示タブを対応付けていなかった。現行 `Record-Demo.ps1` はcopilot-edge所有PID、画面DOMのsession marker、表示回答要素の増加を検証する。`MANUAL CAPTURE READY`前に録画せず、完了JSONの `visibleSessionVerified`／`visibleActivityVerified` がtrueでない素材は編集しない。 |
 | `gdigrab error 5`／`ddagrab`のDXGI出力なし／`CopyFromScreen`のhandle invalid | キャプチャだけの5秒試験を先に行う。3方式とも失敗する環境では本番ランを開始せず、`Record-Demo.ps1 -NoCapture`で外部録画の開始・停止を人に委ねる。スクリプトは指定動画の存在とサイズも最後に検証する。 |
 | 共有フォルダー上でだけ失敗 | リポジトリを承認済みのローカル作業フォルダーへコピーし、同じ相対パスで実行。コピー元・先、時刻、hash を記録し、共有元へ書き戻さない。 |

@@ -4022,7 +4022,7 @@ var require_dbcs_data = __commonJS({
       // == Japanese/ShiftJIS ====================================================
       // All japanese encodings are based on JIS X set of standards:
       // JIS X 0201 - Single-byte encoding of ASCII + ¥ + Kana chars at 0xA1-0xDF.
-      // JIS X 0208 - Main set of 6879 characters, placed in 94x94 plane, to be encoded by 2 bytes.
+      // JIS X 0208 - Main set of 6879 characters, placed in 94x94 plane, to be encoded by 2 bytes. 
       //              Has several variations in 1978, 1983, 1990 and 1997.
       // JIS X 0212 - Supplementary plane of 6067 chars in 94x94 plane. 1990. Effectively dead.
       // JIS X 0213 - Extension and modern replacement of 0208 and 0212. Total chars: 11233.
@@ -4039,7 +4039,7 @@ var require_dbcs_data = __commonJS({
       //               0x8F, (0xA1-0xFE)x2 - 0212 plane (94x94).
       //  * JIS X 208: 7-bit, direct encoding of 0208. Byte ranges: 0x21-0x7E (94 values). Uncommon.
       //               Used as-is in ISO2022 family.
-      //  * ISO2022-JP: Stateful encoding, with escape sequences to switch between ASCII,
+      //  * ISO2022-JP: Stateful encoding, with escape sequences to switch between ASCII, 
       //                0201-1976 Roman, 0208-1978, 0208-1983.
       //  * ISO2022-JP-1: Adds esc seq for 0212-1990.
       //  * ISO2022-JP-2: Adds esc seq for GB2313-1980, KSX1001-1992, ISO8859-1, ISO8859-7.
@@ -4150,7 +4150,7 @@ var require_dbcs_data = __commonJS({
       //  * Windows CP 951: Microsoft variant of Big5-HKSCS-2001. Seems to be never public. http://me.abelcheung.org/articles/research/what-is-cp951/
       //  * Big5-2003 (Taiwan standard) almost superset of cp950.
       //  * Unicode-at-on (UAO) / Mozilla 1.8. Falling out of use on the Web. Not supported by other browsers.
-      //  * Big5-HKSCS (-2001, -2004, -2008). Hong Kong standard.
+      //  * Big5-HKSCS (-2001, -2004, -2008). Hong Kong standard. 
       //    many unicode code points moved from PUA to Supplementary plane (U+2XXXX) over the years.
       //    Plus, it has 4 combining sequences.
       //    Seems that Mozilla refused to support it for 10 yrs. https://bugzilla.mozilla.org/show_bug.cgi?id=162431 https://bugzilla.mozilla.org/show_bug.cgi?id=310299
@@ -4161,7 +4161,7 @@ var require_dbcs_data = __commonJS({
       //    In the encoder, it might make sense to support encoding old PUA mappings to Big5 bytes seq-s.
       //    Official spec: http://www.ogcio.gov.hk/en/business/tech_promotion/ccli/terms/doc/2003cmp_2008.txt
       //                   http://www.ogcio.gov.hk/tc/business/tech_promotion/ccli/terms/doc/hkscs-2008-big5-iso.txt
-      //
+      // 
       // Current understanding of how to deal with Big5(-HKSCS) is in the Encoding Standard, http://encoding.spec.whatwg.org/#big5-encoder
       // Unicode mapping (http://www.unicode.org/Public/MAPPINGS/OBSOLETE/EASTASIA/OTHER/BIG5.TXT) is said to be wrong.
       "windows950": "cp950",
@@ -6486,6 +6486,15 @@ var import_node_child_process3 = require("node:child_process");
 var import_node_net = __toESM(require("node:net"));
 var import_node_fs2 = __toESM(require("node:fs"));
 var import_node_path3 = __toESM(require("node:path"));
+function selectBrowserProcessId(processInfo) {
+  if (!Array.isArray(processInfo)) return null;
+  const browser = processInfo.find((item) => {
+    if (!item || typeof item !== "object") return false;
+    const candidate = item;
+    return String(candidate.type ?? "").toLowerCase() === "browser" && typeof candidate.id === "number" && Number.isSafeInteger(candidate.id) && candidate.id > 0;
+  });
+  return browser && typeof browser.id === "number" ? browser.id : null;
+}
 var RESPONSE_STABILITY_MS = 1e3;
 var VISIBLE_SESSION_MARKER_PREFIX = "company-apps-coding-agent:";
 function makeVisibleSessionMarker(sessionId) {
@@ -6909,6 +6918,7 @@ var CopilotEdgeClient = class {
   cdp = null;
   clipGranted = false;
   ownedEdgePid = null;
+  visibleEdgePid = null;
   edgeProfileDir = null;
   visibleSessionId = null;
   constructor(cfg) {
@@ -6937,6 +6947,23 @@ var CopilotEdgeClient = class {
       bws.close();
     }
     this.clipGranted = true;
+  }
+  async refreshBrowserProcessId(deadlineMs = Number.POSITIVE_INFINITY) {
+    this.visibleEdgePid = null;
+    const ver = await (await fetch(`http://127.0.0.1:${this.s.cdpPort}/json/version`, {
+      signal: AbortSignal.timeout(this.remainingTimeoutMs(deadlineMs, 5e3))
+    })).json();
+    const browserWs = String(ver.webSocketDebuggerUrl ?? "");
+    if (!browserWs) throw new Error("browser WebSocket \u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093");
+    const bws = await CdpConnection.connect(browserWs, this.remainingTimeoutMs(deadlineMs, 1e4));
+    try {
+      const result = await bws.method("SystemInfo.getProcessInfo", {}, this.remainingTimeoutMs(deadlineMs, 1e4));
+      const browserPid = selectBrowserProcessId(result?.processInfo);
+      if (browserPid === null) throw new Error("CDP\u304B\u3089Edge\u30D6\u30E9\u30A6\u30B6\u30FC\u672C\u4F53PID\u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
+      this.visibleEdgePid = browserPid;
+    } finally {
+      bws.close();
+    }
   }
   stripOuterFence(t) {
     let s = t.trim();
@@ -7082,6 +7109,7 @@ var CopilotEdgeClient = class {
     args.push(this.s.url);
     const child = (0, import_node_child_process3.spawn)(findEdgePath(), args, { detached: true, stdio: "ignore" });
     this.ownedEdgePid = child.pid ?? null;
+    this.visibleEdgePid = null;
     child.unref();
     const deadline = Date.now() + 3e4;
     while (Date.now() < deadline) {
@@ -7188,6 +7216,7 @@ var CopilotEdgeClient = class {
     makeVisibleSessionMarker(sessionId);
     await this.ensureEdge();
     await this.ensurePage();
+    await this.refreshBrowserProcessId();
     await this.cdpMethod("Page.navigate", { url: this.s.url });
     await sleep(3e3);
     await this.waitInputReady(120);
@@ -7209,7 +7238,7 @@ var CopilotEdgeClient = class {
       sessionId,
       marker,
       markerMatches: marker === expectedMarker && String(parsed.windowName ?? "") === expectedMarker,
-      pid: this.ownedEdgePid,
+      pid: this.visibleEdgePid,
       cdpPort: this.s.cdpPort,
       url: String(parsed.url ?? ""),
       title: String(parsed.title ?? ""),
@@ -8099,7 +8128,144 @@ async function testCopilotEdgeIsolation() {
   import_node_assert.default.strictEqual(visibleSessionMarkerMatches("mt9icyqzvay6", sessionMarker), true);
   import_node_assert.default.strictEqual(visibleSessionMarkerMatches("mt9gbgtilhj0", sessionMarker), false);
   import_node_assert.default.throws(() => makeVisibleSessionMarker("../wrong-session"), /表示セッションIDが不正/);
+  import_node_assert.default.strictEqual(selectBrowserProcessId([
+    { type: "renderer", id: 23468 },
+    { type: "browser", id: 38124 },
+    { type: "GPU", id: 13292 }
+  ]), 38124);
+  import_node_assert.default.strictEqual(selectBrowserProcessId([{ type: "browser", id: 0 }]), null);
+  import_node_assert.default.strictEqual(selectBrowserProcessId([{ type: "browser", id: 38124.5 }]), null);
+  import_node_assert.default.strictEqual(selectBrowserProcessId({ type: "browser", id: 38124 }), null);
   console.log("PASS copilot-edge-isolation");
+}
+async function testCopilotVisibleSessionPidLifecycle() {
+  const originalFetch = globalThis.fetch;
+  const originalWebSocket = globalThis.WebSocket;
+  let processInfo = void 0;
+  const cdpMethods = [];
+  let closedConnections = 0;
+  class FakeBrowserWebSocket {
+    listeners = /* @__PURE__ */ new Map();
+    constructor(_url) {
+      queueMicrotask(() => this.emit("open", {}));
+    }
+    addEventListener(type, cb, options) {
+      const listeners = this.listeners.get(type) ?? [];
+      listeners.push({ cb, once: options?.once === true });
+      this.listeners.set(type, listeners);
+    }
+    send(data) {
+      const request = JSON.parse(data);
+      cdpMethods.push(request.method);
+      queueMicrotask(() => this.emit("message", {
+        data: JSON.stringify({ id: request.id, result: { processInfo } })
+      }));
+    }
+    close() {
+      closedConnections++;
+    }
+    emit(type, event) {
+      const listeners = this.listeners.get(type) ?? [];
+      this.listeners.set(type, listeners.filter((listener) => {
+        listener.cb(event);
+        return !listener.once;
+      }));
+    }
+  }
+  try {
+    globalThis.fetch = (async () => ({
+      ok: true,
+      json: async () => ({ webSocketDebuggerUrl: "ws://fake-browser" })
+    }));
+    globalThis.WebSocket = FakeBrowserWebSocket;
+    const client = new CopilotEdgeClient({ baseURL: "", model: "", provider: "copilot-edge" });
+    const internal = client;
+    const lifecycle = [];
+    internal.s.cdpPort = 61027;
+    internal.ownedEdgePid = 22468;
+    const ensureEdge = internal.ensureEdge.bind(client);
+    internal.ensureEdge = async () => {
+      lifecycle.push("ensureEdge");
+      await ensureEdge();
+    };
+    internal.ensurePage = async () => {
+      lifecycle.push("ensurePage");
+    };
+    const refreshBrowserProcessId = internal.refreshBrowserProcessId.bind(client);
+    internal.refreshBrowserProcessId = async () => {
+      lifecycle.push("refreshBrowserProcessId");
+      await refreshBrowserProcessId();
+    };
+    internal.cdpMethod = async (name) => {
+      lifecycle.push(name);
+    };
+    internal.waitInputReady = async () => {
+      lifecycle.push("waitInputReady");
+    };
+    internal.assertTrustedOrigin = async () => {
+      lifecycle.push("assertTrustedOrigin");
+    };
+    internal.stampVisibleSessionMarker = async () => {
+      lifecycle.push("stampVisibleSessionMarker");
+    };
+    internal.bringToFront = async () => {
+      lifecycle.push("bringToFront");
+    };
+    internal.inspectVisibleSession = async (sessionId) => {
+      lifecycle.push("inspectVisibleSession");
+      return {
+        sessionId,
+        marker: makeVisibleSessionMarker(sessionId),
+        markerMatches: true,
+        pid: internal.visibleEdgePid,
+        cdpPort: internal.s.cdpPort,
+        url: "https://m365.cloud.microsoft/chat/",
+        title: "Copilot",
+        inputReady: true,
+        responseCount: 0,
+        latestResponseLength: 0,
+        generating: false,
+        copyEnabled: false
+      };
+    };
+    await import_node_assert.default.rejects(
+      () => client.prepareVisibleSession("mt9pidlifecycle"),
+      /CDPからEdgeブラウザー本体PIDを取得できませんでした/
+    );
+    import_node_assert.default.strictEqual(internal.ownedEdgePid, 22468);
+    import_node_assert.default.strictEqual(internal.visibleEdgePid, null);
+    import_node_assert.default.strictEqual(internal.s.cdpPort, 61027);
+    import_node_assert.default.deepStrictEqual(cdpMethods, ["SystemInfo.getProcessInfo"]);
+    import_node_assert.default.deepStrictEqual(lifecycle, ["ensureEdge", "ensurePage", "refreshBrowserProcessId"]);
+    processInfo = [
+      { type: "renderer", id: 23468 },
+      { type: "browser", id: 38124 }
+    ];
+    cdpMethods.length = 0;
+    lifecycle.length = 0;
+    const visible = await client.prepareVisibleSession("mt9pidlifecycle");
+    import_node_assert.default.strictEqual(visible.pid, 38124);
+    import_node_assert.default.strictEqual(internal.ownedEdgePid, 22468);
+    import_node_assert.default.strictEqual(internal.visibleEdgePid, 38124);
+    import_node_assert.default.strictEqual(internal.s.cdpPort, 61027);
+    import_node_assert.default.deepStrictEqual(cdpMethods, ["SystemInfo.getProcessInfo"]);
+    import_node_assert.default.deepStrictEqual(lifecycle, [
+      "ensureEdge",
+      "ensurePage",
+      "refreshBrowserProcessId",
+      "Page.navigate",
+      "waitInputReady",
+      "assertTrustedOrigin",
+      "stampVisibleSessionMarker",
+      "bringToFront",
+      "inspectVisibleSession"
+    ]);
+    import_node_assert.default.strictEqual(closedConnections, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.WebSocket = originalWebSocket;
+  }
+  console.log("PASS copilot-visible-session-pid-lifecycle");
 }
 async function testCopilotResponseCompletion() {
   const empty = () => ({ stableLength: null, stableSinceMs: null });
@@ -8561,6 +8727,7 @@ async function testDemoRecordingContract() {
   await testCopilotChoosesFirstAction();
   await testModeBoundaries();
   await testCopilotEdgeIsolation();
+  await testCopilotVisibleSessionPidLifecycle();
   await testCopilotResponseCompletion();
   await testCopilotChunkFallback();
   await testCopilotLoop();

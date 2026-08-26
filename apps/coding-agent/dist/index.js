@@ -4022,7 +4022,7 @@ var require_dbcs_data = __commonJS({
       // == Japanese/ShiftJIS ====================================================
       // All japanese encodings are based on JIS X set of standards:
       // JIS X 0201 - Single-byte encoding of ASCII + ¥ + Kana chars at 0xA1-0xDF.
-      // JIS X 0208 - Main set of 6879 characters, placed in 94x94 plane, to be encoded by 2 bytes.
+      // JIS X 0208 - Main set of 6879 characters, placed in 94x94 plane, to be encoded by 2 bytes. 
       //              Has several variations in 1978, 1983, 1990 and 1997.
       // JIS X 0212 - Supplementary plane of 6067 chars in 94x94 plane. 1990. Effectively dead.
       // JIS X 0213 - Extension and modern replacement of 0208 and 0212. Total chars: 11233.
@@ -4039,7 +4039,7 @@ var require_dbcs_data = __commonJS({
       //               0x8F, (0xA1-0xFE)x2 - 0212 plane (94x94).
       //  * JIS X 208: 7-bit, direct encoding of 0208. Byte ranges: 0x21-0x7E (94 values). Uncommon.
       //               Used as-is in ISO2022 family.
-      //  * ISO2022-JP: Stateful encoding, with escape sequences to switch between ASCII,
+      //  * ISO2022-JP: Stateful encoding, with escape sequences to switch between ASCII, 
       //                0201-1976 Roman, 0208-1978, 0208-1983.
       //  * ISO2022-JP-1: Adds esc seq for 0212-1990.
       //  * ISO2022-JP-2: Adds esc seq for GB2313-1980, KSX1001-1992, ISO8859-1, ISO8859-7.
@@ -4150,7 +4150,7 @@ var require_dbcs_data = __commonJS({
       //  * Windows CP 951: Microsoft variant of Big5-HKSCS-2001. Seems to be never public. http://me.abelcheung.org/articles/research/what-is-cp951/
       //  * Big5-2003 (Taiwan standard) almost superset of cp950.
       //  * Unicode-at-on (UAO) / Mozilla 1.8. Falling out of use on the Web. Not supported by other browsers.
-      //  * Big5-HKSCS (-2001, -2004, -2008). Hong Kong standard.
+      //  * Big5-HKSCS (-2001, -2004, -2008). Hong Kong standard. 
       //    many unicode code points moved from PUA to Supplementary plane (U+2XXXX) over the years.
       //    Plus, it has 4 combining sequences.
       //    Seems that Mozilla refused to support it for 10 yrs. https://bugzilla.mozilla.org/show_bug.cgi?id=162431 https://bugzilla.mozilla.org/show_bug.cgi?id=310299
@@ -4161,7 +4161,7 @@ var require_dbcs_data = __commonJS({
       //    In the encoder, it might make sense to support encoding old PUA mappings to Big5 bytes seq-s.
       //    Official spec: http://www.ogcio.gov.hk/en/business/tech_promotion/ccli/terms/doc/2003cmp_2008.txt
       //                   http://www.ogcio.gov.hk/tc/business/tech_promotion/ccli/terms/doc/hkscs-2008-big5-iso.txt
-      //
+      // 
       // Current understanding of how to deal with Big5(-HKSCS) is in the Encoding Standard, http://encoding.spec.whatwg.org/#big5-encoder
       // Unicode mapping (http://www.unicode.org/Public/MAPPINGS/OBSOLETE/EASTASIA/OTHER/BIG5.TXT) is said to be wrong.
       "windows950": "cp950",
@@ -6502,6 +6502,15 @@ var import_node_child_process3 = require("node:child_process");
 var import_node_net = __toESM(require("node:net"));
 var import_node_fs3 = __toESM(require("node:fs"));
 var import_node_path4 = __toESM(require("node:path"));
+function selectBrowserProcessId(processInfo) {
+  if (!Array.isArray(processInfo)) return null;
+  const browser = processInfo.find((item) => {
+    if (!item || typeof item !== "object") return false;
+    const candidate = item;
+    return String(candidate.type ?? "").toLowerCase() === "browser" && typeof candidate.id === "number" && Number.isSafeInteger(candidate.id) && candidate.id > 0;
+  });
+  return browser && typeof browser.id === "number" ? browser.id : null;
+}
 var RESPONSE_STABILITY_MS = 1e3;
 var VISIBLE_SESSION_MARKER_PREFIX = "company-apps-coding-agent:";
 function makeVisibleSessionMarker(sessionId) {
@@ -6916,6 +6925,7 @@ var CopilotEdgeClient = class {
   cdp = null;
   clipGranted = false;
   ownedEdgePid = null;
+  visibleEdgePid = null;
   edgeProfileDir = null;
   visibleSessionId = null;
   constructor(cfg) {
@@ -6944,6 +6954,23 @@ var CopilotEdgeClient = class {
       bws.close();
     }
     this.clipGranted = true;
+  }
+  async refreshBrowserProcessId(deadlineMs = Number.POSITIVE_INFINITY) {
+    this.visibleEdgePid = null;
+    const ver = await (await fetch(`http://127.0.0.1:${this.s.cdpPort}/json/version`, {
+      signal: AbortSignal.timeout(this.remainingTimeoutMs(deadlineMs, 5e3))
+    })).json();
+    const browserWs = String(ver.webSocketDebuggerUrl ?? "");
+    if (!browserWs) throw new Error("browser WebSocket \u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093");
+    const bws = await CdpConnection.connect(browserWs, this.remainingTimeoutMs(deadlineMs, 1e4));
+    try {
+      const result = await bws.method("SystemInfo.getProcessInfo", {}, this.remainingTimeoutMs(deadlineMs, 1e4));
+      const browserPid = selectBrowserProcessId(result?.processInfo);
+      if (browserPid === null) throw new Error("CDP\u304B\u3089Edge\u30D6\u30E9\u30A6\u30B6\u30FC\u672C\u4F53PID\u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
+      this.visibleEdgePid = browserPid;
+    } finally {
+      bws.close();
+    }
   }
   stripOuterFence(t) {
     let s = t.trim();
@@ -7089,6 +7116,7 @@ var CopilotEdgeClient = class {
     args.push(this.s.url);
     const child = (0, import_node_child_process3.spawn)(findEdgePath(), args, { detached: true, stdio: "ignore" });
     this.ownedEdgePid = child.pid ?? null;
+    this.visibleEdgePid = null;
     child.unref();
     const deadline = Date.now() + 3e4;
     while (Date.now() < deadline) {
@@ -7195,6 +7223,7 @@ var CopilotEdgeClient = class {
     makeVisibleSessionMarker(sessionId);
     await this.ensureEdge();
     await this.ensurePage();
+    await this.refreshBrowserProcessId();
     await this.cdpMethod("Page.navigate", { url: this.s.url });
     await sleep(3e3);
     await this.waitInputReady(120);
@@ -7216,7 +7245,7 @@ var CopilotEdgeClient = class {
       sessionId,
       marker,
       markerMatches: marker === expectedMarker && String(parsed.windowName ?? "") === expectedMarker,
-      pid: this.ownedEdgePid,
+      pid: this.visibleEdgePid,
       cdpPort: this.s.cdpPort,
       url: String(parsed.url ?? ""),
       title: String(parsed.title ?? ""),
