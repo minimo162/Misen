@@ -5,6 +5,7 @@
   "scripts": {
     "build": "node esbuild.config.mjs",
     "typecheck": "tsc --noEmit",
+    "gate": "node test/gate.mjs",
     "start": "node dist/index.js",
     "serve": "node dist/server.js",
     "bridge": "node dist/openai-bridge.js",
