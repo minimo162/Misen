@@ -613,9 +613,9 @@ async function testV2PermissionActionsLastWins(): Promise<void> {
     { permission: 'write_file', pattern: 'notes/**', action: 'allow' as const },
     { permission: 'write_file', pattern: 'notes/private.txt', action: 'deny' as const }
   ]
-  assert.strictEqual(evaluateToolPermission('host.write_file', { path: 'notes/public.txt', content: 'x' }, ctx, rules), 'allow')
-  assert.strictEqual(evaluateToolPermission('host.write_file', { path: 'notes/private.txt', content: 'x' }, ctx, rules), 'deny')
-  assert.strictEqual(evaluateToolPermission('host.write_file', { path: 'other.txt', content: 'x' }, ctx, rules), 'ask')
+  assert.strictEqual(await evaluateToolPermission('host.write_file', { path: 'notes/public.txt', content: 'x' }, ctx, rules), 'allow')
+  assert.strictEqual(await evaluateToolPermission('host.write_file', { path: 'notes/private.txt', content: 'x' }, ctx, rules), 'deny')
+  assert.strictEqual(await evaluateToolPermission('host.write_file', { path: 'other.txt', content: 'x' }, ctx, rules), 'ask')
 
   const controller = createPermissionHook(rules)
   const args = { path: 'notes/public.txt', content: 'x' }
@@ -683,6 +683,196 @@ async function testV2PermissionActionsLastWins(): Promise<void> {
   assert.ok(!fs.existsSync(path.join(root, 'notes/private.txt')))
   fs.rmSync(root, { recursive: true, force: true })
   console.log('PASS v2-permission-actions-last-wins')
+}
+
+async function testV2PermissionNewVsOverwrite(): Promise<void> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-v2-permission-overwrite-'))
+  const ctx = makeCtx(root)
+  const writeDef = TOOL_DEFS.find((toolDef) => toolDef.name === 'write_file')!
+  const rules = [
+    { permission: 'write_file', pattern: '*', action: 'allow' as const },
+    { permission: 'write_file.overwrite', pattern: '*', action: 'ask' as const }
+  ]
+  let approvals = 0
+  const io: AgentIO = {
+    print: () => {},
+    askYesNo: async () => { approvals++; return true }
+  }
+  try {
+    const first = await executeV2ToolCall(
+      { toolCallId: 'new-write', toolName: 'write_file', input: { path: 'same.txt', content: 'first' } },
+      writeDef,
+      { baseURL: '', model: '', permissions: rules },
+      ctx,
+      io,
+      []
+    )
+    assert.strictEqual(first.status, 'succeeded')
+    assert.strictEqual(first.executed, true)
+    assert.strictEqual(approvals, 0, 'new writes allowed by write_file must not prompt')
+
+    const second = await executeV2ToolCall(
+      { toolCallId: 'overwrite-write', toolName: 'write_file', input: { path: 'same.txt', content: 'second' } },
+      writeDef,
+      { baseURL: '', model: '', permissions: rules },
+      ctx,
+      io,
+      []
+    )
+    assert.strictEqual(second.status, 'succeeded')
+    assert.strictEqual(second.executed, true)
+    assert.strictEqual(approvals, 1, 'existing writes must use write_file.overwrite and ask')
+    assert.strictEqual(fs.readFileSync(path.join(root, 'same.txt'), 'utf8'), 'second')
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+  console.log('PASS v2-permission-new-vs-overwrite')
+}
+
+async function testV2PermissionOverwriteLastWins(): Promise<void> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-v2-permission-overwrite-order-'))
+  const ctx = makeCtx(root)
+  fs.writeFileSync(path.join(root, 'existing.txt'), 'before', 'utf8')
+  const args = { path: 'existing.txt', content: 'after' }
+  try {
+    const askThenDeny = [
+      { permission: 'write_file.overwrite', pattern: '*', action: 'ask' as const },
+      { permission: 'write_file.overwrite', pattern: 'existing.txt', action: 'deny' as const }
+    ]
+    const denyThenAsk = [
+      { permission: 'write_file.overwrite', pattern: 'existing.txt', action: 'deny' as const },
+      { permission: 'write_file.overwrite', pattern: '*', action: 'ask' as const }
+    ]
+    assert.strictEqual(await evaluateToolPermission('host.write_file', args, ctx, askThenDeny), 'deny')
+    assert.strictEqual(await evaluateToolPermission('host.write_file', args, ctx, denyThenAsk), 'ask')
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+  console.log('PASS v2-permission-overwrite-last-wins')
+}
+
+async function testV2PermissionOverwritePrecondition(): Promise<void> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-v2-permission-overwrite-precondition-'))
+  const ctx = makeCtx(root)
+  const target = path.join(root, 'existing.txt')
+  fs.writeFileSync(target, 'before', 'utf8')
+  const originalWriteDef = TOOL_DEFS.find((toolDef) => toolDef.name === 'write_file')!
+  let runs = 0
+  const writeDef: typeof originalWriteDef = {
+    ...originalWriteDef,
+    run: async (args, runCtx) => {
+      runs++
+      return originalWriteDef.run(args, runCtx)
+    }
+  }
+  let approvals = 0
+  const io: AgentIO = {
+    print: () => {},
+    askYesNo: async () => {
+      approvals++
+      fs.writeFileSync(target, 'external-change', 'utf8')
+      return true
+    }
+  }
+  try {
+    const result = await executeV2ToolCall(
+      { toolCallId: 'overwrite-precondition', toolName: 'write_file', input: { path: 'existing.txt', content: 'agent-change' } },
+      writeDef,
+      {
+        baseURL: '',
+        model: '',
+        permissions: [
+          { permission: 'write_file', pattern: '*', action: 'allow' },
+          { permission: 'write_file.overwrite', pattern: '*', action: 'ask' }
+        ]
+      },
+      ctx,
+      io,
+      []
+    )
+    assert.strictEqual(result.status, 'denied')
+    assert.strictEqual(result.executed, false)
+    assert.strictEqual(runs, 0, 'approval precondition denial must happen before ToolDef.run')
+    assert.strictEqual(approvals, 1)
+    assert.strictEqual(fs.readFileSync(target, 'utf8'), 'external-change', 'external content must be preserved')
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+  console.log('PASS v2-permission-overwrite-precondition')
+}
+
+async function testV2MinAskProfileZeroApprovals(): Promise<void> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-v2-min-ask-profile-'))
+  const profilePath = path.join(process.cwd(), 'config.flex.json')
+  const profile = JSON.parse(fs.readFileSync(profilePath, 'utf8')) as AgentConfig
+  const exampleProfilePath = path.join(process.cwd(), 'config.example.json')
+  const exampleProfile = JSON.parse(fs.readFileSync(exampleProfilePath, 'utf8')) as AgentConfig
+  assert.strictEqual(profile.agentLoop, 'v1', 'shipped flex profile must retain the v1 default')
+  assert.strictEqual(profile.safeCommandOnly, true)
+  assert.strictEqual(exampleProfile.safeCommandOnly, true, 'shipped example profile must retain the safe command hard guard')
+  assert.deepStrictEqual(exampleProfile.permissions, profile.permissions, 'shipped profiles must share the ask-minimal permissions')
+  assert.deepStrictEqual(profile.permissions, [
+    { permission: 'list_files', pattern: '*', action: 'allow' },
+    { permission: 'read_file', pattern: '*', action: 'allow' },
+    { permission: 'read_files', pattern: '*', action: 'allow' },
+    { permission: 'read_xlsx', pattern: '*', action: 'allow' },
+    { permission: 'search_files', pattern: '*', action: 'allow' },
+    { permission: 'write_file', pattern: '*', action: 'allow' },
+    { permission: 'write_file.overwrite', pattern: '*', action: 'ask' },
+    { permission: 'start_process', pattern: '*', action: 'allow' },
+    { permission: 'run_command', pattern: '*', action: 'ask' }
+  ])
+  fs.writeFileSync(path.join(root, 'read.txt'), 'needle in fixture', 'utf8')
+  fs.writeFileSync(path.join(root, 'open.txt'), 'open fixture', 'utf8')
+  const scenarios: Array<{ userInput: string; tool_call: { name: string; args: Record<string, unknown> } }> = [
+    { userInput: '一覧', tool_call: { name: 'list_files', args: { path: '.', recursive: false } } },
+    { userInput: '読む', tool_call: { name: 'read_file', args: { path: 'read.txt' } } },
+    { userInput: '開く', tool_call: { name: 'start_process', args: { command: 'open.txt' } } },
+    { userInput: '新規作成', tool_call: { name: 'write_file', args: { path: 'new.txt', content: 'new fixture' } } },
+    { userInput: '検索', tool_call: { name: 'search_files', args: { query: 'needle' } } }
+  ]
+  const steps: ScriptStep[] = scenarios.flatMap((scenario, index) => [
+    { tool_call: scenario.tool_call },
+    { content: `scenario-${index}-done` }
+  ])
+  const startProcessDef = TOOL_DEFS.find((toolDef) => toolDef.name === 'start_process')!
+  const originalStartProcessRun = startProcessDef.run
+  let approvals = 0
+  try {
+    // The open scenario must remain deterministic and must not launch a GUI app.
+    startProcessDef.run = async () => 'stub-opened'
+    await withServer(steps, async (baseCfg, requestBodies) => {
+      for (const scenario of scenarios) {
+        const cfg: AgentConfig = {
+          ...baseCfg,
+          ...profile,
+          agentLoop: 'v2',
+          baseURL: baseCfg.baseURL,
+          apiKey: baseCfg.apiKey,
+          model: baseCfg.model
+        }
+        const result = await runAgentTurnV2({
+          cfg,
+          messages: [],
+          userInput: scenario.userInput,
+          ctx: makeCtx(root, true),
+          io: {
+            print: () => {},
+            askYesNo: async () => { approvals++; return true }
+          }
+        })
+        assert.strictEqual(result.aborted, false, `${scenario.userInput} turn should complete`)
+        assert.ok(result.reply.includes('scenario-'), `${scenario.userInput} turn should receive the model completion`)
+      }
+      assert.strictEqual(requestBodies.length, scenarios.length * 2)
+    })
+    assert.strictEqual(approvals, 0, 'ask-minimal profile must complete all five turns with zero approvals')
+    assert.strictEqual(fs.readFileSync(path.join(root, 'new.txt'), 'utf8'), 'new fixture')
+  } finally {
+    startProcessDef.run = originalStartProcessRun
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+  console.log('PASS v2-min-ask-profile-zero-approvals')
 }
 
 async function testV2PermissionCommandPrefix(): Promise<void> {
@@ -2019,6 +2209,10 @@ async function testDemoRecordingContract(): Promise<void> {
   await testV2ToolLoopAndEventContract()
   await testV2HookDenialPropagation()
   await testV2PermissionActionsLastWins()
+  await testV2PermissionNewVsOverwrite()
+  await testV2PermissionOverwriteLastWins()
+  await testV2PermissionOverwritePrecondition()
+  await testV2MinAskProfileZeroApprovals()
   await testV2PermissionCommandPrefix()
   await testV2PermissionCommandConservative()
   await testV2PermissionHardGuardComposition()
