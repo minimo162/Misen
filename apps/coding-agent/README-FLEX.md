@@ -1,5 +1,32 @@
 # Flex mode (Windows, deterministic by default)
 
+## 回帰ゲート
+
+`apps/coding-agent` で次の1コマンドを実行すると、通常の回帰ゲートを順番に実行します。各段の出力はリアルタイムに表示され、最後に PASS / FAIL / SKIP と所要時間の表が出ます。途中の段が失敗しても可能な後続段を続け、1段でも失敗した場合は終了コード1になります。
+
+```powershell
+npm run gate
+```
+
+| 段 | 実行内容 | 通常実行 |
+|---|---|---|
+| typecheck | `npx tsc --noEmit` | PASS / FAIL |
+| build | `node esbuild.config.mjs` | PASS / FAIL |
+| smoke | `node dist/smoke.js`（直前のbuild成果物を使用） | PASS / FAIL |
+| flex-validate | `node dist/flex-harness.js` | PASS / FAIL |
+| live-converter | `node dist/flex-harness.js --live` | フラグなしはSKIP |
+| live-copilot | `node test/measure-flex-copilot.mjs` | フラグなしはSKIP |
+
+4B変換係まで実行する場合は、llama.cppサーバーを `127.0.0.1:8080` で起動してから `npm run gate -- --live-converter` を使います。
+
+実Copilot 5種の計測まで実行する場合は、`dist/server.js` のサーバーとEdge Copilotセッションを準備してから `npm run gate -- --live-copilot` を使います。既存計測スクリプトのbaseURL、workspace、結果パスはフラグの後へ同じ順番で渡せます。
+
+```powershell
+npm run gate -- --live-copilot http://127.0.0.1:3951 .tmp/flex-copilot-performance .tmp/flex-performance/result.json
+```
+
+機械可読な全段の結果は、実行のたびに `.tmp/gate-result.json` へUTF-8のJSONとして保存されます。
+
 Layer 1 is the default and needs neither llama.cpp nor a local model. From `apps/coding-agent`, start the agent for any existing folder; that folder is the only file-operation boundary:
 
 ```powershell
