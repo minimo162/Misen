@@ -246,8 +246,10 @@ function pausedResult(messages: ChatMessage[], userInput: string, steps: string[
   }
 }
 
-function buildProtocolRules(mode: TurnMode = 'work', allowArbitraryCommands = false, autoApproveCommand = false): string {
-  const toolDocs = TOOL_DEFS.filter((t) => allowArbitraryCommands || t.name !== 'run_command').map((t) => {
+function buildProtocolRules(mode: TurnMode = 'work', allowArbitraryCommands = false, autoApproveCommand = false, safeCommandOnly = false): string {
+  const toolDocs = TOOL_DEFS.filter((t) =>
+    (allowArbitraryCommands || t.name !== 'run_command') &&
+    !(safeCommandOnly && t.name === 'get_weather')).map((t) => {
     const req = ((t.parameters as { required?: string[] }).required ?? [])
     const props = Object.keys((t.parameters as { properties?: Record<string, unknown> }).properties ?? {})
     return `- ${qualifiedToolName(t.name)}(${props.join(', ')}):${req.length ? ` 必須=${req.join(',')};` : ''} ${t.description}`
@@ -272,7 +274,11 @@ function buildProtocolRules(mode: TurnMode = 'work', allowArbitraryCommands = fa
     'あなたの応答は実行結果ではなく、ホストブリッジが解釈する「次の1手」です。',
     'ホストブリッジは host.* のJSONだけを検証して1回ずつ実行し、結果を次の入力にhost_resultとして渡します。',
     'ローカル操作が不要ならanswerを返します。先回りのlist_filesや、同じ操作の繰り返しは禁止です。',
-    allowArbitraryCommands ? '天気・気温・降水量はhost.get_weatherを使い、任意コマンドで外部天気サイトを呼んではいけません。' : '天気・気温・降水量はhost.get_weatherを使ってください。',
+    safeCommandOnly
+      ? 'この構成ではネットワーク通信を行うhostツールは利用できません。天気など外部情報を取得したと主張しないでください。'
+      : allowArbitraryCommands
+        ? '天気・気温・降水量はhost.get_weatherを使い、任意コマンドで外部天気サイトを呼んではいけません。'
+        : '天気・気温・降水量はhost.get_weatherを使ってください。',
     'ツールが拒否された、または情報が不足している場合は、次の操作を推測せずanswerで利用者に確認してください。',
     '',
     '選択できるhostアクション:',
@@ -387,12 +393,12 @@ async function approvalPreconditionChanged(binding: ApprovalBinding, ctx: ToolCo
   return state.existedBefore !== binding.existedBefore || state.beforeHash !== binding.beforeHash
 }
 
-function composeCopilotPrompt(mode: TurnMode, userInput: string, steps: string[], budget = 120000, history: { role: string; content: string }[] = [], allowArbitraryCommands = false, autoApproveCommand = false, systemInstructions = ''): string {
+function composeCopilotPrompt(mode: TurnMode, userInput: string, steps: string[], budget = 120000, history: { role: string; content: string }[] = [], allowArbitraryCommands = false, autoApproveCommand = false, systemInstructions = '', safeCommandOnly = false): string {
   const histBlock = history.length > 0
     ? ['', '[これまでのやりとり]', ...history.map((h) => `${h.role}: ${h.content.replace(/\r?\n+/g, ' ')}`)]
     : []
   const systemBlock = systemInstructions.trim() ? ['', '[業務固有指示]', systemInstructions.trim()] : []
-  const head = [buildProtocolRules(mode, allowArbitraryCommands, autoApproveCommand), ...systemBlock, ...histBlock, '', '[依頼]', userInput]
+  const head = [buildProtocolRules(mode, allowArbitraryCommands, autoApproveCommand, safeCommandOnly), ...systemBlock, ...histBlock, '', '[依頼]', userInput]
   const tail = [
     '',
     '[指示]',
@@ -495,7 +501,7 @@ async function runCopilotTurn(opts: {
     if (io.isPaused?.()) return { reply: '', messages: turnMessages('[一時停止] チェックポイントを保存しました'), aborted: true, paused: true, checkpoint: steps.slice(-20) }
     let raw: string
     try {
-      raw = await backend.complete(composeCopilotPrompt('work', opts.userInput, steps, cfg.copilot?.maxPromptChars ?? 120000, history, policy.allowArbitraryCommands, policy.autoApproveCommand, systemInstructions), io.signal)
+      raw = await backend.complete(composeCopilotPrompt('work', opts.userInput, steps, cfg.copilot?.maxPromptChars ?? 120000, history, policy.allowArbitraryCommands, policy.autoApproveCommand, systemInstructions, ctx.safeCommandOnly === true), io.signal)
       raw = raw.replace(/＜/g, '<').replace(/＞/g, '>').replace(/｀/g, String.fromCharCode(96))
       io.event?.({ type: 'model.decision', summary: 'Copilotの次の1手を受信しました', origin: 'copilot', namespace: 'native', authority: 'claimed' })
     } catch (err) {
@@ -505,7 +511,10 @@ async function runCopilotTurn(opts: {
     }
     let converterRaw: string | null = null
     try {
-      converterRaw = await convertCopilotResponse(cfg.localResponseConverter, raw, TOOL_DEFS.map((tool) => ({ name: qualifiedToolName(tool.name), description: tool.description, parameters: tool.parameters })), io.signal)
+      const converterTools = TOOL_DEFS.filter((tool) =>
+        (policy.allowArbitraryCommands || tool.name !== 'run_command') &&
+        !(ctx.safeCommandOnly && tool.name === 'get_weather'))
+      converterRaw = await convertCopilotResponse(cfg.localResponseConverter, raw, converterTools.map((tool) => ({ name: qualifiedToolName(tool.name), description: tool.description, parameters: tool.parameters })), io.signal)
       if (converterRaw !== null) io.print('[converter] loopback response converter applied')
     } catch (err) {
       // The converter is optional. A failed/unavailable local service is never
@@ -538,6 +547,7 @@ async function runCopilotTurn(opts: {
       if (invalidDecisions >= 2) return stopWithWarning('許可されていないCopilot内蔵ツールまたは不明なツールが要求されたため停止しました')
       continue
     }
+    if (ctx.safeCommandOnly && bareToolName(def.name) === 'get_weather') return stopWithWarning('この構成ではネットワーク通信を行うhostツールは利用できません')
     parsed.tool = normalizedTool
     if (bareToolName(def.name) === 'run_command' && !policy.allowArbitraryCommands) return stopWithWarning('任意コマンド実行は設定で明示的に有効化されていないため停止しました')
     const args = parsed.args ?? {}
@@ -708,7 +718,7 @@ async function runOpenAITurn(opts: {
     if (io.isPaused?.()) return { reply: '', messages, aborted: true, paused: true }
     let assistant: ChatMessage
     try {
-      assistant = await chat(cfg, messages, openAITools({ allowArbitraryCommands: policy.allowArbitraryCommands }), io.signal)
+      assistant = await chat(cfg, messages, openAITools({ allowArbitraryCommands: policy.allowArbitraryCommands, safeCommandOnly: ctx.safeCommandOnly }), io.signal)
     } catch (err) {
       const msg = (err as Error).message
       io.print(`[error] ${msg}`)
@@ -723,6 +733,7 @@ async function runOpenAITurn(opts: {
     const call = calls[0]
     const def = findHostTool(call.function.name)
     if (!def) return warning(`許可されていないhostツール ${call.function.name} が要求されたため停止しました`)
+    if (ctx.safeCommandOnly && bareToolName(def.name) === 'get_weather') return warning('この構成ではネットワーク通信を行うhostツールは利用できません')
     if (bareToolName(def.name) === 'run_command' && !policy.allowArbitraryCommands) return warning('任意コマンド実行は設定で明示的に有効化されていないため停止しました')
     if (def.kind === 'write' && writes >= maxWrites) return warning(`書き込み実行上限(${maxWrites}回)に達したため停止しました`)
     if (def.kind === 'command' && commands >= maxCommands) return warning(`コマンド実行上限(${maxCommands}回)に達したため停止しました`)
@@ -756,6 +767,7 @@ async function executeCall(
   if (!call.function.name.startsWith('host.')) return '[policy error] host.* 以外のツールはworkモードで許可されていません'
   const def = findHostTool(call.function.name)
   if (!def) return `[policy error] 未知のhostツール: ${call.function.name}`
+  if (ctx.safeCommandOnly && bareToolName(def.name) === 'get_weather') return '[policy error] この構成ではネットワーク通信を行うhostツールは利用できません'
   if (bareToolName(def.name) === 'run_command' && !policy.allowArbitraryCommands) return '[policy error] 任意コマンド実行は設定で明示的に有効化されていません'
   let args: Record<string, unknown>
   try {

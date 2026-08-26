@@ -4564,7 +4564,7 @@ function strictProtocolFastPath(rawResponse, tools) {
 }
 function loopbackUrl(value) {
   const url = new URL(value);
-  const host = url.hostname.toLowerCase();
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/gu, "");
   if (url.protocol !== "http:" && url.protocol !== "https:" || !["127.0.0.1", "::1", "localhost"].includes(host)) {
     throw new Error("localResponseConverter.baseURL \u306F loopback HTTP(S) URL \u3060\u3051\u6307\u5B9A\u3067\u304D\u307E\u3059");
   }
@@ -5112,6 +5112,46 @@ function normalizeWorkspaceOpenCommand(command, ctx) {
     throw new Error(`run_command\u62D2\u5426: \u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u3078\u306E\u30A2\u30AF\u30BB\u30B9\u306F\u7981\u6B62\u3067\u3059: ${candidate}`);
   }
   if (!import_node_fs.default.existsSync(absolute)) throw new Error(`run_command\u62D2\u5426: \u958B\u304F\u5BFE\u8C61\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${candidate}`);
+  const stat = import_node_fs.default.lstatSync(absolute);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`run_command\u62D2\u5426: \u901A\u5E38\u30D5\u30A1\u30A4\u30EB\u4EE5\u5916\u306F\u958B\u3051\u307E\u305B\u3093: ${candidate}`);
+  const allowedExtensions = /* @__PURE__ */ new Set([
+    ".txt",
+    ".md",
+    ".csv",
+    ".tsv",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".xml",
+    ".log",
+    ".xlsx",
+    ".xlsm",
+    ".xls",
+    ".ods",
+    ".docx",
+    ".doc",
+    ".odt",
+    ".pptx",
+    ".ppt",
+    ".odp",
+    ".pdf",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".bmp",
+    ".webp",
+    ".svg",
+    ".mp4",
+    ".mov",
+    ".avi",
+    ".mkv",
+    ".mp3",
+    ".wav",
+    ".m4a"
+  ]);
+  const extension = import_node_path.default.extname(absolute).toLowerCase();
+  if (!allowedExtensions.has(extension)) throw new Error(`run_command\u62D2\u5426: \u5B89\u5168\u306B\u958B\u3051\u308B\u901A\u5E38\u6587\u66F8\u30FB\u30E1\u30C7\u30A3\u30A2\u5F62\u5F0F\u3067\u306F\u3042\u308A\u307E\u305B\u3093: ${candidate}`);
   if (absolute.includes("'")) throw new Error("run_command\u62D2\u5426: \u958B\u304F\u5BFE\u8C61\u306E\u30D1\u30B9\u306B\u5F15\u7528\u7B26\u306F\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093");
   return `powershell.exe -NoProfile -Command "Invoke-Item -LiteralPath '${absolute}'"`;
 }

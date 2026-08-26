@@ -4640,7 +4640,7 @@ function strictProtocolFastPath(rawResponse, tools) {
 }
 function loopbackUrl(value) {
   const url = new URL(value);
-  const host = url.hostname.toLowerCase();
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/gu, "");
   if (url.protocol !== "http:" && url.protocol !== "https:" || !["127.0.0.1", "::1", "localhost"].includes(host)) {
     throw new Error("localResponseConverter.baseURL \u306F loopback HTTP(S) URL \u3060\u3051\u6307\u5B9A\u3067\u304D\u307E\u3059");
   }
@@ -5264,6 +5264,46 @@ function normalizeWorkspaceOpenCommand(command, ctx2) {
     throw new Error(`run_command\u62D2\u5426: \u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u3078\u306E\u30A2\u30AF\u30BB\u30B9\u306F\u7981\u6B62\u3067\u3059: ${candidate}`);
   }
   if (!import_node_fs2.default.existsSync(absolute)) throw new Error(`run_command\u62D2\u5426: \u958B\u304F\u5BFE\u8C61\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${candidate}`);
+  const stat = import_node_fs2.default.lstatSync(absolute);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`run_command\u62D2\u5426: \u901A\u5E38\u30D5\u30A1\u30A4\u30EB\u4EE5\u5916\u306F\u958B\u3051\u307E\u305B\u3093: ${candidate}`);
+  const allowedExtensions = /* @__PURE__ */ new Set([
+    ".txt",
+    ".md",
+    ".csv",
+    ".tsv",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".xml",
+    ".log",
+    ".xlsx",
+    ".xlsm",
+    ".xls",
+    ".ods",
+    ".docx",
+    ".doc",
+    ".odt",
+    ".pptx",
+    ".ppt",
+    ".odp",
+    ".pdf",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".bmp",
+    ".webp",
+    ".svg",
+    ".mp4",
+    ".mov",
+    ".avi",
+    ".mkv",
+    ".mp3",
+    ".wav",
+    ".m4a"
+  ]);
+  const extension = import_node_path2.default.extname(absolute).toLowerCase();
+  if (!allowedExtensions.has(extension)) throw new Error(`run_command\u62D2\u5426: \u5B89\u5168\u306B\u958B\u3051\u308B\u901A\u5E38\u6587\u66F8\u30FB\u30E1\u30C7\u30A3\u30A2\u5F62\u5F0F\u3067\u306F\u3042\u308A\u307E\u305B\u3093: ${candidate}`);
   if (absolute.includes("'")) throw new Error("run_command\u62D2\u5426: \u958B\u304F\u5BFE\u8C61\u306E\u30D1\u30B9\u306B\u5F15\u7528\u7B26\u306F\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093");
   return `powershell.exe -NoProfile -Command "Invoke-Item -LiteralPath '${absolute}'"`;
 }
@@ -6125,7 +6165,7 @@ var TOOL_DEFS = [
   }
 ];
 function openAITools(options = {}) {
-  const defs = options.allowArbitraryCommands ? TOOL_DEFS : TOOL_DEFS.filter((tool) => tool.name !== "run_command");
+  const defs = TOOL_DEFS.filter((tool) => (options.allowArbitraryCommands || tool.name !== "run_command") && !(options.safeCommandOnly && tool.name === "get_weather"));
   return defs.map((t) => ({
     type: "function",
     function: { name: qualifiedToolName(t.name), description: t.description, parameters: { ...t.parameters, additionalProperties: false } }
@@ -6270,8 +6310,8 @@ var END_MARKER = "AGENT_END";
 function shouldCancel(io) {
   return io.signal?.aborted === true || io.isCanceled?.() === true;
 }
-function buildProtocolRules(mode = "work", allowArbitraryCommands = false, autoApproveCommand = false) {
-  const toolDocs = TOOL_DEFS.filter((t) => allowArbitraryCommands || t.name !== "run_command").map((t) => {
+function buildProtocolRules(mode = "work", allowArbitraryCommands = false, autoApproveCommand = false, safeCommandOnly = false) {
+  const toolDocs = TOOL_DEFS.filter((t) => (allowArbitraryCommands || t.name !== "run_command") && !(safeCommandOnly && t.name === "get_weather")).map((t) => {
     const req = t.parameters.required ?? [];
     const props = Object.keys(t.parameters.properties ?? {});
     return `- ${qualifiedToolName(t.name)}(${props.join(", ")}):${req.length ? ` \u5FC5\u9808=${req.join(",")};` : ""} ${t.description}`;
@@ -6292,7 +6332,7 @@ function buildProtocolRules(mode = "work", allowArbitraryCommands = false, autoA
     "\u3042\u306A\u305F\u306E\u5FDC\u7B54\u306F\u5B9F\u884C\u7D50\u679C\u3067\u306F\u306A\u304F\u3001\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u304C\u89E3\u91C8\u3059\u308B\u300C\u6B21\u306E1\u624B\u300D\u3067\u3059\u3002",
     "\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u306F host.* \u306EJSON\u3060\u3051\u3092\u691C\u8A3C\u3057\u30661\u56DE\u305A\u3064\u5B9F\u884C\u3057\u3001\u7D50\u679C\u3092\u6B21\u306E\u5165\u529B\u306Bhost_result\u3068\u3057\u3066\u6E21\u3057\u307E\u3059\u3002",
     "\u30ED\u30FC\u30AB\u30EB\u64CD\u4F5C\u304C\u4E0D\u8981\u306A\u3089answer\u3092\u8FD4\u3057\u307E\u3059\u3002\u5148\u56DE\u308A\u306Elist_files\u3084\u3001\u540C\u3058\u64CD\u4F5C\u306E\u7E70\u308A\u8FD4\u3057\u306F\u7981\u6B62\u3067\u3059\u3002",
-    allowArbitraryCommands ? "\u5929\u6C17\u30FB\u6C17\u6E29\u30FB\u964D\u6C34\u91CF\u306Fhost.get_weather\u3092\u4F7F\u3044\u3001\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u3067\u5916\u90E8\u5929\u6C17\u30B5\u30A4\u30C8\u3092\u547C\u3093\u3067\u306F\u3044\u3051\u307E\u305B\u3093\u3002" : "\u5929\u6C17\u30FB\u6C17\u6E29\u30FB\u964D\u6C34\u91CF\u306Fhost.get_weather\u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044\u3002",
+    safeCommandOnly ? "\u3053\u306E\u69CB\u6210\u3067\u306F\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u901A\u4FE1\u3092\u884C\u3046host\u30C4\u30FC\u30EB\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093\u3002\u5929\u6C17\u306A\u3069\u5916\u90E8\u60C5\u5831\u3092\u53D6\u5F97\u3057\u305F\u3068\u4E3B\u5F35\u3057\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002" : allowArbitraryCommands ? "\u5929\u6C17\u30FB\u6C17\u6E29\u30FB\u964D\u6C34\u91CF\u306Fhost.get_weather\u3092\u4F7F\u3044\u3001\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u3067\u5916\u90E8\u5929\u6C17\u30B5\u30A4\u30C8\u3092\u547C\u3093\u3067\u306F\u3044\u3051\u307E\u305B\u3093\u3002" : "\u5929\u6C17\u30FB\u6C17\u6E29\u30FB\u964D\u6C34\u91CF\u306Fhost.get_weather\u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044\u3002",
     "\u30C4\u30FC\u30EB\u304C\u62D2\u5426\u3055\u308C\u305F\u3001\u307E\u305F\u306F\u60C5\u5831\u304C\u4E0D\u8DB3\u3057\u3066\u3044\u308B\u5834\u5408\u306F\u3001\u6B21\u306E\u64CD\u4F5C\u3092\u63A8\u6E2C\u305B\u305Aanswer\u3067\u5229\u7528\u8005\u306B\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
     "",
     "\u9078\u629E\u3067\u304D\u308Bhost\u30A2\u30AF\u30B7\u30E7\u30F3:",
@@ -6393,10 +6433,10 @@ async function approvalPreconditionChanged(binding, ctx2) {
   const state = await getFilePrecondition(binding.path, ctx2);
   return state.existedBefore !== binding.existedBefore || state.beforeHash !== binding.beforeHash;
 }
-function composeCopilotPrompt(mode, userInput, steps, budget = 12e4, history = [], allowArbitraryCommands = false, autoApproveCommand = false, systemInstructions = "") {
+function composeCopilotPrompt(mode, userInput, steps, budget = 12e4, history = [], allowArbitraryCommands = false, autoApproveCommand = false, systemInstructions = "", safeCommandOnly = false) {
   const histBlock = history.length > 0 ? ["", "[\u3053\u308C\u307E\u3067\u306E\u3084\u308A\u3068\u308A]", ...history.map((h) => `${h.role}: ${h.content.replace(/\r?\n+/g, " ")}`)] : [];
   const systemBlock = systemInstructions.trim() ? ["", "[\u696D\u52D9\u56FA\u6709\u6307\u793A]", systemInstructions.trim()] : [];
-  const head = [buildProtocolRules(mode, allowArbitraryCommands, autoApproveCommand), ...systemBlock, ...histBlock, "", "[\u4F9D\u983C]", userInput];
+  const head = [buildProtocolRules(mode, allowArbitraryCommands, autoApproveCommand, safeCommandOnly), ...systemBlock, ...histBlock, "", "[\u4F9D\u983C]", userInput];
   const tail = [
     "",
     "[\u6307\u793A]",
@@ -6478,7 +6518,7 @@ async function runCopilotTurn(opts) {
     if (io.isPaused?.()) return { reply: "", messages: turnMessages("[\u4E00\u6642\u505C\u6B62] \u30C1\u30A7\u30C3\u30AF\u30DD\u30A4\u30F3\u30C8\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F"), aborted: true, paused: true, checkpoint: steps.slice(-20) };
     let raw;
     try {
-      raw = await backend.complete(composeCopilotPrompt("work", opts.userInput, steps, cfg2.copilot?.maxPromptChars ?? 12e4, history, policy.allowArbitraryCommands, policy.autoApproveCommand, systemInstructions), io.signal);
+      raw = await backend.complete(composeCopilotPrompt("work", opts.userInput, steps, cfg2.copilot?.maxPromptChars ?? 12e4, history, policy.allowArbitraryCommands, policy.autoApproveCommand, systemInstructions, ctx2.safeCommandOnly === true), io.signal);
       raw = raw.replace(/＜/g, "<").replace(/＞/g, ">").replace(/｀/g, String.fromCharCode(96));
       io.event?.({ type: "model.decision", summary: "Copilot\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: "copilot", namespace: "native", authority: "claimed" });
     } catch (err) {
@@ -6488,7 +6528,8 @@ async function runCopilotTurn(opts) {
     }
     let converterRaw = null;
     try {
-      converterRaw = await convertCopilotResponse(cfg2.localResponseConverter, raw, TOOL_DEFS.map((tool) => ({ name: qualifiedToolName(tool.name), description: tool.description, parameters: tool.parameters })), io.signal);
+      const converterTools = TOOL_DEFS.filter((tool) => (policy.allowArbitraryCommands || tool.name !== "run_command") && !(ctx2.safeCommandOnly && tool.name === "get_weather"));
+      converterRaw = await convertCopilotResponse(cfg2.localResponseConverter, raw, converterTools.map((tool) => ({ name: qualifiedToolName(tool.name), description: tool.description, parameters: tool.parameters })), io.signal);
       if (converterRaw !== null) io.print("[converter] loopback response converter applied");
     } catch (err) {
       io.print(`[converter] fallback: ${err.message}`);
@@ -6519,6 +6560,7 @@ async function runCopilotTurn(opts) {
       if (invalidDecisions >= 2) return stopWithWarning("\u8A31\u53EF\u3055\u308C\u3066\u3044\u306A\u3044Copilot\u5185\u8535\u30C4\u30FC\u30EB\u307E\u305F\u306F\u4E0D\u660E\u306A\u30C4\u30FC\u30EB\u304C\u8981\u6C42\u3055\u308C\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
       continue;
     }
+    if (ctx2.safeCommandOnly && bareToolName(def.name) === "get_weather") return stopWithWarning("\u3053\u306E\u69CB\u6210\u3067\u306F\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u901A\u4FE1\u3092\u884C\u3046host\u30C4\u30FC\u30EB\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093");
     parsed.tool = normalizedTool;
     if (bareToolName(def.name) === "run_command" && !policy.allowArbitraryCommands) return stopWithWarning("\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u8A2D\u5B9A\u3067\u660E\u793A\u7684\u306B\u6709\u52B9\u5316\u3055\u308C\u3066\u3044\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
     const args = parsed.args ?? {};
@@ -6668,7 +6710,7 @@ async function runOpenAITurn(opts) {
     if (io.isPaused?.()) return { reply: "", messages, aborted: true, paused: true };
     let assistant;
     try {
-      assistant = await chat(cfg2, messages, openAITools({ allowArbitraryCommands: policy.allowArbitraryCommands }), io.signal);
+      assistant = await chat(cfg2, messages, openAITools({ allowArbitraryCommands: policy.allowArbitraryCommands, safeCommandOnly: ctx2.safeCommandOnly }), io.signal);
     } catch (err) {
       const msg = err.message;
       io.print(`[error] ${msg}`);
@@ -6683,6 +6725,7 @@ async function runOpenAITurn(opts) {
     const call = calls[0];
     const def = findHostTool(call.function.name);
     if (!def) return warning(`\u8A31\u53EF\u3055\u308C\u3066\u3044\u306A\u3044host\u30C4\u30FC\u30EB ${call.function.name} \u304C\u8981\u6C42\u3055\u308C\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`);
+    if (ctx2.safeCommandOnly && bareToolName(def.name) === "get_weather") return warning("\u3053\u306E\u69CB\u6210\u3067\u306F\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u901A\u4FE1\u3092\u884C\u3046host\u30C4\u30FC\u30EB\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093");
     if (bareToolName(def.name) === "run_command" && !policy.allowArbitraryCommands) return warning("\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u8A2D\u5B9A\u3067\u660E\u793A\u7684\u306B\u6709\u52B9\u5316\u3055\u308C\u3066\u3044\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
     if (def.kind === "write" && writes >= maxWrites) return warning(`\u66F8\u304D\u8FBC\u307F\u5B9F\u884C\u4E0A\u9650(${maxWrites}\u56DE)\u306B\u9054\u3057\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`);
     if (def.kind === "command" && commands >= maxCommands) return warning(`\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u4E0A\u9650(${maxCommands}\u56DE)\u306B\u9054\u3057\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`);
@@ -6714,6 +6757,7 @@ async function executeCall(call, cfg2, ctx2, io) {
   if (!call.function.name.startsWith("host.")) return "[policy error] host.* \u4EE5\u5916\u306E\u30C4\u30FC\u30EB\u306Fwork\u30E2\u30FC\u30C9\u3067\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093";
   const def = findHostTool(call.function.name);
   if (!def) return `[policy error] \u672A\u77E5\u306Ehost\u30C4\u30FC\u30EB: ${call.function.name}`;
+  if (ctx2.safeCommandOnly && bareToolName(def.name) === "get_weather") return "[policy error] \u3053\u306E\u69CB\u6210\u3067\u306F\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u901A\u4FE1\u3092\u884C\u3046host\u30C4\u30FC\u30EB\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093";
   if (bareToolName(def.name) === "run_command" && !policy.allowArbitraryCommands) return "[policy error] \u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u8A2D\u5B9A\u3067\u660E\u793A\u7684\u306B\u6709\u52B9\u5316\u3055\u308C\u3066\u3044\u307E\u305B\u3093";
   let args;
   try {

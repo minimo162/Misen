@@ -62,7 +62,7 @@ function strictProtocolFastPath(rawResponse: string, tools: ConverterToolDefinit
 
 function loopbackUrl(value: string): URL {
   const url = new URL(value)
-  const host = url.hostname.toLowerCase()
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/gu, '')
   if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !['127.0.0.1', '::1', 'localhost'].includes(host)) {
     throw new Error('localResponseConverter.baseURL は loopback HTTP(S) URL だけ指定できます')
   }

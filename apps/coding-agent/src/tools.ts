@@ -216,6 +216,16 @@ export function normalizeWorkspaceOpenCommand(command: string, ctx: ToolContext)
   let absolute: string
   try { absolute = resolveInWorkspace(candidate, ctx) } catch { throw new Error(`run_command拒否: ワークスペース外へのアクセスは禁止です: ${candidate}`) }
   if (!fs.existsSync(absolute)) throw new Error(`run_command拒否: 開く対象が存在しません: ${candidate}`)
+  const stat = fs.lstatSync(absolute)
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`run_command拒否: 通常ファイル以外は開けません: ${candidate}`)
+  const allowedExtensions = new Set([
+    '.txt', '.md', '.csv', '.tsv', '.json', '.yaml', '.yml', '.xml', '.log',
+    '.xlsx', '.xlsm', '.xls', '.ods', '.docx', '.doc', '.odt', '.pptx', '.ppt', '.odp', '.pdf',
+    '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg',
+    '.mp4', '.mov', '.avi', '.mkv', '.mp3', '.wav', '.m4a'
+  ])
+  const extension = path.extname(absolute).toLowerCase()
+  if (!allowedExtensions.has(extension)) throw new Error(`run_command拒否: 安全に開ける通常文書・メディア形式ではありません: ${candidate}`)
   // The source is a tokenized value with metacharacters rejected above. A
   // quote would alter the generated single-quoted literal, so reject it too.
   if (absolute.includes("'")) throw new Error('run_command拒否: 開く対象のパスに引用符は使用できません')
@@ -1100,8 +1110,10 @@ export const TOOL_DEFS: ToolDef[] = [
   }
 ]
 
-export function openAITools(options: { allowArbitraryCommands?: boolean } = {}): OpenAIToolSchema[] {
-  const defs = options.allowArbitraryCommands ? TOOL_DEFS : TOOL_DEFS.filter((tool) => tool.name !== 'run_command')
+export function openAITools(options: { allowArbitraryCommands?: boolean; safeCommandOnly?: boolean } = {}): OpenAIToolSchema[] {
+  const defs = TOOL_DEFS.filter((tool) =>
+    (options.allowArbitraryCommands || tool.name !== 'run_command') &&
+    !(options.safeCommandOnly && tool.name === 'get_weather'))
   return defs.map((t) => ({
     type: 'function' as const,
     function: { name: qualifiedToolName(t.name), description: t.description, parameters: { ...t.parameters, additionalProperties: false } }

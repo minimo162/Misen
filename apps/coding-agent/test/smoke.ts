@@ -229,9 +229,26 @@ async function testTools(): Promise<void> {
   assert.ok(fs.readFileSync(path.join(root, 'safe-write.txt'), 'utf8').includes('inside-ok'), 'workspace-local writes must remain allowed')
   fs.writeFileSync(path.join(root, 'open-me.txt'), 'open safely')
   fs.writeFileSync(path.join(root, 'ledger-open.xlsx'), 'not a real workbook')
+  fs.writeFileSync(path.join(root, 'blocked.cmd'), '@echo should-not-run')
+  fs.writeFileSync(path.join(root, 'blocked.ps1'), 'throw "should-not-run"')
+  fs.writeFileSync(path.join(root, 'blocked.exe'), 'not-an-executable')
+  fs.writeFileSync(path.join(root, 'blocked.lnk'), 'not-a-shortcut')
+  fs.writeFileSync(path.join(root, 'blocked.url'), '[InternetShortcut]\nURL=https://example.com')
   for (const openCommand of ['Invoke-Item open-me.txt', 'Start-Process -FilePath open-me.txt', 'start " open-me.txt"', 'open open-me.txt', 'excel.exe ledger-open.xlsx']) {
     const normalizedOpen = normalizeWorkspaceOpenCommand(openCommand, ctx)
     assert.ok(normalizedOpen?.includes('Invoke-Item -LiteralPath'), `safe workspace open must normalize: ${openCommand}`)
+  }
+  for (const blockedOpen of ['blocked.cmd', 'blocked.ps1', 'blocked.exe', 'blocked.lnk', 'blocked.url']) {
+    assert.throws(() => normalizeWorkspaceOpenCommand(`Invoke-Item ${blockedOpen}`, ctx), /安全に開ける/u, `executable/link open must be rejected: ${blockedOpen}`)
+  }
+  fs.mkdirSync(path.join(root, 'blocked-directory'))
+  assert.throws(() => normalizeWorkspaceOpenCommand('Invoke-Item blocked-directory', ctx), /通常ファイル以外/u)
+  const linked = path.join(root, 'linked.txt')
+  try {
+    fs.symlinkSync(path.join(root, 'open-me.txt'), linked, 'file')
+    assert.throws(() => normalizeWorkspaceOpenCommand('Invoke-Item linked.txt', ctx), /通常ファイル以外/u, 'reparse/symlink open must be rejected')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EPERM') throw err
   }
   assert.strictEqual(
     formatHostCommandOutput('open open-me.txt', 'powershell.exe -NoProfile -Command "Invoke-Item -LiteralPath \'open-me.txt\'"', '', ''),
@@ -480,6 +497,18 @@ async function testCopilotChoosesFirstAction(): Promise<void> {
   assert.ok(answerBackend.prompts[0].includes('host.get_weather') && !answerBackend.prompts[0].includes('host.run_command(command)'))
   assert.deepStrictEqual(fs.readdirSync(answerRoot), ['evidence.txt'])
   fs.rmSync(answerRoot, { recursive: true, force: true })
+
+  const safeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-safe-'))
+  const safeBackend = new FakeBackend(['{"answer":"外部情報は取得できません"}\nAGENT_END'])
+  const safeCtx = { ...makeCtx(safeRoot), safeCommandOnly: true }
+  const safeAnswer = await runAgentTurn({ cfg, messages: [], userInput: '天気を教えて', ctx: safeCtx, io: ioStub(true), backend: safeBackend })
+  assert.strictEqual(safeAnswer.reply, '外部情報は取得できません')
+  assert.ok(!safeBackend.prompts[0].includes('host.get_weather'), 'safe command contract must hide network host tools')
+  assert.ok(!openAITools({ allowArbitraryCommands: true, safeCommandOnly: true }).some((tool) => tool.function.name === 'host.get_weather'))
+  const deniedWeather = await runAgentTurn({ cfg, messages: [], userInput: '天気を教えて', ctx: safeCtx, io: ioStub(true), backend: new FakeBackend(['{"tool":"host.get_weather","args":{"location":"広島市"}}\nAGENT_END']) })
+  assert.strictEqual(deniedWeather.aborted, true)
+  assert.ok(deniedWeather.messages.at(-1)?.content?.includes('ネットワーク通信'))
+  fs.rmSync(safeRoot, { recursive: true, force: true })
 
   const toolRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-'))
   const toolBackend = new FakeBackend([
@@ -1297,6 +1326,11 @@ async function testLocalResponseConverter(): Promise<void> {
     assert.strictEqual(fallback.reply, 'fallback raw')
   } finally { await new Promise<void>((resolve) => server.close(() => resolve())) }
   await assert.rejects(() => convertCopilotResponse({ enabled: true, baseURL: 'http://example.com/v1' }, 'raw', []), /loopback/u)
+  await assert.rejects(
+    () => convertCopilotResponse({ enabled: true, baseURL: 'http://[::1]:9/v1', timeoutMs: 10 }, 'raw', []),
+    (err: unknown) => !/loopback/u.test(String((err as Error).message)),
+    'IPv6 loopback must pass URL validation before connection failure'
+  )
   console.log('PASS local-response-converter')
 }
 
