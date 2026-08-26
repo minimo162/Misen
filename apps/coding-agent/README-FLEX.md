@@ -1,23 +1,22 @@
-# Flex mode (Windows, offline local converter)
+# Flex mode (Windows, deterministic by default)
 
-From `apps/coding-agent`, first obtain the repository contents, then reconstruct and verify the checked-in runtime. No company-PC download is part of this flow.
+Layer 1 is the default and needs neither llama.cpp nor a local model. From `apps/coding-agent`, start the agent for any existing folder; that folder is the only file-operation boundary:
 
 ```powershell
 git pull
-powershell.exe -NoProfile -File .\vendor\flex-runtime\Join-FlexRuntime.ps1
-powershell.exe -NoProfile -File .\vendor\flex-runtime\Test-FlexRuntime.ps1
-powershell.exe -NoProfile -File .\vendor\flex-runtime\Start-FlexConverter.ps1
-```
-
-If local policy blocks checked-out scripts, set the user-scoped policy once from PowerShell and rerun the same commands: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. The launch scripts do not add `-ExecutionPolicy Bypass`.
-
-In another PowerShell window, start the agent for any existing folder (the folder is the only file-operation boundary):
-
-```powershell
 node .\dist\server.js --config .\config.flex.json --workspace "C:\path\to\your\folder"
 ```
 
-The runtime is the official CPU-specific unified llama.cpp binary; `llama.exe serve` is the single-binary form of `llama-server`. It avoids the separately loaded unsigned `ggml.dll` that Windows Code Integrity rejected on the preparation PC. Qwen3.5-0.8B Q4 was measured first but produced only 2/16 correct conversions. Qwen3.5-4B Q4_0 established the 16/16 baseline, then the trusted Unsloth Q4_K_M build retained 16/16 with zero false positives on eight negative cases, so the checked-in package uses Qwen3.5-4B Q4_K_M. The server binds only to `127.0.0.1` and requires the local token already matched in `config.flex.json`. The web UI opens at `http://127.0.0.1:3948`; if automatic browser opening is blocked, open that URL manually. `config.flex.json` enables the loopback converter. The converter only contacts `127.0.0.1`, `localhost`, or `::1`; any timeout, unavailable server, or malformed response falls back to the existing Copilot parser. Tool arguments are still validated against the current host schemas before execution.
+The optional 4B insurance layer is distributed as GitHub Release assets, not Git history. To install it after `git pull`, download, reconstruct, and verify the pinned assets, then set `localResponseConverter.enabled` to `true` in a local config copy and start it:
+
+```powershell
+powershell.exe -NoProfile -File .\vendor\flex-runtime\Get-FlexRuntime.ps1
+powershell.exe -NoProfile -File .\vendor\flex-runtime\Start-FlexConverter.ps1
+```
+
+`Get-FlexRuntime.ps1` uses direct `https://github.com/minimo162/company-apps-share/releases/download/flex-runtime-v1/...` URLs, checks every downloaded byte count and SHA-256 from `manifest.json`, joins the model, and verifies the complete artifacts. If Release downloads are blocked, do not enable the converter; layer 1 remains the supported default. If local policy blocks checked-out scripts, set the user-scoped policy once from PowerShell and rerun the same commands: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. The scripts do not add `-ExecutionPolicy Bypass`.
+
+The optional runtime is the official CPU-specific unified llama.cpp binary; `llama.exe serve` is the single-binary form of `llama-server`. It avoids the separately loaded unsigned `ggml.dll` that Windows Code Integrity rejected on the preparation PC. Qwen3.5-0.8B Q4 was measured first but produced only 2/16 correct conversions. Qwen3.5-4B Q4_0 established the 16/16 baseline, then the trusted Unsloth Q4_K_M build retained 16/16 with zero false positives on eight negative cases. The optional server binds only to `127.0.0.1` and requires the local token matched in the opt-in config. The web UI opens at `http://127.0.0.1:3948`; if automatic browser opening is blocked, open that URL manually. `config.flex.json` keeps the converter disabled. The converter only contacts `127.0.0.1`, `localhost`, or `::1`; any timeout, unavailable server, or malformed response remains fail-closed. Tool arguments are always validated against the current host schemas before execution.
 
 The local heterogeneous corpus passed 16/16 for both host operations and Q4_K_M response conversion: list 3/3, read 4/4 (including text, CSV, xlsx, and missing file), open 3/3, write 3/3, and search 3/3. The eight-case negative gate produced zero false-positive tool calls. Strict JSON responses used the validated fast path in 0–1 ms; malformed/plain positive responses converted on CPU in 2.3–5.2 seconds in the adoption gate. Real Copilot task evidence and the kickoff stability decision are recorded in `FLEX-VALIDATION.md`. These are preparation-PC measurements, not company-PC EDR results.
 
@@ -27,4 +26,4 @@ Operating rules: use one clear request at a time; inspect before editing; approv
 
 The web UI starts in the projection-friendly demo view. It shows the user request, a collapsed Japanese activity line, the final answer, and links for artifacts; internal events, raw logs, run IDs, diffs, and verification evidence remain hidden. Use the `診断ビュー` toggle when developing or troubleshooting. Failed and older sessions are collapsed under `過去の実行` by default.
 
-Company-PC remaining checks: confirm the Copilot account/session, rendered Edge send control, corporate endpoint behavior, antivirus treatment of the vendored single binary, and a real document-open approval. If startup shows error `0xC0E90002`, check Code Integrity events 3033/3077; do not call it file corruption until the complete-file SHA-256 has also failed. Those are manual checks and are not asserted by the local smoke suite.
+Company-PC remaining checks: first run layer 1 alone; confirm the Copilot account/session, rendered Edge send control, corporate endpoint behavior, and a real document-open approval. Only when enabling the optional insurance layer, check Release access and antivirus treatment of the downloaded single binary. If startup shows error `0xC0E90002`, check Code Integrity events 3033/3077; do not call it file corruption until the complete-file SHA-256 has also failed. Those are manual checks and are not asserted by the local smoke suite.

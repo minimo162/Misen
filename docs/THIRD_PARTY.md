@@ -1,6 +1,6 @@
 # Third-party inventory for 連結デモ
 
-この一覧は、`demo/renketsu-demo` の読み取り・抽出補助と `apps/coding-agent` の JSON 補助に同梱するものを固定するための記録です。実行時にパッケージを取得したり、外部 URL へ問い合わせたりしません。バージョンと license は同梱ファイル、manifest、lockfile を先に確認し、ハッシュと実機 EDR 結果は別の監査記録へ保存します。
+この一覧は、`demo/renketsu-demo` の読み取り・抽出補助と `apps/coding-agent` の JSON 補助に同梱するもの、および任意導入のFlex runtimeを固定するための記録です。デモ本体の実行時にパッケージ取得や外部URL照会は行いません。任意のFlex runtimeだけは明示的な準備工程でGitHub Releaseから取得し、manifestのSHA-256照合後に使います。バージョンとlicenseは同梱ファイル、manifest、lockfileを先に確認し、実機EDR結果は別の監査記録へ保存します。
 
 ## 収録物
 
@@ -33,7 +33,7 @@
    ```
 
 2. ImportExcel は PowerShell Gallery の 7.8.10 パッケージを準備工程で保存し、`vendor/ImportExcel/7.8.10/` に展開します。`Install-Module` やダウンロードを `Read-Xlsx.ps1`／`Update-Ledger.ps1` の実行時に呼び出しません。
-3. 実行時のネットワーク取得、パッケージ install、外部 script の評価を禁止します。共有フォルダー上のまま実行せず、承認済み local-copy の同梱ファイルだけを使います。
+3. 実行時のネットワーク取得、パッケージ install、外部 script の評価を禁止します。任意のFlex runtime取得はデモ開始前の準備工程に限定します。共有フォルダー上のまま実行せず、承認済みlocal-copyとSHA-256確認済みRelease資産だけを使います。
 4. 同梱 DLL／script は EDR canary の後に使い、Excel や入力 xlsx はデモ用に信頼したものだけを対象にします。EPPlus 4.5.3.2 は legacy/unsupported parser であり、「安全」とは表現しません。悪意ある xlsx に対する残余リスクがあります。
 
 ## 受入れレビュー（毎回の手順）
@@ -68,7 +68,7 @@ Get-FileHash (Join-Path $vendor 'ImportExcel\7.8.10\ImportExcel.psd1') -Algorith
 ## 現時点の未確定事項
 
 - Windows 実機の EDR canary、Excel Desktop、Copilot Edge、共有フォルダー local-copy は、明朝のチェックリストが pass するまで未確認です。
-# Flex runtime
+# Flex runtime (optional Release assets)
 
-- **llama.cpp** — official `ggml-org` unified Windows CPU binary `b10612` for detected CPU feature code `qrkkk`; complete executable SHA-256 `9bef3d41385f98a5b8eb0ffd621310a377670725bf6c4bbff23335f45c223157`; MIT License. The pinned official source is `https://huggingface.co/buckets/ggml-org/install.sh/resolve/b10612/x86_64/windows/cpu/qrkkk/llama-app.exe.zst` (compressed SHA-256 `70a611b512a2155abf8580f15b506f53bae8ca48f16eddd3f56018e6735e5746`), decompressed with the same official bucket's `unzstd.exe` (SHA-256 `d845a5b17c7b5f7e8421f32d8e981b0092c4b262e9dba7f370f38bb24470a6f3`). `llama.exe serve` is the single-binary `llama-server` entry point. Its split complete executable is retained under `apps/coding-agent/vendor/flex-runtime/parts`. The preparation PC rejected the nightly ZIP's separate unsigned `ggml.dll` with Code Integrity events 3033/3077 and status `0xC0E90002`; the pinned unified binary passed `llama.exe version` without loading that DLL.
-- **Qwen3.5-4B-GGUF** — `unsloth/Qwen3.5-4B-GGUF`, file `Qwen3.5-4B-Q4_K_M.gguf` (2,740,937,888 bytes); locally verified SHA-256 `00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4`; Apache-2.0. Qwen3.5-0.8B Q4 was rejected after a 2/16 conversion result. Qwen3.5-4B Q4_0 established a 16/16 baseline, and Q4_K_M retained 16/16 plus zero false positives on the eight-case negative gate, so Q4_K_M was adopted. The canonical Apache-2.0 notice is retained as `apps/coding-agent/vendor/flex-runtime/LICENSE-Qwen3.5-Apache-2.0.txt`. Source: https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/blob/main/Qwen3.5-4B-Q4_K_M.gguf. The checked-in manifest records the locally verified complete-file SHA-256 and every split part SHA-256.
+- **llama.cpp** — official `ggml-org` unified Windows CPU binary `b10612` for detected CPU feature code `qrkkk`; complete executable SHA-256 `9bef3d41385f98a5b8eb0ffd621310a377670725bf6c4bbff23335f45c223157`; MIT License. The pinned official source is `https://huggingface.co/buckets/ggml-org/install.sh/resolve/b10612/x86_64/windows/cpu/qrkkk/llama-app.exe.zst` (compressed SHA-256 `70a611b512a2155abf8580f15b506f53bae8ca48f16eddd3f56018e6735e5746`), decompressed with the same official bucket's `unzstd.exe` (SHA-256 `d845a5b17c7b5f7e8421f32d8e981b0092c4b262e9dba7f370f38bb24470a6f3`). `llama.exe serve` is the single-binary `llama-server` entry point. The executable is an optional `flex-runtime-v1` GitHub Release asset and is not stored in Git history. The preparation PC rejected the nightly ZIP's separate unsigned `ggml.dll` with Code Integrity events 3033/3077 and status `0xC0E90002`; the pinned unified binary passed `llama.exe version` without loading that DLL.
+- **Qwen3.5-4B-GGUF** — `unsloth/Qwen3.5-4B-GGUF`, file `Qwen3.5-4B-Q4_K_M.gguf` (2,740,937,888 bytes); locally verified SHA-256 `00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4`; Apache-2.0. Qwen3.5-0.8B Q4 was rejected after a 2/16 conversion result. Qwen3.5-4B Q4_0 established a 16/16 baseline, and Q4_K_M retained 16/16 plus zero false positives on the eight-case negative gate. The canonical Apache-2.0 notice is retained as `apps/coding-agent/vendor/flex-runtime/LICENSE-Qwen3.5-Apache-2.0.txt`. Source: https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/blob/main/Qwen3.5-4B-Q4_K_M.gguf. The 31 split files are optional `flex-runtime-v1` GitHub Release assets, not Git history; the checked-in manifest records the locally verified complete-file SHA-256 and every asset SHA-256.
