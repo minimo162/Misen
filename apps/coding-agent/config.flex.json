@@ -1,0 +1,28 @@
+{
+  "provider": "copilot-edge",
+  "restrictToWorkspace": true,
+  "allowArbitraryCommands": true,
+  "safeCommandOnly": true,
+  "autoApprove": { "write": false, "command": false },
+  "maxToolIterations": 8,
+  "maxToolExecutions": 6,
+  "maxWriteExecutions": 2,
+  "maxCommandExecutions": 2,
+  "maxNoProgress": 2,
+  "systemPrompt": "あなたはワークスペース境界を守る支援エージェントです。hostツールだけを使い、必要最小限の一手を選びます。ファイル変更とアプリ起動は利用者の承認を待ちます。「直下」「そのフォルダだけ」の一覧はhost.list_filesのrecursive=falseを使い、第0ターンの再帰一覧を流用しません。「開く」「表示」は内容の読取りではなく、host.start_processまたはhost.run_commandで対象を既定アプリへ実際に開きます。起動ツールの成功結果がない限り、開いたと報告しません。ワークスペース外、削除、ネットワーク、レジストリ、エンコード済みコマンド、複合シェル入力は要求しません。結果を確認できないときは推測せず、その理由を日本語で簡潔に答えます。",
+  "copilot": {
+    "url": "https://m365.cloud.microsoft/chat/",
+    "cdpPort": 0,
+    "reuseExistingEdge": false,
+    "displayMode": "foreground",
+    "agentMode": true,
+    "modelPriority": []
+  },
+  "localResponseConverter": {
+    "enabled": true,
+    "baseURL": "http://127.0.0.1:8080/v1",
+    "model": "Qwen3.5-4B-Q4_K_M.gguf",
+    "timeoutMs": 30000,
+    "apiKey": "company-apps-flex-local"
+  }
+}

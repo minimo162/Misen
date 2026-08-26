@@ -8,6 +8,7 @@ import { extractJsonReply, runAgentTurn, type AgentIO, type TextBackend } from '
 import { capabilityPolicy, type AgentConfig } from '../src/config'
 import type { ChatMessage } from '../src/llm'
 import {
+  COPILOT_CLICK_SEND_JS,
   COPILOT_CLICK_COPY_JS,
   isResponseCopyControl,
   COPILOT_SCREEN_STATE_JS,
@@ -15,6 +16,7 @@ import {
   assertResponseDeadline,
   isStopGenerationControl,
   makeVisibleSessionMarker,
+  normalizeCopilotEditorText,
   resolveCopilotSettings,
   selectBrowserProcessId,
   selectLatestResponseCandidate,
@@ -23,9 +25,10 @@ import {
   type ResponseCompletionState
 } from '../src/copilot'
 
-import { getFileSnapshot, normalizeRunCommand, openAITools, parseToolResultMeta, rollbackFileChange, validateToolArgs, TOOL_DEFS, type ToolContext } from '../src/tools'
+import { formatHostCommandOutput, getFileSnapshot, normalizeRunCommand, normalizeWorkspaceOpenCommand, openAITools, parseToolResultMeta, prepareHostCommand, rollbackFileChange, validateToolArgs, TOOL_DEFS, type ToolContext } from '../src/tools'
 import { listApprovals, requestApproval, resolveApproval } from '../src/approvals'
 import { getWeather, weatherCodeLabel, type WeatherFetcher } from '../src/weather'
+import { convertCopilotResponse } from '../src/converter'
 
 function makeCtx(root: string, restrict = true): ToolContext {
   return { workspace: root, restrictToWorkspace: restrict }
@@ -119,6 +122,8 @@ async function testTools(): Promise<void> {
 
   fs.mkdirSync(path.join(root, 'batch'), { recursive: true })
   fs.mkdirSync(path.join(root, 'other'), { recursive: true })
+  const directOnly = await get('list_files').run({ path: '.', recursive: false }, ctx)
+  assert.ok(directOnly.includes('batch/') && directOnly.includes('other/') && !directOnly.includes('batch/utf8.txt'), 'recursive=false must return only immediate entries')
   fs.writeFileSync(path.join(root, 'batch', 'utf8.txt'), 'UTF-8本文')
   fs.writeFileSync(path.join(root, 'batch', 'bom.txt'), Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('BOM本文')]))
   fs.writeFileSync(path.join(root, 'batch', 'cp932.txt'), Buffer.from([0x43, 0x50, 0x39, 0x33, 0x32, 0x3a, 0x93, 0xfa, 0x96, 0x7b]))
@@ -148,48 +153,55 @@ async function testTools(): Promise<void> {
   }
   assert.ok(readFilesOutsideThrew, 'read_files must reject workspace escape')
 
+  const bundledWorkbook = path.resolve(__dirname, '..', '..', '..', 'demo', 'renketsu-demo', 'workspace', '集計台帳.xlsx')
+  fs.copyFileSync(bundledWorkbook, path.join(root, 'batch', 'real.xlsx'))
+  const workbookRead = await get('read_xlsx').run({ path: 'batch/real.xlsx' }, ctx)
+  assert.ok(workbookRead.includes('"ok":true') && workbookRead.includes('sheets'), 'read_xlsx must read an arbitrary workspace workbook through the bundled helper')
+  assert.ok(workbookRead.includes('連結台帳') && workbookRead.includes('確認事項'), 'read_xlsx must preserve Japanese sheet names across Windows PowerShell stdout')
+  await assert.rejects(() => get('read_xlsx').run({ path: 'batch/utf8.txt' }, ctx), /\.xlsx/u)
+
   const cmd = await get('run_command').run({ command: 'echo smoke-ok' }, ctx)
   assert.ok(cmd.includes('smoke-ok'))
 
   assert.strictEqual(
     normalizeRunCommand('powershell -File tools/Read-Xlsx.ps1 reports/OS04.xlsx reports/OS05.xlsx'),
-    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\*.xlsx'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path reports\\*.xlsx'
   )
   assert.strictEqual(
     normalizeRunCommand('powershell.exe -File tools\\Read-Xlsx.ps1 "reports\\one file.xlsx"'),
-    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path "reports\\one file.xlsx"'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path "reports\\one file.xlsx"'
   )
   assert.strictEqual(
     normalizeRunCommand('tools/Read-Xlsx.ps1 reports/OS04.xlsx'),
-    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx'
   )
   assert.strictEqual(
     normalizeRunCommand('powershell -NoProfile -File tools/Read-Xlsx.ps1 reports/OS04.xlsx,reports/OS05.xlsx,集計台帳.xlsx'),
-    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\*.xlsx'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path reports\\*.xlsx'
   )
   assert.strictEqual(
     normalizeRunCommand('powershell -File tools/Update-Ledger.ps1 work/extracted.json rates/レート表.csv 集計台帳.xlsx'),
-    'powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\レート表.csv -Ledger 集計台帳.xlsx'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\レート表.csv -Ledger 集計台帳.xlsx'
   )
   assert.strictEqual(
     normalizeRunCommand('tools\\Update-Ledger.ps1 work\\extracted.json rates\\レート表.csv 集計台帳.xlsx'),
-    'powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\レート表.csv -Ledger 集計台帳.xlsx'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\レート表.csv -Ledger 集計台帳.xlsx'
   )
   assert.strictEqual(
     normalizeRunCommand('powershell.exe -File tools\\Update-Ledger.ps1 -Ledger 集計台帳.xlsx -Extracted work\\extracted.json -Rates rates\\レート表.csv'),
-    'powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\レート表.csv -Ledger 集計台帳.xlsx'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\レート表.csv -Ledger 集計台帳.xlsx'
   )
   assert.strictEqual(
     normalizeRunCommand('powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'),
-    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx'
   )
   assert.strictEqual(
     normalizeRunCommand('powershell.exe "-ExecutionPolicy" Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'),
-    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx'
   )
   assert.strictEqual(
     normalizeRunCommand('powershell.exe -ExecutionPolicy:Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'),
-    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx'
   )
   const bypassReadXlsx = await get('run_command').run({
     command: 'powershell.exe -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'
@@ -215,6 +227,18 @@ async function testTools(): Promise<void> {
     command: 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-Content -LiteralPath safe-write.txt -Value inside-ok"'
   }, ctx)
   assert.ok(fs.readFileSync(path.join(root, 'safe-write.txt'), 'utf8').includes('inside-ok'), 'workspace-local writes must remain allowed')
+  fs.writeFileSync(path.join(root, 'open-me.txt'), 'open safely')
+  fs.writeFileSync(path.join(root, 'ledger-open.xlsx'), 'not a real workbook')
+  for (const openCommand of ['Invoke-Item open-me.txt', 'Start-Process -FilePath open-me.txt', 'start " open-me.txt"', 'open open-me.txt', 'excel.exe ledger-open.xlsx']) {
+    const normalizedOpen = normalizeWorkspaceOpenCommand(openCommand, ctx)
+    assert.ok(normalizedOpen?.includes('Invoke-Item -LiteralPath'), `safe workspace open must normalize: ${openCommand}`)
+  }
+  assert.strictEqual(
+    formatHostCommandOutput('open open-me.txt', 'powershell.exe -NoProfile -Command "Invoke-Item -LiteralPath \'open-me.txt\'"', '', ''),
+    'アプリ起動コマンド成功: open open-me.txt'
+  )
+  assert.throws(() => prepareHostCommand('Invoke-Item ..\\outside.txt', ctx), /run_command拒否/u)
+  assert.throws(() => prepareHostCommand('Start-Process open-me.txt; whoami', ctx), /run_command拒否/u)
   assert.throws(
     () => normalizeRunCommand('powershell.exe -File tools\\Read-Xlsx.ps1 "reports\\x&whoami.xlsx"'),
     /複合コマンド/u,
@@ -250,6 +274,13 @@ async function testTools(): Promise<void> {
       `dangerous operation must be rejected: ${blockedCommand}`
     )
   }
+  for (const blockedStart of [
+    'powershell.exe -Command "Remove-Item safe-read.txt"',
+    'curl.exe https://example.com',
+    'reg.exe add HKCU\\Software\\CodingAgentSmoke /v Test /d 1',
+    'powershell.exe -EncodedCommand RwBlAHQALQBEAGEAdABlAA==',
+    'cmd.exe /c "echo x > ..\\escape.txt"'
+  ]) await assert.rejects(() => get('start_process').run({ command: blockedStart }, ctx), /run_command拒否/u, `start_process must share denial policy: ${blockedStart}`)
   const outsideName = `ca-smoke-outside-${process.pid}.txt`
   await assert.rejects(
     () => get('run_command').run({
@@ -280,8 +311,12 @@ async function testTools(): Promise<void> {
   }, ctx)) as { id: string; status: string }
   assert.ok(started.id && started.status === 'running')
   try {
-    await new Promise((resolve) => setTimeout(resolve, 150))
-    const processLog = JSON.parse(await get('read_process_log').run({ process_id: started.id }, ctx)) as { lines: string[]; nextOffset: number }
+    const deadline = Date.now() + 5000
+    let processLog = { lines: [] as string[], nextOffset: 0 }
+    while (Date.now() < deadline && !processLog.lines.join('\n').includes('process-smoke')) {
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      processLog = JSON.parse(await get('read_process_log').run({ process_id: started.id }, ctx)) as { lines: string[]; nextOffset: number }
+    }
     assert.ok(processLog.lines.join('\n').includes('process-smoke'))
     assert.ok(processLog.nextOffset >= processLog.lines.length)
     const stopped = JSON.parse(await get('stop_process').run({ process_id: started.id }, ctx)) as { status: string }
@@ -882,6 +917,11 @@ async function testCopilotResponseCompletion(): Promise<void> {
   }
   new Function('document', 'window', `return ${COPILOT_SCREEN_STATE_JS}`)
   new Function('document', 'window', `return ${COPILOT_CLICK_COPY_JS}`)
+  new Function('document', 'window', `return ${COPILOT_CLICK_SEND_JS}`)
+  assert.strictEqual(normalizeCopilotEditorText('前\u200B中\u200C後'), '前中後')
+  for (const required of ['button[type="submit"]', '.fai-SendButton', '[class*="SendButton" i]', '[data-testid*="send" i]', '[data-automation-id*="send" i]', 'exclude.test(identity)', 'ariaLabel', 'automationId', 'diagnosticButtons']) {
+    assert.ok(COPILOT_CLICK_SEND_JS.includes(required), `send-button detector missing ${required}`)
+  }
   assert.ok(COPILOT_CLICK_COPY_JS.includes('scope=latest'))
   assert.ok(COPILOT_CLICK_COPY_JS.includes('others.length>0'))
   for (const required of ['CopyButtonTestId', 'CopyButtonContainerTestId', 'pre,code', 'copy\\s*(?:response|answer)']) {
@@ -1065,8 +1105,8 @@ async function testCopilotChunkFallback(): Promise<void> {
   const prompt = ('0123456789abcdef'.repeat(140)) + '\n末尾'
   let editor = ''
   let insertCalls = 0
-  internal.editorLength = async () => editor.length
-  internal.editorState = async () => ({ found: true, text: editor, active: true })
+  internal.editorLength = async () => normalizeCopilotEditorText(editor).length
+  internal.editorState = async () => ({ found: true, text: normalizeCopilotEditorText(editor), active: true })
   internal.clearEditor = async () => { editor = '' }
   internal.focusEditor = async () => {}
   internal.bringToFront = async () => {}
@@ -1074,10 +1114,12 @@ async function testCopilotChunkFallback(): Promise<void> {
     if (name !== 'Input.insertText') return
     const chunk = String(params.text ?? '')
     insertCalls++
-    editor += insertCalls === 2 ? chunk.slice(0, 120) : chunk
+    const inserted = insertCalls === 2 ? chunk.slice(0, 120) : chunk
+    editor += `${insertCalls > 1 ? '\u200B\u200C' : ''}${inserted}`
   }
   await internal.insertByChunks(prompt)
-  assert.strictEqual(editor, prompt)
+  assert.strictEqual(normalizeCopilotEditorText(editor), prompt)
+  assert.ok(editor.includes('\u200B\u200C'), 'Lexical chunk boundary markers were not exercised')
   assert.ok(insertCalls > Math.ceil(prompt.length / 450))
   console.log('PASS copilot-chunk-fallback')
 }
@@ -1210,12 +1252,60 @@ async function testCopilotFenceMode(): Promise<void> {
   console.log('PASS copilot-fence')
 }
 
+async function testLocalResponseConverter(): Promise<void> {
+  let responseContent = '{"answer":"変換済み"}'
+  let requestCount = 0
+  let lastUserContent = ''
+  const server = http.createServer((req, res) => {
+    let body = ''
+    req.on('data', (chunk) => { body += String(chunk) })
+    req.on('end', () => {
+      requestCount++
+      assert.strictEqual(req.headers.authorization, 'Bearer smoke-local-token')
+      const request = JSON.parse(body) as { temperature?: number; max_tokens?: number; response_format?: { type?: string }; chat_template_kwargs?: { enable_thinking?: boolean }; messages?: Array<{ role?: string; content?: string }> }
+      assert.strictEqual(request.temperature, 0); assert.strictEqual(request.response_format?.type, 'json_schema'); assert.strictEqual(request.chat_template_kwargs?.enable_thinking, false)
+      assert.strictEqual(request.max_tokens, 192)
+      lastUserContent = request.messages?.find((message) => message.role === 'user')?.content ?? ''
+      res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ choices: [{ message: { content: responseContent } }] }))
+    })
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = (server.address() as net.AddressInfo).port
+  const settings = { enabled: true, baseURL: `http://127.0.0.1:${port}/v1`, model: 'fake', timeoutMs: 1000, apiKey: 'smoke-local-token' }
+  try {
+    assert.strictEqual(await convertCopilotResponse(settings, 'raw', []), responseContent)
+    const direct = await convertCopilotResponse(settings, '{"tool":"write_file","path":"メモ.txt","content":"一言"}', [
+      { name: 'host.write_file', description: 'write', parameters: { type: 'object' } }
+    ])
+    assert.strictEqual(direct, '{"tool":"host.write_file","args":{"path":"メモ.txt","content":"一言"}}')
+    assert.strictEqual(requestCount, 1, 'strict JSON must not spend a local-model request')
+    await convertCopilotResponse(settings, 'search_filesを使い query=青', [
+      { name: 'host.list_files', description: 'list', parameters: { type: 'object' } },
+      { name: 'host.search_files', description: 'search', parameters: { type: 'object' } }
+    ])
+    const converterInput = JSON.parse(lastUserContent) as { host_tools?: Array<{ name?: string }> }
+    assert.deepStrictEqual(converterInput.host_tools?.map((tool) => tool.name), ['host.search_files'])
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'converter-smoke-'))
+    const converted = await runAgentTurn({ cfg: { baseURL: '', model: '', provider: 'copilot-edge', copilot: { agentMode: true }, localResponseConverter: settings }, messages: [], userInput: '答えて', ctx: makeCtx(root), io: ioStub(true), backend: new FakeBackend(['not json']) })
+    assert.strictEqual(converted.reply, '変換済み')
+    responseContent = '{"tool":"host.write_file","args":{"unexpected":true}}'
+    const rejected = await runAgentTurn({ cfg: { baseURL: '', model: '', provider: 'copilot-edge', copilot: { agentMode: true }, localResponseConverter: settings }, messages: [], userInput: '書いて', ctx: makeCtx(root), io: ioStub(true), backend: new FakeBackend(['not json', '{"answer":"schema rejected"}\nAGENT_END']) })
+    assert.strictEqual(rejected.aborted, true); assert.ok(!fs.existsSync(path.join(root, 'unexpected')), 'schema-invalid converter args must not execute')
+    fs.rmSync(root, { recursive: true, force: true })
+    responseContent = 'invalid converter content'
+    const fallback = await runAgentTurn({ cfg: { baseURL: '', model: '', provider: 'copilot-edge', copilot: { agentMode: true }, localResponseConverter: settings }, messages: [], userInput: '答えて', ctx: makeCtx(os.tmpdir(), false), io: ioStub(true), backend: new FakeBackend(['{"answer":"fallback raw"}\nAGENT_END']) })
+    assert.strictEqual(fallback.reply, 'fallback raw')
+  } finally { await new Promise<void>((resolve) => server.close(() => resolve())) }
+  await assert.rejects(() => convertCopilotResponse({ enabled: true, baseURL: 'http://example.com/v1' }, 'raw', []), /loopback/u)
+  console.log('PASS local-response-converter')
+}
+
 async function testUiContract(): Promise<void> {
   const html = fs.readFileSync(path.join(process.cwd(), 'public', 'index.html'), 'utf8')
   const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1]
   assert.ok(script, 'UI script missing')
   new Function(script)
-  for (const required of ['run-plan', 'run-eyebrow', 'run-pause', 'run-resume', 'run-retry', 'run-complete', '回答完了', 'activity-details', '実際の差分を表示', '差分の続き', 'preview-frame', 'verification-list', '診断JSON', 'approval-meta', 'parentRunId', '/api/runs/', '/api/changes/', 'compositionstart', 'aria-live', 'mode-select', 'このPCで実行', 'Copilot内で観測', '@media (max-width: 720px)']) assert.ok(html.includes(required), `UI contract missing: ${required}`)
+  for (const required of ['run-plan', 'run-eyebrow', 'run-pause', 'run-resume', 'run-retry', 'run-complete', '回答完了', 'activity-details', '実際の差分を表示', '差分の続き', 'preview-frame', 'verification-list', '診断JSON', 'approval-meta', 'parentRunId', '/api/runs/', '/api/changes/', 'compositionstart', 'aria-live', 'mode-select', 'このPCで実行', 'Copilot内で観測', '@media (max-width: 720px)', 'demo-view', 'diagnostic-view', 'view-toggle', 'artifacts-panel', '過去の実行', 'friendlyToolName', '入力の反映に失敗したため、自動でやり直しています。']) assert.ok(html.includes(required), `UI contract missing: ${required}`)
   console.log('PASS ui-contract')
 }
 
@@ -1259,6 +1349,7 @@ async function testDemoRecordingContract(): Promise<void> {
   await testMaxIterationHistory()
   await testCopilotPlainMode()
   await testCopilotFenceMode()
+  await testLocalResponseConverter()
   await testUiContract()
   await testDemoRecordingContract()
   console.log('ALL PASS')

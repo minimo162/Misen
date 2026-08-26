@@ -45,6 +45,17 @@ export interface WeatherSettings {
   defaultLocation?: string
 }
 
+/** Optional loopback-only llama.cpp post-processor for Copilot's raw reply. */
+export interface LocalResponseConverterSettings {
+  enabled?: boolean
+  /** OpenAI-compatible llama-server URL.  Non-loopback URLs are rejected. */
+  baseURL?: string
+  model?: string
+  timeoutMs?: number
+  /** Loopback server token; not a remote service credential. */
+  apiKey?: string
+}
+
 export interface AgentConfig {
   baseURL: string
   model: string
@@ -58,11 +69,14 @@ export interface AgentConfig {
   maxNoProgress?: number
   /** High-risk arbitrary shell execution. Disabled unless explicitly enabled. */
   allowArbitraryCommands?: boolean
+  /** When enabled, command tools accept only the explicit workspace-file open allowlist. */
+  safeCommandOnly?: boolean
   autoApprove?: AutoApprove
   restrictToWorkspace?: boolean
   systemPrompt?: string
   provider?: LlmProvider
   copilot?: CopilotSettingsPartial
+  localResponseConverter?: LocalResponseConverterSettings
   weather?: WeatherSettings
   chatTemplateKwargs?: Record<string, unknown>
   /** Internal per-turn capability lock. It is never selected by the model. */
@@ -80,7 +94,8 @@ const DEFAULT_CONFIG: AgentConfig = {
   maxNoProgress: 2,
   allowArbitraryCommands: false,
   autoApprove: { write: false, command: false },
-  copilot: { displayMode: 'foreground', agentMode: true }
+  copilot: { displayMode: 'foreground', agentMode: true },
+  localResponseConverter: { enabled: false, baseURL: 'http://127.0.0.1:8080/v1', model: 'Qwen3.5-4B-Q4_K_M.gguf', timeoutMs: 30000, apiKey: 'company-apps-flex-local' }
 }
 
 function appDataConfigPath(): string {
@@ -98,7 +113,8 @@ function parseConfig(found: string): AgentConfig {
     ...raw,
     provider,
     autoApprove: { ...DEFAULT_CONFIG.autoApprove, ...(raw.autoApprove ?? {}) },
-    copilot: { ...DEFAULT_CONFIG.copilot, ...(raw.copilot ?? {}) }
+    copilot: { ...DEFAULT_CONFIG.copilot, ...(raw.copilot ?? {}) },
+    localResponseConverter: { ...DEFAULT_CONFIG.localResponseConverter, ...(raw.localResponseConverter ?? {}) }
   }
 }
 

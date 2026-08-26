@@ -4503,86 +4503,12 @@ var require_lib = __commonJS({
   }
 });
 
-// src/index.ts
-var import_node_path6 = __toESM(require("node:path"));
-
-// src/config.ts
-var import_node_fs = __toESM(require("node:fs"));
-var import_node_path = __toESM(require("node:path"));
-var DEFAULT_CONFIG = {
-  baseURL: "",
-  model: "",
-  provider: "copilot-edge",
-  maxToolIterations: 10,
-  maxToolExecutions: 8,
-  maxWriteExecutions: 3,
-  maxCommandExecutions: 2,
-  maxNoProgress: 2,
-  allowArbitraryCommands: false,
-  autoApprove: { write: false, command: false },
-  copilot: { displayMode: "foreground", agentMode: true },
-  localResponseConverter: { enabled: false, baseURL: "http://127.0.0.1:8080/v1", model: "Qwen3.5-4B-Q4_K_M.gguf", timeoutMs: 3e4, apiKey: "company-apps-flex-local" }
-};
-function appDataConfigPath() {
-  return import_node_path.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent", "config.json");
-}
-function parseConfig(found) {
-  const raw = JSON.parse(import_node_fs.default.readFileSync(found, "utf8"));
-  const provider = raw.provider ?? "openai";
-  if (provider === "openai" && (!raw.baseURL || !raw.model)) {
-    throw new Error(`provider=openai \u306B\u306F baseURL / model \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
-  }
-  return {
-    ...DEFAULT_CONFIG,
-    ...raw,
-    provider,
-    autoApprove: { ...DEFAULT_CONFIG.autoApprove, ...raw.autoApprove ?? {} },
-    copilot: { ...DEFAULT_CONFIG.copilot, ...raw.copilot ?? {} },
-    localResponseConverter: { ...DEFAULT_CONFIG.localResponseConverter, ...raw.localResponseConverter ?? {} }
-  };
-}
-function capabilityPolicy(cfg, mode = cfg.turnMode ?? "work") {
-  return {
-    mode,
-    hostTools: mode === "work" ? "all" : "none",
-    nativeSearch: mode === "research",
-    nativeOffice: false,
-    maxModelDecisions: Math.max(1, cfg.maxToolIterations ?? 10),
-    maxHostExecutions: Math.max(1, cfg.maxToolExecutions ?? 8),
-    maxWriteExecutions: Math.max(0, cfg.maxWriteExecutions ?? 3),
-    maxCommandExecutions: Math.max(0, cfg.maxCommandExecutions ?? 2),
-    maxNoProgress: Math.max(1, cfg.maxNoProgress ?? 2),
-    autoApproveWrite: cfg.autoApprove?.write === true,
-    autoApproveCommand: cfg.autoApprove?.command === true,
-    allowArbitraryCommands: cfg.allowArbitraryCommands === true
-  };
-}
-function loadConfig(explicitPath) {
-  if (explicitPath) {
-    if (!import_node_fs.default.existsSync(explicitPath)) throw new Error(`\u6307\u5B9A\u3055\u308C\u305F config \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${explicitPath}`);
-    return parseConfig(explicitPath);
-  }
-  const appDataPath = appDataConfigPath();
-  const candidates = [import_node_path.default.join(process.cwd(), "config.json"), appDataPath];
-  const found = candidates.find((p) => import_node_fs.default.existsSync(p));
-  if (found) return parseConfig(found);
-  const dir = import_node_path.default.dirname(appDataPath);
-  import_node_fs.default.mkdirSync(dir, { recursive: true });
-  import_node_fs.default.writeFileSync(appDataPath, JSON.stringify(DEFAULT_CONFIG, null, 2) + "\n", "utf8");
-  console.log(`\u65E2\u5B9A\u306E\u8A2D\u5B9A\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F: ${appDataPath}`);
-  return DEFAULT_CONFIG;
-}
-function resolveApiKey(cfg) {
-  if (cfg.apiKey) return cfg.apiKey;
-  return process.env[cfg.apiKeyEnv ?? "COMPANY_LLM_API_KEY"];
-}
-
-// src/repl.ts
-var import_node_readline = __toESM(require("node:readline"));
+// test/flex-harness.ts
+var import_node_fs2 = __toESM(require("node:fs"));
+var import_node_os = __toESM(require("node:os"));
+var import_node_path2 = __toESM(require("node:path"));
 
 // src/agent.ts
-var import_node_crypto2 = __toESM(require("node:crypto"));
-var import_node_path3 = __toESM(require("node:path"));
 var import_jsonrepair = __toESM(require_cjs());
 
 // src/converter.ts
@@ -4599,7 +4525,7 @@ function decisionSchema(tools) {
         additionalProperties: false,
         required: ["tool", "args"],
         properties: {
-          tool: { type: "string", enum: tools.map((tool) => tool.name) },
+          tool: { type: "string", enum: tools.map((tool2) => tool2.name) },
           args: { type: "object", additionalProperties: true }
         }
       }
@@ -4613,9 +4539,9 @@ function compactParameters(value) {
 }
 function candidateTools(rawResponse, tools) {
   const lower = rawResponse.toLowerCase();
-  const mentioned = tools.filter((tool) => {
-    const bare = tool.name.startsWith("host.") ? tool.name.slice(5) : tool.name;
-    return lower.includes(tool.name.toLowerCase()) || lower.includes(bare.toLowerCase());
+  const mentioned = tools.filter((tool2) => {
+    const bare = tool2.name.startsWith("host.") ? tool2.name.slice(5) : tool2.name;
+    return lower.includes(tool2.name.toLowerCase()) || lower.includes(bare.toLowerCase());
   });
   return mentioned.length > 0 ? mentioned : tools;
 }
@@ -4628,7 +4554,7 @@ function strictProtocolFastPath(rawResponse, tools) {
     }
     if (typeof parsed.tool !== "string") return null;
     const requested = parsed.tool.startsWith("host.") ? parsed.tool : `host.${parsed.tool}`;
-    const matched = tools.find((tool) => tool.name === requested);
+    const matched = tools.find((tool2) => tool2.name === requested);
     if (!matched) return null;
     const args = parsed.args && typeof parsed.args === "object" && !Array.isArray(parsed.args) ? parsed.args : Object.fromEntries(Object.entries(parsed).filter(([key]) => !["tool", "AGENT_END"].includes(key)));
     return JSON.stringify({ tool: matched.name, args });
@@ -4680,7 +4606,7 @@ async function convertCopilotResponse(settings, rawResponse, tools, signal) {
         role: "user",
         content: JSON.stringify({
           raw_response: rawResponse,
-          host_tools: activeTools.map((tool) => ({ name: tool.name, parameters: compactParameters(tool.parameters) }))
+          host_tools: activeTools.map((tool2) => ({ name: tool2.name, parameters: compactParameters(tool2.parameters) }))
         })
       }
     ]
@@ -4719,71 +4645,12 @@ async function convertCopilotResponse(settings, rawResponse, tools, signal) {
   });
 }
 
-// src/llm.ts
-var import_node_http2 = __toESM(require("node:http"));
-var import_node_https2 = __toESM(require("node:https"));
-function postJson(url, body, headers, signal) {
-  return new Promise((resolve, reject) => {
-    const u = new URL(url);
-    const mod = u.protocol === "https:" ? import_node_https2.default : import_node_http2.default;
-    const req = mod.request(
-      u,
-      { method: "POST", headers: { ...headers, "content-length": Buffer.byteLength(body).toString() } },
-      (res) => {
-        let data = "";
-        res.setEncoding("utf8");
-        res.on("data", (c) => {
-          data += c;
-        });
-        res.on("end", () => resolve({ status: res.statusCode ?? 0, text: data }));
-      }
-    );
-    req.setTimeout(0);
-    const abort = () => req.destroy(new Error("LLM request aborted"));
-    if (signal?.aborted) abort();
-    signal?.addEventListener("abort", abort, { once: true });
-    req.on("error", reject);
-    req.on("close", () => signal?.removeEventListener("abort", abort));
-    req.end(body);
-  });
-}
-async function chat(cfg, messages, tools, signal) {
-  const url = cfg.baseURL.replace(/\/+$/, "") + "/chat/completions";
-  const headers = { "content-type": "application/json" };
-  const key = resolveApiKey(cfg);
-  if (key) headers.authorization = `Bearer ${key}`;
-  const payload = JSON.stringify({
-    model: cfg.model,
-    temperature: cfg.temperature ?? 0.2,
-    messages,
-    ...cfg.chatTemplateKwargs ? { chat_template_kwargs: cfg.chatTemplateKwargs } : {},
-    ...tools.length > 0 ? { tools } : {}
-  });
-  const res = await postJson(url, payload, headers, signal);
-  if (res.status < 200 || res.status >= 300) {
-    throw new Error(`LLM API \u30A8\u30E9\u30FC ${res.status}: ${res.text.slice(0, 400)}`);
-  }
-  let data;
-  try {
-    data = JSON.parse(res.text);
-  } catch {
-    throw new Error("LLM API \u306E\u5FDC\u7B54\u304C JSON \u3067\u306F\u3042\u308A\u307E\u305B\u3093");
-  }
-  const raw = data.choices?.[0]?.message;
-  if (!raw) throw new Error("LLM API \u306E\u5FDC\u7B54\u5F62\u5F0F\u304C\u4E0D\u6B63\u3067\u3059");
-  return {
-    role: "assistant",
-    content: raw.content ?? "",
-    ...raw.tool_calls ? { tool_calls: raw.tool_calls } : {}
-  };
-}
-
 // src/tools.ts
-var import_node_fs2 = __toESM(require("node:fs"));
+var import_node_fs = __toESM(require("node:fs"));
 var import_node_child_process2 = require("node:child_process");
 var import_node_crypto = __toESM(require("node:crypto"));
 var import_promises = __toESM(require("node:fs/promises"));
-var import_node_path2 = __toESM(require("node:path"));
+var import_node_path = __toESM(require("node:path"));
 var import_node_util = __toESM(require("node:util"));
 var import_iconv_lite = __toESM(require_lib());
 
@@ -5182,17 +5049,17 @@ function normalizeRunCommand(command) {
       throw new Error(`Read-Xlsx \u306F ${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
     }
     const normalized = pathWords.map((word) => word.replaceAll("/", "\\"));
-    const reportPaths = normalized.length > 1 ? normalized.filter((word) => !(import_node_path2.default.win32.dirname(word) === "." && import_node_path2.default.win32.basename(word).toLowerCase() === "\u96C6\u8A08\u53F0\u5E33.xlsx")) : normalized;
+    const reportPaths = normalized.length > 1 ? normalized.filter((word) => !(import_node_path.default.win32.dirname(word) === "." && import_node_path.default.win32.basename(word).toLowerCase() === "\u96C6\u8A08\u53F0\u5E33.xlsx")) : normalized;
     if (reportPaths.length === 0) throw new Error(`Read-Xlsx \u306F ${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
     let normalizedPath;
     if (reportPaths.length === 1) {
       normalizedPath = reportPaths[0];
     } else {
-      const directories = new Set(reportPaths.map((word) => import_node_path2.default.win32.dirname(word).toLowerCase()));
-      if (directories.size !== 1 || reportPaths.some((word) => import_node_path2.default.win32.extname(word).toLowerCase() !== ".xlsx")) {
+      const directories = new Set(reportPaths.map((word) => import_node_path.default.win32.dirname(word).toLowerCase()));
+      if (directories.size !== 1 || reportPaths.some((word) => import_node_path.default.win32.extname(word).toLowerCase() !== ".xlsx")) {
         throw new Error(`Read-Xlsx \u306E\u8907\u6570\u30D5\u30A1\u30A4\u30EB\u306F\u540C\u3058\u30D5\u30A9\u30EB\u30C0\u30FC\u306E *.xlsx \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\u3002${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
       }
-      normalizedPath = import_node_path2.default.win32.join(import_node_path2.default.win32.dirname(reportPaths[0]), "*.xlsx");
+      normalizedPath = import_node_path.default.win32.join(import_node_path.default.win32.dirname(reportPaths[0]), "*.xlsx");
     }
     return `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path ${quoteCommandWord(normalizedPath)}`;
   }
@@ -5244,7 +5111,7 @@ function normalizeWorkspaceOpenCommand(command, ctx) {
   } catch {
     throw new Error(`run_command\u62D2\u5426: \u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u3078\u306E\u30A2\u30AF\u30BB\u30B9\u306F\u7981\u6B62\u3067\u3059: ${candidate}`);
   }
-  if (!import_node_fs2.default.existsSync(absolute)) throw new Error(`run_command\u62D2\u5426: \u958B\u304F\u5BFE\u8C61\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${candidate}`);
+  if (!import_node_fs.default.existsSync(absolute)) throw new Error(`run_command\u62D2\u5426: \u958B\u304F\u5BFE\u8C61\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${candidate}`);
   if (absolute.includes("'")) throw new Error("run_command\u62D2\u5426: \u958B\u304F\u5BFE\u8C61\u306E\u30D1\u30B9\u306B\u5F15\u7528\u7B26\u306F\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093");
   return `powershell.exe -NoProfile -Command "Invoke-Item -LiteralPath '${absolute}'"`;
 }
@@ -5456,15 +5323,6 @@ function formatFileChangeResult(action, relativePath, before, after, count, exis
     `\u7D50\u679C\u30E1\u30BF\u30C7\u30FC\u30BF: ${JSON.stringify(meta)}`
   ].join("\n");
 }
-function parseToolResultMeta(output) {
-  const line = output.split(/\r?\n/).find((entry) => entry.startsWith("\u7D50\u679C\u30E1\u30BF\u30C7\u30FC\u30BF:"));
-  if (!line) return null;
-  try {
-    return JSON.parse(line.slice("\u7D50\u679C\u30E1\u30BF\u30C7\u30FC\u30BF:".length).trim());
-  } catch {
-    return null;
-  }
-}
 var fileSnapshots = /* @__PURE__ */ new Map();
 function snapshotKey(abs, ctx) {
   return `${ctx.runId ?? "default"}:${abs}`;
@@ -5481,17 +5339,6 @@ function recordFileSnapshot(abs, ctx, before, existedBefore, after) {
   };
   fileSnapshots.set(key, snapshot2);
   return snapshot2;
-}
-async function getFilePrecondition(p, ctx) {
-  const abs = resolveInWorkspace(p, ctx);
-  try {
-    const content = await import_promises.default.readFile(abs, "utf8");
-    return { existedBefore: true, beforeHash: sha256(content) };
-  } catch (err) {
-    const e = err;
-    if (e.code === "ENOENT") return { existedBefore: false };
-    throw err;
-  }
 }
 function truncate(s, max = 8e3) {
   return s.length <= max ? s : s.slice(0, max) + `
@@ -5529,7 +5376,7 @@ function workspaceGlobToRegExp(pattern) {
 function normalizeWorkspaceGlob(pattern) {
   const normalized = pattern.trim().replaceAll("\\", "/").replace(/^\.\//, "");
   if (!normalized) throw new Error("pattern \u304C\u7A7A\u3067\u3059");
-  if (import_node_path2.default.isAbsolute(normalized) || /^[A-Za-z]:/.test(normalized) || normalized.split("/").includes("..")) {
+  if (import_node_path.default.isAbsolute(normalized) || /^[A-Za-z]:/.test(normalized) || normalized.split("/").includes("..")) {
     throw new Error(`\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u3092\u6307\u3059pattern\u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093: ${pattern}`);
   }
   return normalized.endsWith("/") ? `${normalized}*` : normalized;
@@ -5547,23 +5394,23 @@ function decodeWorkspaceText(bytes) {
 function realPathWithMissingTail(abs) {
   let cursor = abs;
   const tail = [];
-  while (!import_node_fs2.default.existsSync(cursor)) {
-    const parent = import_node_path2.default.dirname(cursor);
+  while (!import_node_fs.default.existsSync(cursor)) {
+    const parent = import_node_path.default.dirname(cursor);
     if (parent === cursor) return abs;
-    tail.unshift(import_node_path2.default.basename(cursor));
+    tail.unshift(import_node_path.default.basename(cursor));
     cursor = parent;
   }
-  const real = import_node_fs2.default.realpathSync.native(cursor);
-  return import_node_path2.default.resolve(real, ...tail);
+  const real = import_node_fs.default.realpathSync.native(cursor);
+  return import_node_path.default.resolve(real, ...tail);
 }
 function isWithin(root, candidate) {
-  const relative = import_node_path2.default.relative(root, candidate);
-  return relative === "" || !relative.startsWith("..") && !import_node_path2.default.isAbsolute(relative);
+  const relative = import_node_path.default.relative(root, candidate);
+  return relative === "" || !relative.startsWith("..") && !import_node_path.default.isAbsolute(relative);
 }
 function resolveInWorkspace(p, ctx) {
   if (!p) throw new Error("\u30D1\u30B9\u304C\u7A7A\u3067\u3059");
-  const workspaceAbs = import_node_path2.default.resolve(ctx.workspace);
-  const abs = import_node_path2.default.isAbsolute(p) ? import_node_path2.default.normalize(p) : import_node_path2.default.resolve(workspaceAbs, p);
+  const workspaceAbs = import_node_path.default.resolve(ctx.workspace);
+  const abs = import_node_path.default.isAbsolute(p) ? import_node_path.default.normalize(p) : import_node_path.default.resolve(workspaceAbs, p);
   if (ctx.restrictToWorkspace) {
     const rootReal = realPathWithMissingTail(workspaceAbs);
     const candidateReal = realPathWithMissingTail(abs);
@@ -5583,7 +5430,7 @@ async function walk(dir, cb, depth = 0) {
   }
   for (const e of entries) {
     if (IGNORED_DIRS.has(e.name)) continue;
-    const full = import_node_path2.default.join(dir, e.name);
+    const full = import_node_path.default.join(dir, e.name);
     if (e.isDirectory()) await walk(full, cb, depth + 1);
     else if (e.isFile()) cb(full);
   }
@@ -5594,10 +5441,6 @@ function qualifiedToolName(name) {
 }
 function bareToolName(name) {
   return name.startsWith(HOST_TOOL_PREFIX) ? name.slice(HOST_TOOL_PREFIX.length) : name;
-}
-function findHostTool(name) {
-  if (!name.startsWith(HOST_TOOL_PREFIX)) return void 0;
-  return TOOL_DEFS.find((tool) => tool.name === bareToolName(name));
 }
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -5674,14 +5517,14 @@ var TOOL_DEFS = [
         for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name, "ja"))) {
           if (out.length >= MAX_LIST) break;
           if (!re || re.test(entry.name)) {
-            const relative = import_node_path2.default.relative(ctx.workspace, import_node_path2.default.join(base, entry.name)).replaceAll("\\", "/");
+            const relative = import_node_path.default.relative(ctx.workspace, import_node_path.default.join(base, entry.name)).replaceAll("\\", "/");
             out.push(entry.isDirectory() ? `${relative}/` : relative);
           }
         }
       } else {
         await walk(base, (f) => {
           if (out.length >= MAX_LIST) return;
-          if (!re || re.test(import_node_path2.default.basename(f))) out.push(import_node_path2.default.relative(ctx.workspace, f).replaceAll("\\", "/"));
+          if (!re || re.test(import_node_path.default.basename(f))) out.push(import_node_path.default.relative(ctx.workspace, f).replaceAll("\\", "/"));
         });
       }
       return out.length === 0 ? "(\u8A72\u5F53\u306A\u3057)" : truncate(out.join("\n"));
@@ -5746,14 +5589,14 @@ var TOOL_DEFS = [
       const selected = /* @__PURE__ */ new Map();
       const addFile = (abs, displayPath) => {
         const checked = resolveInWorkspace(abs, ctx);
-        const relative = (displayPath ?? import_node_path2.default.relative(ctx.workspace, checked)).replaceAll("\\", "/");
+        const relative = (displayPath ?? import_node_path.default.relative(ctx.workspace, checked)).replaceAll("\\", "/");
         selected.set(checked.toLowerCase(), { abs: checked, relative });
       };
       for (const requested of requestedPaths) addFile(resolveInWorkspace(requested, ctx), requested.replaceAll("\\", "/"));
       if (patterns.length > 0) {
         const matchers = patterns.map(workspaceGlobToRegExp);
         await walk(ctx.workspace, (file) => {
-          const relative = import_node_path2.default.relative(ctx.workspace, file).replaceAll("\\", "/");
+          const relative = import_node_path.default.relative(ctx.workspace, file).replaceAll("\\", "/");
           if (matchers.some((matcher) => matcher.test(relative))) addFile(file, relative);
         });
       }
@@ -5784,7 +5627,7 @@ var TOOL_DEFS = [
         const heading = `===== ${file.relative} =====
 `;
         const xlsxHint = `run_command\u3067 tools/Read-Xlsx.ps1 ${file.relative} \u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044`;
-        if (import_node_path2.default.extname(file.relative).toLowerCase() === ".xlsx") {
+        if (import_node_path.default.extname(file.relative).toLowerCase() === ".xlsx") {
           const section = `${heading}${xlsxHint}
 `;
           if (used + section.length <= bodyBudget) {
@@ -5839,12 +5682,12 @@ var TOOL_DEFS = [
     async run(args, ctx) {
       const requested = String(args.path ?? "");
       const abs = resolveInWorkspace(requested, ctx);
-      if (import_node_path2.default.extname(abs).toLowerCase() !== ".xlsx") throw new Error("read_xlsx \u306F .xlsx \u30D5\u30A1\u30A4\u30EB\u3060\u3051\u3092\u8AAD\u307F\u53D6\u308C\u307E\u3059");
+      if (import_node_path.default.extname(abs).toLowerCase() !== ".xlsx") throw new Error("read_xlsx \u306F .xlsx \u30D5\u30A1\u30A4\u30EB\u3060\u3051\u3092\u8AAD\u307F\u53D6\u308C\u307E\u3059");
       const stat = await import_promises.default.stat(abs).catch(() => null);
       if (!stat?.isFile()) throw new Error(`xlsx\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${requested}`);
-      const appRoot = import_node_path2.default.resolve(__dirname, "..");
-      const helper = import_node_path2.default.join(appRoot, "tools", "Read-Xlsx.ps1");
-      if (!import_node_fs2.default.existsSync(helper)) throw new Error(`xlsx\u8AAD\u307F\u53D6\u308A\u30D8\u30EB\u30D1\u30FC\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${helper}`);
+      const appRoot = import_node_path.default.resolve(__dirname, "..");
+      const helper = import_node_path.default.join(appRoot, "tools", "Read-Xlsx.ps1");
+      if (!import_node_fs.default.existsSync(helper)) throw new Error(`xlsx\u8AAD\u307F\u53D6\u308A\u30D8\u30EB\u30D1\u30FC\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${helper}`);
       const { stdout, stderr } = await execFileAsync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", helper, "-Path", abs], {
         cwd: ctx.workspace,
         windowsHide: true,
@@ -5882,11 +5725,11 @@ var TOOL_DEFS = [
         if (e.code !== "ENOENT") throw err;
         existedBefore = false;
       }
-      await import_promises.default.mkdir(import_node_path2.default.dirname(abs), { recursive: true });
+      await import_promises.default.mkdir(import_node_path.default.dirname(abs), { recursive: true });
       await import_promises.default.writeFile(abs, content, "utf8");
       const readBack = await import_promises.default.readFile(abs, "utf8");
       recordFileSnapshot(abs, ctx, before, existedBefore, readBack);
-      const result = formatFileChangeResult("\u66F8\u304D\u8FBC\u307F", import_node_path2.default.relative(ctx.workspace, abs), before, readBack, 1, existedBefore);
+      const result = formatFileChangeResult("\u66F8\u304D\u8FBC\u307F", import_node_path.default.relative(ctx.workspace, abs), before, readBack, 1, existedBefore);
       return `${result}
 \u30B5\u30A4\u30BA: ${Buffer.byteLength(readBack)} bytes`;
     }
@@ -5919,13 +5762,13 @@ var TOOL_DEFS = [
       const next = replaceAll ? src.split(oldStr).join(newStr) : src.replace(oldStr, newStr);
       if (next === src) {
         recordFileSnapshot(abs, ctx, src, true, src);
-        return formatFileChangeResult("\u7DE8\u96C6", import_node_path2.default.relative(ctx.workspace, abs), src, src, count, true);
+        return formatFileChangeResult("\u7DE8\u96C6", import_node_path.default.relative(ctx.workspace, abs), src, src, count, true);
       }
       await import_promises.default.writeFile(abs, next, "utf8");
       const readBack = await import_promises.default.readFile(abs, "utf8");
       if (readBack !== next) throw new Error("\u7DE8\u96C6\u5F8C\u306E\u518D\u8AAD\u8FBC\u5185\u5BB9\u304C\u4E00\u81F4\u3057\u307E\u305B\u3093");
       recordFileSnapshot(abs, ctx, src, true, readBack);
-      return formatFileChangeResult("\u7DE8\u96C6", import_node_path2.default.relative(ctx.workspace, abs), src, readBack, count, true);
+      return formatFileChangeResult("\u7DE8\u96C6", import_node_path.default.relative(ctx.workspace, abs), src, readBack, count, true);
     }
   },
   {
@@ -5976,7 +5819,7 @@ var TOOL_DEFS = [
         for (let i = 0; i < lines.length; i++) {
           if (results.length >= MAX_SEARCH_RESULTS) break;
           if (re.test(lines[i])) {
-            results.push(`${import_node_path2.default.relative(ctx.workspace, f).replaceAll("\\", "/")}:${i + 1}: ${truncate(lines[i], 300)}`);
+            results.push(`${import_node_path.default.relative(ctx.workspace, f).replaceAll("\\", "/")}:${i + 1}: ${truncate(lines[i], 300)}`);
           }
         }
       }
@@ -6073,13 +5916,6 @@ var TOOL_DEFS = [
     }
   }
 ];
-function openAITools(options = {}) {
-  const defs = options.allowArbitraryCommands ? TOOL_DEFS : TOOL_DEFS.filter((tool) => tool.name !== "run_command");
-  return defs.map((t) => ({
-    type: "function",
-    function: { name: qualifiedToolName(t.name), description: t.description, parameters: { ...t.parameters, additionalProperties: false } }
-  }));
-}
 
 // src/agent.ts
 function scanCandidates(text) {
@@ -6192,1695 +6028,148 @@ function extractReplyAndEnd(raw) {
   }
   return { parsed, end: candidate.end };
 }
-function attachFenceContent(raw, end, parsed) {
-  if (bareToolName(parsed.tool ?? "") !== "write_file" || typeof parsed.args?.content === "string") return;
-  const normalized = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-  const rest = normalized.slice(end);
-  const cm = rest.match(/^\s*(?:CONTENT|内容)\s*[:：]\s*\r?\n?([\s\S]+)$/i);
-  if (cm) {
-    const body = cm[1].split(END_MARKER)[0].replace(/\s+$/, "").replace(/＜/g, "<").replace(/＞/g, ">").replace(/｀/g, String.fromCharCode(96)).replace(/¶/g, "\n");
-    parsed.args = { ...parsed.args ?? {}, content: body };
-    return;
-  }
-  const fm = rest.match(/```[\w+-]*[ \t]*\r?\n?([\s\S]*?)```/);
-  if (fm) {
-    parsed.args = { ...parsed.args ?? {}, content: fm[1].replace(/^\r?\n/, "").trim() };
-  }
-}
-function buildResearchBundle(question, summary, retrievedAt = (/* @__PURE__ */ new Date()).toISOString()) {
-  const urls = [...summary.matchAll(/https?:\/\/[^\s<>()\[\]"'（）【】、。]+/g)].map((match) => match[0].replace(/[.,;:!?、。]+$/, ""));
-  const uniqueUrls = [...new Set(urls)];
-  const sources = uniqueUrls.map((url) => ({ url, retrievedAt }));
-  const claims = summary.split(/\r?\n+/).map((text) => text.trim()).filter(Boolean).map((text) => ({ text, citations: sources }));
-  const contentHash = import_node_crypto2.default.createHash("sha256").update(summary, "utf8").digest("hex");
-  return { researchId: `research-${contentHash.slice(0, 16)}`, question, summary, claims, sources, retrievedAt, contentHash };
-}
-var END_MARKER = "AGENT_END";
-function shouldCancel(io) {
-  return io.signal?.aborted === true || io.isCanceled?.() === true;
-}
-function buildProtocolRules(mode = "work", allowArbitraryCommands = false, autoApproveCommand = false) {
-  const toolDocs = TOOL_DEFS.filter((t) => allowArbitraryCommands || t.name !== "run_command").map((t) => {
-    const req = t.parameters.required ?? [];
-    const props = Object.keys(t.parameters.properties ?? {});
-    return `- ${qualifiedToolName(t.name)}(${props.join(", ")}):${req.length ? ` \u5FC5\u9808=${req.join(",")};` : ""} ${t.description}`;
-  }).join("\n");
-  const commandRule = allowArbitraryCommands ? autoApproveCommand ? "\u660E\u793A\u8A2D\u5B9A\u306B\u3088\u308A\u4EFB\u610F\u306Ehost\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u81EA\u52D5\u627F\u8A8D\u6E08\u307F\u3067\u3059\u3002\u627F\u8A8D\u3092\u6C42\u3081\u308Banswer\u3092\u8FD4\u3055\u305A\u3001\u5FC5\u8981\u306Ahost.run_command\u3092\u76F4\u3061\u306B\u8981\u6C42\u3057\u3066\u304F\u3060\u3055\u3044\u3002" : "\u660E\u793A\u8A2D\u5B9A\u306B\u3088\u308A\u4EFB\u610F\u306Ehost\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u304C\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u3059\u3002\u5B9F\u884C\u524D\u306B\u627F\u8A8D\u3092\u53D6\u5F97\u3057\u3066\u304F\u3060\u3055\u3044\u3002" : "\u4EFB\u610F\u306E\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u3053\u306ERun\u3067\u306F\u7121\u52B9\u3067\u3059\u3002\u65E2\u77E5\u306E\u691C\u8A3C\u624B\u9806\u3084\u7BA1\u7406\u30D7\u30ED\u30BB\u30B9\u3092\u4F7F\u3044\u3001\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u3092\u8981\u6C42\u3057\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002";
-  if (mode !== "work") {
-    const label = mode === "research" ? "\u8ABF\u67FB" : "\u901A\u5E38\u56DE\u7B54";
-    return [
-      `\u3042\u306A\u305F\u306F\u793E\u5185\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u306E${label}\u30E2\u30FC\u30C9\u3067\u3059\u3002`,
-      "\u3053\u306E\u30E2\u30FC\u30C9\u3067\u306F\u30ED\u30FC\u30AB\u30EB\u30DB\u30B9\u30C8\u30C4\u30FC\u30EB\u3001\u30D5\u30A1\u30A4\u30EB\u64CD\u4F5C\u3001\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u3092\u8981\u6C42\u3057\u3066\u306F\u3044\u3051\u307E\u305B\u3093\u3002",
-      mode === "research" ? "\u5FC5\u8981\u306A\u3089Copilot\u5185\u8535\u306E\u691C\u7D22\u3092\u4F7F\u3044\u3001\u56DE\u7B54\u306B\u53C2\u7167\u5148\u3068\u53D6\u5F97\u6642\u523B\u3092\u542B\u3081\u3066\u304F\u3060\u3055\u3044\u3002" : "\u901A\u5E38\u306E\u56DE\u7B54\u3060\u3051\u3092\u8FD4\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
-      "\u3053\u306E\u56DE\u7B54\u306F\u30A2\u30D7\u30EA\u306E\u30DB\u30B9\u30C8\u5B9F\u884C\u7D50\u679C\u3067\u306F\u3042\u308A\u307E\u305B\u3093\u3002\u30ED\u30FC\u30AB\u30EB\u5909\u66F4\u3084\u5B9F\u884C\u6210\u529F\u3092\u4E3B\u5F35\u3057\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002"
-    ].join("\n");
-  }
-  return [
-    "\u3042\u306A\u305F\u306F\u793E\u5185\u30B3\u30FC\u30C7\u30A3\u30F3\u30B0\u652F\u63F4\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u3067\u3059\u3002work\u30E2\u30FC\u30C9\u3067\u306F\u3001\u30A2\u30D7\u30EA\u304C\u7BA1\u7406\u3059\u308Bhost.*\u30C4\u30FC\u30EB\u3060\u3051\u3092\u4F7F\u3048\u307E\u3059\u3002",
-    "Copilot\u5185\u8535\u306EWeb\u691C\u7D22\u3001Excel\u3001Word\u3001PowerPoint\u3001\u305D\u306E\u4ED6\u306Enative\u6A5F\u80FD\u3092\u30A2\u30D7\u30EA\u306E\u30C4\u30FC\u30EB\u3068\u3057\u3066\u8981\u6C42\u30FB\u5831\u544A\u3057\u3066\u306F\u3044\u3051\u307E\u305B\u3093\u3002",
-    "\u3042\u306A\u305F\u306E\u5FDC\u7B54\u306F\u5B9F\u884C\u7D50\u679C\u3067\u306F\u306A\u304F\u3001\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u304C\u89E3\u91C8\u3059\u308B\u300C\u6B21\u306E1\u624B\u300D\u3067\u3059\u3002",
-    "\u30DB\u30B9\u30C8\u30D6\u30EA\u30C3\u30B8\u306F host.* \u306EJSON\u3060\u3051\u3092\u691C\u8A3C\u3057\u30661\u56DE\u305A\u3064\u5B9F\u884C\u3057\u3001\u7D50\u679C\u3092\u6B21\u306E\u5165\u529B\u306Bhost_result\u3068\u3057\u3066\u6E21\u3057\u307E\u3059\u3002",
-    "\u30ED\u30FC\u30AB\u30EB\u64CD\u4F5C\u304C\u4E0D\u8981\u306A\u3089answer\u3092\u8FD4\u3057\u307E\u3059\u3002\u5148\u56DE\u308A\u306Elist_files\u3084\u3001\u540C\u3058\u64CD\u4F5C\u306E\u7E70\u308A\u8FD4\u3057\u306F\u7981\u6B62\u3067\u3059\u3002",
-    allowArbitraryCommands ? "\u5929\u6C17\u30FB\u6C17\u6E29\u30FB\u964D\u6C34\u91CF\u306Fhost.get_weather\u3092\u4F7F\u3044\u3001\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u3067\u5916\u90E8\u5929\u6C17\u30B5\u30A4\u30C8\u3092\u547C\u3093\u3067\u306F\u3044\u3051\u307E\u305B\u3093\u3002" : "\u5929\u6C17\u30FB\u6C17\u6E29\u30FB\u964D\u6C34\u91CF\u306Fhost.get_weather\u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044\u3002",
-    "\u30C4\u30FC\u30EB\u304C\u62D2\u5426\u3055\u308C\u305F\u3001\u307E\u305F\u306F\u60C5\u5831\u304C\u4E0D\u8DB3\u3057\u3066\u3044\u308B\u5834\u5408\u306F\u3001\u6B21\u306E\u64CD\u4F5C\u3092\u63A8\u6E2C\u305B\u305Aanswer\u3067\u5229\u7528\u8005\u306B\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
-    "",
-    "\u9078\u629E\u3067\u304D\u308Bhost\u30A2\u30AF\u30B7\u30E7\u30F3:",
-    toolDocs,
-    commandRule,
-    allowArbitraryCommands ? "\u9577\u6642\u9593\u306E\u30ED\u30FC\u30AB\u30EB\u958B\u767A\u30B5\u30FC\u30D0\u30FC\u306Fhost.start_process\u2192host.read_process_log\u2192host.stop_process\u306E\u9806\u3067\u7BA1\u7406\u3059\u308B\u3002" : "\u9577\u6642\u9593\u306E\u30ED\u30FC\u30AB\u30EB\u958B\u767A\u30B5\u30FC\u30D0\u30FC\u306Fhost.start_process\u2192host.read_process_log\u2192host.stop_process\u306E\u9806\u3067\u7BA1\u7406\u3057\u3001\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u306F\u4F7F\u308F\u306A\u3044\u3002",
-    "",
-    "\u7B2C0\u30BF\u30FC\u30F3\u306ETOOL_RESULT\u3068\u3001\u305D\u306E\u5F8C\u306Ehost_result\u3060\u3051\u3092\u5B9F\u969B\u306E\u30DB\u30B9\u30C8\u7D50\u679C\u3068\u3057\u3066\u6271\u3044\u307E\u3059\u3002\u7D50\u679C\u3092\u60F3\u50CF\u305B\u305A\u3001\u53D7\u3051\u53D6\u3063\u305F\u5185\u5BB9\u3060\u3051\u3092\u6839\u62E0\u306B\u6B21\u306E1\u624B\u3092\u9078\u3073\u307E\u3059\u3002",
-    "",
-    "\u51FA\u529B\u30EB\u30FC\u30EB(\u53B3\u5B88): \u6BCE\u56DE\u3001\u6B21\u306E\u3069\u3061\u3089\u304B\u306EJSON\u30AA\u30D6\u30B8\u30A7\u30AF\u30C81\u3064\u3060\u3051\u3092\u51FA\u529B\u3059\u308B\u3002",
-    '  {"tool":"host.<\u30A2\u30AF\u30B7\u30E7\u30F3\u540D>","args":{...}}',
-    '  {"answer":"<\u30E6\u30FC\u30B6\u30FC\u3078\u306E\u6700\u7D42\u56DE\u7B54(\u65E5\u672C\u8A9E)>"}',
-    "JSON\u4EE5\u5916\u306E\u8AAC\u660E\u6587\u3001\u898B\u51FA\u3057\u3001\u6328\u62F6\u3001\u8907\u6570JSON\u306F\u51FA\u529B\u3057\u306A\u3044\u3002",
-    "write_file\u306E\u672C\u6587\u304C\u9577\u3044\u5834\u5408\u3060\u3051\u3001JSON\u306E\u76F4\u5F8C\u306BCONTENT:\u3068\u672C\u6587\u3092\u7D9A\u3051\u3001\u6700\u5F8C\u306BAGENT_END\u3092\u7F6E\u304F\u3002",
-    `\u6700\u5F8C\u306B ${END_MARKER} \u3060\u3051\u306E\u884C\u3092\u4ED8\u3051\u308B\u3002`
-  ].join("\n");
-}
-function normalizeForKey(value) {
-  if (Array.isArray(value)) return value.map(normalizeForKey);
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, normalizeForKey(item)]));
-  return value;
-}
-function toolRequestKey(name, args) {
-  const normalized = normalizeForKey(args);
-  if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) return `${name}:${JSON.stringify(normalized)}`;
-  const copy = { ...normalized };
-  const bare = bareToolName(name);
-  if (typeof copy.path === "string") copy.path = import_node_path3.default.normalize(copy.path).replaceAll("\\", "/");
-  if (bare === "list_files") {
-    if (copy.path === "" || copy.path === ".") delete copy.path;
-    if (copy.glob === "*" || copy.glob === "**" || copy.glob === "**/*") delete copy.glob;
-  }
-  return `${name}:${JSON.stringify(copy)}`;
-}
-function formatHostResult(tool, output, metadata, status, callId, runId) {
-  const bare = bareToolName(tool);
-  const max = bare === "read_files" ? 8e4 : 8e3;
-  const truncated = output.length > max;
-  const commandLike = bare === "run_command" || bare === "start_process" || bare === "stop_process";
-  const writeLike = bare === "write_file" || bare === "edit_file";
-  const sideEffectState = status === "succeeded" ? metadata?.changed ? "committed" : "none" : status === "denied" ? "none" : commandLike ? "unknown" : writeLike ? "possible" : "none";
-  const payload = {
-    kind: "host_result",
-    schemaVersion: "1",
-    ...runId ? { runId } : {},
-    ...callId ? { callId } : {},
-    tool,
-    status,
-    data: { summary: output.slice(0, max) },
-    evidence: metadata ? { ...metadata, retrievedAt: (/* @__PURE__ */ new Date()).toISOString() } : { retrievedAt: (/* @__PURE__ */ new Date()).toISOString() },
-    effects: metadata?.changed ? [{ type: "workspace_change", path: metadata.path ?? null, beforeHash: metadata.beforeHash ?? null, afterHash: metadata.afterHash ?? null }] : [],
-    sideEffectState,
-    truncation: { truncated },
-    security: { contentIsUntrusted: true },
-    error: status === "succeeded" ? null : {
-      code: status === "denied" ? "host_call_denied" : "host_call_failed",
-      stage: status === "denied" ? "approval" : "execution",
-      retryable: status === "failed" && !commandLike && !writeLike,
-      sideEffectState,
-      message: output.slice(0, 600)
-    }
-  };
-  return ["[BEGIN_UNTRUSTED_HOST_RESULT]", JSON.stringify(payload), "[END_UNTRUSTED_HOST_RESULT]"].join("\n");
-}
-async function bootstrapWorkspaceEvidence(ctx, io) {
-  const tool = "host.list_files";
-  const callId = "host-bootstrap-0";
-  const def = findHostTool(tool);
-  if (!def) {
-    return ["TOOL_RESULT (\u7B2C0\u30BF\u30FC\u30F3\u81EA\u52D5\u5B9F\u884C)", formatHostResult(tool, "[tool error] list_files\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093", null, "failed", callId, ctx.runId)].join("\n");
-  }
-  const summary = "list_files: \u7B2C0\u30BF\u30FC\u30F3\u306E\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u8A3C\u62E0\u3092\u53D6\u5F97";
-  io.event?.({ type: "tool.requested", tool, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
-  io.event?.({ type: "step.started", tool, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
-  const startedAt = Date.now();
-  let output;
-  try {
-    output = await def.run({}, ctx);
-  } catch (err) {
-    output = `[tool error] ${err.message}`;
-  }
-  const failed = output.startsWith("[tool error]");
-  const durationMs = Date.now() - startedAt;
-  io.event?.({ type: failed ? "tool.failed" : "tool.succeeded", tool, summary, output: output.slice(0, 1200), durationMs, origin: "host", namespace: "app", authority: "authoritative", callId });
-  io.event?.({ type: failed ? "step.failed" : "step.completed", tool, summary, output: output.slice(0, 800), durationMs, origin: "host", namespace: "app", authority: "authoritative", callId });
-  return [
-    "TOOL_RESULT (\u7B2C0\u30BF\u30FC\u30F3\u81EA\u52D5\u5B9F\u884C\u3002\u30E2\u30C7\u30EB\u5224\u65AD\u56DE\u6570\u30FBhost\u5B9F\u884C\u4E88\u7B97\u306B\u306F\u4E0D\u7B97\u5165)",
-    formatHostResult(tool, output, null, failed ? "failed" : "succeeded", callId, ctx.runId)
-  ].join("\n");
-}
-async function captureFileBinding(def, args, ctx) {
-  if (def.kind !== "write" || typeof args.path !== "string") return {};
-  const state = await getFilePrecondition(args.path, ctx);
-  return { path: args.path, ...state };
-}
-async function approvalPreconditionChanged(binding, ctx) {
-  if (!binding.path || binding.existedBefore === void 0) return false;
-  const state = await getFilePrecondition(binding.path, ctx);
-  return state.existedBefore !== binding.existedBefore || state.beforeHash !== binding.beforeHash;
-}
-function composeCopilotPrompt(mode, userInput, steps, budget = 12e4, history = [], allowArbitraryCommands = false, autoApproveCommand = false, systemInstructions = "") {
-  const histBlock = history.length > 0 ? ["", "[\u3053\u308C\u307E\u3067\u306E\u3084\u308A\u3068\u308A]", ...history.map((h) => `${h.role}: ${h.content.replace(/\r?\n+/g, " ")}`)] : [];
-  const systemBlock = systemInstructions.trim() ? ["", "[\u696D\u52D9\u56FA\u6709\u6307\u793A]", systemInstructions.trim()] : [];
-  const head = [buildProtocolRules(mode, allowArbitraryCommands, autoApproveCommand), ...systemBlock, ...histBlock, "", "[\u4F9D\u983C]", userInput];
-  const tail = [
-    "",
-    "[\u6307\u793A]",
-    "\u4E0A\u8A18\u306E\u72B6\u6CC1\u3092\u8E0F\u307E\u3048\u3066\u3001\u6B21\u306B\u53D6\u308B\u3079\u304D\u30A2\u30AF\u30B7\u30E7\u30F3\u3092\u6307\u5B9A\u306E JSON \u5F62\u5F0F\u306E\u307F\u3067\u8FD4\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
-    `\u56DE\u7B54\u306E\u6700\u5F8C\u306B\u306F ${END_MARKER} \u3060\u3051\u306E\u884C\u3092\u4ED8\u3051\u3066\u304F\u3060\u3055\u3044\u3002`
-  ];
-  let keep = steps;
-  const build = (list, omitted) => [...head, ...omitted ? ["(\u203B \u53E4\u3044\u7D4C\u904E\u306F\u7701\u7565\u3057\u307E\u3057\u305F)"] : [], ...list, ...tail].join("\n");
-  let text = build(keep, false);
-  while (text.length > budget && keep.length > 1) {
-    keep = keep.slice(1);
-    text = build(keep, true);
-  }
-  return text;
-}
-async function runCopilotTurn(opts) {
-  const { cfg, ctx, io, backend } = opts;
-  const mode = cfg.turnMode ?? (cfg.copilot?.agentMode === true ? "work" : "chat");
-  const policy = capabilityPolicy(cfg, mode);
-  const history = opts.messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role === "assistant" ? "\u30A2\u30B7\u30B9\u30BF\u30F3\u30C8" : "\u30E6\u30FC\u30B6\u30FC", content: String(m.content ?? "").slice(0, 400) })).slice(-12);
-  const systemInstructions = opts.messages.filter((m) => m.role === "system").map((m) => String(m.content ?? "")).filter((content) => content.trim()).join("\n\n") || cfg.systemPrompt || "";
-  const turnMessages = (assistantContent) => [
-    ...opts.messages,
-    { role: "user", content: opts.userInput },
-    { role: "assistant", content: assistantContent }
-  ];
-  const canceled = () => ({ reply: "", messages: turnMessages("[\u4E2D\u65AD] \u30E6\u30FC\u30B6\u30FC\u304C\u30AD\u30E3\u30F3\u30BB\u30EB\u3057\u307E\u3057\u305F"), aborted: true });
-  const stopRequested = () => shouldCancel(io) || io.isPaused?.() === true;
-  if (mode !== "work") {
-    const modePrompt = buildProtocolRules(mode);
-    const prompt = [cfg.systemPrompt, modePrompt, opts.userInput].filter((s) => s && s.trim()).join("\n\n");
-    try {
-      const text = (await backend.complete(prompt, io.signal)).trim();
-      io.event?.({ type: "model.decision", summary: "Copilot\u306E\u56DE\u7B54\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: "copilot", namespace: "native", authority: "claimed" });
-      io.event?.({ type: "plan.created", summary: mode === "research" ? "Copilot\u8ABF\u67FB\u30E2\u30FC\u30C9\u3092\u958B\u59CB\u3057\u307E\u3057\u305F" : "\u901A\u5E38\u56DE\u7B54\u30E2\u30FC\u30C9\u3092\u958B\u59CB\u3057\u307E\u3057\u305F", origin: "orchestrator", namespace: "none", authority: "derived" });
-      if (mode === "research") {
-        const research = buildResearchBundle(opts.userInput, text);
-        if (research.sources.length === 0) {
-          const message = "\u8ABF\u67FB\u7D50\u679C\u3092\u78BA\u5B9A\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u51FA\u5178URL\u4ED8\u304D\u3067\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
-          io.print(`[warn] ${message}`);
-          io.event?.({ type: "run.warning", error: message, origin: "orchestrator", namespace: "none", authority: "authoritative" });
-          return { reply: "", messages: turnMessages(`[\u4E2D\u65AD] ${message}`), aborted: true };
-        }
-        io.event?.({ type: "step.completed", summary: `Copilot\u8ABF\u67FB\u306E\u56DE\u7B54\u3092\u53D7\u3051\u53D6\u308A\u307E\u3057\u305F\uFF08\u51FA\u5178${research.sources.length}\u4EF6\uFF09`, origin: "copilot", namespace: "native", authority: "claimed" });
-        return { reply: text, messages: turnMessages(text), aborted: false, research };
-      }
-      io.event?.({ type: "step.completed", summary: "\u56DE\u7B54\u3092\u53D7\u3051\u53D6\u308A\u307E\u3057\u305F", origin: "copilot", namespace: "native", authority: "claimed" });
-      return { reply: text, messages: turnMessages(text), aborted: false };
-    } catch (err) {
-      const msg = err.message;
-      io.print(`[error] ${msg}`);
-      return { reply: "", messages: turnMessages(`[error] ${msg}`), aborted: true };
-    }
-  }
-  const steps = [];
-  io.event?.({ type: "plan.created", summary: "Run\u306E\u8A08\u753B\u3068\u691C\u8A3C\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F", origin: "orchestrator", namespace: "none", authority: "derived" });
-  steps.push(await bootstrapWorkspaceEvidence(ctx, io));
-  let parseRetried = false;
-  let invalidDecisions = 0;
-  const actionCounts = /* @__PURE__ */ new Map();
-  const requestHistory = [];
-  const maxIter = policy.maxModelDecisions;
-  const maxExecutions = policy.maxHostExecutions;
-  const maxWrites = policy.maxWriteExecutions;
-  const maxCommands = policy.maxCommandExecutions;
-  const maxNoProgress = policy.maxNoProgress;
-  let executions = 0;
-  let writes = 0;
-  let commands = 0;
-  let noProgress = 0;
-  let lastResultKey = "";
-  const stopWithWarning = (message) => {
-    io.print(`[warn] ${message}`);
-    io.event?.({ type: "run.warning", error: message, origin: "orchestrator", namespace: "none", authority: "authoritative" });
-    return { reply: "", messages: turnMessages(`[\u4E2D\u65AD] ${message}`), aborted: true, checkpoint: steps.slice(-20) };
-  };
-  for (let i = 0; i < maxIter; i++) {
-    if (shouldCancel(io)) return canceled();
-    if (io.isPaused?.()) return { reply: "", messages: turnMessages("[\u4E00\u6642\u505C\u6B62] \u30C1\u30A7\u30C3\u30AF\u30DD\u30A4\u30F3\u30C8\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F"), aborted: true, paused: true, checkpoint: steps.slice(-20) };
-    let raw;
-    try {
-      raw = await backend.complete(composeCopilotPrompt("work", opts.userInput, steps, cfg.copilot?.maxPromptChars ?? 12e4, history, policy.allowArbitraryCommands, policy.autoApproveCommand, systemInstructions), io.signal);
-      raw = raw.replace(/＜/g, "<").replace(/＞/g, ">").replace(/｀/g, String.fromCharCode(96));
-      io.event?.({ type: "model.decision", summary: "Copilot\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: "copilot", namespace: "native", authority: "claimed" });
-    } catch (err) {
-      const msg = err.message;
-      io.print(`[error] ${msg}`);
-      return { reply: "", messages: turnMessages(`[error] ${msg}`), aborted: true };
-    }
-    let converterRaw = null;
-    try {
-      converterRaw = await convertCopilotResponse(cfg.localResponseConverter, raw, TOOL_DEFS.map((tool) => ({ name: qualifiedToolName(tool.name), description: tool.description, parameters: tool.parameters })), io.signal);
-      if (converterRaw !== null) io.print("[converter] loopback response converter applied");
-    } catch (err) {
-      io.print(`[converter] fallback: ${err.message}`);
-    }
-    const pe = converterRaw ? extractReplyAndEnd(converterRaw) ?? extractReplyAndEnd(raw) : extractReplyAndEnd(raw);
-    let parsed = pe?.parsed ?? null;
-    if (parsed && bareToolName(parsed.tool ?? "") === "write_file") attachFenceContent(raw, pe.end, parsed);
-    if (!parsed) {
-      if (!parseRetried) {
-        parseRetried = true;
-        steps.push("SYSTEM: \u76F4\u524D\u306E\u5FDC\u7B54\u306F\u53B3\u683C\u306A\u5358\u4E00JSON\u5951\u7D04\u306B\u9055\u53CD\u3057\u307E\u3057\u305F\u3002JSON\u30AA\u30D6\u30B8\u30A7\u30AF\u30C81\u3064\u3060\u3051\u3092\u8FD4\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
-        continue;
-      }
-      return stopWithWarning("Copilot\u306E\u5FDC\u7B54\u5F62\u5F0F\u3092\u691C\u8A3C\u3067\u304D\u306A\u3044\u305F\u3081\u3001\u5B89\u5168\u306E\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
-    }
-    if (parsed.answer !== void 0) {
-      const reply = parsed.answer.trim();
-      steps.push('assistant: {"answer":"..."}');
-      return { reply, messages: turnMessages(reply), aborted: false };
-    }
-    const requestedTool = parsed.tool ?? "";
-    const normalizedTool = requestedTool.startsWith("host.") ? requestedTool : qualifiedToolName(requestedTool);
-    const def = findHostTool(normalizedTool);
-    if (!requestedTool || !def) {
-      io.event?.({ type: "copilot.native.observed", tool: parsed.tool, summary: "Copilot\u5185\u8535/native\u30C4\u30FC\u30EB\u8981\u6C42\u3092\u89B3\u6E2C\u3057\u307E\u3057\u305F\uFF08\u5B9F\u884C\u3057\u3066\u3044\u307E\u305B\u3093\uFF09", origin: "copilot", namespace: "native", authority: "observed" });
-      invalidDecisions++;
-      steps.push(`SYSTEM: \u8A31\u53EF\u3055\u308C\u3066\u3044\u308B\u65E2\u77E5\u306Ehost\u30C4\u30FC\u30EB\u3060\u3051\u3092\u5B9F\u884C\u3067\u304D\u307E\u3059\u3002\u53D7\u4FE1\u3057\u305Ftool=${parsed.tool ?? "(\u306A\u3057)"}`);
-      if (invalidDecisions >= 2) return stopWithWarning("\u8A31\u53EF\u3055\u308C\u3066\u3044\u306A\u3044Copilot\u5185\u8535\u30C4\u30FC\u30EB\u307E\u305F\u306F\u4E0D\u660E\u306A\u30C4\u30FC\u30EB\u304C\u8981\u6C42\u3055\u308C\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
-      continue;
-    }
-    parsed.tool = normalizedTool;
-    if (bareToolName(def.name) === "run_command" && !policy.allowArbitraryCommands) return stopWithWarning("\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u8A2D\u5B9A\u3067\u660E\u793A\u7684\u306B\u6709\u52B9\u5316\u3055\u308C\u3066\u3044\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
-    const args = parsed.args ?? {};
-    const argError = validateToolArgs(def, args);
-    if (argError) {
-      invalidDecisions++;
-      steps.push(`host_result(${parsed.tool}): [validation_error] ${argError}`);
-      if (invalidDecisions >= 2) return stopWithWarning(`host\u30C4\u30FC\u30EB\u306E\u5F15\u6570\u3092\u691C\u8A3C\u3067\u304D\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F: ${argError}`);
-      continue;
-    }
-    invalidDecisions = 0;
-    const requestKey = toolRequestKey(parsed.tool, args);
-    const previousCount = actionCounts.get(requestKey) ?? 0;
-    requestHistory.push(requestKey);
-    if (requestHistory.length >= 4) {
-      const n = requestHistory.length;
-      if (requestHistory[n - 4] === requestHistory[n - 2] && requestHistory[n - 3] === requestHistory[n - 1]) return stopWithWarning("\u540C\u3058host\u64CD\u4F5C\u306E\u5FAA\u74B0\u304C\u691C\u51FA\u3055\u308C\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
-    }
-    if (previousCount > 0) {
-      if (previousCount >= 2) return stopWithWarning("\u540C\u3058host\u64CD\u4F5C\u304C\u7E70\u308A\u8FD4\u3055\u308C\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
-      actionCounts.set(requestKey, previousCount + 1);
-      steps.push(`SYSTEM: ${parsed.tool} \u306F\u76F4\u524D\u306B\u5B9F\u884C\u6E08\u307F\u3067\u3059\u3002\u524D\u56DE\u306Ehost_result\u3092\u4F7F\u3044\u3001\u5225\u306E\u64CD\u4F5C\u304C\u5FC5\u8981\u306A\u5834\u5408\u3060\u3051\u9078\u3093\u3067\u304F\u3060\u3055\u3044\u3002`);
-      continue;
-    }
-    actionCounts.set(requestKey, 1);
-    if (executions >= maxExecutions) return stopWithWarning(`host\u30C4\u30FC\u30EB\u5B9F\u884C\u4E0A\u9650(${maxExecutions}\u56DE)\u306B\u9054\u3057\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`);
-    if (def.kind === "write" && writes >= maxWrites) return stopWithWarning(`\u66F8\u304D\u8FBC\u307F\u5B9F\u884C\u4E0A\u9650(${maxWrites}\u56DE)\u306B\u9054\u3057\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`);
-    if (def.kind === "command" && commands >= maxCommands) return stopWithWarning(`\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u4E0A\u9650(${maxCommands}\u56DE)\u306B\u9054\u3057\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`);
-    if (stopRequested()) return canceled();
-    const qualified = qualifiedToolName(def.name);
-    const callId = `host-call-${executions + 1}`;
-    const summary = summarize(qualified, args);
-    io.event?.({ type: "tool.requested", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
-    io.event?.({ type: "step.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
-    if (def.kind !== "read") {
-      const auto = def.kind === "write" ? policy.autoApproveWrite : policy.autoApproveCommand;
-      const fileBinding = await captureFileBinding(def, args, ctx);
-      const approvalBinding = { ...fileBinding, toolName: qualified, argsHash: JSON.stringify(normalizeForKey(args)), command: typeof args.command === "string" ? args.command : void 0, network: def.kind === "command", callId };
-      if (!auto) {
-        const ok = await io.askYesNo(`\u5B9F\u884C\u3092\u8A31\u53EF\u3057\u307E\u3059\u304B\uFF1F
-${summary}`, approvalBinding);
-        if (ok) io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, origin: "host", namespace: "app", authority: "authoritative", callId });
-        if (ok && await approvalPreconditionChanged(approvalBinding, ctx)) {
-          io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u627F\u8A8D\u3092\u7121\u52B9\u5316\u3057\u307E\u3057\u305F", origin: "host", namespace: "app", authority: "authoritative", callId });
-          steps.push(formatHostResult(qualified, "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u5B9F\u884C\u3057\u307E\u305B\u3093\u3067\u3057\u305F", null, "denied", callId, ctx.runId));
-          continue;
-        }
-        if (!ok) {
-          io.event?.({ type: "tool.denied", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
-          steps.push(formatHostResult(qualified, "\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F", null, "denied", callId, ctx.runId));
-          continue;
-        }
-      } else {
-        io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, metadata: { automatic: true }, origin: "host", namespace: "app", authority: "authoritative", callId });
-      }
-    }
-    executions++;
-    if (def.kind === "write") writes++;
-    if (def.kind === "command") commands++;
-    io.event?.({ type: "tool.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
-    io.print(`[tool] ${summary}`);
-    if (stopRequested()) return canceled();
-    const startedAt = Date.now();
-    let output;
-    try {
-      output = await def.run(args, ctx);
-    } catch (err) {
-      output = `[tool error] ${err.message}`;
-    }
-    const failed = output.startsWith("[tool error]");
-    const durationMs = Date.now() - startedAt;
-    const metadata = parseToolResultMeta(output);
-    const resultKey = `${qualified}:${metadata?.afterHash ?? output.slice(0, 1600)}`;
-    noProgress = failed || resultKey === lastResultKey ? noProgress + 1 : 0;
-    lastResultKey = resultKey;
-    io.event?.({ type: failed ? "tool.failed" : "tool.succeeded", tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId });
-    io.event?.({ type: failed ? "step.failed" : "step.completed", tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId });
-    steps.push(formatHostResult(qualified, output, metadata, failed ? "failed" : "succeeded", callId, ctx.runId));
-    steps.push(`SYSTEM: ${qualified} \u306F\u5B9F\u884C\u6E08\u307F\u3067\u3059\u3002\u7D50\u679C\u3092\u6839\u62E0\u306B\u6B21\u306E1\u624B\u3092\u5224\u65AD\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
-    if (noProgress >= maxNoProgress) return stopWithWarning(`host\u30C4\u30FC\u30EB\u7D50\u679C\u306B\u9032\u5C55\u304C\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F\uFF08${maxNoProgress}\u56DE\u9023\u7D9A\uFF09`);
-  }
-  return stopWithWarning("\u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F");
-}
-async function runAgentTurn(opts) {
-  if (opts.backend || opts.cfg.provider === "copilot-edge") {
-    const backend = opts.backend;
-    if (!backend) throw new Error("provider=copilot-edge \u306B\u306F backend \u304C\u5FC5\u8981\u3067\u3059");
-    return runCopilotTurn({ cfg: opts.cfg, messages: opts.messages, backend, userInput: opts.userInput, ctx: opts.ctx, io: opts.io });
-  }
-  if ((opts.cfg.turnMode ?? "work") !== "work") return runPlainOpenAITurn(opts);
-  return runOpenAITurn(opts);
-}
-async function runPlainOpenAITurn(opts) {
-  const mode = opts.cfg.turnMode ?? "chat";
-  const prompt = mode === "research" ? `${opts.userInput}
-
-\u8ABF\u67FB\u30E2\u30FC\u30C9\u3067\u3059\u3002\u5FC5\u8981\u306A\u3089\u691C\u7D22\u3092\u4F7F\u3044\u3001\u51FA\u5178URL\u3068\u53D6\u5F97\u6642\u523B\u3092\u6DFB\u3048\u3066\u304F\u3060\u3055\u3044\u3002\u30ED\u30FC\u30AB\u30EB\u30D5\u30A1\u30A4\u30EB\u5909\u66F4\u3084\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u884C\u3044\u307E\u305B\u3093\u3002` : opts.userInput;
-  const messages = [...opts.messages, { role: "user", content: prompt }];
-  try {
-    const assistant = await chat(opts.cfg, messages, [], opts.io.signal);
-    const reply = assistant.content ?? "";
-    opts.io.event?.({ type: "model.decision", summary: "\u30E2\u30C7\u30EB\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: "copilot", namespace: "none", authority: "claimed" });
-    messages.push(assistant);
-    opts.io.event?.({ type: "plan.created", summary: mode === "research" ? "\u8ABF\u67FB\u30E2\u30FC\u30C9\u3092\u958B\u59CB\u3057\u307E\u3057\u305F" : "\u901A\u5E38\u56DE\u7B54\u30E2\u30FC\u30C9\u3092\u958B\u59CB\u3057\u307E\u3057\u305F", origin: "orchestrator", namespace: "none", authority: "derived" });
-    if (mode === "research") {
-      const research = buildResearchBundle(opts.userInput, reply);
-      if (research.sources.length === 0) {
-        const message = "\u8ABF\u67FB\u7D50\u679C\u3092\u78BA\u5B9A\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u51FA\u5178URL\u4ED8\u304D\u3067\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
-        opts.io.print(`[warn] ${message}`);
-        opts.io.event?.({ type: "run.warning", error: message, origin: "orchestrator", namespace: "none", authority: "authoritative" });
-        return { reply: "", messages: [...messages, { role: "assistant", content: `[\u4E2D\u65AD] ${message}` }], aborted: true };
-      }
-      opts.io.event?.({ type: "step.completed", summary: `\u8ABF\u67FB\u7D50\u679C\u3092\u53D7\u3051\u53D6\u308A\u307E\u3057\u305F\uFF08\u51FA\u5178${research.sources.length}\u4EF6\uFF09`, origin: "copilot", namespace: "native", authority: "claimed" });
-      return { reply, messages, aborted: false, research };
-    }
-    opts.io.event?.({ type: "step.completed", summary: "\u56DE\u7B54\u3092\u53D7\u3051\u53D6\u308A\u307E\u3057\u305F", origin: "orchestrator", namespace: "none", authority: "derived" });
-    return { reply, messages, aborted: false };
-  } catch (err) {
-    const msg = err.message;
-    opts.io.print(`[error] ${msg}`);
-    return { reply: "", messages, aborted: true };
-  }
-}
-async function runOpenAITurn(opts) {
-  const { cfg, ctx, io } = opts;
-  const policy = capabilityPolicy(cfg, "work");
-  const messages = [...opts.messages, { role: "user", content: opts.userInput }];
-  io.event?.({ type: "plan.created", summary: "Run\u306E\u8A08\u753B\u3068\u691C\u8A3C\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F", origin: "orchestrator", namespace: "none", authority: "derived" });
-  const maxIter = policy.maxModelDecisions;
-  const maxExecutions = policy.maxHostExecutions;
-  const maxWrites = policy.maxWriteExecutions;
-  const maxCommands = policy.maxCommandExecutions;
-  const maxNoProgress = policy.maxNoProgress;
-  const actionCounts = /* @__PURE__ */ new Map();
-  let executions = 0;
-  let writes = 0;
-  let commands = 0;
-  let noProgress = 0;
-  let lastResultKey = "";
-  const warning = (message) => {
-    io.print(`[warn] ${message}`);
-    io.event?.({ type: "run.warning", error: message, origin: "orchestrator", namespace: "none", authority: "authoritative" });
-    return { reply: "", messages, aborted: true };
-  };
-  for (let i = 0; i < maxIter; i++) {
-    if (shouldCancel(io)) return { reply: "", messages, aborted: true };
-    if (io.isPaused?.()) return { reply: "", messages, aborted: true, paused: true };
-    let assistant;
-    try {
-      assistant = await chat(cfg, messages, openAITools({ allowArbitraryCommands: policy.allowArbitraryCommands }), io.signal);
-    } catch (err) {
-      const msg = err.message;
-      io.print(`[error] ${msg}`);
-      return { reply: "", messages, aborted: true };
-    }
-    io.event?.({ type: "model.decision", summary: "\u30E2\u30C7\u30EB\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: "copilot", namespace: "none", authority: "claimed" });
-    messages.push(assistant);
-    const calls = assistant.tool_calls ?? [];
-    if (calls.length === 0) return { reply: assistant.content ?? "", messages, aborted: false };
-    if (calls.length !== 1) return warning("1\u56DE\u306E\u5224\u65AD\u3067\u8907\u6570\u306Ehost\u30C4\u30FC\u30EB\u304C\u8981\u6C42\u3055\u308C\u305F\u305F\u3081\u3001\u5B89\u5168\u306E\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
-    if (executions >= maxExecutions) return warning(`host\u30C4\u30FC\u30EB\u5B9F\u884C\u4E0A\u9650(${maxExecutions}\u56DE)\u306B\u9054\u3057\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`);
-    const call = calls[0];
-    const def = findHostTool(call.function.name);
-    if (!def) return warning(`\u8A31\u53EF\u3055\u308C\u3066\u3044\u306A\u3044host\u30C4\u30FC\u30EB ${call.function.name} \u304C\u8981\u6C42\u3055\u308C\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`);
-    if (bareToolName(def.name) === "run_command" && !policy.allowArbitraryCommands) return warning("\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u8A2D\u5B9A\u3067\u660E\u793A\u7684\u306B\u6709\u52B9\u5316\u3055\u308C\u3066\u3044\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
-    if (def.kind === "write" && writes >= maxWrites) return warning(`\u66F8\u304D\u8FBC\u307F\u5B9F\u884C\u4E0A\u9650(${maxWrites}\u56DE)\u306B\u9054\u3057\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`);
-    if (def.kind === "command" && commands >= maxCommands) return warning(`\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u4E0A\u9650(${maxCommands}\u56DE)\u306B\u9054\u3057\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`);
-    let argsForKey = {};
-    try {
-      argsForKey = call.function.arguments ? JSON.parse(call.function.arguments) : {};
-    } catch {
-    }
-    const key = toolRequestKey(call.function.name, argsForKey && typeof argsForKey === "object" && !Array.isArray(argsForKey) ? argsForKey : {});
-    if ((actionCounts.get(key) ?? 0) > 0) return warning("\u540C\u3058host\u30C4\u30FC\u30EB\u64CD\u4F5C\u304C\u7E70\u308A\u8FD4\u3055\u308C\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
-    actionCounts.set(key, 1);
-    const output = await executeCall(call, cfg, ctx, io);
-    executions++;
-    if (def.kind === "write") writes++;
-    if (def.kind === "command") commands++;
-    if (output.startsWith("[policy error]") || output.startsWith("[validation error]")) return warning(output);
-    const metadata = parseToolResultMeta(output);
-    const resultKey = `${call.function.name}:${metadata?.afterHash ?? output.slice(0, 1600)}`;
-    noProgress = resultKey === lastResultKey ? noProgress + 1 : 0;
-    lastResultKey = resultKey;
-    const status = output === "(\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)" ? "denied" : output.startsWith("[tool error]") ? "failed" : "succeeded";
-    messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: formatHostResult(call.function.name, output, metadata, status, call.id, ctx.runId) });
-    if (noProgress >= maxNoProgress) return warning(`host\u30C4\u30FC\u30EB\u7D50\u679C\u306B\u9032\u5C55\u304C\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F\uFF08${maxNoProgress}\u56DE\u9023\u7D9A\uFF09`);
-  }
-  return warning("\u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F");
-}
-async function executeCall(call, cfg, ctx, io) {
-  const policy = capabilityPolicy(cfg, "work");
-  if (!call.function.name.startsWith("host.")) return "[policy error] host.* \u4EE5\u5916\u306E\u30C4\u30FC\u30EB\u306Fwork\u30E2\u30FC\u30C9\u3067\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093";
-  const def = findHostTool(call.function.name);
-  if (!def) return `[policy error] \u672A\u77E5\u306Ehost\u30C4\u30FC\u30EB: ${call.function.name}`;
-  if (bareToolName(def.name) === "run_command" && !policy.allowArbitraryCommands) return "[policy error] \u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u8A2D\u5B9A\u3067\u660E\u793A\u7684\u306B\u6709\u52B9\u5316\u3055\u308C\u3066\u3044\u307E\u305B\u3093";
-  let args;
-  try {
-    const parsed = call.function.arguments ? JSON.parse(call.function.arguments) : {};
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("args\u306FJSON\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
-    args = parsed;
-  } catch (err) {
-    return `[validation error] ${err.message}`;
-  }
-  const argError = validateToolArgs(def, args);
-  if (argError) return `[validation error] ${argError}`;
-  const qualified = qualifiedToolName(def.name);
-  const summary = summarize(qualified, args);
-  io.event?.({ type: "tool.requested", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
-  io.event?.({ type: "step.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
-  if (def.kind !== "read") {
-    const auto = def.kind === "write" ? policy.autoApproveWrite : policy.autoApproveCommand;
-    const fileBinding = await captureFileBinding(def, args, ctx);
-    const approvalBinding = { ...fileBinding, toolName: qualified, argsHash: JSON.stringify(normalizeForKey(args)), command: typeof args.command === "string" ? args.command : void 0, network: def.kind === "command", callId: call.id };
-    if (!auto) {
-      const ok = await io.askYesNo(`\u5B9F\u884C\u3092\u8A31\u53EF\u3057\u307E\u3059\u304B\uFF1F
-${summary}`, approvalBinding);
-      if (ok) io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
-      if (ok && await approvalPreconditionChanged(approvalBinding, ctx)) {
-        io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u627F\u8A8D\u3092\u7121\u52B9\u5316\u3057\u307E\u3057\u305F", origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
-        return "(\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)";
-      }
-      if (!ok) {
-        io.event?.({ type: "tool.denied", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
-        return "(\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)";
-      }
-    } else {
-      io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, metadata: { automatic: true }, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
-    }
-  }
-  io.event?.({ type: "tool.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
-  io.print(`[tool] ${summary}`);
-  const startedAt = Date.now();
-  try {
-    const output = await def.run(args, ctx);
-    const durationMs = Date.now() - startedAt;
-    const metadata = parseToolResultMeta(output);
-    io.event?.({ type: "tool.succeeded", tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
-    io.event?.({ type: "step.completed", tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
-    return output;
-  } catch (err) {
-    const output = `[tool error] ${err.message}`;
-    const durationMs = Date.now() - startedAt;
-    io.event?.({ type: "tool.failed", tool: qualified, summary, output, error: output, durationMs, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
-    io.event?.({ type: "step.failed", tool: qualified, summary, output, error: output, durationMs, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
-    return output;
-  }
-}
-function summarize(name, args) {
-  const bare = bareToolName(name);
-  switch (bare) {
-    case "run_command":
-      return `run_command: ${args.command}`;
-    case "get_weather":
-      return `get_weather: ${args.location ?? "\u8A2D\u5B9A\u306E\u65E2\u5B9A\u5730\u57DF"}`;
-    case "write_file":
-      return `write_file: ${args.path}`;
-    case "edit_file":
-      return `edit_file: ${args.path}`;
-    default:
-      return `${name}: ${JSON.stringify(args)}`;
-  }
+function extractJsonReply(raw) {
+  return extractReplyAndEnd(raw)?.parsed ?? null;
 }
 
-// src/copilot.ts
-var import_node_child_process3 = require("node:child_process");
-var import_node_net = __toESM(require("node:net"));
-var import_node_fs3 = __toESM(require("node:fs"));
-var import_node_path4 = __toESM(require("node:path"));
-function selectBrowserProcessId(processInfo) {
-  if (!Array.isArray(processInfo)) return null;
-  const browser = processInfo.find((item) => {
-    if (!item || typeof item !== "object") return false;
-    const candidate = item;
-    return String(candidate.type ?? "").toLowerCase() === "browser" && typeof candidate.id === "number" && Number.isSafeInteger(candidate.id) && candidate.id > 0;
-  });
-  return browser && typeof browser.id === "number" ? browser.id : null;
+// test/flex-harness.ts
+function tool(name) {
+  const found = TOOL_DEFS.find((entry) => entry.name === name);
+  if (!found) throw new Error(`missing tool: ${name}`);
+  return found;
 }
-var RESPONSE_STABILITY_MS = 1e3;
-var VISIBLE_SESSION_MARKER_PREFIX = "company-apps-coding-agent:";
-function makeVisibleSessionMarker(sessionId) {
-  const normalized = sessionId.trim();
-  if (!/^[a-z0-9_-]{6,80}$/i.test(normalized)) throw new Error("\u8868\u793A\u30BB\u30C3\u30B7\u30E7\u30F3ID\u304C\u4E0D\u6B63\u3067\u3059");
-  return VISIBLE_SESSION_MARKER_PREFIX + normalized;
+function summarize(results, label) {
+  const grouped = {};
+  for (const type of ["list", "read", "open", "write", "search"]) {
+    const selected = results.filter((result) => result.type === type);
+    const times = selected.map((result) => result.ms);
+    const success = selected.filter((result) => result.ok).length;
+    grouped[type] = { success, total: selected.length, stable: selected.length > 0 && success === selected.length, minMs: Math.min(...times), maxMs: Math.max(...times) };
+  }
+  console.log(`${label}_SUMMARY ${JSON.stringify(grouped)}`);
+  if (Object.values(grouped).some((entry) => !entry.stable)) process.exitCode = 1;
 }
-function assertResponseDeadline(deadlineMs, responseTimeoutSec, nowMs = Date.now()) {
-  if (nowMs >= deadlineMs) throw new Error(`Copilot \u306E\u5FDC\u7B54\u304C\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8\u3057\u307E\u3057\u305F (${responseTimeoutSec}\u79D2)`);
-}
-function selectLatestResponseCandidate(candidates) {
-  const usable = candidates.filter((candidate) => candidate.text.trim().length > 0);
-  usable.sort((a, b) => a.bottom - b.bottom || a.order - b.order);
-  return usable.length > 0 ? usable[usable.length - 1] : null;
-}
-function isStopGenerationControl(candidate) {
-  const structural = /fai-SendButton__stopBackground|stopGeneratingButton|stop-button/i.test(candidate.selector);
-  const semantic = /stop\s*(?:generating|response)|cancel\s*(?:generation|response)|生成を停止|応答を停止|停止する/i.test(candidate.label);
-  return structural || semantic;
-}
-function updateResponseCompletionState(previous, sample) {
-  if (sample.generating || !sample.copyEnabled || sample.textLength <= 0) {
-    return { state: { stableLength: null, stableSinceMs: null }, ready: false };
-  }
-  if (previous.stableLength !== sample.textLength || previous.stableSinceMs === null) {
-    return {
-      state: { stableLength: sample.textLength, stableSinceMs: sample.observedAtMs },
-      ready: false
-    };
-  }
-  return {
-    state: previous,
-    ready: sample.observedAtMs - previous.stableSinceMs >= RESPONSE_STABILITY_MS
-  };
-}
-function resolveCopilotSettings(cfg) {
-  const c = cfg.copilot ?? {};
-  const reuseExistingEdge = c.reuseExistingEdge === true;
-  const configuredPort = typeof c.cdpPort === "number" && Number.isInteger(c.cdpPort) && c.cdpPort > 0 ? c.cdpPort : 9445;
-  return {
-    url: c.url ?? "https://m365.cloud.microsoft/chat/",
-    // A fixed port is only honored when the user explicitly opts into attaching to an existing Edge.
-    // The normal path allocates a loopback port for an Edge process owned by this client.
-    cdpPort: reuseExistingEdge ? configuredPort : 0,
-    reuseExistingEdge,
-    maxPromptChars: c.maxPromptChars ?? 12e4,
-    pollIntervalMs: Math.max(500, c.pollIntervalMs ?? 900),
-    responseTimeoutSec: c.responseTimeoutSec ?? 300,
-    stallTimeoutSec: c.stallTimeoutSec ?? 120,
-    displayMode: c.displayMode === "foreground" ? "foreground" : "minimized",
-    endMarker: c.endMarker ?? "AGENT_END",
-    agentMode: c.agentMode === true,
-    profileName: c.profileName,
-    modelPriority: Array.isArray(c.modelPriority) ? c.modelPriority.filter((s) => s && s.trim()) : ["GPT 5.6 Think Deeper", "Opus", "Think Deeper"]
-  };
-}
-var VISIBLE_JS = `const __vis=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};`;
-var DOCS_JS = `const __docs=[];const __seenRoots=new Set();const __addRoot=r=>{if(!r||__seenRoots.has(r))return;__seenRoots.add(r);__docs.push(r);let all=[];try{all=Array.from(r.querySelectorAll('*'));}catch(e){}for(const el of all){try{if(el.shadowRoot)__addRoot(el.shadowRoot);}catch(e){}try{if((el.tagName||'').toLowerCase()==='iframe'&&el.contentDocument)__addRoot(el.contentDocument);}catch(e){}}};__addRoot(document);`;
-var INPUT_READY_JS = `(() => {
-  ${VISIBLE_JS}
-  ${DOCS_JS}
-  const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
-  for (const d of __docs) for (const s of sels) {
-    const el = d.querySelector(s);
-    if (__vis(el)) return JSON.stringify({ ready: true, url: location.href });
-  }
-  return JSON.stringify({ ready: false, url: location.href });
-})()`;
-var COPILOT_SCREEN_STATE_JS = `(() => {
-  ${VISIBLE_JS}
-  ${DOCS_JS}
-  const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
-  let input = null;
-  for (const d of __docs) { input = sels.map(s => ({ s, el: d.querySelector(s) })).find(x => __vis(x.el)); if (input) break; }
-  const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button,[role="button"],a')));
-  const responseSelectors = ['[data-testid="markdown-reply"]','[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
-  const responseRootSelectors = ['[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][class*="CopilotMessage" i]','[data-testid="copilot-message-div"]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
-  const responseSelectorText = responseSelectors.join(',');const responseRootSelectorText=responseRootSelectors.join(',');
-  const responseRoot = node => {try{return node.closest(responseRootSelectorText)||node;}catch(e){return node;}};
-  const topBottom = node => {const rect=node.getBoundingClientRect();let bottom=Number(rect.bottom)||0;let win=node.ownerDocument&&node.ownerDocument.defaultView;try{while(win&&win!==win.parent&&win.frameElement){bottom+=win.frameElement.getBoundingClientRect().top;win=win.parent;}}catch(e){}return bottom;};
-  const controlLabel = el => [el.getAttribute('aria-label'),el.title,el.getAttribute('data-testid'),el.getAttribute('data-automation-id'),el.id,el.className,el.innerText,el.textContent].filter(Boolean).join(' ').trim();
-  const enabledCopy = el => {const label=[el.getAttribute('aria-label'),el.title,el.innerText,el.textContent].filter(Boolean).join(' ').trim();const testId=el.getAttribute('data-testid')||'';let inCode=false,inToolbar=false;try{inCode=!!el.closest('pre,code,[data-testid*="code" i]');inToolbar=!!el.closest('[role="toolbar"],.fai-CopilotMessage__actions,[data-testid="CopyButtonContainerTestId"]');}catch(e){}const identity=/^CopyButtonTestId$/i.test(testId)||/(?:\u5FDC\u7B54|\u56DE\u7B54).{0,8}\u30B3\u30D4\u30FC|\u30B3\u30D4\u30FC.{0,8}(?:\u5FDC\u7B54|\u56DE\u7B54)|copy\\s*(?:response|answer)|(?:response|answer)\\s*copy/i.test(label)||(inToolbar&&/^(?:\u30B3\u30D4\u30FC|copy)$/i.test(label));return __vis(el)&&!inCode&&identity&&!el.disabled&&el.getAttribute('aria-disabled')!=='true';};
-  const copyForResponse = sourceNode => {
-    const ownRoot=responseRoot(sourceNode);let scope=ownRoot;
-    for(let depth=0;scope&&depth<6;depth++){
-      let others=[];try{others=Array.from(scope.querySelectorAll(responseSelectorText)).filter(el=>responseRoot(el)!==ownRoot);}catch(e){}
-      if(others.length>0)break;
-      let controls=[];try{controls=Array.from(scope.querySelectorAll('button,[role="button"],span[role="button"]'));}catch(e){}
-      if(controls.some(enabledCopy))return true;
-      if(scope.tagName&&/^(MAIN|BODY)$/.test(scope.tagName))break;
-      scope=scope.parentElement;
-    }
-    return false;
-  };
-  const responseCandidates=[];const seenResponses=new Set();let responseOrder=0;
-  for(const d of __docs)for(const selector of responseSelectors){let nodes=[];try{nodes=Array.from(d.querySelectorAll(selector));}catch(e){}for(const node of nodes){const root=responseRoot(node);if(seenResponses.has(root)||!__vis(node))continue;const text=((node.innerText||'')||(node.textContent||'')).trim();if(!text)continue;seenResponses.add(root);responseCandidates.push({text,bottom:topBottom(root),order:responseOrder++,copyEnabled:copyForResponse(node)});}}
-  const stopSelectors=['.fai-SendButton__stopBackground','[data-testid="stopGeneratingButton"]','[data-testid="stop-button"]','[aria-label*="Stop"]','[aria-label*="\u505C\u6B62"]','[aria-label*="Cancel"]','[aria-label*="\u30AD\u30E3\u30F3\u30BB\u30EB"]','[data-testid*="stop" i]'];
-  const stopCandidates=[];const seenStops=new Set();
-  for(const d of __docs)for(const selector of stopSelectors){let nodes=[];try{nodes=Array.from(d.querySelectorAll(selector));}catch(e){}for(const item of nodes){let el=item;try{el=item.closest('button,[role="button"],a')||item;}catch(e){}if(seenStops.has(el)||!__vis(el))continue;seenStops.add(el);stopCandidates.push({label:(controlLabel(el)+' '+controlLabel(item)).trim(),selector});}}
-  const signIn = buttons.find(el => __vis(el) && /sign\\s*in|log\\s*in|\u30B5\u30A4\u30F3\u30A4\u30F3|\u30ED\u30B0\u30A4\u30F3/i.test((el.innerText || el.textContent || el.getAttribute('aria-label') || el.title || '').trim()));
-  const url = String(location.href || '');
-  const signinRequired = /(?:login|signin|sign-in|auth)/i.test(url) || (!input && !!signIn);
-  return JSON.stringify({ inputReady: !!input, stopCandidates, responseCandidates, signinRequired, url, title: String(document.title || ''), windowName: String(window.name || ''), sessionMarker: String(document.documentElement.getAttribute('data-company-apps-session') || '') });
-})()`;
-var FRESH_CHAT_JS = `(() => {
-  ${VISIBLE_JS}
-  ${DOCS_JS}
-  const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button, [role="button"], a, [tabindex]')));
-  const candidates = [];
-  for (const b of buttons) {
-    const label = (b.getAttribute('aria-label') || b.title || b.textContent || '').trim();
-    if (!label) continue;
-    let score = 0;
-    if (/^(\u65B0\u3057\u3044\u30C1\u30E3\u30C3\u30C8|New chat)$/i.test(label)) score += 1000;
-    else if (/\u65B0\u3057\u3044\u30C1\u30E3\u30C3\u30C8|New chat/i.test(label)) score += 400;
-    else if (/\u30C1\u30E3\u30C3\u30C8|chat/i.test(label)) score += 80;
-    if (/\u305D\u306E\u4ED6|\u5C65\u6B74|\u691C\u7D22|\u30E9\u30A4\u30D6\u30E9\u30EA|more|history|search|library/i.test(label)) score -= 300;
-    if (score <= 0) continue;
-    if (b.disabled || b.getAttribute('aria-disabled') === 'true') continue;
-    if (!__vis(b)) continue;
-    candidates.push({ el: b, label, score });
-  }
-  candidates.sort((a, b) => b.score - a.score);
-  if (candidates[0]) { candidates[0].el.click(); return JSON.stringify({ clicked: true }); }
-  return JSON.stringify({ clicked: false });
-})()`;
-var COPILOT_CLICK_SEND_JS = `(() => {
-  ${VISIBLE_JS}
-  ${DOCS_JS}
-  const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button, [role="button"]')));
-  const exclude = /stop|cancel|\u505C\u6B62|\u30AD\u30E3\u30F3\u30BB\u30EB|regenerate|\u518D\u751F\u6210|attach|\u6DFB\u4ED8|microphone|voice|\u30DC\u30A4\u30B9|\u97F3\u58F0|new chat|\u65B0\u3057\u3044\u30C1\u30E3\u30C3\u30C8|clear|\u30AF\u30EA\u30A2|close|\u9589\u3058\u308B|search|\u691C\u7D22|library|\u30E9\u30A4\u30D6\u30E9\u30EA|file|\u30D5\u30A1\u30A4\u30EB/;
-  const structural = b => b.matches('button[type="submit"],.fai-SendButton,[class*="SendButton" i],[data-testid*="send" i],[data-automation-id*="send" i]');
-  const inventory = b => ({ariaLabel:b.getAttribute('aria-label')||'',title:b.title||'',testId:b.getAttribute('data-testid')||'',automationId:b.getAttribute('data-automation-id')||'',className:typeof b.className==='string'?b.className:'',type:b.getAttribute('type')||'',disabled:!!b.disabled,ariaDisabled:b.getAttribute('aria-disabled')||'',visible:__vis(b)});
-  const clickable = [];
-  for (const b of buttons) {
-    const label = (b.getAttribute('aria-label') || b.title || b.textContent || '').trim();
-    const lower = label.toLowerCase();
-    const identity = [lower,b.getAttribute('data-testid'),b.getAttribute('data-automation-id'),typeof b.className==='string'?b.className:''].filter(Boolean).join(' ').toLowerCase();
-    let score = 0;
-    if (/^(\u9001\u4FE1|send)$/i.test(label)) score += 1000;
-    else if (structural(b)) score += 600;
-    else if (/\u9001\u4FE1|send/i.test(lower)) score += 400;
-    if (score <= 0) continue;
-    if (exclude.test(identity)) continue;
-    if (b.disabled || b.getAttribute('aria-disabled') === 'true') continue;
-    if (!__vis(b)) continue;
-    clickable.push({ el: b, score, inventory: inventory(b) });
-  }
-  clickable.sort((a, b) => b.score - a.score);
-  if (clickable[0]) { clickable[0].el.click(); return JSON.stringify({ clicked: true, selected:clickable[0].inventory }); }
-  const inputSelectors=['#m365-chat-editor-target-element','[data-lexical-editor="true"][contenteditable]','[role="textbox"][contenteditable]'];
-  let nearby=[];
-  for(const d of __docs)for(const selector of inputSelectors){const input=d.querySelector(selector);if(!input)continue;let scope=input.parentElement;for(let depth=0;scope&&depth<6;depth++,scope=scope.parentElement){const found=Array.from(scope.querySelectorAll('button,[role="button"]'));if(found.length){nearby=found;break;}}if(nearby.length)break;}
-  const diagnosticButtons=(nearby.length?nearby:buttons).slice(-32);
-  return JSON.stringify({ clicked: false, inventory: diagnosticButtons.map(inventory) });
-})()`;
-var EDITOR_LENGTH_JS = `(() => {
-  ${VISIBLE_JS}
-  ${DOCS_JS}
-  const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
-  for (const d of __docs) for (const s of sels) {
-    const el = d.querySelector(s);
-    if (__vis(el)) return String((el.textContent || '').replace(/[\\u200B\\u200C]/g, '').length);
-  }
-  return '-1';
-})()`;
-var EDITOR_STATE_JS = `(() => {
-  ${VISIBLE_JS}
-  ${DOCS_JS}
-  const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
-  for (const d of __docs) for (const s of sels) {
-    const el = d.querySelector(s);
-    if (__vis(el)) return JSON.stringify({ found: true, text: String(el.textContent || '').replace(/[\\u200B\\u200C]/g, ''), active: d.activeElement === el });
-  }
-  return JSON.stringify({ found: false, text: '', active: false });
-})()`;
-function textMismatchDiagnostic(expected, actual) {
-  let index = 0;
-  while (index < expected.length && index < actual.length && expected[index] === actual[index]) index++;
-  const start = Math.max(0, index - 12);
-  const end = index + 20;
-  const expectedSlice = expected.slice(start, end);
-  const actualSlice = actual.slice(start, end);
-  const code = (value) => Array.from(value).map((char) => char.codePointAt(0)?.toString(16).padStart(4, "0")).join(" ");
-  return `first=${index} expected=${JSON.stringify(expectedSlice)} [${code(expectedSlice)}] actual=${JSON.stringify(actualSlice)} [${code(actualSlice)}] lengths=${expected.length}/${actual.length}`;
-}
-var CLEAR_EDITOR_JS = `(() => {
-  ${VISIBLE_JS}
-  ${DOCS_JS}
-  const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
-  for (const d of __docs) for (const s of sels) {
-    const el = d.querySelector(s);
-    if (__vis(el)) { el.focus(); document.execCommand('selectAll'); document.execCommand('delete'); return 'ok'; }
-  }
-  return 'ng';
-})()`;
-var MODEL_SELECT_JS = String.raw`(async () => {
-  const candidates = __CANDIDATES__;
-  const switcherSelector = __SWITCHER__;
-  const docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}}
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const norm = s => (s || '').replace(/\s+/g, ' ').trim();
-  const stripTail = s => norm(s).replace(/[…‥]|\.{3}$/g, '');
-  const eq = (a,b) => a.toLowerCase() === b.toLowerCase();
-  const has = (a,b) => a.toLowerCase().indexOf(b.toLowerCase()) !== -1;
-  const matchesModel = (shown,cand,picked) => {
-    const a = stripTail(shown); if (!a) return false;
-    if (eq(a,cand) || has(a,cand)) return true;
-    if (picked && (eq(a,picked) || has(a,picked))) return true;
-    return a.length >= 6 && (has(cand,a) || (picked && has(picked,a)));
-  };
-  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
-  const primaryLabel = el => { const p=el.querySelector('.fai-CapabilityPickerMenuItem__primaryContentWrapper'); if(p)return norm(p.innerText); const c=el.querySelector('.fui-MenuItem__content > span:first-child'); if(c)return norm(c.innerText); return norm((el.innerText||'').split('\n')[0]); };
-  const subTextOf = el => { const s=el.querySelector('.fai-CapabilityPickerMenuItem__subText'); return s?norm(s.innerText):''; };
-  const itemSelector='[role="menuitem"],[role="menuitemradio"],[role="menuitemcheckbox"],[role="option"]';
-  const menuRoot=()=>{for(const d of docs){const r=d.querySelector('.fui-MenuPopover')||d.querySelector('[data-portal-node] [role="menu"]');if(r)return r;}return null;};
-  const collectItems=()=>{const r=menuRoot();return r?Array.from(r.querySelectorAll(itemSelector)).filter(visible):[];};
-  const collectItemsAll=()=>{const roots=docs.flatMap(d=>Array.from(d.querySelectorAll('.fui-MenuPopover, [data-portal-node] [role="menu"]'))).filter(visible);return Array.from(new Set(roots.flatMap(r=>Array.from(r.querySelectorAll(itemSelector)).filter(visible))));};
-  const pressEscape=()=>{try{const o={key:'Escape',code:'Escape',keyCode:27,which:27,bubbles:true,cancelable:true};const t=document.activeElement||document.body;t.dispatchEvent(new KeyboardEvent('keydown',o));t.dispatchEvent(new KeyboardEvent('keyup',o));}catch(e){}};
-  const fireEnter=el=>{try{el.focus();const o={key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true,cancelable:true};el.dispatchEvent(new KeyboardEvent('keydown',o));el.dispatchEvent(new KeyboardEvent('keyup',o));return true;}catch(e){return false;}};
-  const fireMenuClick=async el=>{try{const r=el.getBoundingClientRect(),cx=r.x+r.width/2,cy=r.y+r.height/2,base={bubbles:true,cancelable:true,view:window,clientX:cx,clientY:cy};el.dispatchEvent(new PointerEvent('pointerover',{...base,pointerType:'mouse'}));el.dispatchEvent(new MouseEvent('mouseover',base));el.dispatchEvent(new PointerEvent('pointermove',{...base,pointerType:'mouse'}));el.dispatchEvent(new MouseEvent('mousemove',base));try{el.focus();}catch(e){}await sleep(60);el.dispatchEvent(new PointerEvent('pointerdown',{...base,pointerType:'mouse',button:0}));el.dispatchEvent(new MouseEvent('mousedown',{...base,button:0}));el.dispatchEvent(new PointerEvent('pointerup',{...base,pointerType:'mouse',button:0}));el.dispatchEvent(new MouseEvent('mouseup',{...base,button:0}));el.dispatchEvent(new MouseEvent('click',{...base,button:0}));try{el.click();}catch(e){}return true;}catch(e){return false;}};
-  const findSwitcher=()=>{for(const d of docs){let b=d.querySelector(switcherSelector);if(b&&visible(b))return b;b=Array.from(d.querySelectorAll('button[aria-haspopup="menu"]')).find(x=>visible(x)&&(/モデル/.test(x.getAttribute('aria-label')||'')||/model/i.test(x.getAttribute('aria-label')||'')));if(b)return b;}return null;};
-  const labelItems=xs=>xs.map(el=>({el,label:primaryLabel(el),submenu:el.getAttribute('aria-haspopup')==='menu',testId:el.getAttribute('data-test-id')||'',checked:el.getAttribute('aria-checked')==='true'})).filter(x=>x.label);
-  const isGptTrigger=x=>/^gptSubMenuModelTrigger/i.test(x.testId)||(x.submenu&&/^gpt/i.test(x.label))||(x.submenu&&has(subTextOf(x.el),'OpenAI'));
-  const findHit=(xs,c)=>xs.find(x=>eq(x.label,c))||xs.find(x=>has(x.label,c))||(/^gpt/i.test(c)?xs.find(isGptTrigger):null);
-  const btn=findSwitcher();
-  if(!btn)return JSON.stringify({ok:true,changed:false,reason:'switcher_not_found'});
-  const current=norm(btn.innerText);
-  if(candidates.length&&matchesModel(current,candidates[0],''))return JSON.stringify({ok:true,changed:false,reason:'already_selected',current,picked:candidates[0]});
-  await fireMenuClick(btn);
-  let items=[];for(let i=0;i<30;i++){items=collectItems();if(items.length)break;await sleep(100);}if(items.length){await sleep(150);const a=collectItems();if(a.length)items=a;}
-  if(!items.length){pressEscape();return JSON.stringify({ok:true,changed:false,reason:'menu_not_found',current});}
-  let labeled=labelItems(items),skipped=[],observedSubMenuItems=[];
-  const clickAndConfirm=async(hit,cand)=>{
-    const before=new Set(collectItemsAll());await fireMenuClick(hit.el);let picked=hit.label,clicked=hit.el;
-    if(hit.submenu){let fresh=[];for(let i=0;i<20;i++){fresh=collectItemsAll().filter(x=>!before.has(x));if(fresh.length)break;await sleep(100);}if(fresh.length){const sub=fresh.map(el=>({el,label:primaryLabel(el)})).filter(x=>x.label);observedSubMenuItems=sub.map(x=>x.label).slice(0,16);const suffix=cand.replace(/^GPT[\s-]*[\d.]*\s*/i,'');const h=sub.find(x=>eq(x.label,cand))||sub.find(x=>has(x.label,cand))||sub.find(x=>eq(x.label,suffix))||sub.find(x=>suffix&&has(x.label,suffix))||sub.find(x=>has(cand,x.label)&&x.label.length>=4);if(!h)return{applied:false,reason:'submenu_no_match'};picked=h.label;clicked=h.el;await fireMenuClick(clicked);}}
-    const timeout=hit.submenu?5000:2000,t0=Date.now();let keyboard=false;
-    while(Date.now()-t0<timeout){await sleep(hit.submenu?50:100);after_loop:{}
-      const after=norm((findSwitcher()||{innerText:''}).innerText);
-      if(matchesModel(after,cand,picked))return{applied:true,after,picked};
-      const still=menuRoot()!==null;
-      if(hit.submenu&&still&&!keyboard&&(Date.now()-t0)>=800){keyboard=true;fireEnter(clicked);}
-    }
-    return{applied:false,reason:'confirm_failed'};
-  };
-  for(let pi=0;pi<candidates.length;pi++){const cand=candidates[pi],hit=findHit(labeled,cand);if(!hit){skipped.push(cand);continue;}
-    if(hit.checked){pressEscape();return JSON.stringify({ok:true,changed:false,reason:'already_selected',current,picked:hit.label});}
-    const r=await clickAndConfirm(hit,cand);
-    if(r.applied)return JSON.stringify({ok:true,changed:true,reason:'selected',before:current,after:r.after,picked:r.picked});
-    pressEscape();await sleep(150);pressEscape();await sleep(700);
-    const after2=norm((findSwitcher()||{innerText:''}).innerText);
-    if(matchesModel(after2,cand,r.picked||''))return JSON.stringify({ok:true,changed:true,reason:'selected_late',before:current,after:after2,picked:r.picked});
-  }
-  pressEscape();return JSON.stringify({ok:true,changed:false,reason:'model_not_in_menu',current,tried:candidates,skipped});
-})()`;
-var COPILOT_CLICK_COPY_JS = `(() => {
-  ${VISIBLE_JS}
-  ${DOCS_JS}
-  const responseSelectors=['[data-testid="markdown-reply"]','[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
-  const responseRootSelectors=['[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][class*="CopilotMessage" i]','[data-testid="copilot-message-div"]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
-  const responseSelectorText=responseSelectors.join(',');const responseRootSelectorText=responseRootSelectors.join(',');
-  const responseRoot=node=>{try{return node.closest(responseRootSelectorText)||node;}catch(e){return node;}};
-  const topBottom=node=>{const rect=node.getBoundingClientRect();let bottom=Number(rect.bottom)||0;let win=node.ownerDocument&&node.ownerDocument.defaultView;try{while(win&&win!==win.parent&&win.frameElement){bottom+=win.frameElement.getBoundingClientRect().top;win=win.parent;}}catch(e){}return bottom;};
-  const labelOf=el=>[el.getAttribute('aria-label'),el.title,el.getAttribute('data-testid'),el.getAttribute('data-automation-id'),el.id,el.className,el.innerText,el.textContent].filter(Boolean).join(' ').trim();
-  const enabledCopy=el=>{const label=[el.getAttribute('aria-label'),el.title,el.innerText,el.textContent].filter(Boolean).join(' ').trim();const testId=el.getAttribute('data-testid')||'';let inCode=false,inToolbar=false;try{inCode=!!el.closest('pre,code,[data-testid*="code" i]');inToolbar=!!el.closest('[role="toolbar"],.fai-CopilotMessage__actions,[data-testid="CopyButtonContainerTestId"]');}catch(e){}const identity=/^CopyButtonTestId$/i.test(testId)||/(?:\u5FDC\u7B54|\u56DE\u7B54).{0,8}\u30B3\u30D4\u30FC|\u30B3\u30D4\u30FC.{0,8}(?:\u5FDC\u7B54|\u56DE\u7B54)|copy\\s*(?:response|answer)|(?:response|answer)\\s*copy/i.test(label)||(inToolbar&&/^(?:\u30B3\u30D4\u30FC|copy)$/i.test(label));return __vis(el)&&!inCode&&identity&&!el.disabled&&el.getAttribute('aria-disabled')!=='true';};
-  const responses=[];const seenResponses=new Set();let order=0;
-  for(const d of __docs)for(const selector of responseSelectors){let nodes=[];try{nodes=Array.from(d.querySelectorAll(selector));}catch(e){}for(const node of nodes){const root=responseRoot(node);if(seenResponses.has(root)||!__vis(node))continue;const text=((node.innerText||'')||(node.textContent||'')).trim();if(!text)continue;seenResponses.add(root);responses.push({node:root,bottom:topBottom(root),order:order++});}}
-  responses.sort((a,b)=>(a.bottom-b.bottom)||(a.order-b.order));
-  const latest=responses.length?responses[responses.length-1].node:null;
-  let cand=[];let scope=latest;
-  for(let depth=0;scope&&depth<6;depth++){
-    let others=[];try{others=Array.from(scope.querySelectorAll(responseSelectorText)).filter(el=>responseRoot(el)!==latest);}catch(e){}
-    if(others.length>0)break;
-    let controls=[];try{controls=Array.from(scope.querySelectorAll('button,[role="button"],span[role="button"]'));}catch(e){}
-    cand=controls.filter(enabledCopy);if(cand.length)break;
-    if(scope.tagName&&/^(MAIN|BODY)$/.test(scope.tagName))break;
-    scope=scope.parentElement;
-  }
-  const labels = cand.slice(-5).map((b) => (b.getAttribute('aria-label') || b.title || b.tagName).slice(0, 40));
-  if (cand.length === 0) return JSON.stringify({ clicked: false, found: 0, sample: labels });
-  const last = cand[cand.length - 1];
-  try { last.scrollIntoView({ block: 'center' }); } catch (e) {}
-  last.click();
-  return JSON.stringify({ clicked: true, found: cand.length, label: (last.getAttribute('aria-label') || '').slice(0, 40) });
-})()`;
-var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-var throwIfAborted = (signal) => {
-  if (signal?.aborted) throw new Error("Copilot\u5B9F\u884C\u306F\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F");
-};
-var CdpConnection = class _CdpConnection {
-  ws;
-  nextId = 1;
-  pending = /* @__PURE__ */ new Map();
-  constructor(ws) {
-    this.ws = ws;
-    ws.addEventListener("message", (ev) => this.onMessage(String(ev.data)));
-  }
-  static async connect(url, timeoutMs = 15e3) {
-    const ctor = globalThis.WebSocket;
-    if (!ctor) throw new Error("\u3053\u306E Node.js \u306B\u306F\u6A19\u6E96 WebSocket \u304C\u3042\u308A\u307E\u305B\u3093 (v22+ \u3092\u4F7F\u7528\u3057\u3066\u304F\u3060\u3055\u3044)");
-    const ws = new ctor(url);
-    await new Promise((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error("CDP WebSocket \u63A5\u7D9A\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8")), timeoutMs);
-      ws.addEventListener("open", () => {
-        clearTimeout(t);
-        resolve();
-      }, { once: true });
-      ws.addEventListener("error", () => {
-        clearTimeout(t);
-        reject(new Error("CDP WebSocket \u63A5\u7D9A\u306B\u5931\u6557\u3057\u307E\u3057\u305F"));
-      }, { once: true });
-    });
-    return new _CdpConnection(ws);
-  }
-  onMessage(raw) {
-    let obj;
-    try {
-      obj = JSON.parse(raw);
-    } catch {
-      return;
-    }
-    if (typeof obj.id !== "number") return;
-    const p = this.pending.get(obj.id);
-    if (!p) return;
-    this.pending.delete(obj.id);
-    clearTimeout(p.timer);
-    if (obj.error !== void 0) p.reject(new Error(`CDP \u30A8\u30E9\u30FC: ${JSON.stringify(obj.error).slice(0, 300)}`));
-    else p.resolve(obj.result);
-  }
-  async method(name, params = {}, timeoutMs = 3e4) {
-    const id = this.nextId++;
-    const p = new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`CDP \u5FDC\u7B54\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8: ${name}`));
-      }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
-    });
-    this.ws.send(JSON.stringify({ id, method: name, params }));
-    return p;
-  }
-  async evalJs(expression, timeoutMs = 3e4) {
-    const r = await this.method(
-      "Runtime.evaluate",
-      { expression, awaitPromise: true, returnByValue: true, userGesture: true },
-      timeoutMs
-    );
-    if (r && typeof r === "object" && "exceptionDetails" in r && r.exceptionDetails) {
-      throw new Error("JavaScript evaluation failed: " + JSON.stringify(r.exceptionDetails).slice(0, 400));
-    }
-    const rr = r;
-    return rr?.result?.value;
-  }
-  close() {
-    try {
-      this.ws.close();
-    } catch {
-    }
-    for (const [, p] of this.pending) {
-      clearTimeout(p.timer);
-      p.reject(new Error("CDP \u63A5\u7D9A\u3092\u5207\u65AD\u3057\u307E\u3057\u305F"));
-    }
-    this.pending.clear();
-  }
-};
-function isLocalUrl(url) {
-  if (!url) return true;
+async function measured(result, operation, expected) {
+  const started = Date.now();
   try {
-    return ["127.0.0.1", "localhost", "::1"].includes(new URL(url).host.toLowerCase());
-  } catch {
-    return false;
+    const output = await operation();
+    const ok = expected(output);
+    return { ...result, ok, ms: Date.now() - started, detail: ok ? "ok" : output.slice(0, 160) };
+  } catch (error) {
+    return { ...result, ok: false, ms: Date.now() - started, detail: String(error.message ?? error).slice(0, 160) };
   }
 }
-async function devToolsUp(port) {
+async function deterministicCorpus() {
+  const root = import_node_fs2.default.mkdtempSync(import_node_path2.default.join(import_node_os.default.tmpdir(), "flex-harness-"));
+  const ctx = { workspace: root, restrictToWorkspace: true, safeCommandOnly: true };
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(2e3) });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-async function findFreePort() {
-  return new Promise((resolve, reject) => {
-    const server = import_node_net.default.createServer();
-    server.once("error", reject);
-    server.listen({ host: "127.0.0.1", port: 0 }, () => {
-      const address = server.address();
-      const port = typeof address === "object" && address ? address.port : 0;
-      server.close((error) => {
-        if (error) reject(error);
-        else if (port > 0) resolve(port);
-        else reject(new Error("Edge\u7528\u306E\u7A7A\u304D\u30DD\u30FC\u30C8\u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F"));
-      });
-    });
-  });
-}
-function profileIsInUse(profileDir) {
-  if (["SingletonLock", "SingletonCookie", "SingletonSocket"].some((name) => import_node_fs3.default.existsSync(import_node_path4.default.join(profileDir, name)))) return true;
-  if (process.platform !== "win32") return false;
-  try {
-    const needle = import_node_path4.default.resolve(profileDir).replace(/[\\/]+$/, "").toLowerCase();
-    const marker = `--user-data-dir=${needle}`;
-    const output = (0, import_node_child_process3.execFileSync)("powershell.exe", [
-      "-NoProfile",
-      "-NonInteractive",
-      "-Command",
-      `Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Select-Object -ExpandProperty CommandLine`
-    ], { encoding: "utf8", timeout: 3e3, windowsHide: true });
-    return output.split(/\r?\n/).some((line) => {
-      const normalized = line.toLowerCase().replaceAll('"', "");
-      const index = normalized.indexOf(marker);
-      return index >= 0 && (index + marker.length === normalized.length || /\s/.test(normalized[index + marker.length]));
-    });
-  } catch {
-    return true;
-  }
-}
-function findEdgePath() {
-  const roots = [process.env["ProgramFiles(x86)"], process.env.ProgramFiles, process.env.LOCALAPPDATA].filter(Boolean);
-  for (const root of roots) {
-    const p = import_node_path4.default.join(root, "Microsoft", "Edge", "Application", "msedge.exe");
-    if (import_node_fs3.default.existsSync(p)) return p;
-  }
-  throw new Error("Microsoft Edge \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3002Edge \u3092\u30A4\u30F3\u30B9\u30C8\u30FC\u30EB\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
-}
-var CopilotEdgeClient = class {
-  name = "copilot-edge";
-  s;
-  cdp = null;
-  clipGranted = false;
-  ownedEdgePid = null;
-  visibleEdgePid = null;
-  edgeProfileDir = null;
-  visibleSessionId = null;
-  constructor(cfg) {
-    this.s = resolveCopilotSettings(cfg);
-  }
-  remainingTimeoutMs(deadlineMs, maximumMs) {
-    if (!Number.isFinite(deadlineMs)) return maximumMs;
-    const remainingMs = Math.floor(deadlineMs - Date.now());
-    if (remainingMs <= 0) throw new Error("Copilot response deadline exhausted");
-    return Math.max(1, Math.min(maximumMs, remainingMs));
-  }
-  async grantClipboard(deadlineMs = Number.POSITIVE_INFINITY) {
-    if (this.clipGranted) return;
-    const ver = await (await fetch(`http://127.0.0.1:${this.s.cdpPort}/json/version`, {
-      signal: AbortSignal.timeout(this.remainingTimeoutMs(deadlineMs, 5e3))
-    })).json();
-    const browserWs = String(ver.webSocketDebuggerUrl ?? "");
-    if (!browserWs) throw new Error("browser WebSocket \u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093");
-    const bws = await CdpConnection.connect(browserWs, this.remainingTimeoutMs(deadlineMs, 1e4));
-    try {
-      await bws.method("Browser.grantPermissions", {
-        permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"],
-        origin: new URL(this.s.url).origin
-      }, this.remainingTimeoutMs(deadlineMs, 1e4));
-    } finally {
-      bws.close();
-    }
-    this.clipGranted = true;
-  }
-  async refreshBrowserProcessId(deadlineMs = Number.POSITIVE_INFINITY) {
-    this.visibleEdgePid = null;
-    const ver = await (await fetch(`http://127.0.0.1:${this.s.cdpPort}/json/version`, {
-      signal: AbortSignal.timeout(this.remainingTimeoutMs(deadlineMs, 5e3))
-    })).json();
-    const browserWs = String(ver.webSocketDebuggerUrl ?? "");
-    if (!browserWs) throw new Error("browser WebSocket \u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093");
-    const bws = await CdpConnection.connect(browserWs, this.remainingTimeoutMs(deadlineMs, 1e4));
-    try {
-      const result = await bws.method("SystemInfo.getProcessInfo", {}, this.remainingTimeoutMs(deadlineMs, 1e4));
-      const browserPid = selectBrowserProcessId(result?.processInfo);
-      if (browserPid === null) throw new Error("CDP\u304B\u3089Edge\u30D6\u30E9\u30A6\u30B6\u30FC\u672C\u4F53PID\u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
-      this.visibleEdgePid = browserPid;
-    } finally {
-      bws.close();
-    }
-  }
-  stripOuterFence(t) {
-    let s = t.trim();
-    const m = s.match(/^```[\w-]*[ \t]*\r?\n([\s\S]*)\r?\n?```\s*$/);
-    if (m) s = m[1];
-    return s.split("\n").filter((l) => l.trim() !== this.s.endMarker).join("\n").trim();
-  }
-  async bringToFront(deadlineMs = Number.POSITIVE_INFINITY) {
-    try {
-      await this.cdpMethod("Page.bringToFront", {}, this.remainingTimeoutMs(deadlineMs, 5e3));
-      const pauseMs = this.remainingTimeoutMs(deadlineMs, 300);
-      await sleep(pauseMs);
-    } catch {
-    }
-  }
-  readSystemClipboard(deadlineMs = Number.POSITIVE_INFINITY) {
-    if (process.platform !== "win32") return "";
-    try {
-      return String((0, import_node_child_process3.execFileSync)("powershell.exe", [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false); Get-Clipboard -Raw"
-      ], {
-        encoding: "utf8",
-        timeout: this.remainingTimeoutMs(deadlineMs, 5e3),
-        windowsHide: true,
-        maxBuffer: 2 * 1024 * 1024
-      })).trim();
-    } catch {
-      return "";
-    }
-  }
-  async finalizeAnswer(fallbackText, deadlineMs = Number.POSITIVE_INFINITY) {
-    const assertWithinDeadline = () => {
-      assertResponseDeadline(deadlineMs, this.s.responseTimeoutSec);
-    };
-    const sleepWithinDeadline = async (requestedMs) => {
-      assertWithinDeadline();
-      await sleep(this.remainingTimeoutMs(deadlineMs, requestedMs));
-      assertWithinDeadline();
-    };
-    let baseline = "";
-    try {
-      await this.bringToFront(deadlineMs);
-      assertWithinDeadline();
-      baseline = this.readSystemClipboard(deadlineMs);
-      if (!baseline) {
-        await this.grantClipboard(deadlineMs);
-        baseline = String(await this.evalWithReconnect("navigator.clipboard.readText()", this.remainingTimeoutMs(deadlineMs, 8e3))).trim();
-      }
-    } catch {
-    }
-    assertWithinDeadline();
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        await this.bringToFront(deadlineMs);
-        assertWithinDeadline();
-        await this.grantClipboard(deadlineMs);
-        const clicked = JSON.parse(String(await this.evalWithReconnect(
-          COPILOT_CLICK_COPY_JS,
-          this.remainingTimeoutMs(deadlineMs, 15e3)
-        )));
-        console.log("[clip] candidates=" + JSON.stringify(clicked));
-        if (clicked.clicked) {
-          await sleepWithinDeadline(400 + attempt * 200);
-          let clip = this.readSystemClipboard(deadlineMs);
-          if (!clip || clip.trim() === baseline) {
-            clip = String(await this.evalWithReconnect(
-              "navigator.clipboard.readText()",
-              this.remainingTimeoutMs(deadlineMs, 1e4)
-            ));
-          } else {
-            console.log("[clip] read via Windows clipboard");
-          }
-          assertWithinDeadline();
-          const s = this.stripOuterFence(clip);
-          if (s.trim().length >= 10 && s.trim() !== baseline) {
-            assertWithinDeadline();
-            return s;
-          }
-        }
-      } catch (err) {
-        assertWithinDeadline();
-        console.log("[clip] attempt " + attempt + " error: " + err.message.slice(0, 80));
-      }
-      await sleepWithinDeadline(700);
-    }
-    assertWithinDeadline();
-    console.log("[clip] fallback to innerText");
-    const cleaned = this.cleanResponse(fallbackText);
-    assertWithinDeadline();
-    return cleaned;
-  }
-  hardenPreferences(profileDir) {
-    try {
-      const prefPath = import_node_path4.default.join(profileDir, "Default", "Preferences");
-      if (!import_node_fs3.default.existsSync(prefPath)) return;
-      const j = JSON.parse(import_node_fs3.default.readFileSync(prefPath, "utf8"));
-      if (!j.session) j.session = {};
-      j.session.restore_on_startup = 4;
-      j.session.startup_urls = [];
-      if (j.profile) j.profile.exit_type = "Normal";
-      import_node_fs3.default.writeFileSync(prefPath, JSON.stringify(j), "utf8");
-    } catch {
-    }
-  }
-  chooseEdgeProfile() {
-    const root = import_node_path4.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent");
-    import_node_fs3.default.mkdirSync(root, { recursive: true });
-    const suffix = (this.s.profileName ?? "default").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "default";
-    const stable = import_node_path4.default.join(root, suffix === "default" ? "edge-profile" : "edge-profile-" + suffix);
-    if (!profileIsInUse(stable)) return stable;
-    return import_node_fs3.default.mkdtempSync(import_node_path4.default.join(root, "edge-profile-" + suffix + "-session-"));
-  }
-  async ensureEdge() {
-    if (this.s.reuseExistingEdge) {
-      if (this.s.cdpPort > 0 && await devToolsUp(this.s.cdpPort)) return;
-      if (this.s.cdpPort <= 0) throw new Error("\u65E2\u5B58Edge\u63A5\u7D9A\u3092\u518D\u5229\u7528\u3059\u308B\u306B\u306F copilot.cdpPort \u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
-    } else {
-      if (this.ownedEdgePid !== null && await devToolsUp(this.s.cdpPort)) return;
-      this.s.cdpPort = await findFreePort();
-    }
-    const userDataDir = this.edgeProfileDir ?? this.chooseEdgeProfile();
-    this.edgeProfileDir = userDataDir;
-    this.hardenPreferences(userDataDir);
-    const args = [
-      `--remote-debugging-port=${this.s.cdpPort}`,
-      "--remote-debugging-address=127.0.0.1",
-      "--remote-allow-origins=*",
-      `--user-data-dir=${userDataDir}`,
-      "--no-first-run",
-      "--disable-background-timer-throttling",
-      "--disable-backgrounding-occluded-windows",
-      "--disable-renderer-backgrounding",
-      "--disable-features=CalculateNativeWinOcclusion,msEdgeTranslate",
-      "--disable-sync",
-      "--no-default-browser-check",
-      "--disable-session-crashed-bubble",
-      "--hide-crash-restore-bubble"
+    for (const dir of ["reports", "rates", "tools", "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0", "\u7A7A\u30D5\u30A9\u30EB\u30C0"]) import_node_fs2.default.mkdirSync(import_node_path2.default.join(root, dir), { recursive: true });
+    import_node_fs2.default.writeFileSync(import_node_path2.default.join(root, "\u6982\u8981.txt"), "\u30AD\u30C3\u30AF\u30AA\u30D5\u65E5: 2026-08-27\n\u5408\u8A00\u8449: \u82E5\u8449");
+    import_node_fs2.default.writeFileSync(import_node_path2.default.join(root, "reports", "\u5317.csv"), "\u9805\u76EE,\u5024\n\u58F2\u4E0A,120\n\u691C\u7D22\u672D,\u9752");
+    import_node_fs2.default.writeFileSync(import_node_path2.default.join(root, "rates", "\u70BA\u66FF.csv"), "\u901A\u8CA8,\u5186\nUSD,150\n\u691C\u7D22\u672D,\u8D64");
+    import_node_fs2.default.writeFileSync(import_node_path2.default.join(root, "tools", "\u6848\u5185.txt"), "\u691C\u7D22\u672D: \u7DD1");
+    import_node_fs2.default.writeFileSync(import_node_path2.default.join(root, "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0", "\u65E5\u672C\u8A9E\u30E1\u30E2.md"), "- \u4E00\u3064\n- \u4E8C\u3064");
+    const workbook = import_node_path2.default.resolve(__dirname, "..", "..", "..", "demo", "renketsu-demo", "workspace", "\u96C6\u8A08\u53F0\u5E33.xlsx");
+    import_node_fs2.default.copyFileSync(workbook, import_node_path2.default.join(root, "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0", "\u4EFB\u610F\u53F0\u5E33.xlsx"));
+    const cases = [
+      measured({ type: "list", utterance: "\u3053\u3053\u76F4\u4E0B\u3001\u4F55\u3042\u308B\uFF1F", target: "workspace root" }, () => tool("list_files").run({ path: ".", recursive: false }, ctx), (o) => o.includes("\u6982\u8981.txt") && o.includes("reports/") && !o.includes("reports/\u5317.csv")),
+      measured({ type: "list", utterance: "reports \u306ECSV\u3092\u4E00\u89A7\u3067\u304A\u9858\u3044\u3057\u307E\u3059", target: "reports" }, () => tool("list_files").run({ path: "reports", glob: "*.csv" }, ctx), (o) => o.includes("reports/\u5317.csv")),
+      measured({ type: "list", utterance: "\u96D1\u591A\u30D5\u30A9\u30EB\u30C0\u898B\u305B\u3066", target: "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0" }, () => tool("list_files").run({ path: "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0" }, ctx), (o) => o.includes("\u65E5\u672C\u8A9E\u30E1\u30E2.md") && o.includes("\u4EFB\u610F\u53F0\u5E33.xlsx")),
+      measured({ type: "read", utterance: "\u6982\u8981\u3001\u8AAD\u3093\u3067", target: "\u6982\u8981.txt" }, () => tool("read_files").run({ paths: ["\u6982\u8981.txt"] }, ctx), (o) => o.includes("\u82E5\u8449")),
+      measured({ type: "read", utterance: "\u70BA\u66FFCSV\u306EUSD\u306F\u3044\u304F\u3089\u3067\u3057\u3087\u3046\u304B", target: "rates/\u70BA\u66FF.csv" }, () => tool("read_files").run({ pattern: "rates/\u70BA\u66FF.csv" }, ctx), (o) => o.includes("USD,150")),
+      measured({ type: "read", utterance: "\u4EFB\u610F\u53F0\u5E33\u306E\u30B7\u30FC\u30C8\u5185\u5BB9\u304A\u9858\u3044", target: "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u4EFB\u610F\u53F0\u5E33.xlsx" }, () => tool("read_xlsx").run({ path: "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u4EFB\u610F\u53F0\u5E33.xlsx" }, ctx), (o) => o.includes('"ok":true') && o.includes("sheets")),
+      measured({ type: "read", utterance: "\u306A\u3044\u8CC7\u6599\u3082\u4E00\u5FDC\u898B\u3066", target: "\u5B58\u5728\u3057\u306A\u3044.txt" }, () => tool("read_files").run({ pattern: "\u5B58\u5728\u3057\u306A\u3044.txt" }, ctx), (o) => o === "(\u8A72\u5F53\u306A\u3057)"),
+      measured({ type: "open", utterance: "\u6982\u8981\u3092\u958B\u3044\u3066\u304F\u3060\u3055\u3044", target: "\u6982\u8981.txt" }, async () => prepareHostCommand("Invoke-Item \u6982\u8981.txt", ctx), (o) => o.includes("Invoke-Item -LiteralPath")),
+      measured({ type: "open", utterance: "\u5317.csv\u958B\u3044\u3066", target: "reports/\u5317.csv" }, async () => prepareHostCommand("Start-Process -FilePath reports/\u5317.csv", ctx), (o) => o.includes("Invoke-Item -LiteralPath")),
+      measured({ type: "open", utterance: "\u4EFB\u610F\u53F0\u5E33\u3072\u3089\u304F", target: "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u4EFB\u610F\u53F0\u5E33.xlsx" }, async () => prepareHostCommand('excel.exe "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u4EFB\u610F\u53F0\u5E33.xlsx"', ctx), (o) => o.includes("Invoke-Item -LiteralPath")),
+      measured({ type: "write", utterance: "\u65E5\u4ED8\u30E1\u30E2\u3092\u65B0\u898F\u3067", target: "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u65E5\u4ED8.txt" }, () => tool("write_file").run({ path: "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u65E5\u4ED8.txt", content: "2026-08-27" }, ctx), (o) => o.includes("\u66F8\u304D\u8FBC\u307F\u5B8C\u4E86")),
+      measured({ type: "write", utterance: "rates\u306B\u4E00\u8A00\u7F6E\u3044\u3066\u304F\u3060\u3055\u3044", target: "rates/\u4E00\u8A00.txt" }, () => tool("write_file").run({ path: "rates/\u4E00\u8A00.txt", content: "\u78BA\u8A8D\u3057\u307E\u3057\u305F" }, ctx), (o) => o.includes("\u66F8\u304D\u8FBC\u307F\u5B8C\u4E86")),
+      measured({ type: "write", utterance: "tools\u3078\u7B87\u6761\u66F8\u304D\u30E1\u30E2", target: "tools/\u7B87\u6761\u66F8\u304D.md" }, () => tool("write_file").run({ path: "tools/\u7B87\u6761\u66F8\u304D.md", content: "- alpha\n- beta" }, ctx), (o) => o.includes("\u66F8\u304D\u8FBC\u307F\u5B8C\u4E86")),
+      measured({ type: "search", utterance: "\u9752\u3063\u3066\u3069\u3053\uFF1F", target: "\u9752" }, () => tool("search_files").run({ query: "\u9752" }, ctx), (o) => o.includes("reports/\u5317.csv")),
+      measured({ type: "search", utterance: "\u300C\u8D64\u300D\u3092\u5168\u30D5\u30A1\u30A4\u30EB\u6A2A\u65AD\u3067\u63A2\u3057\u3066\u304F\u3060\u3055\u3044", target: "\u8D64" }, () => tool("search_files").run({ query: "\u8D64" }, ctx), (o) => o.includes("rates/\u70BA\u66FF.csv")),
+      measured({ type: "search", utterance: "\u7DD1 \u691C\u7D22", target: "\u7DD1" }, () => tool("search_files").run({ query: "\u7DD1" }, ctx), (o) => o.includes("tools/\u6848\u5185.txt"))
     ];
-    if (this.s.displayMode === "minimized") args.push("--window-position=-32000,-32000", "--window-size=1280,900");
-    args.push(this.s.url);
-    const child = (0, import_node_child_process3.spawn)(findEdgePath(), args, { detached: true, stdio: "ignore" });
-    this.ownedEdgePid = child.pid ?? null;
-    this.visibleEdgePid = null;
-    child.unref();
-    const deadline = Date.now() + 3e4;
-    while (Date.now() < deadline) {
-      if (await devToolsUp(this.s.cdpPort)) return;
-      await sleep(500);
-    }
-    const mode = this.s.reuseExistingEdge ? "\u6307\u5B9A\u3055\u308C\u305FEdge" : "\u5C02\u7528Edge";
-    throw new Error(`${mode}\u306EDevTools Protocol\u304C\u8D77\u52D5\u3057\u307E\u305B\u3093\u3067\u3057\u305F (port=${this.s.cdpPort})\u3002\u4ED6\u30A2\u30D7\u30EA\u306EEdge\u306B\u306F\u63A5\u7D9A\u305B\u305A\u3001\u5C02\u7528\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB\u3067\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
-  }
-  async listTargets() {
-    try {
-      const res = await fetch(`http://127.0.0.1:${this.s.cdpPort}/json`, { signal: AbortSignal.timeout(5e3) });
-      const raw = await res.json();
-      return Array.isArray(raw) ? raw : [];
-    } catch {
-      return [];
-    }
-  }
-  async ensurePage() {
-    const host = (() => {
-      try {
-        return new URL(this.s.url).host;
-      } catch {
-        return "";
-      }
-    })();
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const targets = await this.listTargets();
-      const pages = targets.filter((t) => t.type === "page" && t.webSocketDebuggerUrl && !isLocalUrl(t.url));
-      const preferred = pages.find((t) => host && t.url?.includes(host) || t.url?.toLowerCase().includes("copilot"));
-      const fallback = this.s.reuseExistingEdge ? pages.find((t) => /^https?:/i.test(t.url ?? "")) : void 0;
-      const picked = preferred ?? fallback;
-      if (picked) {
-        this.cdp?.close();
-        this.cdp = await CdpConnection.connect(picked.webSocketDebuggerUrl);
-        return;
-      }
-      const created = await fetch(`http://127.0.0.1:${this.s.cdpPort}/json/new?${encodeURIComponent(this.s.url)}`, {
-        method: "PUT",
-        signal: AbortSignal.timeout(5e3)
-      }).catch(() => null);
-      if (!created?.ok) {
-        await fetch(`http://127.0.0.1:${this.s.cdpPort}/json/new?${encodeURIComponent(this.s.url)}`, {
-          signal: AbortSignal.timeout(5e3)
-        }).catch(() => null);
-      }
-      await sleep(2e3);
-    }
-    throw new Error("Copilot \u30DA\u30FC\u30B8 (CDP \u30BF\u30FC\u30B2\u30C3\u30C8) \u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002");
-  }
-  async assertTrustedOrigin() {
-    const actualRaw = String(await this.evalWithReconnect("(() => location.origin)()"));
-    const u = new URL(this.s.url);
-    if (u.protocol !== "https:" || !u.host) {
-      throw new Error(`copilot.url \u306F https \u306E\u7D76\u5BFE URL \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${this.s.url}`);
-    }
-    let actualHost = "";
-    try {
-      const au = new URL(actualRaw);
-      if (au.protocol !== "https:") throw new Error("not https");
-      actualHost = au.host.toLowerCase();
-    } catch {
-      throw new Error(`Copilot \u306E\u9001\u4FE1\u5148\u304C\u4E0D\u6B63\u3067\u3059: ${actualRaw}`);
-    }
-    if (actualHost !== u.host.toLowerCase()) {
-      throw new Error(`Copilot \u306E\u9001\u4FE1\u5148\u304C\u8A2D\u5B9A\u3068\u4E00\u81F4\u3057\u307E\u305B\u3093 (expected=${u.host}, actual=${actualHost})`);
-    }
-  }
-  async evalWithReconnect(expr, timeoutMs = 2e4) {
-    if (!this.cdp) throw new Error("Copilot \u30DA\u30FC\u30B8\u672A\u63A5\u7D9A\u3067\u3059");
-    return this.cdp.evalJs(expr, timeoutMs);
-  }
-  async waitInputReady(timeoutSec, signal) {
-    const deadline = Date.now() + timeoutSec * 1e3;
-    while (Date.now() < deadline) {
-      throwIfAborted(signal);
-      const raw = await this.evalWithReconnect(INPUT_READY_JS, 15e3);
-      const state = JSON.parse(String(raw));
-      if (/login|signin|sign-in|auth/i.test(state.url)) {
-        throw new Error("Copilot \u3078\u306E\u30B5\u30A4\u30F3\u30A4\u30F3\u304C\u5FC5\u8981\u3067\u3059\u3002Edge \u30A6\u30A3\u30F3\u30C9\u30A6\u3067\u30B5\u30A4\u30F3\u30A4\u30F3\u3057\u3066\u304B\u3089\u518D\u5B9F\u884C\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
-      }
-      if (state.ready) return;
-      await sleep(350);
-      throwIfAborted(signal);
-    }
-    throw new Error("Copilot \u306E\u5165\u529B\u6B04\u304C\u6E96\u5099\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F (\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8)\u3002");
-  }
-  async freshChat() {
-    const raw = await this.evalWithReconnect(FRESH_CHAT_JS);
-    if (!JSON.parse(String(raw)).clicked) {
-      await this.cdpMethod("Page.navigate", { url: this.s.url });
-      await sleep(3e3);
-    } else {
-      await sleep(450);
-    }
-  }
-  async stampVisibleSessionMarker(sessionId) {
-    const marker = makeVisibleSessionMarker(sessionId);
-    const result = await this.evalWithReconnect(`(() => { const marker = ${JSON.stringify(marker)}; window.name = marker; document.documentElement.setAttribute('data-company-apps-session', marker); return JSON.stringify({ windowName: window.name, sessionMarker: document.documentElement.getAttribute('data-company-apps-session') }); })()`);
-    const stamped = JSON.parse(String(result));
-    if (stamped.windowName !== marker || stamped.sessionMarker !== marker) throw new Error("Copilot\u8868\u793A\u30BF\u30D6\u3078\u30BB\u30C3\u30B7\u30E7\u30F3\u8B58\u5225\u5B50\u3092\u8A2D\u5B9A\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
-  }
-  async prepareVisibleSession(sessionId) {
-    makeVisibleSessionMarker(sessionId);
-    await this.ensureEdge();
-    await this.ensurePage();
-    await this.refreshBrowserProcessId();
-    await this.cdpMethod("Page.navigate", { url: this.s.url });
-    await sleep(3e3);
-    await this.waitInputReady(120);
-    await this.assertTrustedOrigin();
-    this.visibleSessionId = sessionId;
-    await this.stampVisibleSessionMarker(sessionId);
-    await this.bringToFront();
-    return this.inspectVisibleSession(sessionId);
-  }
-  async inspectVisibleSession(sessionId) {
-    const expectedMarker = makeVisibleSessionMarker(sessionId);
-    if (!this.cdp) throw new Error("Copilot\u8868\u793A\u30BF\u30D6\u306F\u6E96\u5099\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
-    const raw = await this.evalWithReconnect(COPILOT_SCREEN_STATE_JS, 15e3);
-    const parsed = JSON.parse(String(raw));
-    const responses = parsed.responseCandidates ?? [];
-    const latest = selectLatestResponseCandidate(responses);
-    const marker = String(parsed.sessionMarker ?? "");
-    return {
-      sessionId,
-      marker,
-      markerMatches: marker === expectedMarker && String(parsed.windowName ?? "") === expectedMarker,
-      pid: this.visibleEdgePid,
-      cdpPort: this.s.cdpPort,
-      url: String(parsed.url ?? ""),
-      title: String(parsed.title ?? ""),
-      inputReady: parsed.inputReady === true,
-      responseCount: responses.length,
-      latestResponseLength: latest?.text.length ?? 0,
-      generating: (parsed.stopCandidates ?? []).some(isStopGenerationControl),
-      copyEnabled: latest?.copyEnabled === true
-    };
-  }
-  async cdpMethod(name, params, timeoutMs = 3e4) {
-    if (!this.cdp) throw new Error("Copilot \u30DA\u30FC\u30B8\u672A\u63A5\u7D9A\u3067\u3059");
-    await this.cdp.method(name, params, timeoutMs);
-  }
-  async editorLength() {
-    const raw = await this.evalWithReconnect(EDITOR_LENGTH_JS);
-    const n = Number(raw);
-    return Number.isFinite(n) ? n : -1;
-  }
-  async editorState() {
-    const raw = await this.evalWithReconnect(EDITOR_STATE_JS);
-    try {
-      const state = JSON.parse(String(raw));
-      return { found: state.found === true, text: typeof state.text === "string" ? state.text : "", active: state.active === true };
-    } catch {
-      return { found: false, text: "", active: false };
-    }
-  }
-  async insertPrompt(prompt) {
-    if (prompt.length > this.s.maxPromptChars) {
-      throw new Error(`\u4F9D\u983C\u6587\u304C\u4E0A\u9650 ${this.s.maxPromptChars} \u6587\u5B57\u3092\u8D85\u3048\u3066\u3044\u307E\u3059 (${prompt.length} \u6587\u5B57)`);
-    }
-    try {
-      await this.pasteViaClipboard(prompt);
-      return;
-    } catch (err) {
-      console.log(`[paste] \u30AF\u30EA\u30C3\u30D7\u30DC\u30FC\u30C9\u8CBC\u308A\u4ED8\u3051\u306B\u5931\u6557\u3001\u30C1\u30E3\u30F3\u30AF\u65B9\u5F0F\u3078\u30D5\u30A9\u30FC\u30EB\u30D0\u30C3\u30AF: ${err.message}`);
-    }
-    await this.insertByChunks(prompt);
-  }
-  async pasteViaClipboard(prompt) {
-    await this.bringToFront();
-    await this.grantClipboard();
-    await this.focusEditor();
-    await this.evalWithReconnect("window.focus(); true", 5e3);
-    await this.evalWithReconnect(`navigator.clipboard.writeText(${JSON.stringify(prompt)})`, 15e3);
-    for (let i = 0; i < 6; i++) {
-      await this.evalWithReconnect(CLEAR_EDITOR_JS);
-      await sleep(150);
-      if (await this.editorLength() === 0) break;
-    }
-    await this.focusEditor();
-    await this.evalWithReconnect("(() => { const s = getSelection(); if (!s || !document.activeElement) return; s.selectAllChildren(document.activeElement); s.collapseToEnd() })()", 1e4);
-    await this.cdpMethod("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "v", code: "KeyV", windowsVirtualKeyCode: 86, modifiers: 2 });
-    await this.cdpMethod("Input.dispatchKeyEvent", { type: "keyUp", key: "v", code: "KeyV", windowsVirtualKeyCode: 86, modifiers: 2 });
-    await sleep(700);
-    const len = Number(await this.editorLength());
-    if (len < prompt.length * 0.9) throw new Error(`\u8CBC\u308A\u4ED8\u3051\u5F8C\u306E\u9577\u3055\u4E0D\u8DB3 (\u671F\u5F85 ~${prompt.length}, \u5B9F\u969B ${len})`);
-  }
-  async insertByChunks(prompt) {
-    if (await this.editorLength() > 0) {
-      await this.clearEditor();
-    }
-    let pos = 0;
-    let chunkSize = 450;
-    let rebuilds = 0;
-    while (pos < prompt.length) {
-      const chunk = prompt.slice(pos, pos + chunkSize);
-      let ok = false;
-      for (let attempt = 1; attempt <= 6 && !ok; attempt++) {
-        const before = await this.editorState();
-        if (!before.found) throw new Error("\u5165\u529B\u6B04\u304C\u518D\u63CF\u753B\u4E2D\u3067\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F");
-        if (!prompt.startsWith(before.text)) {
-          const diagnostic = textMismatchDiagnostic(prompt, before.text);
-          console.warn(`[input] DOM\u6587\u5B57\u5217\u4E0D\u4E00\u81F4: ${diagnostic}`);
-          if (rebuilds >= 2) throw new Error(`\u4F9D\u983C\u6587\u306E\u5165\u529B\u5185\u5BB9\u304C\u4E00\u81F4\u3057\u307E\u305B\u3093\u3067\u3057\u305F (${diagnostic})`);
-          await this.clearEditor();
-          pos = 0;
-          rebuilds++;
-          break;
-        }
-        if (before.text.length > pos) {
-          pos = before.text.length;
-          ok = true;
-          break;
-        }
-        await this.bringToFront();
-        await this.focusEditor();
-        await this.cdpMethod("Input.insertText", { text: prompt.slice(pos, pos + chunk.length) });
-        for (let poll = 0; poll < 8; poll++) {
-          await sleep(180);
-          const after = await this.editorState();
-          if (!after.found || !prompt.startsWith(after.text)) break;
-          if (after.text.length > pos) {
-            pos = after.text.length;
-            ok = true;
-            break;
-          }
-        }
-        if (!ok) await sleep(250 * attempt);
-      }
-      if (!ok) {
-        if (pos >= prompt.length) break;
-        if (chunkSize > 180) {
-          chunkSize = Math.floor(chunkSize / 2);
-          continue;
-        }
-        if (rebuilds >= 2) {
-          throw new Error(`\u4F9D\u983C\u6587\u306E\u5165\u529B\u304C\u4F4D\u7F6E ${pos} \u3067\u53CD\u6620\u3055\u308C\u307E\u305B\u3093\u3067\u3057\u305F`);
-        }
-        await this.clearEditor();
-        pos = 0;
-        rebuilds++;
-      }
-    }
-    const final = await this.editorState();
-    if (!final.found || !final.text.startsWith(prompt)) {
-      throw new Error(`\u4F9D\u983C\u6587\u306E\u5165\u529B\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F (\u671F\u5F85 ${prompt.length} / \u5B9F\u969B ${final.text.length})`);
-    }
-  }
-  async clearEditor() {
-    await this.focusEditor();
-    await this.cdpMethod("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: 2 });
-    await this.cdpMethod("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: 2 });
-    await sleep(120);
-    await this.cdpMethod("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 });
-    await this.cdpMethod("Input.dispatchKeyEvent", { type: "keyUp", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 });
-    await sleep(200);
-  }
-  async focusEditor() {
-    const js = `(() => {
-      ${VISIBLE_JS}
-      ${DOCS_JS}
-      const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
-      for (const d of __docs) for (const s of sels) {
-        const el = d.querySelector(s);
-        if (__vis(el)) {
-          try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); }
-          try {
-            const range = d.createRange();
-            range.selectNodeContents(el);
-            range.collapse(false);
-            const sel = d.getSelection();
-            if (sel) { sel.removeAllRanges(); sel.addRange(range); }
-          } catch (e) {}
-          return 'ok';
-        }
-      }
-      return 'ng';
-    })()`;
-    if (await this.evalWithReconnect(js) !== "ok") throw new Error("\u5165\u529B\u6B04\u306B\u30D5\u30A9\u30FC\u30AB\u30B9\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
-  }
-  async clickSend() {
-    const raw = await this.evalWithReconnect(COPILOT_CLICK_SEND_JS);
-    const result = JSON.parse(String(raw));
-    if (!result.clicked) {
-      const diagnostic = JSON.stringify(result.inventory ?? []).slice(0, 3e3);
-      console.log(`[send] candidate inventory: ${diagnostic}`);
-      throw new Error(`\u6709\u52B9\u306A\u9001\u4FE1\u30DC\u30BF\u30F3\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u5019\u88DC\u8A3A\u65AD: ${diagnostic}`);
-    }
-  }
-  async readScreenState(timeoutMs = 15e3) {
-    const raw = await this.evalWithReconnect(COPILOT_SCREEN_STATE_JS, timeoutMs);
-    const parsed = JSON.parse(String(raw));
-    const latest = selectLatestResponseCandidate(parsed.responseCandidates ?? []);
-    return {
-      text: latest?.text ?? "",
-      generating: (parsed.stopCandidates ?? []).some(isStopGenerationControl),
-      copyEnabled: latest?.copyEnabled === true,
-      signinRequired: parsed.signinRequired
-    };
-  }
-  async waitResponse(baseline, signal) {
-    const deadline = Date.now() + this.s.responseTimeoutSec * 1e3;
-    let lastText = "";
-    let lastChange = Date.now();
-    let sawNewText = false;
-    let completionState = { stableLength: null, stableSinceMs: null };
-    while (Date.now() < deadline) {
-      throwIfAborted(signal);
-      const remainingMs = deadline - Date.now();
-      if (remainingMs <= 0) break;
-      const st = await this.readScreenState(Math.min(15e3, remainingMs));
-      if (Date.now() >= deadline) break;
-      if (st.signinRequired) throw new Error("Copilot \u3078\u306E\u30B5\u30A4\u30F3\u30A4\u30F3\u304C\u5FC5\u8981\u3067\u3059\u3002");
-      if (st.text && st.text !== baseline) {
-        sawNewText = true;
-        if (st.text !== lastText) {
-          lastText = st.text;
-          lastChange = Date.now();
-        }
-      }
-      const quietFor = Date.now() - lastChange;
-      const completion = updateResponseCompletionState(completionState, {
-        observedAtMs: Date.now(),
-        textLength: sawNewText && st.text === lastText ? lastText.length : 0,
-        generating: st.generating,
-        copyEnabled: st.copyEnabled
-      });
-      completionState = completion.state;
-      if (completion.ready) {
-        const answer = await this.finalizeAnswer(lastText, deadline);
-        assertResponseDeadline(deadline, this.s.responseTimeoutSec);
-        return answer;
-      }
-      if (!st.generating && sawNewText && quietFor > this.s.stallTimeoutSec * 1e3) {
-        throw new Error("Copilot \u306E\u5FDC\u7B54\u304C\u505C\u6EDE\u3057\u305F\u305F\u3081\u8AE6\u3081\u307E\u3057\u305F");
-      }
-      const sleepMs = Math.min(this.s.pollIntervalMs, deadline - Date.now());
-      if (sleepMs > 0) await sleep(sleepMs);
-      throwIfAborted(signal);
-    }
-    throw new Error(`Copilot \u306E\u5FDC\u7B54\u304C\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8\u3057\u307E\u3057\u305F (${this.s.responseTimeoutSec}\u79D2)`);
-  }
-  cleanResponse(text) {
-    return text.split("\n").filter((l) => l.trim() !== this.s.endMarker).join("\n").trim();
-  }
-  async selectModel() {
-    if (!this.s.modelPriority || this.s.modelPriority.length === 0) return;
-    const js = MODEL_SELECT_JS.replace("__CANDIDATES__", JSON.stringify(this.s.modelPriority)).replace("__SWITCHER__", JSON.stringify("#gptModeSwitcher"));
-    try {
-      const raw = await this.evalWithReconnect(js, 3e4);
-      const r = JSON.parse(String(raw));
-      if (r.changed) console.log(`[model] ${r.before ?? "?"} -> ${r.after ?? r.picked ?? "?"}`);
-      else if (["switcher_not_found", "menu_not_found", "model_not_in_menu"].includes(r.reason ?? "")) console.warn(`[model] \u5229\u7528\u4E0D\u53EF\u306E\u305F\u3081UI\u65E2\u5B9A\u3092\u7D99\u7D9A: ${r.reason}`);
-    } catch (err) {
-      console.log(`[model] \u5207\u66FF\u30B9\u30AD\u30C3\u30D7(\u7D99\u7D9A): ${err.message}`);
-    }
-  }
-  async complete(prompt, signal) {
-    throwIfAborted(signal);
-    await this.ensureEdge();
-    await this.ensurePage();
-    await this.freshChat();
-    await this.waitInputReady(120, signal);
-    if (this.visibleSessionId) {
-      await this.stampVisibleSessionMarker(this.visibleSessionId);
-      await this.bringToFront();
-    }
-    await this.selectModel();
-    throwIfAborted(signal);
-    await this.waitInputReady(30, signal);
-    await this.assertTrustedOrigin();
-    await this.insertPrompt(prompt);
-    const baseline = (await this.readScreenState()).text;
-    await this.clickSend();
-    throwIfAborted(signal);
-    return this.waitResponse(baseline, signal);
-  }
-  close() {
-    this.cdp?.close();
-    this.cdp = null;
-  }
-};
-
-// src/session.ts
-var import_node_fs4 = __toESM(require("node:fs"));
-var import_node_os = __toESM(require("node:os"));
-var import_node_path5 = __toESM(require("node:path"));
-var logPath;
-function ensureLog() {
-  if (!logPath) {
-    const dir = import_node_path5.default.join(import_node_os.default.tmpdir(), "company-coding-agent", "sessions");
-    import_node_fs4.default.mkdirSync(dir, { recursive: true });
-    const stamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
-    logPath = import_node_path5.default.join(dir, `${stamp}.jsonl`);
-  }
-  return logPath;
-}
-function appendSession(userInput, newMessages) {
-  try {
-    const line = JSON.stringify({ ts: (/* @__PURE__ */ new Date()).toISOString(), input: userInput, messages: newMessages }) + "\n";
-    import_node_fs4.default.appendFileSync(ensureLog(), line, "utf8");
-  } catch {
+    const results = await Promise.all(cases);
+    for (const result of results) console.log(`DETERMINISTIC	${result.type}	${result.ok ? "PASS" : "FAIL"}	${result.ms}ms	${result.target}	${result.utterance}	${result.detail}`);
+    summarize(results, "DETERMINISTIC");
+  } finally {
+    import_node_fs2.default.rmSync(root, { recursive: true, force: true });
   }
 }
-
-// src/repl.ts
-var DEFAULT_SYSTEM_PROMPT = "\u3042\u306A\u305F\u306F\u793E\u5185\u306E\u30B3\u30FC\u30C7\u30A3\u30F3\u30B0\u652F\u63F4\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u3067\u3059\u3002\u63D0\u4F9B\u3055\u308C\u305F\u30C4\u30FC\u30EB\u3067\u30D5\u30A1\u30A4\u30EB\u306E\u8ABF\u67FB\u30FB\u7DE8\u96C6\u30FB\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u3092\u884C\u3044\u3001\u7C21\u6F54\u306A\u65E5\u672C\u8A9E\u3067\u56DE\u7B54\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
-function printHelp() {
-  console.log(
-    [
-      "\u30B3\u30DE\u30F3\u30C9:",
-      "  /help   \u30D8\u30EB\u30D7\u8868\u793A",
-      "  /reset  \u4F1A\u8A71\u5C65\u6B74\u3092\u30EA\u30BB\u30C3\u30C8",
-      "  /cwd    \u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u3092\u8868\u793A",
-      "  /exit   \u7D42\u4E86 (\u7A7AEnter\u3067\u3082\u7D42\u4E86)",
-      "",
-      "\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306E\u524D\u306B\u78BA\u8A8D\u30D7\u30ED\u30F3\u30D7\u30C8\u304C\u8868\u793A\u3055\u308C\u307E\u3059(\u30D5\u30A1\u30A4\u30EB\u66F8\u304D\u8FBC\u307F\u306F\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5185\u306A\u3089\u81EA\u52D5\u627F\u8A8D)"
-    ].join("\n")
-  );
-}
-async function startRepl(cfg, ctx) {
-  const lineQueue = [];
-  let waiter = null;
-  const rl = import_node_readline.default.createInterface({ input: process.stdin, terminal: false });
-  rl.on("line", (raw) => {
-    const line = raw.trim();
-    if (waiter) {
-      const w = waiter;
-      waiter = null;
-      w(line);
-    } else {
-      lineQueue.push(line);
+async function liveConverterCorpus() {
+  const model = process.env.FLEX_CONVERTER_MODEL || "Qwen3.5-4B-Q4_K_M.gguf";
+  const settings = { enabled: true, baseURL: "http://127.0.0.1:8080/v1", model, timeoutMs: 3e4, apiKey: "company-apps-flex-local" };
+  const defs = TOOL_DEFS.map((entry) => ({ name: qualifiedToolName(entry.name), description: entry.description, parameters: entry.parameters }));
+  const cases = [
+    { type: "list", utterance: "reports\u898B\u305B\u3066", target: "reports", raw: '{"tool":"list_files","path":"reports"}', expectedTool: "host.list_files", expectedArgs: { path: "reports" } },
+    { type: "list", utterance: "rates \u306ECSV\u4E00\u89A7\u3092\u304A\u9858\u3044\u3057\u307E\u3059", target: "rates", raw: 'TOOL: host.list_files\nARGS: {"path":"rates","glob":"*.csv"}', expectedTool: "host.list_files", expectedArgs: { path: "rates", glob: "*.csv" } },
+    { type: "list", utterance: "\u96D1\u591A\u30D5\u30A9\u30EB\u30C0\u4F55\u3042\u308B\uFF1F", target: "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0", raw: "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0\u3092\u5217\u6319\u3057\u307E\u3059\u3002list_files \u306E path \u306F\u300C\u96D1\u591A \u30D5\u30A9\u30EB\u30C0\u300D\u3067\u3059\u3002", expectedTool: "host.list_files", expectedArgs: { path: "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0" } },
+    { type: "read", utterance: "\u6982\u8981\u8AAD\u3093\u3067", target: "\u6982\u8981.txt", raw: '{"tool":"read_files","paths":["\u6982\u8981.txt"]}', expectedTool: "host.read_files", expectedArgs: { paths: ["\u6982\u8981.txt"] } },
+    { type: "read", utterance: "\u70BA\u66FFCSV\u3092\u62DD\u898B\u3067\u304D\u307E\u3059\u304B", target: "rates/\u70BA\u66FF.csv", raw: "host.read_files \u3092 pattern=rates/\u70BA\u66FF.csv \u3067\u547C\u3073\u307E\u3059\u3002", expectedTool: "host.read_files", expectedArgs: { pattern: "rates/\u70BA\u66FF.csv" } },
+    { type: "read", utterance: "\u53F0\u5E33\u306E\u4E2D\u8EAB\u304A\u9858\u3044", target: "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u4EFB\u610F\u53F0\u5E33.xlsx", raw: "xlsx\u306A\u306E\u3067 read_xlsx\u3002path \u306F \u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u4EFB\u610F\u53F0\u5E33.xlsx", expectedTool: "host.read_xlsx", expectedArgs: { path: "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u4EFB\u610F\u53F0\u5E33.xlsx" } },
+    { type: "read", utterance: "\u306A\u3044\u8CC7\u6599\u3042\u308B\uFF1F", target: "\u5B58\u5728\u3057\u306A\u3044.txt", raw: '{"tool":"host.read_files","args":{"pattern":"\u5B58\u5728\u3057\u306A\u3044.txt"}}', expectedTool: "host.read_files", expectedArgs: { pattern: "\u5B58\u5728\u3057\u306A\u3044.txt" } },
+    { type: "open", utterance: "\u6982\u8981\u3092\u958B\u3044\u3066\u304F\u3060\u3055\u3044", target: "\u6982\u8981.txt", raw: '{"tool":"start_process","command":"Invoke-Item \u6982\u8981.txt"}', expectedTool: "host.start_process", expectedArgs: { command: "Invoke-Item \u6982\u8981.txt" } },
+    { type: "open", utterance: "\u5317.csv\u958B\u3044\u3066", target: "reports/\u5317.csv", raw: "start_process \u3092\u4F7F\u3046\u3002command \u306F Start-Process -FilePath reports/\u5317.csv", expectedTool: "host.start_process", expectedArgs: { command: "Start-Process -FilePath reports/\u5317.csv" } },
+    { type: "open", utterance: "\u53F0\u5E33\u3072\u3089\u304F", target: "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u4EFB\u610F\u53F0\u5E33.xlsx", raw: '{"tool":"run_command","args":{"command":"excel.exe \\"\u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u4EFB\u610F\u53F0\u5E33.xlsx\\""}}', expectedTool: "host.run_command", expectedArgs: { command: 'excel.exe "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u4EFB\u610F\u53F0\u5E33.xlsx"' } },
+    { type: "write", utterance: "\u65E5\u4ED8\u30E1\u30E2\u4F5C\u3063\u3066", target: "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u65E5\u4ED8.txt", raw: '{"tool":"write_file","path":"\u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u65E5\u4ED8.txt","content":"2026-08-27"}', expectedTool: "host.write_file", expectedArgs: { path: "\u96D1\u591A \u30D5\u30A9\u30EB\u30C0/\u65E5\u4ED8.txt", content: "2026-08-27" } },
+    { type: "write", utterance: "\u4E00\u8A00\u7F6E\u3044\u3066\u304F\u3060\u3055\u3044", target: "rates/\u4E00\u8A00.txt", raw: "host.write_file / path=rates/\u4E00\u8A00.txt / content=\u78BA\u8A8D\u3057\u307E\u3057\u305F", expectedTool: "host.write_file", expectedArgs: { path: "rates/\u4E00\u8A00.txt", content: "\u78BA\u8A8D\u3057\u307E\u3057\u305F" } },
+    { type: "write", utterance: "\u7B87\u6761\u66F8\u304D\u30E1\u30E2\u3088\u308D\u3057\u304F", target: "tools/\u7B87\u6761\u66F8\u304D.md", raw: "write_file \u3067 tools/\u7B87\u6761\u66F8\u304D.md \u306B\u300C- alpha\n- beta\u300D\u3092\u65B0\u898F\u4F5C\u6210\u3002", expectedTool: "host.write_file", expectedArgs: { path: "tools/\u7B87\u6761\u66F8\u304D.md", content: "- alpha\n- beta" } },
+    { type: "search", utterance: "\u9752\u3069\u3053", target: "\u9752", raw: '{"tool":"search_files","query":"\u9752"}', expectedTool: "host.search_files", expectedArgs: { query: "\u9752" } },
+    { type: "search", utterance: "\u8D64\u3092\u6A2A\u65AD\u691C\u7D22\u3057\u3066\u304F\u3060\u3055\u3044", target: "\u8D64", raw: 'TOOL host.search_files ARGS {"query":"\u8D64"}', expectedTool: "host.search_files", expectedArgs: { query: "\u8D64" } },
+    { type: "search", utterance: "\u7DD1 \u691C\u7D22", target: "\u7DD1", raw: "search_files\u3092\u4F7F\u3063\u3066\u3002query=\u7DD1", expectedTool: "host.search_files", expectedArgs: { query: "\u7DD1" } }
+  ];
+  const results = [];
+  for (const item of cases) {
+    const started = Date.now();
+    try {
+      const output = await convertCopilotResponse(settings, item.raw, defs);
+      const parsed = output ? extractJsonReply(output) : null;
+      const normalizedTool = parsed?.tool ? qualifiedToolName(parsed.tool) : void 0;
+      const def = normalizedTool ? TOOL_DEFS.find((entry) => qualifiedToolName(entry.name) === normalizedTool) : void 0;
+      const args = parsed?.args ?? {};
+      const argsMatch = Object.entries(item.expectedArgs).every(([key, value]) => JSON.stringify(args[key]) === JSON.stringify(value));
+      const ok = normalizedTool === item.expectedTool && argsMatch && Boolean(def) && validateToolArgs(def, args) === null;
+      results.push({ type: item.type, utterance: item.utterance, target: item.target, ok, ms: Date.now() - started, detail: output?.slice(0, 180) ?? "(null)" });
+    } catch (error) {
+      results.push({ type: item.type, utterance: item.utterance, target: item.target, ok: false, ms: Date.now() - started, detail: String(error.message ?? error).slice(0, 180) });
     }
-  });
-  rl.on("close", () => {
-    if (waiter) {
-      const w = waiter;
-      waiter = null;
-      w("");
-    }
-  });
-  async function nextLine(promptText) {
-    process.stdout.write(promptText);
-    if (lineQueue.length > 0) return lineQueue.shift();
-    return new Promise((resolve) => {
-      waiter = resolve;
-    });
   }
-  const io = {
-    print: (t) => console.log(t),
-    askYesNo: async (q) => /^y(es)?$/i.test(await nextLine(`${q} [y/N]: `))
-  };
-  let messages = [{ role: "system", content: cfg.systemPrompt ?? DEFAULT_SYSTEM_PROMPT }];
-  let copilotBackend = null;
-  console.log(`coding-agent (${cfg.model || (cfg.provider ?? "openai")}) \u2014 \u958B\u59CB\u3002/help \u3067\u30B3\u30DE\u30F3\u30C9\u3001\u7A7AEnter\u3067\u7D42\u4E86`);
-  for (; ; ) {
-    const input = await nextLine("> ");
-    if (input === "") break;
-    if (input.startsWith("/")) {
-      const cmd = input.split(/\s+/)[0];
-      if (cmd === "/exit" || cmd === "/quit") break;
-      if (cmd === "/reset") {
-        messages = messages.slice(0, 1);
-        console.log("(\u4F1A\u8A71\u3092\u30EA\u30BB\u30C3\u30C8\u3057\u307E\u3057\u305F)");
-        continue;
-      }
-      if (cmd === "/cwd") {
-        console.log(ctx.workspace);
-        continue;
-      }
-      if (cmd === "/help") {
-        printHelp();
-        continue;
-      }
-      console.log(`\u4E0D\u660E\u306A\u30B3\u30DE\u30F3\u30C9: ${cmd}`);
-      continue;
+  for (const result of results) console.log(`LIVE_CONVERTER	${result.type}	${result.ok ? "PASS" : "FAIL"}	${result.ms}ms	${result.target}	${result.utterance}	${result.detail}`);
+  summarize(results, "LIVE_CONVERTER");
+  const negativeCases = [
+    "\u8A72\u5F53\u3059\u308B\u30D5\u30A1\u30A4\u30EB\u306F\u3042\u308A\u307E\u305B\u3093\u3002",
+    "\u30D5\u30A1\u30A4\u30EB\u540D\u304C\u6307\u5B9A\u3055\u308C\u3066\u3044\u306A\u3044\u305F\u3081\u3001\u5229\u7528\u8005\u3078\u306E\u78BA\u8A8D\u304C\u5FC5\u8981\u3067\u3059\u3002",
+    "\u51E6\u7406\u306F\u5B8C\u4E86\u3057\u307E\u3057\u305F\u3002",
+    "list_files \u306F\u30D5\u30A1\u30A4\u30EB\u4E00\u89A7\u3092\u53D6\u5F97\u3059\u308B\u30C4\u30FC\u30EB\u3067\u3059\u3002\u4ECA\u56DE\u306F\u64CD\u4F5C\u3057\u307E\u305B\u3093\u3002",
+    "run_command \u306E\u5B9F\u884C\u306F\u5B89\u5168\u5883\u754C\u306B\u3088\u308A\u62D2\u5426\u3055\u308C\u307E\u3057\u305F\u3002",
+    "\u66F8\u304D\u8FBC\u307F\u5148\u304C\u4E0D\u660E\u306A\u306E\u3067 write_file \u306F\u307E\u3060\u547C\u3073\u51FA\u305B\u307E\u305B\u3093\u3002",
+    '{"tool":"host.unknown_tool","args":{"path":"\u63A8\u6E2C.txt"}}',
+    "\u958B\u304F\u5BFE\u8C61\u304C\u5206\u304B\u308A\u307E\u305B\u3093\u3002\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\u3002"
+  ];
+  let falsePositive = 0;
+  for (const raw of negativeCases) {
+    const started = Date.now();
+    let detail = "";
+    let ok = false;
+    try {
+      const output = await convertCopilotResponse(settings, raw, defs);
+      const parsed = output ? extractJsonReply(output) : null;
+      ok = !parsed?.tool && typeof parsed?.answer === "string" && parsed.answer.trim().length > 0;
+      detail = output?.slice(0, 180) ?? "(null)";
+    } catch (error) {
+      detail = String(error.message ?? error).slice(0, 180);
     }
-    const backend = cfg.provider === "copilot-edge" ? copilotBackend ??= new CopilotEdgeClient(cfg) : void 0;
-    const result = await runAgentTurn({ cfg, messages, userInput: input, ctx, io, backend });
-    if (result.reply) console.log(result.reply + "\n");
-    messages = result.messages;
-    appendSession(input, result.messages);
+    if (!ok) falsePositive++;
+    console.log(`NEGATIVE_CONVERTER	${ok ? "PASS" : "FAIL"}	${Date.now() - started}ms	${raw}	${detail}`);
   }
-  rl.close();
-  copilotBackend?.close?.();
-}
-
-// src/index.ts
-function argValue(flag) {
-  const i = process.argv.indexOf(flag);
-  return i >= 0 ? process.argv[i + 1] : void 0;
-}
-function positionalWorkspace() {
-  const argv = process.argv.slice(2);
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--config" || a === "--workspace") {
-      i++;
-      continue;
-    }
-    if (!a.startsWith("-")) return a;
-  }
-  return void 0;
+  console.log(`NEGATIVE_CONVERTER_SUMMARY ${JSON.stringify({ model, total: negativeCases.length, falsePositive })}`);
+  if (falsePositive !== 0) process.exitCode = 1;
 }
 async function main() {
-  const cfg = loadConfig(argValue("--config"));
-  const workspaceArg = argValue("--workspace") ?? positionalWorkspace();
-  const workspace = workspaceArg ? import_node_path6.default.resolve(workspaceArg) : process.cwd();
-  await startRepl(cfg, { workspace, restrictToWorkspace: cfg.restrictToWorkspace ?? true, safeCommandOnly: cfg.safeCommandOnly === true, weatherDefaultLocation: cfg.weather?.defaultLocation });
+  await deterministicCorpus();
+  if (process.argv.includes("--live")) await liveConverterCorpus();
 }
-main().catch((err) => {
-  console.error(err instanceof Error ? err.message : err);
-  process.exitCode = 1;
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
 });

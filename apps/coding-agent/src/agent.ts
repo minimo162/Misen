@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import path from 'node:path'
 import { jsonrepair } from '../vendor/npm/node_modules/jsonrepair'
+import { convertCopilotResponse } from './converter'
 export interface ParsedReply {
   tool?: string
   args?: Record<string, unknown>
@@ -502,7 +503,16 @@ async function runCopilotTurn(opts: {
       io.print(`[error] ${msg}`)
       return { reply: '', messages: turnMessages(`[error] ${msg}`), aborted: true }
     }
-    const pe = extractReplyAndEnd(raw)
+    let converterRaw: string | null = null
+    try {
+      converterRaw = await convertCopilotResponse(cfg.localResponseConverter, raw, TOOL_DEFS.map((tool) => ({ name: qualifiedToolName(tool.name), description: tool.description, parameters: tool.parameters })), io.signal)
+      if (converterRaw !== null) io.print('[converter] loopback response converter applied')
+    } catch (err) {
+      // The converter is optional. A failed/unavailable local service is never
+      // allowed to change the proven tolerant-parser path.
+      io.print(`[converter] fallback: ${(err as Error).message}`)
+    }
+    const pe = converterRaw ? extractReplyAndEnd(converterRaw) ?? extractReplyAndEnd(raw) : extractReplyAndEnd(raw)
     let parsed = pe?.parsed ?? null
     if (parsed && bareToolName(parsed.tool ?? '') === 'write_file') attachFenceContent(raw, pe!.end, parsed)
     if (!parsed) {

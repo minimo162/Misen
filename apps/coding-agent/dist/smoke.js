@@ -4505,7 +4505,7 @@ var require_lib = __commonJS({
 
 // test/smoke.ts
 var import_node_assert = __toESM(require("node:assert"));
-var import_node_http2 = __toESM(require("node:http"));
+var import_node_http3 = __toESM(require("node:http"));
 var import_node_fs3 = __toESM(require("node:fs"));
 var import_node_os = __toESM(require("node:os"));
 var import_node_path4 = __toESM(require("node:path"));
@@ -4514,6 +4514,140 @@ var import_node_path4 = __toESM(require("node:path"));
 var import_node_crypto2 = __toESM(require("node:crypto"));
 var import_node_path2 = __toESM(require("node:path"));
 var import_jsonrepair = __toESM(require_cjs());
+
+// src/converter.ts
+var import_node_http = __toESM(require("node:http"));
+var import_node_https = __toESM(require("node:https"));
+function decisionSchema(tools) {
+  return {
+    type: "object",
+    additionalProperties: false,
+    oneOf: [
+      { type: "object", additionalProperties: false, required: ["answer"], properties: { answer: { type: "string" } } },
+      {
+        type: "object",
+        additionalProperties: false,
+        required: ["tool", "args"],
+        properties: {
+          tool: { type: "string", enum: tools.map((tool) => tool.name) },
+          args: { type: "object", additionalProperties: true }
+        }
+      }
+    ]
+  };
+}
+function compactParameters(value) {
+  if (Array.isArray(value)) return value.map(compactParameters);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !["description", "examples", "default", "title"].includes(key)).map(([key, item]) => [key, compactParameters(item)]));
+}
+function candidateTools(rawResponse, tools) {
+  const lower = rawResponse.toLowerCase();
+  const mentioned = tools.filter((tool) => {
+    const bare = tool.name.startsWith("host.") ? tool.name.slice(5) : tool.name;
+    return lower.includes(tool.name.toLowerCase()) || lower.includes(bare.toLowerCase());
+  });
+  return mentioned.length > 0 ? mentioned : tools;
+}
+function strictProtocolFastPath(rawResponse, tools) {
+  try {
+    const parsed = JSON.parse(rawResponse.trim());
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    if (typeof parsed.answer === "string" && Object.keys(parsed).every((key) => ["answer", "AGENT_END"].includes(key))) {
+      return JSON.stringify({ answer: parsed.answer });
+    }
+    if (typeof parsed.tool !== "string") return null;
+    const requested = parsed.tool.startsWith("host.") ? parsed.tool : `host.${parsed.tool}`;
+    const matched = tools.find((tool) => tool.name === requested);
+    if (!matched) return null;
+    const args = parsed.args && typeof parsed.args === "object" && !Array.isArray(parsed.args) ? parsed.args : Object.fromEntries(Object.entries(parsed).filter(([key]) => !["tool", "AGENT_END"].includes(key)));
+    return JSON.stringify({ tool: matched.name, args });
+  } catch {
+    return null;
+  }
+}
+function loopbackUrl(value) {
+  const url = new URL(value);
+  const host = url.hostname.toLowerCase();
+  if (url.protocol !== "http:" && url.protocol !== "https:" || !["127.0.0.1", "::1", "localhost"].includes(host)) {
+    throw new Error("localResponseConverter.baseURL \u306F loopback HTTP(S) URL \u3060\u3051\u6307\u5B9A\u3067\u304D\u307E\u3059");
+  }
+  return url;
+}
+function endpoint(baseURL) {
+  const base = loopbackUrl(baseURL);
+  return new URL(base.pathname.endsWith("/") ? "chat/completions" : `${base.pathname}/chat/completions`, base);
+}
+async function convertCopilotResponse(settings, rawResponse, tools, signal) {
+  if (settings?.enabled !== true) return null;
+  const baseURL = settings.baseURL ?? "http://127.0.0.1:8080/v1";
+  const url = endpoint(baseURL);
+  const direct = strictProtocolFastPath(rawResponse, tools);
+  if (direct) return direct;
+  const timeoutMs = Math.max(250, Math.min(6e4, Math.floor(settings.timeoutMs ?? 3e4)));
+  const activeTools = candidateTools(rawResponse, tools);
+  const body = JSON.stringify({
+    model: settings.model ?? "Qwen3.5-4B-Q4_K_M.gguf",
+    temperature: 0,
+    max_tokens: 192,
+    stream: false,
+    // llama.cpp accepts OpenAI's response_format JSON schema and disables
+    // free-form "thinking" through the Qwen chat-template flag.
+    response_format: { type: "json_schema", json_schema: { name: "host_decision", strict: true, schema: decisionSchema(activeTools) } },
+    chat_template_kwargs: { enable_thinking: false },
+    messages: [
+      {
+        role: "system",
+        content: [
+          "Copilot\u306E\u751F\u5FDC\u7B54\u3092\u3001\u8A31\u53EF\u6E08\u307Fhost\u64CD\u4F5C\u307E\u305F\u306Fanswer\u3078\u5909\u63DB\u3059\u308B\u3002JSON\u3060\u3051\u3092\u8FD4\u3059\u3002",
+          "raw_response\u306B\u660E\u793A\u3055\u308C\u305Ftool\u3001path\u3001paths\u3001pattern\u3001glob\u3001query\u3001content\u3001command\u3060\u3051\u3092\u5FE0\u5B9F\u306B\u79FB\u3059\u3002",
+          "\u5024\u3084\u30D5\u30A1\u30A4\u30EB\u540D\u3092\u63A8\u6E2C\u30FB\u88DC\u5B8C\u30FB\u7F6E\u63DB\u305B\u305A\u3001host_tools\u306E\u4F8B\u793A\u5024\u3082\u4F7F\u308F\u306A\u3044\u3002",
+          "tool\u540D\u306Bhost.\u304C\u306A\u3051\u308C\u3070\u4ED8\u3051\u3001\u30C8\u30C3\u30D7\u30EC\u30D9\u30EB\u306E\u5F15\u6570\u306Fargs\u3078\u79FB\u3059\u3002",
+          "\u64CD\u4F5C\u3068\u5F15\u6570\u3092\u7279\u5B9A\u3067\u304D\u306A\u3044\u81EA\u7136\u6587\u306F\u3001raw_response\u5168\u6587\u3092answer\u306B\u3059\u308B\u3002"
+        ].join("\n")
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          raw_response: rawResponse,
+          host_tools: activeTools.map((tool) => ({ name: tool.name, parameters: compactParameters(tool.parameters) }))
+        })
+      }
+    ]
+  });
+  const headers = { "content-type": "application/json", "content-length": Buffer.byteLength(body) };
+  if (settings.apiKey) headers.authorization = `Bearer ${settings.apiKey}`;
+  return await new Promise((resolve, reject) => {
+    const request = (url.protocol === "https:" ? import_node_https.default.request : import_node_http.default.request)(url, {
+      method: "POST",
+      headers,
+      timeout: timeoutMs
+    }, (response) => {
+      let text = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => {
+        text += chunk;
+      });
+      response.on("end", () => {
+        if ((response.statusCode ?? 500) < 200 || (response.statusCode ?? 500) >= 300) return reject(new Error(`converter HTTP ${response.statusCode ?? 0}`));
+        try {
+          const parsed = JSON.parse(text);
+          const content = parsed.choices?.[0]?.message?.content;
+          if (typeof content !== "string" || !content.trim()) throw new Error("converter response content \u304C\u3042\u308A\u307E\u305B\u3093");
+          resolve(content);
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    request.once("timeout", () => request.destroy(new Error(`converter timeout (${timeoutMs}ms)`)));
+    request.once("error", reject);
+    const abort = () => request.destroy(new Error("converter canceled"));
+    signal?.addEventListener("abort", abort, { once: true });
+    request.once("close", () => signal?.removeEventListener("abort", abort));
+    request.end(body);
+  });
+}
 
 // src/config.ts
 function capabilityPolicy(cfg, mode = cfg.turnMode ?? "work") {
@@ -4538,12 +4672,12 @@ function resolveApiKey(cfg) {
 }
 
 // src/llm.ts
-var import_node_http = __toESM(require("node:http"));
-var import_node_https = __toESM(require("node:https"));
+var import_node_http2 = __toESM(require("node:http"));
+var import_node_https2 = __toESM(require("node:https"));
 function postJson(url, body, headers, signal) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
-    const mod = u.protocol === "https:" ? import_node_https.default : import_node_http.default;
+    const mod = u.protocol === "https:" ? import_node_https2.default : import_node_http2.default;
     const req = mod.request(
       u,
       { method: "POST", headers: { ...headers, "content-length": Buffer.byteLength(body).toString() } },
@@ -4912,6 +5046,7 @@ async function getWeather(locationName, signal, fetcher = (input, init) => fetch
 
 // src/tools.ts
 var execAsync = import_node_util.default.promisify(import_node_child_process2.exec);
+var execFileAsync = import_node_util.default.promisify(import_node_child_process2.execFile);
 var IGNORED_DIRS = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", ".tmp"]);
 var MAX_LIST = 500;
 var MAX_SEARCH_RESULTS = 200;
@@ -5011,7 +5146,7 @@ function normalizeRunCommand(command) {
       }
       normalizedPath = import_node_path.default.win32.join(import_node_path.default.win32.dirname(reportPaths[0]), "*.xlsx");
     }
-    return `powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path ${quoteCommandWord(normalizedPath)}`;
+    return `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path ${quoteCommandWord(normalizedPath)}`;
   }
   const rest = parsed.words.slice(scriptArgsIndex);
   const named = /* @__PURE__ */ new Map();
@@ -5035,7 +5170,49 @@ function normalizeRunCommand(command) {
   const rates = (named.get("rates") ?? positional[1])?.replaceAll("/", "\\");
   const ledger = (named.get("ledger") ?? positional[2])?.replaceAll("/", "\\");
   if (!extracted || !rates || !ledger || positional.length > 3) throw new Error(`Update-Ledger \u306F ${UPDATE_LEDGER_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
-  return `powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted ${quoteCommandWord(extracted)} -Rates ${quoteCommandWord(rates)} -Ledger ${quoteCommandWord(ledger)}`;
+  return `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Update-Ledger.ps1 -Extracted ${quoteCommandWord(extracted)} -Rates ${quoteCommandWord(rates)} -Ledger ${quoteCommandWord(ledger)}`;
+}
+function normalizeWorkspaceOpenCommand(command, ctx) {
+  const parsed = splitCommandWords(command.trim());
+  if (parsed.unsafe || parsed.words.length === 0) return null;
+  const words = parsed.words;
+  let candidate;
+  const executable = (words[0] ?? "").toLowerCase();
+  if (executable === "invoke-item" || executable === "ii") {
+    if (words.length === 2) candidate = words[1];
+    else if (words.length === 3 && /^-(?:literal)?path$/iu.test(words[1])) candidate = words[2];
+  } else if (executable === "start-process") {
+    if (words.length === 2) candidate = words[1];
+    else if (words.length === 3 && /^-filepath$/iu.test(words[1])) candidate = words[2];
+  } else if (["start", "open"].includes(executable) && words.length === 2) {
+    candidate = words[1].trimStart();
+  } else if (["excel", "excel.exe"].includes(executable) && words.length === 2 && /\.xlsx$/iu.test(words[1])) {
+    candidate = words[1];
+  }
+  if (!candidate) return null;
+  let absolute;
+  try {
+    absolute = resolveInWorkspace(candidate, ctx);
+  } catch {
+    throw new Error(`run_command\u62D2\u5426: \u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u3078\u306E\u30A2\u30AF\u30BB\u30B9\u306F\u7981\u6B62\u3067\u3059: ${candidate}`);
+  }
+  if (!import_node_fs.default.existsSync(absolute)) throw new Error(`run_command\u62D2\u5426: \u958B\u304F\u5BFE\u8C61\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${candidate}`);
+  if (absolute.includes("'")) throw new Error("run_command\u62D2\u5426: \u958B\u304F\u5BFE\u8C61\u306E\u30D1\u30B9\u306B\u5F15\u7528\u7B26\u306F\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093");
+  return `powershell.exe -NoProfile -Command "Invoke-Item -LiteralPath '${absolute}'"`;
+}
+function prepareHostCommand(command, ctx) {
+  const normalized = normalizeRunCommand(command);
+  const safeOpen = normalizeWorkspaceOpenCommand(normalized, ctx);
+  if (ctx.safeCommandOnly && !safeOpen) throw new Error("run_command\u62D2\u5426: \u3053\u306E\u69CB\u6210\u3067\u306F\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5185\u30D5\u30A1\u30A4\u30EB\u3092\u958B\u304F\u660E\u793A\u8A31\u53EF\u5F62\u5F0F\u3060\u3051\u5B9F\u884C\u3067\u304D\u307E\u3059");
+  const prepared = safeOpen ?? normalized;
+  assertRunCommandPolicy(prepared, ctx);
+  return prepared;
+}
+function formatHostCommandOutput(requested, prepared, stdout, stderr) {
+  const parts = [stdout, stderr].filter((value) => value.trim().length > 0).map((value) => truncate(value));
+  if (parts.length > 0) return parts.join("\n---stderr---\n");
+  if (/\bInvoke-Item\s+-LiteralPath\b/iu.test(prepared)) return `\u30A2\u30D7\u30EA\u8D77\u52D5\u30B3\u30DE\u30F3\u30C9\u6210\u529F: ${requested}`;
+  return "(\u51FA\u529B\u306A\u3057)";
 }
 var DELETE_OPERATIONS = /* @__PURE__ */ new Set([
   "remove-item",
@@ -5122,6 +5299,11 @@ function commandWords(command) {
 function commandOperationTokens(command) {
   return commandWords(command).map((word) => word.toLowerCase());
 }
+function containsPowerShellEncodedCommand(command) {
+  const words = commandWords(command);
+  const powershell = words.findIndex((word) => /^(?:powershell|powershell\.exe|pwsh|pwsh\.exe)$/iu.test(word));
+  return powershell >= 0 && words.slice(powershell + 1).some(isEncodedCommandFlag);
+}
 function assertWorkspaceWriteTarget(target, ctx) {
   const cleaned = target.trim().replace(/^['"]|['"]$/g, "");
   if (!cleaned || /^&\d$/u.test(cleaned) || /^(?:nul|\$null)$/iu.test(cleaned)) return;
@@ -5166,7 +5348,7 @@ function writeOperationTargets(command) {
   return targets;
 }
 function assertRunCommandPolicy(command, ctx) {
-  if (commandWords(command).some(isEncodedCommandFlag)) {
+  if (containsPowerShellEncodedCommand(command)) {
     throw new Error("run_command\u62D2\u5426: -EncodedCommand \u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
   }
   const operations = commandOperationTokens(command);
@@ -5457,7 +5639,8 @@ var TOOL_DEFS = [
       type: "object",
       properties: {
         path: { type: "string", description: "\u8D77\u70B9\u30C7\u30A3\u30EC\u30AF\u30C8\u30EA (\u65E2\u5B9A: \u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u30EB\u30FC\u30C8)" },
-        glob: { type: "string", description: "\u30D5\u30A1\u30A4\u30EB\u540D\u306E\u30D1\u30BF\u30FC\u30F3\u3002\u4F8B: *.ts" }
+        glob: { type: "string", description: "\u30D5\u30A1\u30A4\u30EB\u540D\u306E\u30D1\u30BF\u30FC\u30F3\u3002\u4F8B: *.ts" },
+        recursive: { type: "boolean", description: "\u30B5\u30D6\u30D5\u30A9\u30EB\u30C0\u3082\u518D\u5E30\u3059\u308B\u304B (\u65E2\u5B9A: true)\u3002\u76F4\u4E0B\u3060\u3051\u306A\u3089false" }
       },
       required: []
     },
@@ -5465,10 +5648,21 @@ var TOOL_DEFS = [
       const base = args.path ? resolveInWorkspace(String(args.path), ctx) : ctx.workspace;
       const re = args.glob ? wildcardToRegExp(String(args.glob)) : null;
       const out = [];
-      await walk(base, (f) => {
-        if (out.length >= MAX_LIST) return;
-        if (!re || re.test(import_node_path.default.basename(f))) out.push(import_node_path.default.relative(ctx.workspace, f).replaceAll("\\", "/"));
-      });
+      if (args.recursive === false) {
+        const entries = await import_promises.default.readdir(base, { withFileTypes: true });
+        for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name, "ja"))) {
+          if (out.length >= MAX_LIST) break;
+          if (!re || re.test(entry.name)) {
+            const relative = import_node_path.default.relative(ctx.workspace, import_node_path.default.join(base, entry.name)).replaceAll("\\", "/");
+            out.push(entry.isDirectory() ? `${relative}/` : relative);
+          }
+        }
+      } else {
+        await walk(base, (f) => {
+          if (out.length >= MAX_LIST) return;
+          if (!re || re.test(import_node_path.default.basename(f))) out.push(import_node_path.default.relative(ctx.workspace, f).replaceAll("\\", "/"));
+        });
+      }
       return out.length === 0 ? "(\u8A72\u5F53\u306A\u3057)" : truncate(out.join("\n"));
     }
   },
@@ -5611,6 +5805,38 @@ var TOOL_DEFS = [
     }
   },
   {
+    name: "read_xlsx",
+    description: "\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5185\u306E\u4EFB\u610F\u306Exlsx\u3092\u8AAD\u307F\u3001\u30B7\u30FC\u30C8\u540D\u30FB\u30BB\u30EB\u7BC4\u56F2\u30FB\u8868\u5185\u5BB9\u3092JSON\u3067\u8FD4\u3059",
+    kind: "read",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u76F8\u5BFE\u306Exlsx\u30D5\u30A1\u30A4\u30EB\u30D1\u30B9" }
+      },
+      required: ["path"]
+    },
+    async run(args, ctx) {
+      const requested = String(args.path ?? "");
+      const abs = resolveInWorkspace(requested, ctx);
+      if (import_node_path.default.extname(abs).toLowerCase() !== ".xlsx") throw new Error("read_xlsx \u306F .xlsx \u30D5\u30A1\u30A4\u30EB\u3060\u3051\u3092\u8AAD\u307F\u53D6\u308C\u307E\u3059");
+      const stat = await import_promises.default.stat(abs).catch(() => null);
+      if (!stat?.isFile()) throw new Error(`xlsx\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${requested}`);
+      const appRoot = import_node_path.default.resolve(__dirname, "..");
+      const helper = import_node_path.default.join(appRoot, "tools", "Read-Xlsx.ps1");
+      if (!import_node_fs.default.existsSync(helper)) throw new Error(`xlsx\u8AAD\u307F\u53D6\u308A\u30D8\u30EB\u30D1\u30FC\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${helper}`);
+      const { stdout, stderr } = await execFileAsync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", helper, "-Path", abs], {
+        cwd: ctx.workspace,
+        windowsHide: true,
+        encoding: "utf8",
+        maxBuffer: 1e7,
+        signal: ctx.signal
+      });
+      const output = String(stdout).trim();
+      if (!output) throw new Error(`xlsx\u8AAD\u307F\u53D6\u308A\u7D50\u679C\u304C\u7A7A\u3067\u3059${stderr ? `: ${String(stderr).trim()}` : ""}`);
+      return truncate(output, MAX_READ_FILES_CHARS);
+    }
+  },
+  {
     name: "write_file",
     description: "\u30C6\u30AD\u30B9\u30C8\u30D5\u30A1\u30A4\u30EB\u3092\u65B0\u898F\u4F5C\u6210\u307E\u305F\u306F\u4E0A\u66F8\u304D\u3059\u308B",
     kind: "write",
@@ -5750,7 +5976,8 @@ var TOOL_DEFS = [
       required: ["command"]
     },
     async run(args, ctx) {
-      const process2 = startManagedProcess(String(args.command ?? ""), ctx.workspace, args.label ? String(args.label) : void 0, args.url ? String(args.url) : void 0);
+      const command = prepareHostCommand(String(args.command ?? ""), ctx);
+      const process2 = startManagedProcess(command, ctx.workspace, args.label ? String(args.label) : void 0, args.url ? String(args.url) : void 0);
       return JSON.stringify(process2);
     }
   },
@@ -5804,9 +6031,9 @@ var TOOL_DEFS = [
       required: ["command"]
     },
     async run(args, ctx) {
-      const command = normalizeRunCommand(String(args.command ?? ""));
-      if (/wttr\.in/i.test(command)) throw new Error("\u5929\u6C17\u30FB\u6C17\u6E29\u306E\u53D6\u5F97\u306Bwttr.in\u306F\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093\u3002get_weather\u30C4\u30FC\u30EB\u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044");
-      assertRunCommandPolicy(command, ctx);
+      const requested = String(args.command ?? "");
+      if (/wttr\.in/i.test(requested)) throw new Error("\u5929\u6C17\u30FB\u6C17\u6E29\u306E\u53D6\u5F97\u306Bwttr.in\u306F\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093\u3002get_weather\u30C4\u30FC\u30EB\u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044");
+      const command = prepareHostCommand(requested, ctx);
       if (ctx.signal?.aborted) throw new Error("\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F");
       try {
         const { stdout, stderr } = await execAsync(command, {
@@ -5816,8 +6043,7 @@ var TOOL_DEFS = [
           windowsHide: true,
           signal: ctx.signal
         });
-        const parts = [stdout, stderr].filter((s) => s.trim().length > 0).map((s) => truncate(s));
-        return parts.length > 0 ? parts.join("\n---stderr---\n") : "(\u51FA\u529B\u306A\u3057)";
+        return formatHostCommandOutput(requested, command, stdout, stderr);
       } catch (err) {
         const e = err;
         const tail = [e.stdout ?? "", e.stderr ?? ""].filter((s) => s.trim()).map((s) => truncate(s)).join("\n---\n");
@@ -6191,7 +6417,14 @@ async function runCopilotTurn(opts) {
       io.print(`[error] ${msg}`);
       return { reply: "", messages: turnMessages(`[error] ${msg}`), aborted: true };
     }
-    const pe = extractReplyAndEnd(raw);
+    let converterRaw = null;
+    try {
+      converterRaw = await convertCopilotResponse(cfg.localResponseConverter, raw, TOOL_DEFS.map((tool) => ({ name: qualifiedToolName(tool.name), description: tool.description, parameters: tool.parameters })), io.signal);
+      if (converterRaw !== null) io.print("[converter] loopback response converter applied");
+    } catch (err) {
+      io.print(`[converter] fallback: ${err.message}`);
+    }
+    const pe = converterRaw ? extractReplyAndEnd(converterRaw) ?? extractReplyAndEnd(raw) : extractReplyAndEnd(raw);
     let parsed = pe?.parsed ?? null;
     if (parsed && bareToolName(parsed.tool ?? "") === "write_file") attachFenceContent(raw, pe.end, parsed);
     if (!parsed) {
@@ -6486,6 +6719,9 @@ var import_node_child_process3 = require("node:child_process");
 var import_node_net = __toESM(require("node:net"));
 var import_node_fs2 = __toESM(require("node:fs"));
 var import_node_path3 = __toESM(require("node:path"));
+function normalizeCopilotEditorText(value) {
+  return value.replace(/[\u200B\u200C]/gu, "");
+}
 function selectBrowserProcessId(processInfo) {
   if (!Array.isArray(processInfo)) return null;
   const browser = processInfo.find((item) => {
@@ -6630,28 +6866,35 @@ var FRESH_CHAT_JS = `(() => {
   if (candidates[0]) { candidates[0].el.click(); return JSON.stringify({ clicked: true }); }
   return JSON.stringify({ clicked: false });
 })()`;
-var CLICK_SEND_JS = `(() => {
+var COPILOT_CLICK_SEND_JS = `(() => {
   ${VISIBLE_JS}
   ${DOCS_JS}
   const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button, [role="button"]')));
   const exclude = /stop|cancel|\u505C\u6B62|\u30AD\u30E3\u30F3\u30BB\u30EB|regenerate|\u518D\u751F\u6210|attach|\u6DFB\u4ED8|microphone|voice|\u30DC\u30A4\u30B9|\u97F3\u58F0|new chat|\u65B0\u3057\u3044\u30C1\u30E3\u30C3\u30C8|clear|\u30AF\u30EA\u30A2|close|\u9589\u3058\u308B|search|\u691C\u7D22|library|\u30E9\u30A4\u30D6\u30E9\u30EA|file|\u30D5\u30A1\u30A4\u30EB/;
+  const structural = b => b.matches('button[type="submit"],.fai-SendButton,[class*="SendButton" i],[data-testid*="send" i],[data-automation-id*="send" i]');
+  const inventory = b => ({ariaLabel:b.getAttribute('aria-label')||'',title:b.title||'',testId:b.getAttribute('data-testid')||'',automationId:b.getAttribute('data-automation-id')||'',className:typeof b.className==='string'?b.className:'',type:b.getAttribute('type')||'',disabled:!!b.disabled,ariaDisabled:b.getAttribute('aria-disabled')||'',visible:__vis(b)});
   const clickable = [];
   for (const b of buttons) {
     const label = (b.getAttribute('aria-label') || b.title || b.textContent || '').trim();
-    if (!label) continue;
     const lower = label.toLowerCase();
+    const identity = [lower,b.getAttribute('data-testid'),b.getAttribute('data-automation-id'),typeof b.className==='string'?b.className:''].filter(Boolean).join(' ').toLowerCase();
     let score = 0;
     if (/^(\u9001\u4FE1|send)$/i.test(label)) score += 1000;
+    else if (structural(b)) score += 600;
     else if (/\u9001\u4FE1|send/i.test(lower)) score += 400;
     if (score <= 0) continue;
-    if (exclude.test(lower)) continue;
+    if (exclude.test(identity)) continue;
     if (b.disabled || b.getAttribute('aria-disabled') === 'true') continue;
     if (!__vis(b)) continue;
-    clickable.push({ el: b, score });
+    clickable.push({ el: b, score, inventory: inventory(b) });
   }
   clickable.sort((a, b) => b.score - a.score);
-  if (clickable[0]) { clickable[0].el.click(); return JSON.stringify({ clicked: true }); }
-  return JSON.stringify({ clicked: false });
+  if (clickable[0]) { clickable[0].el.click(); return JSON.stringify({ clicked: true, selected:clickable[0].inventory }); }
+  const inputSelectors=['#m365-chat-editor-target-element','[data-lexical-editor="true"][contenteditable]','[role="textbox"][contenteditable]'];
+  let nearby=[];
+  for(const d of __docs)for(const selector of inputSelectors){const input=d.querySelector(selector);if(!input)continue;let scope=input.parentElement;for(let depth=0;scope&&depth<6;depth++,scope=scope.parentElement){const found=Array.from(scope.querySelectorAll('button,[role="button"]'));if(found.length){nearby=found;break;}}if(nearby.length)break;}
+  const diagnosticButtons=(nearby.length?nearby:buttons).slice(-32);
+  return JSON.stringify({ clicked: false, inventory: diagnosticButtons.map(inventory) });
 })()`;
 var EDITOR_LENGTH_JS = `(() => {
   ${VISIBLE_JS}
@@ -6659,7 +6902,7 @@ var EDITOR_LENGTH_JS = `(() => {
   const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
   for (const d of __docs) for (const s of sels) {
     const el = d.querySelector(s);
-    if (__vis(el)) return String((el.textContent || '').length);
+    if (__vis(el)) return String((el.textContent || '').replace(/[\\u200B\\u200C]/g, '').length);
   }
   return '-1';
 })()`;
@@ -6669,10 +6912,20 @@ var EDITOR_STATE_JS = `(() => {
   const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
   for (const d of __docs) for (const s of sels) {
     const el = d.querySelector(s);
-    if (__vis(el)) return JSON.stringify({ found: true, text: String(el.textContent || ''), active: d.activeElement === el });
+    if (__vis(el)) return JSON.stringify({ found: true, text: String(el.textContent || '').replace(/[\\u200B\\u200C]/g, ''), active: d.activeElement === el });
   }
   return JSON.stringify({ found: false, text: '', active: false });
 })()`;
+function textMismatchDiagnostic(expected, actual) {
+  let index = 0;
+  while (index < expected.length && index < actual.length && expected[index] === actual[index]) index++;
+  const start = Math.max(0, index - 12);
+  const end = index + 20;
+  const expectedSlice = expected.slice(start, end);
+  const actualSlice = actual.slice(start, end);
+  const code = (value) => Array.from(value).map((char) => char.codePointAt(0)?.toString(16).padStart(4, "0")).join(" ");
+  return `first=${index} expected=${JSON.stringify(expectedSlice)} [${code(expectedSlice)}] actual=${JSON.stringify(actualSlice)} [${code(actualSlice)}] lengths=${expected.length}/${actual.length}`;
+}
 var CLEAR_EDITOR_JS = `(() => {
   ${VISIBLE_JS}
   ${DOCS_JS}
@@ -7312,7 +7565,9 @@ var CopilotEdgeClient = class {
         const before = await this.editorState();
         if (!before.found) throw new Error("\u5165\u529B\u6B04\u304C\u518D\u63CF\u753B\u4E2D\u3067\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F");
         if (!prompt.startsWith(before.text)) {
-          if (rebuilds >= 2) throw new Error(`\u4F9D\u983C\u6587\u306E\u5165\u529B\u5185\u5BB9\u304C\u4F4D\u7F6E ${before.text.length} \u3067\u4E0D\u4E00\u81F4\u306B\u306A\u308A\u307E\u3057\u305F`);
+          const diagnostic = textMismatchDiagnostic(prompt, before.text);
+          console.warn(`[input] DOM\u6587\u5B57\u5217\u4E0D\u4E00\u81F4: ${diagnostic}`);
+          if (rebuilds >= 2) throw new Error(`\u4F9D\u983C\u6587\u306E\u5165\u529B\u5185\u5BB9\u304C\u4E00\u81F4\u3057\u307E\u305B\u3093\u3067\u3057\u305F (${diagnostic})`);
           await this.clearEditor();
           pos = 0;
           rebuilds++;
@@ -7390,9 +7645,12 @@ var CopilotEdgeClient = class {
     if (await this.evalWithReconnect(js) !== "ok") throw new Error("\u5165\u529B\u6B04\u306B\u30D5\u30A9\u30FC\u30AB\u30B9\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
   }
   async clickSend() {
-    const raw = await this.evalWithReconnect(CLICK_SEND_JS);
-    if (!JSON.parse(String(raw)).clicked) {
-      throw new Error("\u6709\u52B9\u306A\u9001\u4FE1\u30DC\u30BF\u30F3\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F");
+    const raw = await this.evalWithReconnect(COPILOT_CLICK_SEND_JS);
+    const result = JSON.parse(String(raw));
+    if (!result.clicked) {
+      const diagnostic = JSON.stringify(result.inventory ?? []).slice(0, 3e3);
+      console.log(`[send] candidate inventory: ${diagnostic}`);
+      throw new Error(`\u6709\u52B9\u306A\u9001\u4FE1\u30DC\u30BF\u30F3\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u5019\u88DC\u8A3A\u65AD: ${diagnostic}`);
     }
   }
   async readScreenState(timeoutMs = 15e3) {
@@ -7458,6 +7716,7 @@ var CopilotEdgeClient = class {
       const raw = await this.evalWithReconnect(js, 3e4);
       const r = JSON.parse(String(raw));
       if (r.changed) console.log(`[model] ${r.before ?? "?"} -> ${r.after ?? r.picked ?? "?"}`);
+      else if (["switcher_not_found", "menu_not_found", "model_not_in_menu"].includes(r.reason ?? "")) console.warn(`[model] \u5229\u7528\u4E0D\u53EF\u306E\u305F\u3081UI\u65E2\u5B9A\u3092\u7D99\u7D9A: ${r.reason}`);
     } catch (err) {
       console.log(`[model] \u5207\u66FF\u30B9\u30AD\u30C3\u30D7(\u7D99\u7D9A): ${err.message}`);
     }
@@ -7615,6 +7874,8 @@ async function testTools() {
   import_node_assert.default.ok(list.includes("hello.txt"));
   import_node_fs3.default.mkdirSync(import_node_path4.default.join(root, "batch"), { recursive: true });
   import_node_fs3.default.mkdirSync(import_node_path4.default.join(root, "other"), { recursive: true });
+  const directOnly = await get("list_files").run({ path: ".", recursive: false }, ctx);
+  import_node_assert.default.ok(directOnly.includes("batch/") && directOnly.includes("other/") && !directOnly.includes("batch/utf8.txt"), "recursive=false must return only immediate entries");
   import_node_fs3.default.writeFileSync(import_node_path4.default.join(root, "batch", "utf8.txt"), "UTF-8\u672C\u6587");
   import_node_fs3.default.writeFileSync(import_node_path4.default.join(root, "batch", "bom.txt"), Buffer.concat([Buffer.from([239, 187, 191]), Buffer.from("BOM\u672C\u6587")]));
   import_node_fs3.default.writeFileSync(import_node_path4.default.join(root, "batch", "cp932.txt"), Buffer.from([67, 80, 57, 51, 50, 58, 147, 250, 150, 123]));
@@ -7643,47 +7904,53 @@ async function testTools() {
     readFilesOutsideThrew = true;
   }
   import_node_assert.default.ok(readFilesOutsideThrew, "read_files must reject workspace escape");
+  const bundledWorkbook = import_node_path4.default.resolve(__dirname, "..", "..", "..", "demo", "renketsu-demo", "workspace", "\u96C6\u8A08\u53F0\u5E33.xlsx");
+  import_node_fs3.default.copyFileSync(bundledWorkbook, import_node_path4.default.join(root, "batch", "real.xlsx"));
+  const workbookRead = await get("read_xlsx").run({ path: "batch/real.xlsx" }, ctx);
+  import_node_assert.default.ok(workbookRead.includes('"ok":true') && workbookRead.includes("sheets"), "read_xlsx must read an arbitrary workspace workbook through the bundled helper");
+  import_node_assert.default.ok(workbookRead.includes("\u9023\u7D50\u53F0\u5E33") && workbookRead.includes("\u78BA\u8A8D\u4E8B\u9805"), "read_xlsx must preserve Japanese sheet names across Windows PowerShell stdout");
+  await import_node_assert.default.rejects(() => get("read_xlsx").run({ path: "batch/utf8.txt" }, ctx), /\.xlsx/u);
   const cmd = await get("run_command").run({ command: "echo smoke-ok" }, ctx);
   import_node_assert.default.ok(cmd.includes("smoke-ok"));
   import_node_assert.default.strictEqual(
     normalizeRunCommand("powershell -File tools/Read-Xlsx.ps1 reports/OS04.xlsx reports/OS05.xlsx"),
-    "powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\*.xlsx"
+    "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path reports\\*.xlsx"
   );
   import_node_assert.default.strictEqual(
     normalizeRunCommand('powershell.exe -File tools\\Read-Xlsx.ps1 "reports\\one file.xlsx"'),
-    'powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path "reports\\one file.xlsx"'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path "reports\\one file.xlsx"'
   );
   import_node_assert.default.strictEqual(
     normalizeRunCommand("tools/Read-Xlsx.ps1 reports/OS04.xlsx"),
-    "powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx"
+    "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx"
   );
   import_node_assert.default.strictEqual(
     normalizeRunCommand("powershell -NoProfile -File tools/Read-Xlsx.ps1 reports/OS04.xlsx,reports/OS05.xlsx,\u96C6\u8A08\u53F0\u5E33.xlsx"),
-    "powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\*.xlsx"
+    "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path reports\\*.xlsx"
   );
   import_node_assert.default.strictEqual(
     normalizeRunCommand("powershell -File tools/Update-Ledger.ps1 work/extracted.json rates/\u30EC\u30FC\u30C8\u8868.csv \u96C6\u8A08\u53F0\u5E33.xlsx"),
-    "powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\\u30EC\u30FC\u30C8\u8868.csv -Ledger \u96C6\u8A08\u53F0\u5E33.xlsx"
+    "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\\u30EC\u30FC\u30C8\u8868.csv -Ledger \u96C6\u8A08\u53F0\u5E33.xlsx"
   );
   import_node_assert.default.strictEqual(
     normalizeRunCommand("tools\\Update-Ledger.ps1 work\\extracted.json rates\\\u30EC\u30FC\u30C8\u8868.csv \u96C6\u8A08\u53F0\u5E33.xlsx"),
-    "powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\\u30EC\u30FC\u30C8\u8868.csv -Ledger \u96C6\u8A08\u53F0\u5E33.xlsx"
+    "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\\u30EC\u30FC\u30C8\u8868.csv -Ledger \u96C6\u8A08\u53F0\u5E33.xlsx"
   );
   import_node_assert.default.strictEqual(
     normalizeRunCommand("powershell.exe -File tools\\Update-Ledger.ps1 -Ledger \u96C6\u8A08\u53F0\u5E33.xlsx -Extracted work\\extracted.json -Rates rates\\\u30EC\u30FC\u30C8\u8868.csv"),
-    "powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\\u30EC\u30FC\u30C8\u8868.csv -Ledger \u96C6\u8A08\u53F0\u5E33.xlsx"
+    "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Update-Ledger.ps1 -Extracted work\\extracted.json -Rates rates\\\u30EC\u30FC\u30C8\u8868.csv -Ledger \u96C6\u8A08\u53F0\u5E33.xlsx"
   );
   import_node_assert.default.strictEqual(
     normalizeRunCommand("powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx"),
-    "powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx"
+    "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx"
   );
   import_node_assert.default.strictEqual(
     normalizeRunCommand('powershell.exe "-ExecutionPolicy" Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx'),
-    "powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx"
+    "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx"
   );
   import_node_assert.default.strictEqual(
     normalizeRunCommand("powershell.exe -ExecutionPolicy:Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx"),
-    "powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx"
+    "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path reports\\OS04.xlsx"
   );
   const bypassReadXlsx = await get("run_command").run({
     command: "powershell.exe -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 reports\\OS04.xlsx"
@@ -7709,6 +7976,18 @@ async function testTools() {
     command: 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-Content -LiteralPath safe-write.txt -Value inside-ok"'
   }, ctx);
   import_node_assert.default.ok(import_node_fs3.default.readFileSync(import_node_path4.default.join(root, "safe-write.txt"), "utf8").includes("inside-ok"), "workspace-local writes must remain allowed");
+  import_node_fs3.default.writeFileSync(import_node_path4.default.join(root, "open-me.txt"), "open safely");
+  import_node_fs3.default.writeFileSync(import_node_path4.default.join(root, "ledger-open.xlsx"), "not a real workbook");
+  for (const openCommand of ["Invoke-Item open-me.txt", "Start-Process -FilePath open-me.txt", 'start " open-me.txt"', "open open-me.txt", "excel.exe ledger-open.xlsx"]) {
+    const normalizedOpen = normalizeWorkspaceOpenCommand(openCommand, ctx);
+    import_node_assert.default.ok(normalizedOpen?.includes("Invoke-Item -LiteralPath"), `safe workspace open must normalize: ${openCommand}`);
+  }
+  import_node_assert.default.strictEqual(
+    formatHostCommandOutput("open open-me.txt", `powershell.exe -NoProfile -Command "Invoke-Item -LiteralPath 'open-me.txt'"`, "", ""),
+    "\u30A2\u30D7\u30EA\u8D77\u52D5\u30B3\u30DE\u30F3\u30C9\u6210\u529F: open open-me.txt"
+  );
+  import_node_assert.default.throws(() => prepareHostCommand("Invoke-Item ..\\outside.txt", ctx), /run_command拒否/u);
+  import_node_assert.default.throws(() => prepareHostCommand("Start-Process open-me.txt; whoami", ctx), /run_command拒否/u);
   import_node_assert.default.throws(
     () => normalizeRunCommand('powershell.exe -File tools\\Read-Xlsx.ps1 "reports\\x&whoami.xlsx"'),
     /複合コマンド/u,
@@ -7744,6 +8023,13 @@ async function testTools() {
       `dangerous operation must be rejected: ${blockedCommand}`
     );
   }
+  for (const blockedStart of [
+    'powershell.exe -Command "Remove-Item safe-read.txt"',
+    "curl.exe https://example.com",
+    "reg.exe add HKCU\\Software\\CodingAgentSmoke /v Test /d 1",
+    "powershell.exe -EncodedCommand RwBlAHQALQBEAGEAdABlAA==",
+    'cmd.exe /c "echo x > ..\\escape.txt"'
+  ]) await import_node_assert.default.rejects(() => get("start_process").run({ command: blockedStart }, ctx), /run_command拒否/u, `start_process must share denial policy: ${blockedStart}`);
   const outsideName = `ca-smoke-outside-${process.pid}.txt`;
   await import_node_assert.default.rejects(
     () => get("run_command").run({
@@ -7772,8 +8058,12 @@ async function testTools() {
   }, ctx));
   import_node_assert.default.ok(started.id && started.status === "running");
   try {
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    const processLog = JSON.parse(await get("read_process_log").run({ process_id: started.id }, ctx));
+    const deadline = Date.now() + 5e3;
+    let processLog = { lines: [], nextOffset: 0 };
+    while (Date.now() < deadline && !processLog.lines.join("\n").includes("process-smoke")) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      processLog = JSON.parse(await get("read_process_log").run({ process_id: started.id }, ctx));
+    }
     import_node_assert.default.ok(processLog.lines.join("\n").includes("process-smoke"));
     import_node_assert.default.ok(processLog.nextOffset >= processLog.lines.length);
     const stopped = JSON.parse(await get("stop_process").run({ process_id: started.id }, ctx));
@@ -7814,7 +8104,7 @@ async function testTools() {
 }
 function mockServer(steps) {
   const state = { requests: 0 };
-  const server = import_node_http2.default.createServer((req, res) => {
+  const server = import_node_http3.default.createServer((req, res) => {
     let body = "";
     req.on("data", (c) => {
       body += c;
@@ -8376,6 +8666,11 @@ async function testCopilotResponseCompletion() {
   }
   new Function("document", "window", `return ${COPILOT_SCREEN_STATE_JS}`);
   new Function("document", "window", `return ${COPILOT_CLICK_COPY_JS}`);
+  new Function("document", "window", `return ${COPILOT_CLICK_SEND_JS}`);
+  import_node_assert.default.strictEqual(normalizeCopilotEditorText("\u524D\u200B\u4E2D\u200C\u5F8C"), "\u524D\u4E2D\u5F8C");
+  for (const required of ['button[type="submit"]', ".fai-SendButton", '[class*="SendButton" i]', '[data-testid*="send" i]', '[data-automation-id*="send" i]', "exclude.test(identity)", "ariaLabel", "automationId", "diagnosticButtons"]) {
+    import_node_assert.default.ok(COPILOT_CLICK_SEND_JS.includes(required), `send-button detector missing ${required}`);
+  }
   import_node_assert.default.ok(COPILOT_CLICK_COPY_JS.includes("scope=latest"));
   import_node_assert.default.ok(COPILOT_CLICK_COPY_JS.includes("others.length>0"));
   for (const required of ["CopyButtonTestId", "CopyButtonContainerTestId", "pre,code", "copy\\s*(?:response|answer)"]) {
@@ -8545,8 +8840,8 @@ async function testCopilotChunkFallback() {
   const prompt = "0123456789abcdef".repeat(140) + "\n\u672B\u5C3E";
   let editor = "";
   let insertCalls = 0;
-  internal.editorLength = async () => editor.length;
-  internal.editorState = async () => ({ found: true, text: editor, active: true });
+  internal.editorLength = async () => normalizeCopilotEditorText(editor).length;
+  internal.editorState = async () => ({ found: true, text: normalizeCopilotEditorText(editor), active: true });
   internal.clearEditor = async () => {
     editor = "";
   };
@@ -8558,10 +8853,12 @@ async function testCopilotChunkFallback() {
     if (name !== "Input.insertText") return;
     const chunk = String(params.text ?? "");
     insertCalls++;
-    editor += insertCalls === 2 ? chunk.slice(0, 120) : chunk;
+    const inserted = insertCalls === 2 ? chunk.slice(0, 120) : chunk;
+    editor += `${insertCalls > 1 ? "\u200B\u200C" : ""}${inserted}`;
   };
   await internal.insertByChunks(prompt);
-  import_node_assert.default.strictEqual(editor, prompt);
+  import_node_assert.default.strictEqual(normalizeCopilotEditorText(editor), prompt);
+  import_node_assert.default.ok(editor.includes("\u200B\u200C"), "Lexical chunk boundary markers were not exercised");
   import_node_assert.default.ok(insertCalls > Math.ceil(prompt.length / 450));
   console.log("PASS copilot-chunk-fallback");
 }
@@ -8689,12 +8986,67 @@ async function testCopilotFenceMode() {
   import_node_fs3.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS copilot-fence");
 }
+async function testLocalResponseConverter() {
+  let responseContent = '{"answer":"\u5909\u63DB\u6E08\u307F"}';
+  let requestCount = 0;
+  let lastUserContent = "";
+  const server = import_node_http3.default.createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += String(chunk);
+    });
+    req.on("end", () => {
+      requestCount++;
+      import_node_assert.default.strictEqual(req.headers.authorization, "Bearer smoke-local-token");
+      const request = JSON.parse(body);
+      import_node_assert.default.strictEqual(request.temperature, 0);
+      import_node_assert.default.strictEqual(request.response_format?.type, "json_schema");
+      import_node_assert.default.strictEqual(request.chat_template_kwargs?.enable_thinking, false);
+      import_node_assert.default.strictEqual(request.max_tokens, 192);
+      lastUserContent = request.messages?.find((message) => message.role === "user")?.content ?? "";
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ choices: [{ message: { content: responseContent } }] }));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const settings = { enabled: true, baseURL: `http://127.0.0.1:${port}/v1`, model: "fake", timeoutMs: 1e3, apiKey: "smoke-local-token" };
+  try {
+    import_node_assert.default.strictEqual(await convertCopilotResponse(settings, "raw", []), responseContent);
+    const direct = await convertCopilotResponse(settings, '{"tool":"write_file","path":"\u30E1\u30E2.txt","content":"\u4E00\u8A00"}', [
+      { name: "host.write_file", description: "write", parameters: { type: "object" } }
+    ]);
+    import_node_assert.default.strictEqual(direct, '{"tool":"host.write_file","args":{"path":"\u30E1\u30E2.txt","content":"\u4E00\u8A00"}}');
+    import_node_assert.default.strictEqual(requestCount, 1, "strict JSON must not spend a local-model request");
+    await convertCopilotResponse(settings, "search_files\u3092\u4F7F\u3044 query=\u9752", [
+      { name: "host.list_files", description: "list", parameters: { type: "object" } },
+      { name: "host.search_files", description: "search", parameters: { type: "object" } }
+    ]);
+    const converterInput = JSON.parse(lastUserContent);
+    import_node_assert.default.deepStrictEqual(converterInput.host_tools?.map((tool) => tool.name), ["host.search_files"]);
+    const root = import_node_fs3.default.mkdtempSync(import_node_path4.default.join(import_node_os.default.tmpdir(), "converter-smoke-"));
+    const converted = await runAgentTurn({ cfg: { baseURL: "", model: "", provider: "copilot-edge", copilot: { agentMode: true }, localResponseConverter: settings }, messages: [], userInput: "\u7B54\u3048\u3066", ctx: makeCtx(root), io: ioStub(true), backend: new FakeBackend(["not json"]) });
+    import_node_assert.default.strictEqual(converted.reply, "\u5909\u63DB\u6E08\u307F");
+    responseContent = '{"tool":"host.write_file","args":{"unexpected":true}}';
+    const rejected = await runAgentTurn({ cfg: { baseURL: "", model: "", provider: "copilot-edge", copilot: { agentMode: true }, localResponseConverter: settings }, messages: [], userInput: "\u66F8\u3044\u3066", ctx: makeCtx(root), io: ioStub(true), backend: new FakeBackend(["not json", '{"answer":"schema rejected"}\nAGENT_END']) });
+    import_node_assert.default.strictEqual(rejected.aborted, true);
+    import_node_assert.default.ok(!import_node_fs3.default.existsSync(import_node_path4.default.join(root, "unexpected")), "schema-invalid converter args must not execute");
+    import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+    responseContent = "invalid converter content";
+    const fallback = await runAgentTurn({ cfg: { baseURL: "", model: "", provider: "copilot-edge", copilot: { agentMode: true }, localResponseConverter: settings }, messages: [], userInput: "\u7B54\u3048\u3066", ctx: makeCtx(import_node_os.default.tmpdir(), false), io: ioStub(true), backend: new FakeBackend(['{"answer":"fallback raw"}\nAGENT_END']) });
+    import_node_assert.default.strictEqual(fallback.reply, "fallback raw");
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+  await import_node_assert.default.rejects(() => convertCopilotResponse({ enabled: true, baseURL: "http://example.com/v1" }, "raw", []), /loopback/u);
+  console.log("PASS local-response-converter");
+}
 async function testUiContract() {
   const html = import_node_fs3.default.readFileSync(import_node_path4.default.join(process.cwd(), "public", "index.html"), "utf8");
   const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
   import_node_assert.default.ok(script, "UI script missing");
   new Function(script);
-  for (const required of ["run-plan", "run-eyebrow", "run-pause", "run-resume", "run-retry", "run-complete", "\u56DE\u7B54\u5B8C\u4E86", "activity-details", "\u5B9F\u969B\u306E\u5DEE\u5206\u3092\u8868\u793A", "\u5DEE\u5206\u306E\u7D9A\u304D", "preview-frame", "verification-list", "\u8A3A\u65ADJSON", "approval-meta", "parentRunId", "/api/runs/", "/api/changes/", "compositionstart", "aria-live", "mode-select", "\u3053\u306EPC\u3067\u5B9F\u884C", "Copilot\u5185\u3067\u89B3\u6E2C", "@media (max-width: 720px)"]) import_node_assert.default.ok(html.includes(required), `UI contract missing: ${required}`);
+  for (const required of ["run-plan", "run-eyebrow", "run-pause", "run-resume", "run-retry", "run-complete", "\u56DE\u7B54\u5B8C\u4E86", "activity-details", "\u5B9F\u969B\u306E\u5DEE\u5206\u3092\u8868\u793A", "\u5DEE\u5206\u306E\u7D9A\u304D", "preview-frame", "verification-list", "\u8A3A\u65ADJSON", "approval-meta", "parentRunId", "/api/runs/", "/api/changes/", "compositionstart", "aria-live", "mode-select", "\u3053\u306EPC\u3067\u5B9F\u884C", "Copilot\u5185\u3067\u89B3\u6E2C", "@media (max-width: 720px)", "demo-view", "diagnostic-view", "view-toggle", "artifacts-panel", "\u904E\u53BB\u306E\u5B9F\u884C", "friendlyToolName", "\u5165\u529B\u306E\u53CD\u6620\u306B\u5931\u6557\u3057\u305F\u305F\u3081\u3001\u81EA\u52D5\u3067\u3084\u308A\u76F4\u3057\u3066\u3044\u307E\u3059\u3002"]) import_node_assert.default.ok(html.includes(required), `UI contract missing: ${required}`);
   console.log("PASS ui-contract");
 }
 async function testDemoRecordingContract() {
@@ -8735,6 +9087,7 @@ async function testDemoRecordingContract() {
   await testMaxIterationHistory();
   await testCopilotPlainMode();
   await testCopilotFenceMode();
+  await testLocalResponseConverter();
   await testUiContract();
   await testDemoRecordingContract();
   console.log("ALL PASS");

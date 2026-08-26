@@ -44,6 +44,12 @@ export interface ResponseCompletionState {
   stableSinceMs: number | null
 }
 
+export function normalizeCopilotEditorText(value: string): string {
+  // Lexical inserts these caret markers at Input.insertText chunk boundaries.
+  // They are DOM implementation details and are not part of the submitted text.
+  return value.replace(/[\u200B\u200C]/gu, '')
+}
+
 export interface CopilotResponseCandidate {
   text: string
   bottom: number
@@ -250,28 +256,35 @@ const FRESH_CHAT_JS = `(() => {
   return JSON.stringify({ clicked: false });
 })()`
 
-const CLICK_SEND_JS = `(() => {
+export const COPILOT_CLICK_SEND_JS = `(() => {
   ${VISIBLE_JS}
   ${DOCS_JS}
   const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button, [role="button"]')));
   const exclude = /stop|cancel|停止|キャンセル|regenerate|再生成|attach|添付|microphone|voice|ボイス|音声|new chat|新しいチャット|clear|クリア|close|閉じる|search|検索|library|ライブラリ|file|ファイル/;
+  const structural = b => b.matches('button[type="submit"],.fai-SendButton,[class*="SendButton" i],[data-testid*="send" i],[data-automation-id*="send" i]');
+  const inventory = b => ({ariaLabel:b.getAttribute('aria-label')||'',title:b.title||'',testId:b.getAttribute('data-testid')||'',automationId:b.getAttribute('data-automation-id')||'',className:typeof b.className==='string'?b.className:'',type:b.getAttribute('type')||'',disabled:!!b.disabled,ariaDisabled:b.getAttribute('aria-disabled')||'',visible:__vis(b)});
   const clickable = [];
   for (const b of buttons) {
     const label = (b.getAttribute('aria-label') || b.title || b.textContent || '').trim();
-    if (!label) continue;
     const lower = label.toLowerCase();
+    const identity = [lower,b.getAttribute('data-testid'),b.getAttribute('data-automation-id'),typeof b.className==='string'?b.className:''].filter(Boolean).join(' ').toLowerCase();
     let score = 0;
     if (/^(送信|send)$/i.test(label)) score += 1000;
+    else if (structural(b)) score += 600;
     else if (/送信|send/i.test(lower)) score += 400;
     if (score <= 0) continue;
-    if (exclude.test(lower)) continue;
+    if (exclude.test(identity)) continue;
     if (b.disabled || b.getAttribute('aria-disabled') === 'true') continue;
     if (!__vis(b)) continue;
-    clickable.push({ el: b, score });
+    clickable.push({ el: b, score, inventory: inventory(b) });
   }
   clickable.sort((a, b) => b.score - a.score);
-  if (clickable[0]) { clickable[0].el.click(); return JSON.stringify({ clicked: true }); }
-  return JSON.stringify({ clicked: false });
+  if (clickable[0]) { clickable[0].el.click(); return JSON.stringify({ clicked: true, selected:clickable[0].inventory }); }
+  const inputSelectors=['#m365-chat-editor-target-element','[data-lexical-editor="true"][contenteditable]','[role="textbox"][contenteditable]'];
+  let nearby=[];
+  for(const d of __docs)for(const selector of inputSelectors){const input=d.querySelector(selector);if(!input)continue;let scope=input.parentElement;for(let depth=0;scope&&depth<6;depth++,scope=scope.parentElement){const found=Array.from(scope.querySelectorAll('button,[role="button"]'));if(found.length){nearby=found;break;}}if(nearby.length)break;}
+  const diagnosticButtons=(nearby.length?nearby:buttons).slice(-32);
+  return JSON.stringify({ clicked: false, inventory: diagnosticButtons.map(inventory) });
 })()`
 
 const EDITOR_LENGTH_JS = `(() => {
@@ -280,7 +293,7 @@ const EDITOR_LENGTH_JS = `(() => {
   const sels = ${JSON.stringify(['#m365-chat-editor-target-element', '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
   for (const d of __docs) for (const s of sels) {
     const el = d.querySelector(s);
-    if (__vis(el)) return String((el.textContent || '').length);
+    if (__vis(el)) return String((el.textContent || '').replace(/[\\u200B\\u200C]/g, '').length);
   }
   return '-1';
 })()`
@@ -291,10 +304,21 @@ const EDITOR_STATE_JS = `(() => {
   const sels = ${JSON.stringify(['#m365-chat-editor-target-element', '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
   for (const d of __docs) for (const s of sels) {
     const el = d.querySelector(s);
-    if (__vis(el)) return JSON.stringify({ found: true, text: String(el.textContent || ''), active: d.activeElement === el });
+    if (__vis(el)) return JSON.stringify({ found: true, text: String(el.textContent || '').replace(/[\\u200B\\u200C]/g, ''), active: d.activeElement === el });
   }
   return JSON.stringify({ found: false, text: '', active: false });
 })()`
+
+function textMismatchDiagnostic(expected: string, actual: string): string {
+  let index = 0
+  while (index < expected.length && index < actual.length && expected[index] === actual[index]) index++
+  const start = Math.max(0, index - 12)
+  const end = index + 20
+  const expectedSlice = expected.slice(start, end)
+  const actualSlice = actual.slice(start, end)
+  const code = (value: string) => Array.from(value).map((char) => char.codePointAt(0)?.toString(16).padStart(4, '0')).join(' ')
+  return `first=${index} expected=${JSON.stringify(expectedSlice)} [${code(expectedSlice)}] actual=${JSON.stringify(actualSlice)} [${code(actualSlice)}] lengths=${expected.length}/${actual.length}`
+}
 
 const CLEAR_EDITOR_JS = `(() => {
   ${VISIBLE_JS}
@@ -962,7 +986,9 @@ export class CopilotEdgeClient {
         const before = await this.editorState()
         if (!before.found) throw new Error('入力欄が再描画中で見つかりませんでした')
         if (!prompt.startsWith(before.text)) {
-          if (rebuilds >= 2) throw new Error(`依頼文の入力内容が位置 ${before.text.length} で不一致になりました`)
+          const diagnostic = textMismatchDiagnostic(prompt, before.text)
+          console.warn(`[input] DOM文字列不一致: ${diagnostic}`)
+          if (rebuilds >= 2) throw new Error(`依頼文の入力内容が一致しませんでした (${diagnostic})`)
           await this.clearEditor()
           pos = 0
           rebuilds++
@@ -1043,9 +1069,12 @@ export class CopilotEdgeClient {
   }
 
   private async clickSend(): Promise<void> {
-    const raw = await this.evalWithReconnect(CLICK_SEND_JS)
-    if (!(JSON.parse(String(raw)) as { clicked: boolean }).clicked) {
-      throw new Error('有効な送信ボタンが見つかりませんでした')
+    const raw = await this.evalWithReconnect(COPILOT_CLICK_SEND_JS)
+    const result = JSON.parse(String(raw)) as { clicked: boolean; inventory?: unknown }
+    if (!result.clicked) {
+      const diagnostic = JSON.stringify(result.inventory ?? []).slice(0, 3000)
+      console.log(`[send] candidate inventory: ${diagnostic}`)
+      throw new Error(`有効な送信ボタンが見つかりませんでした。候補診断: ${diagnostic}`)
     }
   }
 
@@ -1119,8 +1148,9 @@ export class CopilotEdgeClient {
       .replace('__SWITCHER__', JSON.stringify('#gptModeSwitcher'))
     try {
       const raw = await this.evalWithReconnect(js, 30000)
-      const r = JSON.parse(String(raw)) as { changed?: boolean; reason?: string; before?: string; after?: string; picked?: string }
+      const r = JSON.parse(String(raw)) as { changed?: boolean; reason?: string; before?: string; after?: string; picked?: string; tried?: string[] }
       if (r.changed) console.log(`[model] ${r.before ?? '?'} -> ${r.after ?? r.picked ?? '?'}`)
+      else if (['switcher_not_found', 'menu_not_found', 'model_not_in_menu'].includes(r.reason ?? '')) console.warn(`[model] 利用不可のためUI既定を継続: ${r.reason}`)
     } catch (err) {
       console.log(`[model] 切替スキップ(継続): ${(err as Error).message}`)
     }
