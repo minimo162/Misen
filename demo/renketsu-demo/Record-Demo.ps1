@@ -96,6 +96,7 @@ function Move-WindowForDemo {
 
 $edgeWindow = Get-Process -Name msedge -ErrorAction SilentlyContinue |
     Where-Object { $_.MainWindowHandle -ne 0 } |
+    Sort-Object StartTime -Descending |
     Select-Object -First 1
 if ($null -eq $edgeWindow) {
     throw 'Visible coding-agent Edge window was not found.'
