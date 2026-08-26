@@ -1559,6 +1559,10 @@ async function testOpenAICompatibleBridge(): Promise<void> {
 
     const negative = interpretBridgeResponse('例: {"tool":"write_file","args":{"path":"推測.txt","content":"x"}} ですが今回は操作しません。', tools)
     assert.strictEqual(negative.toolCalls, undefined)
+    const impossible = interpretBridgeResponse('write_file の実行は不可能です。{"tool":"write_file","args":{"path":"推測.txt","content":"x"}}', tools)
+    assert.strictEqual(impossible.toolCalls, undefined)
+    const informational = interpretBridgeResponse('write_file はファイルを書くツールです。', tools)
+    assert.strictEqual(informational.toolCalls, undefined)
     const readTool: OpenAITool[] = [{ type: 'function', function: { name: 'read', parameters: { type: 'object', additionalProperties: false, required: ['filePath'], properties: { filePath: { type: 'string' } } } } }]
     const windowsPath = interpretBridgeResponse(String.raw`{"tool":"read","args":{"filePath":"C:\Users\yuuki\flex-live"}}`, readTool)
     assert.strictEqual(JSON.parse(String((windowsPath.toolCalls?.[0].function as { arguments?: string })?.arguments)).filePath, 'C:\\Users\\yuuki\\flex-live')

@@ -233,16 +233,22 @@ function hasNegatedToolIntent(rawResponse: string): boolean {
   const text = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, '').trim()
   if (/(?:例[:：]|たとえば|例えば|今回は[^。\n]*(?:しません|しない)|拒否され|呼び出せません|操作しません)/u.test(text)) return true
   const japaneseAction = '(?:実行|操作|処理|呼び出し?|起動|開く|書き込(?:み|む)?|読み取(?:り|る)?|検索|使用|使う)'
-  const japaneseNegation = '(?:しないで|しない|しません|しなくて|してはいけ|禁止|不可|不要|やめ)'
+  const japaneseNegation = '(?:しないで|しない|しません|しなくて|してはいけ|できない|できません|できず|不可能|禁止|不可|不要|やめ)'
   if (new RegExp(`${japaneseAction}.{0,32}${japaneseNegation}|${japaneseNegation}.{0,32}${japaneseAction}`, 'iu').test(text)) return true
   const englishAction = '(?:execute|run|call|invoke|use|open|write|read|search)'
   const englishNegation = `(?:do\\s+not|don't|never|must\\s+not|should\\s+not|shall\\s+not)`
   return new RegExp(`\\b${englishNegation}\\b.{0,64}\\b${englishAction}\\b|\\b${englishAction}\\b.{0,64}\\b${englishNegation}\\b`, 'iu').test(text)
 }
 
+function isInformationalToolMention(rawResponse: string): boolean {
+  const text = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, '').trim()
+  return /(?:とは|は)[^。\n]{0,80}(?:ツール|関数|機能)(?:です|だ|になります)/iu.test(text)
+    || /(?:ツール|関数|機能)[^。\n]{0,40}(?:説明|意味|用途)(?:です|は|:|：)/iu.test(text)
+}
+
 function explicitToolDecision(rawResponse: string, tools: ConverterToolDefinition[]): string | null {
   const text = rawResponse.trim()
-  if (hasNegatedToolIntent(text) || /まだ[^。\n]*(?:できません|呼べません)/u.test(text)) return null
+  if (hasNegatedToolIntent(text) || isInformationalToolMention(text) || /まだ[^。\n]*(?:できません|呼べません)/u.test(text)) return null
   const matched = [...tools]
     .sort((a, b) => b.name.length - a.name.length)
     .find((tool) => {
@@ -277,7 +283,7 @@ function explicitToolDecision(rawResponse: string, tools: ConverterToolDefinitio
 
 export function interpretCopilotResponseDeterministically(rawResponse: string, tools: ConverterToolDefinition[]): DeterministicConversion | null {
   const candidates = jsonDecisionCandidates(rawResponse, tools)
-  const negativeContext = hasNegatedToolIntent(rawResponse)
+  const negativeContext = hasNegatedToolIntent(rawResponse) || isInformationalToolMention(rawResponse)
   if (candidates.length > 0 && !negativeContext) return { content: candidates[0].text, method: 'json-candidate', repairs: candidates[0].repairs }
   const explicit = explicitToolDecision(rawResponse, tools)
   if (explicit) return { content: explicit, method: 'explicit-tool-text', repairs: [] }

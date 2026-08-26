@@ -4752,15 +4752,19 @@ function hasNegatedToolIntent(rawResponse) {
   const text = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, "").trim();
   if (/(?:例[:：]|たとえば|例えば|今回は[^。\n]*(?:しません|しない)|拒否され|呼び出せません|操作しません)/u.test(text)) return true;
   const japaneseAction = "(?:\u5B9F\u884C|\u64CD\u4F5C|\u51E6\u7406|\u547C\u3073\u51FA\u3057?|\u8D77\u52D5|\u958B\u304F|\u66F8\u304D\u8FBC(?:\u307F|\u3080)?|\u8AAD\u307F\u53D6(?:\u308A|\u308B)?|\u691C\u7D22|\u4F7F\u7528|\u4F7F\u3046)";
-  const japaneseNegation = "(?:\u3057\u306A\u3044\u3067|\u3057\u306A\u3044|\u3057\u307E\u305B\u3093|\u3057\u306A\u304F\u3066|\u3057\u3066\u306F\u3044\u3051|\u7981\u6B62|\u4E0D\u53EF|\u4E0D\u8981|\u3084\u3081)";
+  const japaneseNegation = "(?:\u3057\u306A\u3044\u3067|\u3057\u306A\u3044|\u3057\u307E\u305B\u3093|\u3057\u306A\u304F\u3066|\u3057\u3066\u306F\u3044\u3051|\u3067\u304D\u306A\u3044|\u3067\u304D\u307E\u305B\u3093|\u3067\u304D\u305A|\u4E0D\u53EF\u80FD|\u7981\u6B62|\u4E0D\u53EF|\u4E0D\u8981|\u3084\u3081)";
   if (new RegExp(`${japaneseAction}.{0,32}${japaneseNegation}|${japaneseNegation}.{0,32}${japaneseAction}`, "iu").test(text)) return true;
   const englishAction = "(?:execute|run|call|invoke|use|open|write|read|search)";
   const englishNegation = `(?:do\\s+not|don't|never|must\\s+not|should\\s+not|shall\\s+not)`;
   return new RegExp(`\\b${englishNegation}\\b.{0,64}\\b${englishAction}\\b|\\b${englishAction}\\b.{0,64}\\b${englishNegation}\\b`, "iu").test(text);
 }
+function isInformationalToolMention(rawResponse) {
+  const text = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, "").trim();
+  return /(?:とは|は)[^。\n]{0,80}(?:ツール|関数|機能)(?:です|だ|になります)/iu.test(text) || /(?:ツール|関数|機能)[^。\n]{0,40}(?:説明|意味|用途)(?:です|は|:|：)/iu.test(text);
+}
 function explicitToolDecision(rawResponse, tools) {
   const text = rawResponse.trim();
-  if (hasNegatedToolIntent(text) || /まだ[^。\n]*(?:できません|呼べません)/u.test(text)) return null;
+  if (hasNegatedToolIntent(text) || isInformationalToolMention(text) || /まだ[^。\n]*(?:できません|呼べません)/u.test(text)) return null;
   const matched = [...tools].sort((a, b) => b.name.length - a.name.length).find((tool2) => {
     const bare2 = tool2.name.startsWith("host.") ? tool2.name.slice(5) : tool2.name;
     return text.toLowerCase().includes(tool2.name.toLowerCase()) || text.toLowerCase().includes(bare2.toLowerCase());
@@ -4801,7 +4805,7 @@ function explicitToolDecision(rawResponse, tools) {
 }
 function interpretCopilotResponseDeterministically(rawResponse, tools) {
   const candidates = jsonDecisionCandidates(rawResponse, tools);
-  const negativeContext = hasNegatedToolIntent(rawResponse);
+  const negativeContext = hasNegatedToolIntent(rawResponse) || isInformationalToolMention(rawResponse);
   if (candidates.length > 0 && !negativeContext) return { content: candidates[0].text, method: "json-candidate", repairs: candidates[0].repairs };
   const explicit = explicitToolDecision(rawResponse, tools);
   if (explicit) return { content: explicit, method: "explicit-tool-text", repairs: [] };
@@ -6421,7 +6425,10 @@ var NEGATIVE_CASES = [
   '\u4F8B: {"tool":"host.list_files","args":{"path":"reports"}} \u3067\u3059\u304C\u4ECA\u56DE\u306F\u64CD\u4F5C\u3057\u307E\u305B\u3093\u3002',
   String.raw`例: {"tool":"host.read_file","args":{"path":"C:\Users\demo\資料.txt"}} ですが今回は操作しません。`,
   '\u3053\u306E\u64CD\u4F5C\u306F\u5B9F\u884C\u3057\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002{"tool":"host.read_file","args":{"path":"secret.txt"}}',
-  'Do not execute this operation. {"tool":"host.write_file","args":{"path":"unsafe.txt","content":"x"}}'
+  'Do not execute this operation. {"tool":"host.write_file","args":{"path":"unsafe.txt","content":"x"}}',
+  "run_command \u306F\u73FE\u5728\u306E\u5B89\u5168\u5883\u754C\u3067\u306F\u5B9F\u884C\u3067\u304D\u307E\u305B\u3093\u3002",
+  "list_files \u306F\u30D5\u30A1\u30A4\u30EB\u4E00\u89A7\u3092\u53D6\u5F97\u3059\u308B\u30C4\u30FC\u30EB\u3067\u3059\u3002",
+  'run_command \u306E\u5B9F\u884C\u306F\u4E0D\u53EF\u80FD\u3067\u3059\u3002{"tool":"host.run_command","args":{"command":"Get-ChildItem"}}'
 ];
 var LAYER_DEFS = TOOL_DEFS.map((entry) => ({ name: qualifiedToolName(entry.name), description: entry.description, parameters: entry.parameters }));
 function validatedDecision(output, expectedTool, expectedArgs = {}) {

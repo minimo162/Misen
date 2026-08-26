@@ -109,7 +109,10 @@ const NEGATIVE_CASES = [
   '例: {"tool":"host.list_files","args":{"path":"reports"}} ですが今回は操作しません。',
   String.raw`例: {"tool":"host.read_file","args":{"path":"C:\Users\demo\資料.txt"}} ですが今回は操作しません。`,
   'この操作は実行しないでください。{"tool":"host.read_file","args":{"path":"secret.txt"}}',
-  'Do not execute this operation. {"tool":"host.write_file","args":{"path":"unsafe.txt","content":"x"}}'
+  'Do not execute this operation. {"tool":"host.write_file","args":{"path":"unsafe.txt","content":"x"}}',
+  'run_command は現在の安全境界では実行できません。',
+  'list_files はファイル一覧を取得するツールです。',
+  'run_command の実行は不可能です。{"tool":"host.run_command","args":{"command":"Get-ChildItem"}}'
 ]
 
 const LAYER_DEFS = TOOL_DEFS.map((entry) => ({ name: qualifiedToolName(entry.name), description: entry.description, parameters: entry.parameters }))
