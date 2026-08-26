@@ -144,6 +144,16 @@ function repairJsonText(source: string): { text: string; repairs: string[] } {
   return { text, repairs }
 }
 
+function repairWindowsPathBackslashes(source: string): string | null {
+  let changed = false
+  const repaired = source.replace(/(:\s*")([A-Za-z]:\\[^"\r\n]*)(")/gu, (_match, prefix: string, pathValue: string, suffix: string) => {
+    const escaped = pathValue.replace(/\\+/gu, (slashes) => slashes.length % 2 === 0 ? slashes : `${slashes}\\`)
+    if (escaped !== pathValue) changed = true
+    return prefix + escaped + suffix
+  })
+  return changed ? repaired : null
+}
+
 function jsonDecisionCandidates(rawResponse: string, tools: ConverterToolDefinition[]): JsonCandidate[] {
   const clean = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, '').replace(/```(?:json)?/giu, '').replace(/```/gu, '').replace(/\bAGENT_END\b/giu, '').trim()
   const sources: Array<{ text: string; offset: number }> = scanJsonObjects(clean).map((candidate) => ({ text: candidate.text, offset: candidate.position }))
@@ -151,7 +161,7 @@ function jsonDecisionCandidates(rawResponse: string, tools: ConverterToolDefinit
   const valid: JsonCandidate[] = []
   const seen = new Set<string>()
   for (const source of sources) {
-    const attempts: Array<{ text: string; repairs: string[] }> = [{ text: source.text, repairs: [] }]
+    const attempts: Array<{ text: string; repairs: string[]; semanticBonus?: number }> = [{ text: source.text, repairs: [] }]
     try {
       const repaired = jsonrepair(source.text)
       if (repaired !== source.text) attempts.push({ text: repaired, repairs: ['jsonrepair'] })
@@ -161,6 +171,10 @@ function jsonDecisionCandidates(rawResponse: string, tools: ConverterToolDefinit
         try { attempts.push({ text: jsonrepair(custom.text), repairs: [...custom.repairs, 'jsonrepair'] }) } catch {}
       }
     }
+    const windowsPath = repairWindowsPathBackslashes(source.text)
+    if (windowsPath !== null) {
+      try { attempts.push({ text: jsonrepair(windowsPath), repairs: ['windows-path-backslash', 'jsonrepair'], semanticBonus: 40 }) } catch {}
+    }
     for (const attempt of attempts) {
       try {
         const content = protocolObject(JSON.parse(attempt.text), tools)
@@ -169,7 +183,7 @@ function jsonDecisionCandidates(rawResponse: string, tools: ConverterToolDefinit
         if (seen.has(key)) continue
         seen.add(key)
         const score = /"(?:tool|answer)"/u.test(attempt.text) ? 20 : 0
-        valid.push({ text: content, position: source.offset, score: score + (/"args"/u.test(attempt.text) ? 8 : 0), repairs: attempt.repairs })
+        valid.push({ text: content, position: source.offset, score: score + (/"args"/u.test(attempt.text) ? 8 : 0) + (attempt.semanticBonus ?? 0), repairs: attempt.repairs })
       } catch {}
     }
   }

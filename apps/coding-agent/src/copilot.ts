@@ -287,6 +287,20 @@ export const COPILOT_CLICK_SEND_JS = `(() => {
   return JSON.stringify({ clicked: false, inventory: diagnosticButtons.map(inventory) });
 })()`
 
+export const COPILOT_SEND_READY_JS = `(() => {
+  ${VISIBLE_JS}
+  ${DOCS_JS}
+  const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button, [role="button"]')));
+  const structural = b => b.matches('button[type="submit"],.fai-SendButton,[class*="SendButton" i],[data-testid*="send" i],[data-automation-id*="send" i]');
+  const inventory = b => { const r=b.getBoundingClientRect(); return {ariaLabel:b.getAttribute('aria-label')||'',title:b.title||'',testId:b.getAttribute('data-testid')||'',automationId:b.getAttribute('data-automation-id')||'',className:typeof b.className==='string'?b.className:'',type:b.getAttribute('type')||'',disabled:!!b.disabled,ariaDisabled:b.getAttribute('aria-disabled')||'',visible:__vis(b),rect:{x:r.x,y:r.y,width:r.width,height:r.height,cx:r.x+r.width/2,cy:r.y+r.height/2}}; };
+  const candidates = buttons.filter(b => {
+    const label=(b.getAttribute('aria-label')||b.title||b.textContent||'').trim();
+    return structural(b) || /^(送信|send)$/i.test(label);
+  });
+  const ready = candidates.find(b => __vis(b) && !b.disabled && b.getAttribute('aria-disabled') !== 'true');
+  return JSON.stringify({ready:!!ready,inventory:candidates.slice(-32).map(inventory)});
+})()`
+
 const EDITOR_LENGTH_JS = `(() => {
   ${VISIBLE_JS}
   ${DOCS_JS}
@@ -960,33 +974,36 @@ export class CopilotEdgeClient {
     if (prompt.length > this.s.maxPromptChars) {
       throw new Error(`依頼文が上限 ${this.s.maxPromptChars} 文字を超えています (${prompt.length} 文字)`)
     }
-    try {
-      await this.pasteViaClipboard(prompt)
-      return
-    } catch (err) {
-      console.log(`[paste] クリップボード貼り付けに失敗、チャンク方式へフォールバック: ${(err as Error).message}`)
+    let lastDirectError = ''
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await this.insertDirect(prompt)
+        if (attempt > 1) console.log('[input] 単一Input.insertTextの再試行で成功')
+        return
+      } catch (err) {
+        lastDirectError = (err as Error).message
+        console.log(`[input] 単一Input.insertText attempt=${attempt} failed: ${lastDirectError}`)
+        if (attempt < 2) await sleep(300)
+      }
     }
+    console.log(`[input] 単一Input.insertTextを2回確認できず、チャンク方式へフォールバック: ${lastDirectError}`)
     await this.insertByChunks(prompt)
   }
 
-  private async pasteViaClipboard(prompt: string): Promise<void> {
+  private async insertDirect(prompt: string): Promise<void> {
+    if ((await this.editorLength()) > 0) await this.clearEditor()
     await this.bringToFront()
-    await this.grantClipboard()
     await this.focusEditor()
-    await this.evalWithReconnect('window.focus(); true', 5000)
-    await this.evalWithReconnect(`navigator.clipboard.writeText(${JSON.stringify(prompt)})`, 15000)
-    for (let i = 0; i < 6; i++) {
-      await this.evalWithReconnect(CLEAR_EDITOR_JS)
+    const timeoutMs = prompt.length > 12000 ? 90000 : prompt.length > 5000 ? 60000 : 30000
+    await this.cdpMethod('Input.insertText', { text: prompt }, timeoutMs)
+    let final = await this.editorState()
+    for (let poll = 0; poll < 12 && (!final.found || final.text !== prompt); poll++) {
       await sleep(150)
-      if ((await this.editorLength()) === 0) break
+      final = await this.editorState()
     }
-    await this.focusEditor()
-    await this.evalWithReconnect('(() => { const s = getSelection(); if (!s || !document.activeElement) return; s.selectAllChildren(document.activeElement); s.collapseToEnd() })()', 10000)
-    await this.cdpMethod('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'v', code: 'KeyV', windowsVirtualKeyCode: 86, modifiers: 2 })
-    await this.cdpMethod('Input.dispatchKeyEvent', { type: 'keyUp', key: 'v', code: 'KeyV', windowsVirtualKeyCode: 86, modifiers: 2 })
-    await sleep(700)
-    const len = Number(await this.editorLength())
-    if (len < prompt.length * 0.9) throw new Error(`貼り付け後の長さ不足 (期待 ~${prompt.length}, 実際 ${len})`)
+    if (!final.found || final.text !== prompt) throw new Error(`貼り付け後の内容不一致 (${textMismatchDiagnostic(prompt, final.text)})`)
+    const send = await this.waitSendReady(6000)
+    if (!send.ready) throw new Error('単一Input.insertText後も送信ボタンが有効になりませんでした')
   }
 
   private async insertByChunks(prompt: string): Promise<void> {
@@ -1085,14 +1102,62 @@ export class CopilotEdgeClient {
     if ((await this.evalWithReconnect(js)) !== 'ok') throw new Error('入力欄にフォーカスできませんでした')
   }
 
-  private async clickSend(): Promise<void> {
+  private async waitSendReady(timeoutMs: number): Promise<{ ready: boolean; inventory: unknown }> {
+    const deadline = Date.now() + timeoutMs
+    let latest: { ready: boolean; inventory: unknown } = { ready: false, inventory: [] }
+    do {
+      try {
+        latest = JSON.parse(String(await this.evalWithReconnect(COPILOT_SEND_READY_JS))) as { ready: boolean; inventory: unknown }
+        if (latest.ready) return latest
+      } catch {}
+      if (Date.now() < deadline) await sleep(150)
+    } while (Date.now() < deadline)
+    return latest
+  }
+
+  private async waitSendEstablished(baselineText: string, baselineInputLength: number, timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs
+    let notReadySamples = 0
+    do {
+      const state = await this.readScreenState(5000)
+      const inputLength = await this.editorLength()
+      const ready = await this.waitSendReady(1)
+      if (state.generating || (baselineText && state.text && state.text !== baselineText) || (baselineInputLength > 0 && inputLength >= 0 && inputLength <= 2)) return true
+      notReadySamples = ready.ready ? 0 : notReadySamples + 1
+      if (notReadySamples >= 2) return true
+      if (Date.now() < deadline) await sleep(150)
+    } while (Date.now() < deadline)
+    return false
+  }
+
+  private async clickSend(baselineText = ''): Promise<void> {
+    const ready = await this.waitSendReady(6000)
+    if (!ready.ready) {
+      const diagnostic = JSON.stringify(ready.inventory ?? []).slice(0, 3000)
+      console.log(`[send] candidate inventory: ${diagnostic}`)
+      throw new Error(`有効な送信ボタンが見つかりませんでした。候補診断: ${diagnostic}`)
+    }
+    const baselineInputLength = await this.editorLength()
     const raw = await this.evalWithReconnect(COPILOT_CLICK_SEND_JS)
-    const result = JSON.parse(String(raw)) as { clicked: boolean; inventory?: unknown }
+    const result = JSON.parse(String(raw)) as { clicked: boolean; selected?: { rect?: { cx?: number; cy?: number } }; inventory?: unknown }
     if (!result.clicked) {
       const diagnostic = JSON.stringify(result.inventory ?? []).slice(0, 3000)
       console.log(`[send] candidate inventory: ${diagnostic}`)
       throw new Error(`有効な送信ボタンが見つかりませんでした。候補診断: ${diagnostic}`)
     }
+    if (await this.waitSendEstablished(baselineText, baselineInputLength, 1800)) return
+    const x = Number(result.selected?.rect?.cx)
+    const y = Number(result.selected?.rect?.cy)
+    if (Number.isFinite(x) && Number.isFinite(y) && x >= 0 && y >= 0) {
+      await this.cdpMethod('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
+      await sleep(80)
+      await this.cdpMethod('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
+      if (await this.waitSendEstablished(baselineText, baselineInputLength, 1800)) {
+        console.log('[send] synthetic click未成立のためCDP native mouseで送信')
+        return
+      }
+    }
+    throw new Error('送信ボタン操作後も生成開始・入力消去・応答増加を確認できませんでした')
   }
 
   private async readScreenState(timeoutMs = 15000): Promise<{ text: string; generating: boolean; copyEnabled: boolean; signinRequired: boolean }> {
@@ -1217,7 +1282,7 @@ export class CopilotEdgeClient {
     const baseline = (await this.readScreenState()).text
     const baselineReadMs = Date.now() - phaseStartedAt
     phaseStartedAt = Date.now()
-    await this.clickSend()
+    await this.clickSend(baseline)
     const sendMs = Date.now() - phaseStartedAt
     throwIfAborted(signal)
     const response = await this.waitResponse(baseline, signal)

@@ -7,6 +7,7 @@
     "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
     "serve": "node dist/server.js",
+    "bridge": "node dist/openai-bridge.js",
     "smoke": "node esbuild.config.mjs && node dist/smoke.js",
     "flex:validate": "node esbuild.config.mjs && node dist/flex-harness.js",
     "flex:validate:live": "node esbuild.config.mjs && node dist/flex-harness.js --live",

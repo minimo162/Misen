@@ -4653,6 +4653,15 @@ function repairJsonText(source) {
   }
   return { text, repairs };
 }
+function repairWindowsPathBackslashes(source) {
+  let changed = false;
+  const repaired = source.replace(/(:\s*")([A-Za-z]:\\[^"\r\n]*)(")/gu, (_match, prefix, pathValue, suffix) => {
+    const escaped = pathValue.replace(/\\+/gu, (slashes) => slashes.length % 2 === 0 ? slashes : `${slashes}\\`);
+    if (escaped !== pathValue) changed = true;
+    return prefix + escaped + suffix;
+  });
+  return changed ? repaired : null;
+}
 function jsonDecisionCandidates(rawResponse, tools) {
   const clean = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, "").replace(/```(?:json)?/giu, "").replace(/```/gu, "").replace(/\bAGENT_END\b/giu, "").trim();
   const sources = scanJsonObjects(clean).map((candidate) => ({ text: candidate.text, offset: candidate.position }));
@@ -4673,6 +4682,13 @@ function jsonDecisionCandidates(rawResponse, tools) {
         }
       }
     }
+    const windowsPath = repairWindowsPathBackslashes(source.text);
+    if (windowsPath !== null) {
+      try {
+        attempts.push({ text: (0, import_jsonrepair.jsonrepair)(windowsPath), repairs: ["windows-path-backslash", "jsonrepair"], semanticBonus: 40 });
+      } catch {
+      }
+    }
     for (const attempt of attempts) {
       try {
         const content = protocolObject(JSON.parse(attempt.text), tools);
@@ -4681,7 +4697,7 @@ function jsonDecisionCandidates(rawResponse, tools) {
         if (seen.has(key)) continue;
         seen.add(key);
         const score = /"(?:tool|answer)"/u.test(attempt.text) ? 20 : 0;
-        valid.push({ text: content, position: source.offset, score: score + (/"args"/u.test(attempt.text) ? 8 : 0), repairs: attempt.repairs });
+        valid.push({ text: content, position: source.offset, score: score + (/"args"/u.test(attempt.text) ? 8 : 0) + (attempt.semanticBonus ?? 0), repairs: attempt.repairs });
       } catch {
       }
     }
@@ -6372,7 +6388,8 @@ var NEGATIVE_CASES = [
   "\u66F8\u304D\u8FBC\u307F\u5148\u304C\u4E0D\u660E\u306A\u306E\u3067 write_file \u306F\u307E\u3060\u547C\u3073\u51FA\u305B\u307E\u305B\u3093\u3002",
   '{"tool":"host.unknown_tool","args":{"path":"\u63A8\u6E2C.txt"}}',
   "\u958B\u304F\u5BFE\u8C61\u304C\u5206\u304B\u308A\u307E\u305B\u3093\u3002\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
-  '\u4F8B: {"tool":"host.list_files","args":{"path":"reports"}} \u3067\u3059\u304C\u4ECA\u56DE\u306F\u64CD\u4F5C\u3057\u307E\u305B\u3093\u3002'
+  '\u4F8B: {"tool":"host.list_files","args":{"path":"reports"}} \u3067\u3059\u304C\u4ECA\u56DE\u306F\u64CD\u4F5C\u3057\u307E\u305B\u3093\u3002',
+  String.raw`例: {"tool":"host.read_file","args":{"path":"C:\Users\demo\資料.txt"}} ですが今回は操作しません。`
 ];
 var LAYER_DEFS = TOOL_DEFS.map((entry) => ({ name: qualifiedToolName(entry.name), description: entry.description, parameters: entry.parameters }));
 function validatedDecision(output, expectedTool, expectedArgs = {}) {

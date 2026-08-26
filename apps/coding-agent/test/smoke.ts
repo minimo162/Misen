@@ -9,6 +9,7 @@ import { capabilityPolicy, type AgentConfig } from '../src/config'
 import type { ChatMessage } from '../src/llm'
 import {
   COPILOT_CLICK_SEND_JS,
+  COPILOT_SEND_READY_JS,
   COPILOT_CLICK_COPY_JS,
   isResponseCopyControl,
   COPILOT_SCREEN_STATE_JS,
@@ -29,6 +30,7 @@ import { formatHostCommandOutput, getFileSnapshot, normalizeRunCommand, normaliz
 import { listApprovals, requestApproval, resolveApproval } from '../src/approvals'
 import { getWeather, weatherCodeLabel, type WeatherFetcher } from '../src/weather'
 import { convertCopilotResponse } from '../src/converter'
+import { buildBridgePrompt, createOpenAICompatibleBridgeServer, interpretBridgeResponse, type OpenAITool } from '../src/openai-bridge'
 
 function makeCtx(root: string, restrict = true): ToolContext {
   return { workspace: root, restrictToWorkspace: restrict }
@@ -968,10 +970,13 @@ async function testCopilotResponseCompletion(): Promise<void> {
   new Function('document', 'window', `return ${COPILOT_SCREEN_STATE_JS}`)
   new Function('document', 'window', `return ${COPILOT_CLICK_COPY_JS}`)
   new Function('document', 'window', `return ${COPILOT_CLICK_SEND_JS}`)
+  new Function('document', 'window', `return ${COPILOT_SEND_READY_JS}`)
   assert.strictEqual(normalizeCopilotEditorText('前\u200B中\u200C後'), '前中後')
   for (const required of ['button[type="submit"]', '.fai-SendButton', '[class*="SendButton" i]', '[data-testid*="send" i]', '[data-automation-id*="send" i]', 'exclude.test(identity)', 'ariaLabel', 'automationId', 'diagnosticButtons']) {
     assert.ok(COPILOT_CLICK_SEND_JS.includes(required), `send-button detector missing ${required}`)
+    if (required !== 'exclude.test(identity)' && required !== 'diagnosticButtons') assert.ok(COPILOT_SEND_READY_JS.includes(required), `send-button readiness detector missing ${required}`)
   }
+  assert.ok(fs.readFileSync(path.join(process.cwd(), 'src', 'copilot.ts'), 'utf8').includes("this.cdpMethod('Input.dispatchMouseEvent', { type: 'mousePressed'"), 'send path must retain native CDP mouse fallback')
   assert.ok(COPILOT_CLICK_COPY_JS.includes('scope=latest'))
   assert.ok(COPILOT_CLICK_COPY_JS.includes('others.length>0'))
   for (const required of ['CopyButtonTestId', 'CopyButtonContainerTestId', 'pre,code', 'copy\\s*(?:response|answer)']) {
@@ -1171,6 +1176,8 @@ async function testCopilotChunkFallback(): Promise<void> {
     focusEditor: () => Promise<void>
     bringToFront: () => Promise<void>
     cdpMethod: (name: string, params: Record<string, unknown>) => Promise<void>
+    waitSendReady: (timeoutMs: number) => Promise<{ ready: boolean; inventory: unknown }>
+    insertDirect: (prompt: string) => Promise<void>
     insertByChunks: (prompt: string) => Promise<void>
   }
   const internal = client as unknown as Internals
@@ -1189,10 +1196,19 @@ async function testCopilotChunkFallback(): Promise<void> {
     const inserted = insertCalls === 2 ? chunk.slice(0, 120) : chunk
     editor += `${insertCalls > 1 ? '\u200B\u200C' : ''}${inserted}`
   }
+  internal.waitSendReady = async () => ({ ready: true, inventory: [] })
   await internal.insertByChunks(prompt)
   assert.strictEqual(normalizeCopilotEditorText(editor), prompt)
   assert.ok(editor.includes('\u200B\u200C'), 'Lexical chunk boundary markers were not exercised')
   assert.ok(insertCalls > Math.ceil(prompt.length / 450))
+  editor = ''
+  insertCalls = 0
+  internal.cdpMethod = async (name, params) => {
+    if (name === 'Input.insertText') { insertCalls++; editor = String(params.text ?? '') }
+  }
+  await internal.insertDirect(prompt)
+  assert.strictEqual(editor, prompt)
+  assert.strictEqual(insertCalls, 1, 'YakuLingo-style direct input must use one Input.insertText call')
   console.log('PASS copilot-chunk-fallback')
 }
 async function testCopilotLoop(): Promise<void> {
@@ -1398,6 +1414,83 @@ async function testUiContract(): Promise<void> {
   console.log('PASS ui-contract')
 }
 
+async function testOpenAICompatibleBridge(): Promise<void> {
+  const token = 'bridge-smoke-token-1234'
+  const prompts: string[] = []
+  const rawReplies = [
+    'ストリーム回答',
+    '通常回答です',
+    `処理します。\n{'tool':'write_file','args':{'path':'メモ.txt','content':'確認'}}`,
+    '{"tool":"write_file","args":{"path":3,"content":"不正"}}'
+  ]
+  const server = createOpenAICompatibleBridgeServer(token, {
+    complete: async (prompt) => { prompts.push(prompt); return rawReplies.shift() ?? 'empty' },
+    now: () => 1_700_000_000_000
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = (server.address() as net.AddressInfo).port
+  const url = `http://127.0.0.1:${port}/v1/chat/completions`
+  const post = (body: unknown, bearer = token) => fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}` },
+    body: JSON.stringify(body)
+  })
+  const tools: OpenAITool[] = [{
+    type: 'function',
+    function: {
+      name: 'write_file',
+      description: '新規ファイルを書く',
+      parameters: {
+        type: 'object', additionalProperties: false, required: ['path', 'content'],
+        properties: { path: { type: 'string', minLength: 1 }, content: { type: 'string' } }
+      }
+    }
+  }]
+  try {
+    const unauthorized = await post({ model: 'test', messages: [{ role: 'user', content: 'hi' }] }, 'wrong-token-12345678')
+    assert.strictEqual(unauthorized.status, 401)
+    const streaming = await post({ model: 'test', stream: true, messages: [{ role: 'user', content: 'hi' }] })
+    assert.strictEqual(streaming.status, 200)
+    assert.ok(streaming.headers.get('content-type')?.includes('text/event-stream'))
+    const streamText = await streaming.text()
+    assert.ok(streamText.includes('ストリーム回答') && streamText.includes('data: [DONE]'))
+
+    const normal = await post({ model: 'bridge-test', messages: [{ role: 'system', content: '日本語で' }, { role: 'user', content: '答えて' }] })
+    assert.strictEqual(normal.status, 200)
+    const normalJson = await normal.json() as { choices: Array<{ message: { content: string }; finish_reason: string }> }
+    assert.strictEqual(normalJson.choices[0].message.content, '通常回答です')
+    assert.strictEqual(normalJson.choices[0].finish_reason, 'stop')
+    assert.ok(prompts[1].includes('[1:SYSTEM]') && prompts[1].includes('[2:USER]'))
+
+    const called = await post({ model: 'bridge-test', messages: [{ role: 'user', content: 'メモを書いて' }], tools })
+    assert.strictEqual(called.status, 200)
+    const calledJson = await called.json() as { choices: Array<{ message: { content: null; tool_calls: Array<{ function: { name: string; arguments: string } }> }; finish_reason: string }> }
+    assert.strictEqual(calledJson.choices[0].finish_reason, 'tool_calls')
+    assert.strictEqual(calledJson.choices[0].message.tool_calls[0].function.name, 'write_file')
+    assert.deepStrictEqual(JSON.parse(calledJson.choices[0].message.tool_calls[0].function.arguments), { path: 'メモ.txt', content: '確認' })
+    assert.ok(prompts[2].includes('AVAILABLE_FUNCTIONS=') && prompts[2].includes('write_file'))
+    assert.ok(prompts[2].includes('「ここ」「この場所」「直下」') && prompts[2].includes(' . を使ってください'))
+    assert.ok(prompts[2].includes('「開く」') && prompts[2].includes('既定アプリを起動'))
+
+    const rejected = await post({ model: 'bridge-test', messages: [{ role: 'user', content: '不正な引数' }], tools })
+    const rejectedJson = await rejected.json() as { choices: Array<{ message: { content: string }; finish_reason: string }> }
+    assert.strictEqual(rejectedJson.choices[0].finish_reason, 'stop')
+    assert.strictEqual(rejectedJson.choices[0].message.content, '{"tool":"write_file","args":{"path":3,"content":"不正"}}')
+
+    const negative = interpretBridgeResponse('例: {"tool":"write_file","args":{"path":"推測.txt","content":"x"}} ですが今回は操作しません。', tools)
+    assert.strictEqual(negative.toolCalls, undefined)
+    const readTool: OpenAITool[] = [{ type: 'function', function: { name: 'read', parameters: { type: 'object', additionalProperties: false, required: ['filePath'], properties: { filePath: { type: 'string' } } } } }]
+    const windowsPath = interpretBridgeResponse(String.raw`{"tool":"read","args":{"filePath":"C:\Users\yuuki\flex-live"}}`, readTool)
+    assert.strictEqual(JSON.parse(String((windowsPath.toolCalls?.[0].function as { arguments?: string })?.arguments)).filePath, 'C:\\Users\\yuuki\\flex-live')
+    assert.ok(windowsPath.repairs.includes('windows-path-backslash'))
+    assert.ok(buildBridgePrompt({ messages: [{ role: 'user', content: [{ type: 'text', text: '配列本文' }] }], tools: [] }).includes('配列本文'))
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+  assert.strictEqual(prompts.length, 4, 'unauthorized requests must not reach Copilot')
+  console.log('PASS openai-compatible-bridge')
+}
+
 async function testDemoRecordingContract(): Promise<void> {
   const repoRoot = path.resolve(process.cwd(), '..', '..')
   const recorder = fs.readFileSync(path.join(repoRoot, 'demo', 'renketsu-demo', 'Record-Demo.ps1'), 'utf8')
@@ -1439,6 +1532,7 @@ async function testDemoRecordingContract(): Promise<void> {
   await testCopilotPlainMode()
   await testCopilotFenceMode()
   await testLocalResponseConverter()
+  await testOpenAICompatibleBridge()
   await testUiContract()
   await testDemoRecordingContract()
   console.log('ALL PASS')

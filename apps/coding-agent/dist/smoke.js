@@ -4505,7 +4505,7 @@ var require_lib = __commonJS({
 
 // test/smoke.ts
 var import_node_assert = __toESM(require("node:assert"));
-var import_node_http3 = __toESM(require("node:http"));
+var import_node_http4 = __toESM(require("node:http"));
 var import_node_fs3 = __toESM(require("node:fs"));
 var import_node_os = __toESM(require("node:os"));
 var import_node_path4 = __toESM(require("node:path"));
@@ -4657,6 +4657,15 @@ function repairJsonText(source) {
   }
   return { text, repairs };
 }
+function repairWindowsPathBackslashes(source) {
+  let changed = false;
+  const repaired = source.replace(/(:\s*")([A-Za-z]:\\[^"\r\n]*)(")/gu, (_match, prefix, pathValue, suffix) => {
+    const escaped = pathValue.replace(/\\+/gu, (slashes) => slashes.length % 2 === 0 ? slashes : `${slashes}\\`);
+    if (escaped !== pathValue) changed = true;
+    return prefix + escaped + suffix;
+  });
+  return changed ? repaired : null;
+}
 function jsonDecisionCandidates(rawResponse, tools) {
   const clean = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, "").replace(/```(?:json)?/giu, "").replace(/```/gu, "").replace(/\bAGENT_END\b/giu, "").trim();
   const sources = scanJsonObjects(clean).map((candidate) => ({ text: candidate.text, offset: candidate.position }));
@@ -4677,6 +4686,13 @@ function jsonDecisionCandidates(rawResponse, tools) {
         }
       }
     }
+    const windowsPath = repairWindowsPathBackslashes(source.text);
+    if (windowsPath !== null) {
+      try {
+        attempts.push({ text: (0, import_jsonrepair.jsonrepair)(windowsPath), repairs: ["windows-path-backslash", "jsonrepair"], semanticBonus: 40 });
+      } catch {
+      }
+    }
     for (const attempt of attempts) {
       try {
         const content = protocolObject(JSON.parse(attempt.text), tools);
@@ -4685,7 +4701,7 @@ function jsonDecisionCandidates(rawResponse, tools) {
         if (seen.has(key)) continue;
         seen.add(key);
         const score = /"(?:tool|answer)"/u.test(attempt.text) ? 20 : 0;
-        valid.push({ text: content, position: source.offset, score: score + (/"args"/u.test(attempt.text) ? 8 : 0), repairs: attempt.repairs });
+        valid.push({ text: content, position: source.offset, score: score + (/"args"/u.test(attempt.text) ? 8 : 0) + (attempt.semanticBonus ?? 0), repairs: attempt.repairs });
       } catch {
       }
     }
@@ -6688,8 +6704,8 @@ async function runCopilotTurn(opts) {
       io.print(`[error] ${msg}`);
       return { reply: "", messages: turnMessages(`[error] ${msg}`), aborted: true };
     }
-    const converterTools = toolDefsForContract({ allowArbitraryCommands: policy.allowArbitraryCommands, safeCommandOnly: ctx.safeCommandOnly });
-    const contractTools = converterTools.map((tool) => ({ name: qualifiedToolName(tool.name), description: tool.description, parameters: tool.parameters }));
+    const converterTools2 = toolDefsForContract({ allowArbitraryCommands: policy.allowArbitraryCommands, safeCommandOnly: ctx.safeCommandOnly });
+    const contractTools = converterTools2.map((tool) => ({ name: qualifiedToolName(tool.name), description: tool.description, parameters: tool.parameters }));
     const layer1StartedAt = Date.now();
     const directPe = extractReplyAndEnd(raw);
     const deterministic = directPe ? null : interpretCopilotResponseDeterministically(raw, contractTools);
@@ -7197,6 +7213,19 @@ var COPILOT_CLICK_SEND_JS = `(() => {
   for(const d of __docs)for(const selector of inputSelectors){const input=d.querySelector(selector);if(!input)continue;let scope=input.parentElement;for(let depth=0;scope&&depth<6;depth++,scope=scope.parentElement){const found=Array.from(scope.querySelectorAll('button,[role="button"]'));if(found.length){nearby=found;break;}}if(nearby.length)break;}
   const diagnosticButtons=(nearby.length?nearby:buttons).slice(-32);
   return JSON.stringify({ clicked: false, inventory: diagnosticButtons.map(inventory) });
+})()`;
+var COPILOT_SEND_READY_JS = `(() => {
+  ${VISIBLE_JS}
+  ${DOCS_JS}
+  const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button, [role="button"]')));
+  const structural = b => b.matches('button[type="submit"],.fai-SendButton,[class*="SendButton" i],[data-testid*="send" i],[data-automation-id*="send" i]');
+  const inventory = b => { const r=b.getBoundingClientRect(); return {ariaLabel:b.getAttribute('aria-label')||'',title:b.title||'',testId:b.getAttribute('data-testid')||'',automationId:b.getAttribute('data-automation-id')||'',className:typeof b.className==='string'?b.className:'',type:b.getAttribute('type')||'',disabled:!!b.disabled,ariaDisabled:b.getAttribute('aria-disabled')||'',visible:__vis(b),rect:{x:r.x,y:r.y,width:r.width,height:r.height,cx:r.x+r.width/2,cy:r.y+r.height/2}}; };
+  const candidates = buttons.filter(b => {
+    const label=(b.getAttribute('aria-label')||b.title||b.textContent||'').trim();
+    return structural(b) || /^(\u9001\u4FE1|send)$/i.test(label);
+  });
+  const ready = candidates.find(b => __vis(b) && !b.disabled && b.getAttribute('aria-disabled') !== 'true');
+  return JSON.stringify({ready:!!ready,inventory:candidates.slice(-32).map(inventory)});
 })()`;
 var EDITOR_LENGTH_JS = `(() => {
   ${VISIBLE_JS}
@@ -7827,32 +7856,35 @@ var CopilotEdgeClient = class {
     if (prompt.length > this.s.maxPromptChars) {
       throw new Error(`\u4F9D\u983C\u6587\u304C\u4E0A\u9650 ${this.s.maxPromptChars} \u6587\u5B57\u3092\u8D85\u3048\u3066\u3044\u307E\u3059 (${prompt.length} \u6587\u5B57)`);
     }
-    try {
-      await this.pasteViaClipboard(prompt);
-      return;
-    } catch (err) {
-      console.log(`[paste] \u30AF\u30EA\u30C3\u30D7\u30DC\u30FC\u30C9\u8CBC\u308A\u4ED8\u3051\u306B\u5931\u6557\u3001\u30C1\u30E3\u30F3\u30AF\u65B9\u5F0F\u3078\u30D5\u30A9\u30FC\u30EB\u30D0\u30C3\u30AF: ${err.message}`);
+    let lastDirectError = "";
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await this.insertDirect(prompt);
+        if (attempt > 1) console.log("[input] \u5358\u4E00Input.insertText\u306E\u518D\u8A66\u884C\u3067\u6210\u529F");
+        return;
+      } catch (err) {
+        lastDirectError = err.message;
+        console.log(`[input] \u5358\u4E00Input.insertText attempt=${attempt} failed: ${lastDirectError}`);
+        if (attempt < 2) await sleep(300);
+      }
     }
+    console.log(`[input] \u5358\u4E00Input.insertText\u30922\u56DE\u78BA\u8A8D\u3067\u304D\u305A\u3001\u30C1\u30E3\u30F3\u30AF\u65B9\u5F0F\u3078\u30D5\u30A9\u30FC\u30EB\u30D0\u30C3\u30AF: ${lastDirectError}`);
     await this.insertByChunks(prompt);
   }
-  async pasteViaClipboard(prompt) {
+  async insertDirect(prompt) {
+    if (await this.editorLength() > 0) await this.clearEditor();
     await this.bringToFront();
-    await this.grantClipboard();
     await this.focusEditor();
-    await this.evalWithReconnect("window.focus(); true", 5e3);
-    await this.evalWithReconnect(`navigator.clipboard.writeText(${JSON.stringify(prompt)})`, 15e3);
-    for (let i = 0; i < 6; i++) {
-      await this.evalWithReconnect(CLEAR_EDITOR_JS);
+    const timeoutMs = prompt.length > 12e3 ? 9e4 : prompt.length > 5e3 ? 6e4 : 3e4;
+    await this.cdpMethod("Input.insertText", { text: prompt }, timeoutMs);
+    let final = await this.editorState();
+    for (let poll = 0; poll < 12 && (!final.found || final.text !== prompt); poll++) {
       await sleep(150);
-      if (await this.editorLength() === 0) break;
+      final = await this.editorState();
     }
-    await this.focusEditor();
-    await this.evalWithReconnect("(() => { const s = getSelection(); if (!s || !document.activeElement) return; s.selectAllChildren(document.activeElement); s.collapseToEnd() })()", 1e4);
-    await this.cdpMethod("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "v", code: "KeyV", windowsVirtualKeyCode: 86, modifiers: 2 });
-    await this.cdpMethod("Input.dispatchKeyEvent", { type: "keyUp", key: "v", code: "KeyV", windowsVirtualKeyCode: 86, modifiers: 2 });
-    await sleep(700);
-    const len = Number(await this.editorLength());
-    if (len < prompt.length * 0.9) throw new Error(`\u8CBC\u308A\u4ED8\u3051\u5F8C\u306E\u9577\u3055\u4E0D\u8DB3 (\u671F\u5F85 ~${prompt.length}, \u5B9F\u969B ${len})`);
+    if (!final.found || final.text !== prompt) throw new Error(`\u8CBC\u308A\u4ED8\u3051\u5F8C\u306E\u5185\u5BB9\u4E0D\u4E00\u81F4 (${textMismatchDiagnostic(prompt, final.text)})`);
+    const send = await this.waitSendReady(6e3);
+    if (!send.ready) throw new Error("\u5358\u4E00Input.insertText\u5F8C\u3082\u9001\u4FE1\u30DC\u30BF\u30F3\u304C\u6709\u52B9\u306B\u306A\u308A\u307E\u305B\u3093\u3067\u3057\u305F");
   }
   async insertByChunks(prompt) {
     if (await this.editorLength() > 0) {
@@ -7947,7 +7979,41 @@ var CopilotEdgeClient = class {
     })()`;
     if (await this.evalWithReconnect(js) !== "ok") throw new Error("\u5165\u529B\u6B04\u306B\u30D5\u30A9\u30FC\u30AB\u30B9\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
   }
-  async clickSend() {
+  async waitSendReady(timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    let latest = { ready: false, inventory: [] };
+    do {
+      try {
+        latest = JSON.parse(String(await this.evalWithReconnect(COPILOT_SEND_READY_JS)));
+        if (latest.ready) return latest;
+      } catch {
+      }
+      if (Date.now() < deadline) await sleep(150);
+    } while (Date.now() < deadline);
+    return latest;
+  }
+  async waitSendEstablished(baselineText, baselineInputLength, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    let notReadySamples = 0;
+    do {
+      const state = await this.readScreenState(5e3);
+      const inputLength = await this.editorLength();
+      const ready = await this.waitSendReady(1);
+      if (state.generating || baselineText && state.text && state.text !== baselineText || baselineInputLength > 0 && inputLength >= 0 && inputLength <= 2) return true;
+      notReadySamples = ready.ready ? 0 : notReadySamples + 1;
+      if (notReadySamples >= 2) return true;
+      if (Date.now() < deadline) await sleep(150);
+    } while (Date.now() < deadline);
+    return false;
+  }
+  async clickSend(baselineText = "") {
+    const ready = await this.waitSendReady(6e3);
+    if (!ready.ready) {
+      const diagnostic = JSON.stringify(ready.inventory ?? []).slice(0, 3e3);
+      console.log(`[send] candidate inventory: ${diagnostic}`);
+      throw new Error(`\u6709\u52B9\u306A\u9001\u4FE1\u30DC\u30BF\u30F3\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u5019\u88DC\u8A3A\u65AD: ${diagnostic}`);
+    }
+    const baselineInputLength = await this.editorLength();
     const raw = await this.evalWithReconnect(COPILOT_CLICK_SEND_JS);
     const result = JSON.parse(String(raw));
     if (!result.clicked) {
@@ -7955,6 +8021,19 @@ var CopilotEdgeClient = class {
       console.log(`[send] candidate inventory: ${diagnostic}`);
       throw new Error(`\u6709\u52B9\u306A\u9001\u4FE1\u30DC\u30BF\u30F3\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u5019\u88DC\u8A3A\u65AD: ${diagnostic}`);
     }
+    if (await this.waitSendEstablished(baselineText, baselineInputLength, 1800)) return;
+    const x = Number(result.selected?.rect?.cx);
+    const y = Number(result.selected?.rect?.cy);
+    if (Number.isFinite(x) && Number.isFinite(y) && x >= 0 && y >= 0) {
+      await this.cdpMethod("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
+      await sleep(80);
+      await this.cdpMethod("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
+      if (await this.waitSendEstablished(baselineText, baselineInputLength, 1800)) {
+        console.log("[send] synthetic click\u672A\u6210\u7ACB\u306E\u305F\u3081CDP native mouse\u3067\u9001\u4FE1");
+        return;
+      }
+    }
+    throw new Error("\u9001\u4FE1\u30DC\u30BF\u30F3\u64CD\u4F5C\u5F8C\u3082\u751F\u6210\u958B\u59CB\u30FB\u5165\u529B\u6D88\u53BB\u30FB\u5FDC\u7B54\u5897\u52A0\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
   }
   async readScreenState(timeoutMs = 15e3) {
     const raw = await this.evalWithReconnect(COPILOT_SCREEN_STATE_JS, timeoutMs);
@@ -8064,7 +8143,7 @@ var CopilotEdgeClient = class {
     const baseline = (await this.readScreenState()).text;
     const baselineReadMs = Date.now() - phaseStartedAt;
     phaseStartedAt = Date.now();
-    await this.clickSend();
+    await this.clickSend(baseline);
     const sendMs = Date.now() - phaseStartedAt;
     throwIfAborted(signal);
     const response = await this.waitResponse(baseline, signal);
@@ -8136,6 +8215,299 @@ function resolveApproval(id, approved, reason = approved ? "\u5229\u7528\u8005\u
   while (resolutions.size > 100) resolutions.delete(resolutions.keys().next().value);
   entry.resolve(Boolean(approved));
   return true;
+}
+
+// src/openai-bridge.ts
+var import_node_crypto3 = __toESM(require("node:crypto"));
+var import_node_http3 = __toESM(require("node:http"));
+var MAX_BODY_BYTES = 2 * 1024 * 1024;
+var TOOL_NAME = /^[A-Za-z0-9_-]{1,64}$/u;
+var ANNOTATION_KEYWORDS = /* @__PURE__ */ new Set(["description", "title", "default", "examples", "deprecated", "readOnly", "writeOnly", "$comment", "$schema", "$id", "$defs", "definitions"]);
+function isObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+function messageContent(value) {
+  if (typeof value === "string") return value;
+  if (value === null || value === void 0) return "";
+  if (!Array.isArray(value)) throw new Error("message.content \u306F\u6587\u5B57\u5217\u307E\u305F\u306Ftext part\u914D\u5217\u3060\u3051\u5BFE\u5FDC\u3057\u3066\u3044\u307E\u3059");
+  return value.map((part) => {
+    if (!isObject(part) || part.type !== "text" || typeof part.text !== "string") {
+      throw new Error("\u753B\u50CF\u30FB\u97F3\u58F0\u306A\u3069text\u4EE5\u5916\u306Emessage content part\u306F\u672A\u5BFE\u5FDC\u3067\u3059");
+    }
+    return part.text;
+  }).join("\n");
+}
+function assertTools(value) {
+  if (value === void 0) return [];
+  if (!Array.isArray(value) || value.length > 128) throw new Error("tools \u306F128\u4EF6\u4EE5\u4E0B\u306E\u914D\u5217\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
+  const seen = /* @__PURE__ */ new Set();
+  return value.map((candidate) => {
+    if (!isObject(candidate) || candidate.type !== "function" || !isObject(candidate.function)) throw new Error("function tool\u4EE5\u5916\u306F\u672A\u5BFE\u5FDC\u3067\u3059");
+    const name = candidate.function.name;
+    if (typeof name !== "string" || !TOOL_NAME.test(name)) throw new Error(`tool\u540D\u304C\u4E0D\u6B63\u3067\u3059: ${String(name ?? "")}`);
+    if (seen.has(name)) throw new Error(`tool\u540D\u304C\u91CD\u8907\u3057\u3066\u3044\u307E\u3059: ${name}`);
+    seen.add(name);
+    const description = candidate.function.description;
+    if (description !== void 0 && typeof description !== "string") throw new Error(`tool description\u304C\u4E0D\u6B63\u3067\u3059: ${name}`);
+    const parameters = candidate.function.parameters ?? { type: "object", properties: {} };
+    if (!isObject(parameters)) throw new Error(`tool parameters\u304C\u4E0D\u6B63\u3067\u3059: ${name}`);
+    return { type: "function", function: { name, description, parameters } };
+  });
+}
+function parseOpenAIChatRequest(value) {
+  if (!isObject(value)) throw new Error("request body\u306FJSON object\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
+  if (!Array.isArray(value.messages) || value.messages.length === 0 || value.messages.length > 200) throw new Error("messages \u306F1\u301C200\u4EF6\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
+  const messages = value.messages.map((candidate) => {
+    if (!isObject(candidate) || !["system", "user", "assistant", "tool"].includes(String(candidate.role ?? ""))) throw new Error("message.role\u304C\u4E0D\u6B63\u3067\u3059");
+    messageContent(candidate.content);
+    return candidate;
+  });
+  const stream = value.stream;
+  if (stream !== void 0 && typeof stream !== "boolean") throw new Error("stream \u306Fboolean\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
+  return {
+    model: typeof value.model === "string" ? value.model : void 0,
+    messages,
+    tools: assertTools(value.tools),
+    tool_choice: value.tool_choice,
+    stream
+  };
+}
+function buildBridgePrompt(request) {
+  const transcript = request.messages.map((message, index) => {
+    const meta = [message.name ? `name=${message.name}` : "", message.tool_call_id ? `tool_call_id=${message.tool_call_id}` : ""].filter(Boolean).join(" ");
+    const calls = message.tool_calls === void 0 ? "" : `
+tool_calls=${JSON.stringify(message.tool_calls)}`;
+    return `[${index + 1}:${message.role.toUpperCase()}${meta ? ` ${meta}` : ""}]
+${messageContent(message.content)}${calls}`;
+  }).join("\n\n");
+  if (!request.tools?.length) return [
+    "\u4EE5\u4E0B\u306E\u4F1A\u8A71\u306B\u5BFE\u3059\u308B\u6B21\u306Eassistant\u56DE\u7B54\u3092\u751F\u6210\u3057\u3066\u304F\u3060\u3055\u3044\u3002\u7C21\u6F54\u306B\u7B54\u3048\u3066\u304F\u3060\u3055\u3044\u3002",
+    transcript
+  ].join("\n\n");
+  const tools = request.tools.map((tool) => ({
+    name: tool.function.name,
+    description: tool.function.description ?? "",
+    parameters: tool.function.parameters ?? { type: "object", properties: {} }
+  }));
+  return [
+    "\u4EE5\u4E0B\u306E\u4F1A\u8A71\u306B\u5BFE\u3059\u308B\u6B21\u306Eassistant\u306E1\u624B\u3060\u3051\u3092\u751F\u6210\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+    '\u5229\u7528\u53EF\u80FD\u306A\u95A2\u6570\u304C\u5FC5\u8981\u306A\u3089\u3001\u5730\u306E\u6587\u3092\u4ED8\u3051\u305A JSON 1\u500B\u3060\u3051\u3092\u8FD4\u3057\u3066\u304F\u3060\u3055\u3044: {"tool":"\u95A2\u6570\u540D","args":{...}}',
+    "\u95A2\u6570\u304C\u4E0D\u8981\u306A\u3089\u901A\u5E38\u306E\u56DE\u7B54\u3060\u3051\u3092\u8FD4\u3057\u3066\u304F\u3060\u3055\u3044\u3002\u5024\u30FB\u30D1\u30B9\u30FB\u4E8B\u5B9F\u3092\u63A8\u6E2C\u3057\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002\u4E26\u5217\u95A2\u6570\u547C\u3073\u51FA\u3057\u306F\u3057\u307E\u305B\u3093\u3002",
+    "\u5229\u7528\u8005\u306E\u300C\u3053\u3053\u300D\u300C\u3053\u306E\u5834\u6240\u300D\u300C\u76F4\u4E0B\u300D\u306F\u30DB\u30B9\u30C8\u306E\u73FE\u5728\u306E\u4F5C\u696D\u30C7\u30A3\u30EC\u30AF\u30C8\u30EA\u3092\u6307\u3057\u307E\u3059\u3002\u95A2\u6570\u304C\u76F8\u5BFE\u30D1\u30B9\u3092\u8A31\u3059\u5834\u5408\u306F\u3001\u305D\u306E\u57FA\u6E96\u3092\u8868\u3059 . \u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044\u3002",
+    "\u5229\u7528\u8005\u304C\u30D5\u30A1\u30A4\u30EB\u3092\u300C\u958B\u304F\u300D\u3068\u983C\u3093\u3060\u5834\u5408\u306F\u5185\u5BB9\u306E\u8AAD\u307F\u53D6\u308A\u3067\u4EE3\u7528\u305B\u305A\u3001\u5229\u7528\u53EF\u80FD\u306A\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u95A2\u6570\u3067\u65E2\u5B9A\u30A2\u30D7\u30EA\u3092\u8D77\u52D5\u3059\u308B1\u624B\u3092\u9078\u3093\u3067\u304F\u3060\u3055\u3044\u3002",
+    "\u65B0\u898F\u30D5\u30A1\u30A4\u30EB\u306E\u89AA\u30D5\u30A9\u30EB\u30C0\u3068\u540D\u524D\u304C\u5229\u7528\u8005\u306E\u4F9D\u983C\u304B\u3089\u4E00\u610F\u306A\u3089\u3001\u89AA\u30D5\u30A9\u30EB\u30C0\u3092\u691C\u7D22\u305B\u305A\u3001\u6307\u5B9A\u3092\u76F8\u5BFE\u30D1\u30B9\u3078\u5FE0\u5B9F\u306B\u7D44\u307F\u7ACB\u3066\u3066\u66F8\u304D\u8FBC\u307F\u95A2\u6570\u3092\u547C\u3093\u3067\u304F\u3060\u3055\u3044\u3002",
+    `AVAILABLE_FUNCTIONS=${JSON.stringify(tools)}`,
+    transcript
+  ].join("\n\n");
+}
+function matchesType(value, type) {
+  if (type === "null") return value === null;
+  if (type === "array") return Array.isArray(value);
+  if (type === "object") return isObject(value);
+  if (type === "integer") return typeof value === "number" && Number.isSafeInteger(value);
+  if (type === "number") return typeof value === "number" && Number.isFinite(value);
+  return typeof value === type;
+}
+function validateSchema(value, schema, at = "$") {
+  if (schema === true || schema === void 0) return { ok: true };
+  if (schema === false || !isObject(schema)) return { ok: false, error: `${at}: unsupported schema` };
+  if ("$ref" in schema || "patternProperties" in schema || "not" in schema || "if" in schema || "then" in schema || "else" in schema) {
+    return { ok: false, error: `${at}: unsupported schema keyword` };
+  }
+  if (Array.isArray(schema.allOf)) {
+    for (const item of schema.allOf) {
+      const result = validateSchema(value, item, at);
+      if (!result.ok) return result;
+    }
+  }
+  if (Array.isArray(schema.anyOf)) {
+    const results = schema.anyOf.map((item) => validateSchema(value, item, at));
+    if (!results.some((result) => result.ok)) return { ok: false, error: `${at}: anyOf mismatch` };
+  }
+  if (Array.isArray(schema.oneOf)) {
+    if (schema.oneOf.filter((item) => validateSchema(value, item, at).ok).length !== 1) return { ok: false, error: `${at}: oneOf mismatch` };
+  }
+  if (Array.isArray(schema.enum) && !schema.enum.some((item) => JSON.stringify(item) === JSON.stringify(value))) return { ok: false, error: `${at}: enum mismatch` };
+  if ("const" in schema && JSON.stringify(schema.const) !== JSON.stringify(value)) return { ok: false, error: `${at}: const mismatch` };
+  const types = Array.isArray(schema.type) ? schema.type : typeof schema.type === "string" ? [schema.type] : [];
+  if (types.length > 0 && !types.some((type) => typeof type === "string" && matchesType(value, type))) return { ok: false, error: `${at}: type mismatch` };
+  if (typeof value === "string") {
+    if (typeof schema.minLength === "number" && value.length < schema.minLength) return { ok: false, error: `${at}: minLength` };
+    if (typeof schema.maxLength === "number" && value.length > schema.maxLength) return { ok: false, error: `${at}: maxLength` };
+    if (typeof schema.pattern === "string") {
+      try {
+        if (!new RegExp(schema.pattern, "u").test(value)) return { ok: false, error: `${at}: pattern` };
+      } catch {
+        return { ok: false, error: `${at}: invalid pattern` };
+      }
+    }
+  }
+  if (typeof value === "number") {
+    if (typeof schema.minimum === "number" && value < schema.minimum) return { ok: false, error: `${at}: minimum` };
+    if (typeof schema.maximum === "number" && value > schema.maximum) return { ok: false, error: `${at}: maximum` };
+  }
+  if (Array.isArray(value)) {
+    if (typeof schema.minItems === "number" && value.length < schema.minItems) return { ok: false, error: `${at}: minItems` };
+    if (typeof schema.maxItems === "number" && value.length > schema.maxItems) return { ok: false, error: `${at}: maxItems` };
+    if (schema.items !== void 0) {
+      for (let index = 0; index < value.length; index++) {
+        const result = validateSchema(value[index], schema.items, `${at}[${index}]`);
+        if (!result.ok) return result;
+      }
+    }
+  }
+  if (isObject(value)) {
+    const properties = isObject(schema.properties) ? schema.properties : {};
+    const required = Array.isArray(schema.required) ? schema.required : [];
+    for (const key of required) if (typeof key !== "string" || !(key in value)) return { ok: false, error: `${at}: missing ${String(key)}` };
+    for (const [key, item] of Object.entries(value)) {
+      if (key in properties) {
+        const result = validateSchema(item, properties[key], `${at}.${key}`);
+        if (!result.ok) return result;
+      } else if (schema.additionalProperties === false) {
+        return { ok: false, error: `${at}: additional property ${key}` };
+      } else if (isObject(schema.additionalProperties)) {
+        const result = validateSchema(item, schema.additionalProperties, `${at}.${key}`);
+        if (!result.ok) return result;
+      }
+    }
+  }
+  for (const key of Object.keys(schema)) {
+    if (ANNOTATION_KEYWORDS.has(key)) continue;
+    if (!["type", "properties", "required", "additionalProperties", "items", "enum", "const", "allOf", "anyOf", "oneOf", "minLength", "maxLength", "pattern", "minimum", "maximum", "minItems", "maxItems"].includes(key)) {
+      return { ok: false, error: `${at}: unsupported schema keyword ${key}` };
+    }
+  }
+  return { ok: true };
+}
+function converterTools(tools) {
+  return tools.map((tool) => ({
+    name: `host.${tool.function.name}`,
+    description: tool.function.description ?? "",
+    parameters: tool.function.parameters ?? { type: "object", properties: {} }
+  }));
+}
+function interpretBridgeResponse(raw, tools) {
+  const deterministic = interpretCopilotResponseDeterministically(raw, converterTools(tools));
+  if (!deterministic) return { content: raw, method: "raw-fallback", repairs: [] };
+  let decision;
+  try {
+    decision = JSON.parse(deterministic.content);
+  } catch {
+    return { content: raw, method: "raw-fallback", repairs: [] };
+  }
+  if (typeof decision.answer === "string") return { content: decision.answer, method: deterministic.method, repairs: deterministic.repairs };
+  if (typeof decision.tool !== "string" || !isObject(decision.args)) return { content: raw, method: "raw-fallback", repairs: [] };
+  const externalName = decision.tool.startsWith("host.") ? decision.tool.slice(5) : decision.tool;
+  const matched = tools.find((tool) => tool.function.name === externalName);
+  if (!matched) return { content: raw, method: "raw-fallback", repairs: [] };
+  const validation = validateSchema(decision.args, matched.function.parameters ?? { type: "object", properties: {} });
+  if (!validation.ok) return { content: raw, method: "schema-rejected", repairs: deterministic.repairs, diagnostic: validation.error };
+  return {
+    content: null,
+    toolCalls: [{
+      id: `call_${import_node_crypto3.default.randomBytes(12).toString("hex")}`,
+      type: "function",
+      function: { name: externalName, arguments: JSON.stringify(decision.args) }
+    }],
+    method: deterministic.method,
+    repairs: deterministic.repairs
+  };
+}
+async function completeOpenAIChat(request, options, signal) {
+  const raw = await options.complete(buildBridgePrompt(request), signal);
+  const interpreted = interpretBridgeResponse(raw, request.tools ?? []);
+  console.log("[bridge-decision] " + JSON.stringify({
+    interpretation: interpreted.method,
+    repairs: interpreted.repairs,
+    tool: interpreted.toolCalls?.[0]?.function && isObject(interpreted.toolCalls[0].function) ? interpreted.toolCalls[0].function.name : null,
+    diagnostic: interpreted.diagnostic ?? null,
+    toolCount: request.tools?.length ?? 0
+  }));
+  const created = Math.floor((options.now?.() ?? Date.now()) / 1e3);
+  const toolCalls = interpreted.toolCalls;
+  return {
+    id: `chatcmpl_${import_node_crypto3.default.randomBytes(12).toString("hex")}`,
+    object: "chat.completion",
+    created,
+    model: request.model ?? "copilot-edge-layer1",
+    choices: [{
+      index: 0,
+      message: toolCalls ? { role: "assistant", content: null, tool_calls: toolCalls } : { role: "assistant", content: interpreted.content ?? "" },
+      finish_reason: toolCalls ? "tool_calls" : "stop"
+    }],
+    bridge: { interpretation: interpreted.method, repairs: interpreted.repairs }
+  };
+}
+function authorized(header, token) {
+  const prefix = "Bearer ";
+  if (!header?.startsWith(prefix)) return false;
+  const supplied = Buffer.from(header.slice(prefix.length), "utf8");
+  const expected = Buffer.from(token, "utf8");
+  return supplied.length === expected.length && import_node_crypto3.default.timingSafeEqual(supplied, expected);
+}
+function sendJson(response, status, value) {
+  const body = JSON.stringify(value);
+  response.writeHead(status, { "content-type": "application/json; charset=utf-8", "content-length": Buffer.byteLength(body) });
+  response.end(body);
+}
+function sendSingleChunkSse(response, completion) {
+  const choices = Array.isArray(completion.choices) ? completion.choices : [];
+  const first = isObject(choices[0]) ? choices[0] : {};
+  const message = isObject(first.message) ? first.message : {};
+  const id = String(completion.id ?? `chatcmpl_${import_node_crypto3.default.randomBytes(12).toString("hex")}`);
+  const created = Number(completion.created ?? Math.floor(Date.now() / 1e3));
+  const model = String(completion.model ?? "copilot-edge-layer1");
+  const delta = { role: "assistant" };
+  if (Array.isArray(message.tool_calls)) delta.tool_calls = message.tool_calls.map((call, index) => ({ index, ...isObject(call) ? call : {} }));
+  else delta.content = typeof message.content === "string" ? message.content : "";
+  const chunks = [
+    { id, object: "chat.completion.chunk", created, model, choices: [{ index: 0, delta, finish_reason: null }] },
+    { id, object: "chat.completion.chunk", created, model, choices: [{ index: 0, delta: {}, finish_reason: String(first.finish_reason ?? "stop") }] }
+  ];
+  response.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive" });
+  for (const chunk of chunks) response.write(`data: ${JSON.stringify(chunk)}
+
+`);
+  response.end("data: [DONE]\n\n");
+}
+function openAIError(response, status, message, code) {
+  sendJson(response, status, { error: { message, type: status >= 500 ? "server_error" : "invalid_request_error", param: null, code } });
+}
+async function readJsonBody(request) {
+  let size = 0;
+  const chunks = [];
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > MAX_BODY_BYTES) throw new Error("request body\u304C2MB\u3092\u8D85\u3048\u3066\u3044\u307E\u3059");
+    chunks.push(buffer);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+function createOpenAICompatibleBridgeServer(token, options) {
+  if (token.length < 16) throw new Error("COPILOT_BRIDGE_TOKEN \u306F16\u6587\u5B57\u4EE5\u4E0A\u3067\u56FA\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
+  let queue = Promise.resolve();
+  const schedule = (work) => {
+    const next = queue.then(work, work);
+    queue = next.then(() => void 0, () => void 0);
+    return next;
+  };
+  return import_node_http3.default.createServer(async (request, response) => {
+    if (!authorized(request.headers.authorization, token)) return openAIError(response, 401, "Bearer token\u304C\u4E0D\u6B63\u3067\u3059", "invalid_api_key");
+    if (request.method !== "POST" || request.url !== "/v1/chat/completions") return openAIError(response, 404, "POST /v1/chat/completions \u3060\u3051\u5BFE\u5FDC\u3057\u3066\u3044\u307E\u3059", "not_found");
+    try {
+      const parsed = parseOpenAIChatRequest(await readJsonBody(request));
+      const controller = new AbortController();
+      request.once("aborted", () => controller.abort());
+      const result = await schedule(() => completeOpenAIChat(parsed, options, controller.signal));
+      if (parsed.stream === true) sendSingleChunkSse(response, result);
+      else sendJson(response, 200, result);
+    } catch (error) {
+      const message = error instanceof SyntaxError ? "request body\u304C\u6B63\u3057\u3044JSON\u3067\u306F\u3042\u308A\u307E\u305B\u3093" : error.message;
+      openAIError(response, error instanceof SyntaxError ? 400 : 422, message, "bridge_request_failed");
+    }
+  });
 }
 
 // test/smoke.ts
@@ -8474,7 +8846,7 @@ async function testTools() {
 }
 function mockServer(steps) {
   const state = { requests: 0 };
-  const server = import_node_http3.default.createServer((req, res) => {
+  const server = import_node_http4.default.createServer((req, res) => {
     let body = "";
     req.on("data", (c) => {
       body += c;
@@ -9063,10 +9435,13 @@ async function testCopilotResponseCompletion() {
   new Function("document", "window", `return ${COPILOT_SCREEN_STATE_JS}`);
   new Function("document", "window", `return ${COPILOT_CLICK_COPY_JS}`);
   new Function("document", "window", `return ${COPILOT_CLICK_SEND_JS}`);
+  new Function("document", "window", `return ${COPILOT_SEND_READY_JS}`);
   import_node_assert.default.strictEqual(normalizeCopilotEditorText("\u524D\u200B\u4E2D\u200C\u5F8C"), "\u524D\u4E2D\u5F8C");
   for (const required of ['button[type="submit"]', ".fai-SendButton", '[class*="SendButton" i]', '[data-testid*="send" i]', '[data-automation-id*="send" i]', "exclude.test(identity)", "ariaLabel", "automationId", "diagnosticButtons"]) {
     import_node_assert.default.ok(COPILOT_CLICK_SEND_JS.includes(required), `send-button detector missing ${required}`);
+    if (required !== "exclude.test(identity)" && required !== "diagnosticButtons") import_node_assert.default.ok(COPILOT_SEND_READY_JS.includes(required), `send-button readiness detector missing ${required}`);
   }
+  import_node_assert.default.ok(import_node_fs3.default.readFileSync(import_node_path4.default.join(process.cwd(), "src", "copilot.ts"), "utf8").includes("this.cdpMethod('Input.dispatchMouseEvent', { type: 'mousePressed'"), "send path must retain native CDP mouse fallback");
   import_node_assert.default.ok(COPILOT_CLICK_COPY_JS.includes("scope=latest"));
   import_node_assert.default.ok(COPILOT_CLICK_COPY_JS.includes("others.length>0"));
   for (const required of ["CopyButtonTestId", "CopyButtonContainerTestId", "pre,code", "copy\\s*(?:response|answer)"]) {
@@ -9273,10 +9648,22 @@ async function testCopilotChunkFallback() {
     const inserted = insertCalls === 2 ? chunk.slice(0, 120) : chunk;
     editor += `${insertCalls > 1 ? "\u200B\u200C" : ""}${inserted}`;
   };
+  internal.waitSendReady = async () => ({ ready: true, inventory: [] });
   await internal.insertByChunks(prompt);
   import_node_assert.default.strictEqual(normalizeCopilotEditorText(editor), prompt);
   import_node_assert.default.ok(editor.includes("\u200B\u200C"), "Lexical chunk boundary markers were not exercised");
   import_node_assert.default.ok(insertCalls > Math.ceil(prompt.length / 450));
+  editor = "";
+  insertCalls = 0;
+  internal.cdpMethod = async (name, params) => {
+    if (name === "Input.insertText") {
+      insertCalls++;
+      editor = String(params.text ?? "");
+    }
+  };
+  await internal.insertDirect(prompt);
+  import_node_assert.default.strictEqual(editor, prompt);
+  import_node_assert.default.strictEqual(insertCalls, 1, "YakuLingo-style direct input must use one Input.insertText call");
   console.log("PASS copilot-chunk-fallback");
 }
 async function testCopilotLoop() {
@@ -9407,7 +9794,7 @@ async function testLocalResponseConverter() {
   let responseContent = '{"answer":"\u5909\u63DB\u6E08\u307F"}';
   let requestCount = 0;
   let lastUserContent = "";
-  const server = import_node_http3.default.createServer((req, res) => {
+  const server = import_node_http4.default.createServer((req, res) => {
     let body = "";
     req.on("data", (chunk) => {
       body += String(chunk);
@@ -9483,6 +9870,84 @@ async function testUiContract() {
   for (const required of ["run-plan", "run-eyebrow", "run-pause", "run-resume", "run-retry", "run-complete", "\u56DE\u7B54\u5B8C\u4E86", "activity-details", "\u5B9F\u969B\u306E\u5DEE\u5206\u3092\u8868\u793A", "\u5DEE\u5206\u306E\u7D9A\u304D", "preview-frame", "verification-list", "\u8A3A\u65ADJSON", "approval-meta", "parentRunId", "/api/runs/", "/api/changes/", "compositionstart", "aria-live", "mode-select", "\u3053\u306EPC\u3067\u5B9F\u884C", "Copilot\u5185\u3067\u89B3\u6E2C", "@media (max-width: 720px)", "demo-view", "diagnostic-view", "view-toggle", "artifacts-panel", "\u904E\u53BB\u306E\u5B9F\u884C", "friendlyToolName", "\u5165\u529B\u306E\u53CD\u6620\u306B\u5931\u6557\u3057\u305F\u305F\u3081\u3001\u81EA\u52D5\u3067\u3084\u308A\u76F4\u3057\u3066\u3044\u307E\u3059\u3002"]) import_node_assert.default.ok(html.includes(required), `UI contract missing: ${required}`);
   console.log("PASS ui-contract");
 }
+async function testOpenAICompatibleBridge() {
+  const token = "bridge-smoke-token-1234";
+  const prompts = [];
+  const rawReplies = [
+    "\u30B9\u30C8\u30EA\u30FC\u30E0\u56DE\u7B54",
+    "\u901A\u5E38\u56DE\u7B54\u3067\u3059",
+    `\u51E6\u7406\u3057\u307E\u3059\u3002
+{'tool':'write_file','args':{'path':'\u30E1\u30E2.txt','content':'\u78BA\u8A8D'}}`,
+    '{"tool":"write_file","args":{"path":3,"content":"\u4E0D\u6B63"}}'
+  ];
+  const server = createOpenAICompatibleBridgeServer(token, {
+    complete: async (prompt) => {
+      prompts.push(prompt);
+      return rawReplies.shift() ?? "empty";
+    },
+    now: () => 17e11
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const url = `http://127.0.0.1:${port}/v1/chat/completions`;
+  const post = (body, bearer = token) => fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${bearer}` },
+    body: JSON.stringify(body)
+  });
+  const tools = [{
+    type: "function",
+    function: {
+      name: "write_file",
+      description: "\u65B0\u898F\u30D5\u30A1\u30A4\u30EB\u3092\u66F8\u304F",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["path", "content"],
+        properties: { path: { type: "string", minLength: 1 }, content: { type: "string" } }
+      }
+    }
+  }];
+  try {
+    const unauthorized = await post({ model: "test", messages: [{ role: "user", content: "hi" }] }, "wrong-token-12345678");
+    import_node_assert.default.strictEqual(unauthorized.status, 401);
+    const streaming = await post({ model: "test", stream: true, messages: [{ role: "user", content: "hi" }] });
+    import_node_assert.default.strictEqual(streaming.status, 200);
+    import_node_assert.default.ok(streaming.headers.get("content-type")?.includes("text/event-stream"));
+    const streamText = await streaming.text();
+    import_node_assert.default.ok(streamText.includes("\u30B9\u30C8\u30EA\u30FC\u30E0\u56DE\u7B54") && streamText.includes("data: [DONE]"));
+    const normal = await post({ model: "bridge-test", messages: [{ role: "system", content: "\u65E5\u672C\u8A9E\u3067" }, { role: "user", content: "\u7B54\u3048\u3066" }] });
+    import_node_assert.default.strictEqual(normal.status, 200);
+    const normalJson = await normal.json();
+    import_node_assert.default.strictEqual(normalJson.choices[0].message.content, "\u901A\u5E38\u56DE\u7B54\u3067\u3059");
+    import_node_assert.default.strictEqual(normalJson.choices[0].finish_reason, "stop");
+    import_node_assert.default.ok(prompts[1].includes("[1:SYSTEM]") && prompts[1].includes("[2:USER]"));
+    const called = await post({ model: "bridge-test", messages: [{ role: "user", content: "\u30E1\u30E2\u3092\u66F8\u3044\u3066" }], tools });
+    import_node_assert.default.strictEqual(called.status, 200);
+    const calledJson = await called.json();
+    import_node_assert.default.strictEqual(calledJson.choices[0].finish_reason, "tool_calls");
+    import_node_assert.default.strictEqual(calledJson.choices[0].message.tool_calls[0].function.name, "write_file");
+    import_node_assert.default.deepStrictEqual(JSON.parse(calledJson.choices[0].message.tool_calls[0].function.arguments), { path: "\u30E1\u30E2.txt", content: "\u78BA\u8A8D" });
+    import_node_assert.default.ok(prompts[2].includes("AVAILABLE_FUNCTIONS=") && prompts[2].includes("write_file"));
+    import_node_assert.default.ok(prompts[2].includes("\u300C\u3053\u3053\u300D\u300C\u3053\u306E\u5834\u6240\u300D\u300C\u76F4\u4E0B\u300D") && prompts[2].includes(" . \u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044"));
+    import_node_assert.default.ok(prompts[2].includes("\u300C\u958B\u304F\u300D") && prompts[2].includes("\u65E2\u5B9A\u30A2\u30D7\u30EA\u3092\u8D77\u52D5"));
+    const rejected = await post({ model: "bridge-test", messages: [{ role: "user", content: "\u4E0D\u6B63\u306A\u5F15\u6570" }], tools });
+    const rejectedJson = await rejected.json();
+    import_node_assert.default.strictEqual(rejectedJson.choices[0].finish_reason, "stop");
+    import_node_assert.default.strictEqual(rejectedJson.choices[0].message.content, '{"tool":"write_file","args":{"path":3,"content":"\u4E0D\u6B63"}}');
+    const negative = interpretBridgeResponse('\u4F8B: {"tool":"write_file","args":{"path":"\u63A8\u6E2C.txt","content":"x"}} \u3067\u3059\u304C\u4ECA\u56DE\u306F\u64CD\u4F5C\u3057\u307E\u305B\u3093\u3002', tools);
+    import_node_assert.default.strictEqual(negative.toolCalls, void 0);
+    const readTool = [{ type: "function", function: { name: "read", parameters: { type: "object", additionalProperties: false, required: ["filePath"], properties: { filePath: { type: "string" } } } } }];
+    const windowsPath = interpretBridgeResponse(String.raw`{"tool":"read","args":{"filePath":"C:\Users\yuuki\flex-live"}}`, readTool);
+    import_node_assert.default.strictEqual(JSON.parse(String(windowsPath.toolCalls?.[0].function?.arguments)).filePath, "C:\\Users\\yuuki\\flex-live");
+    import_node_assert.default.ok(windowsPath.repairs.includes("windows-path-backslash"));
+    import_node_assert.default.ok(buildBridgePrompt({ messages: [{ role: "user", content: [{ type: "text", text: "\u914D\u5217\u672C\u6587" }] }], tools: [] }).includes("\u914D\u5217\u672C\u6587"));
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+  import_node_assert.default.strictEqual(prompts.length, 4, "unauthorized requests must not reach Copilot");
+  console.log("PASS openai-compatible-bridge");
+}
 async function testDemoRecordingContract() {
   const repoRoot = import_node_path4.default.resolve(process.cwd(), "..", "..");
   const recorder = import_node_fs3.default.readFileSync(import_node_path4.default.join(repoRoot, "demo", "renketsu-demo", "Record-Demo.ps1"), "utf8");
@@ -9522,6 +9987,7 @@ async function testDemoRecordingContract() {
   await testCopilotPlainMode();
   await testCopilotFenceMode();
   await testLocalResponseConverter();
+  await testOpenAICompatibleBridge();
   await testUiContract();
   await testDemoRecordingContract();
   console.log("ALL PASS");

@@ -106,7 +106,8 @@ const NEGATIVE_CASES = [
   '書き込み先が不明なので write_file はまだ呼び出せません。',
   '{"tool":"host.unknown_tool","args":{"path":"推測.txt"}}',
   '開く対象が分かりません。対象ファイルを指定してください。',
-  '例: {"tool":"host.list_files","args":{"path":"reports"}} ですが今回は操作しません。'
+  '例: {"tool":"host.list_files","args":{"path":"reports"}} ですが今回は操作しません。',
+  String.raw`例: {"tool":"host.read_file","args":{"path":"C:\Users\demo\資料.txt"}} ですが今回は操作しません。`
 ]
 
 const LAYER_DEFS = TOOL_DEFS.map((entry) => ({ name: qualifiedToolName(entry.name), description: entry.description, parameters: entry.parameters }))

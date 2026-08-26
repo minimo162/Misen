@@ -4727,6 +4727,15 @@ function repairJsonText(source) {
   }
   return { text, repairs };
 }
+function repairWindowsPathBackslashes(source) {
+  let changed = false;
+  const repaired = source.replace(/(:\s*")([A-Za-z]:\\[^"\r\n]*)(")/gu, (_match, prefix, pathValue, suffix) => {
+    const escaped = pathValue.replace(/\\+/gu, (slashes) => slashes.length % 2 === 0 ? slashes : `${slashes}\\`);
+    if (escaped !== pathValue) changed = true;
+    return prefix + escaped + suffix;
+  });
+  return changed ? repaired : null;
+}
 function jsonDecisionCandidates(rawResponse, tools) {
   const clean = rawResponse.replace(/<think>[\s\S]*?<\/think>/giu, "").replace(/```(?:json)?/giu, "").replace(/```/gu, "").replace(/\bAGENT_END\b/giu, "").trim();
   const sources = scanJsonObjects(clean).map((candidate) => ({ text: candidate.text, offset: candidate.position }));
@@ -4747,6 +4756,13 @@ function jsonDecisionCandidates(rawResponse, tools) {
         }
       }
     }
+    const windowsPath = repairWindowsPathBackslashes(source.text);
+    if (windowsPath !== null) {
+      try {
+        attempts.push({ text: (0, import_jsonrepair.jsonrepair)(windowsPath), repairs: ["windows-path-backslash", "jsonrepair"], semanticBonus: 40 });
+      } catch {
+      }
+    }
     for (const attempt of attempts) {
       try {
         const content = protocolObject(JSON.parse(attempt.text), tools);
@@ -4755,7 +4771,7 @@ function jsonDecisionCandidates(rawResponse, tools) {
         if (seen.has(key)) continue;
         seen.add(key);
         const score = /"(?:tool|answer)"/u.test(attempt.text) ? 20 : 0;
-        valid.push({ text: content, position: source.offset, score: score + (/"args"/u.test(attempt.text) ? 8 : 0), repairs: attempt.repairs });
+        valid.push({ text: content, position: source.offset, score: score + (/"args"/u.test(attempt.text) ? 8 : 0) + (attempt.semanticBonus ?? 0), repairs: attempt.repairs });
       } catch {
       }
     }
@@ -7204,6 +7220,19 @@ var COPILOT_CLICK_SEND_JS = `(() => {
   const diagnosticButtons=(nearby.length?nearby:buttons).slice(-32);
   return JSON.stringify({ clicked: false, inventory: diagnosticButtons.map(inventory) });
 })()`;
+var COPILOT_SEND_READY_JS = `(() => {
+  ${VISIBLE_JS}
+  ${DOCS_JS}
+  const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button, [role="button"]')));
+  const structural = b => b.matches('button[type="submit"],.fai-SendButton,[class*="SendButton" i],[data-testid*="send" i],[data-automation-id*="send" i]');
+  const inventory = b => { const r=b.getBoundingClientRect(); return {ariaLabel:b.getAttribute('aria-label')||'',title:b.title||'',testId:b.getAttribute('data-testid')||'',automationId:b.getAttribute('data-automation-id')||'',className:typeof b.className==='string'?b.className:'',type:b.getAttribute('type')||'',disabled:!!b.disabled,ariaDisabled:b.getAttribute('aria-disabled')||'',visible:__vis(b),rect:{x:r.x,y:r.y,width:r.width,height:r.height,cx:r.x+r.width/2,cy:r.y+r.height/2}}; };
+  const candidates = buttons.filter(b => {
+    const label=(b.getAttribute('aria-label')||b.title||b.textContent||'').trim();
+    return structural(b) || /^(\u9001\u4FE1|send)$/i.test(label);
+  });
+  const ready = candidates.find(b => __vis(b) && !b.disabled && b.getAttribute('aria-disabled') !== 'true');
+  return JSON.stringify({ready:!!ready,inventory:candidates.slice(-32).map(inventory)});
+})()`;
 var EDITOR_LENGTH_JS = `(() => {
   ${VISIBLE_JS}
   ${DOCS_JS}
@@ -7833,32 +7862,35 @@ var CopilotEdgeClient = class {
     if (prompt.length > this.s.maxPromptChars) {
       throw new Error(`\u4F9D\u983C\u6587\u304C\u4E0A\u9650 ${this.s.maxPromptChars} \u6587\u5B57\u3092\u8D85\u3048\u3066\u3044\u307E\u3059 (${prompt.length} \u6587\u5B57)`);
     }
-    try {
-      await this.pasteViaClipboard(prompt);
-      return;
-    } catch (err) {
-      console.log(`[paste] \u30AF\u30EA\u30C3\u30D7\u30DC\u30FC\u30C9\u8CBC\u308A\u4ED8\u3051\u306B\u5931\u6557\u3001\u30C1\u30E3\u30F3\u30AF\u65B9\u5F0F\u3078\u30D5\u30A9\u30FC\u30EB\u30D0\u30C3\u30AF: ${err.message}`);
+    let lastDirectError = "";
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await this.insertDirect(prompt);
+        if (attempt > 1) console.log("[input] \u5358\u4E00Input.insertText\u306E\u518D\u8A66\u884C\u3067\u6210\u529F");
+        return;
+      } catch (err) {
+        lastDirectError = err.message;
+        console.log(`[input] \u5358\u4E00Input.insertText attempt=${attempt} failed: ${lastDirectError}`);
+        if (attempt < 2) await sleep(300);
+      }
     }
+    console.log(`[input] \u5358\u4E00Input.insertText\u30922\u56DE\u78BA\u8A8D\u3067\u304D\u305A\u3001\u30C1\u30E3\u30F3\u30AF\u65B9\u5F0F\u3078\u30D5\u30A9\u30FC\u30EB\u30D0\u30C3\u30AF: ${lastDirectError}`);
     await this.insertByChunks(prompt);
   }
-  async pasteViaClipboard(prompt) {
+  async insertDirect(prompt) {
+    if (await this.editorLength() > 0) await this.clearEditor();
     await this.bringToFront();
-    await this.grantClipboard();
     await this.focusEditor();
-    await this.evalWithReconnect("window.focus(); true", 5e3);
-    await this.evalWithReconnect(`navigator.clipboard.writeText(${JSON.stringify(prompt)})`, 15e3);
-    for (let i = 0; i < 6; i++) {
-      await this.evalWithReconnect(CLEAR_EDITOR_JS);
+    const timeoutMs = prompt.length > 12e3 ? 9e4 : prompt.length > 5e3 ? 6e4 : 3e4;
+    await this.cdpMethod("Input.insertText", { text: prompt }, timeoutMs);
+    let final = await this.editorState();
+    for (let poll = 0; poll < 12 && (!final.found || final.text !== prompt); poll++) {
       await sleep(150);
-      if (await this.editorLength() === 0) break;
+      final = await this.editorState();
     }
-    await this.focusEditor();
-    await this.evalWithReconnect("(() => { const s = getSelection(); if (!s || !document.activeElement) return; s.selectAllChildren(document.activeElement); s.collapseToEnd() })()", 1e4);
-    await this.cdpMethod("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "v", code: "KeyV", windowsVirtualKeyCode: 86, modifiers: 2 });
-    await this.cdpMethod("Input.dispatchKeyEvent", { type: "keyUp", key: "v", code: "KeyV", windowsVirtualKeyCode: 86, modifiers: 2 });
-    await sleep(700);
-    const len = Number(await this.editorLength());
-    if (len < prompt.length * 0.9) throw new Error(`\u8CBC\u308A\u4ED8\u3051\u5F8C\u306E\u9577\u3055\u4E0D\u8DB3 (\u671F\u5F85 ~${prompt.length}, \u5B9F\u969B ${len})`);
+    if (!final.found || final.text !== prompt) throw new Error(`\u8CBC\u308A\u4ED8\u3051\u5F8C\u306E\u5185\u5BB9\u4E0D\u4E00\u81F4 (${textMismatchDiagnostic(prompt, final.text)})`);
+    const send = await this.waitSendReady(6e3);
+    if (!send.ready) throw new Error("\u5358\u4E00Input.insertText\u5F8C\u3082\u9001\u4FE1\u30DC\u30BF\u30F3\u304C\u6709\u52B9\u306B\u306A\u308A\u307E\u305B\u3093\u3067\u3057\u305F");
   }
   async insertByChunks(prompt) {
     if (await this.editorLength() > 0) {
@@ -7953,7 +7985,41 @@ var CopilotEdgeClient = class {
     })()`;
     if (await this.evalWithReconnect(js) !== "ok") throw new Error("\u5165\u529B\u6B04\u306B\u30D5\u30A9\u30FC\u30AB\u30B9\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
   }
-  async clickSend() {
+  async waitSendReady(timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    let latest = { ready: false, inventory: [] };
+    do {
+      try {
+        latest = JSON.parse(String(await this.evalWithReconnect(COPILOT_SEND_READY_JS)));
+        if (latest.ready) return latest;
+      } catch {
+      }
+      if (Date.now() < deadline) await sleep(150);
+    } while (Date.now() < deadline);
+    return latest;
+  }
+  async waitSendEstablished(baselineText, baselineInputLength, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    let notReadySamples = 0;
+    do {
+      const state = await this.readScreenState(5e3);
+      const inputLength = await this.editorLength();
+      const ready = await this.waitSendReady(1);
+      if (state.generating || baselineText && state.text && state.text !== baselineText || baselineInputLength > 0 && inputLength >= 0 && inputLength <= 2) return true;
+      notReadySamples = ready.ready ? 0 : notReadySamples + 1;
+      if (notReadySamples >= 2) return true;
+      if (Date.now() < deadline) await sleep(150);
+    } while (Date.now() < deadline);
+    return false;
+  }
+  async clickSend(baselineText = "") {
+    const ready = await this.waitSendReady(6e3);
+    if (!ready.ready) {
+      const diagnostic = JSON.stringify(ready.inventory ?? []).slice(0, 3e3);
+      console.log(`[send] candidate inventory: ${diagnostic}`);
+      throw new Error(`\u6709\u52B9\u306A\u9001\u4FE1\u30DC\u30BF\u30F3\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u5019\u88DC\u8A3A\u65AD: ${diagnostic}`);
+    }
+    const baselineInputLength = await this.editorLength();
     const raw = await this.evalWithReconnect(COPILOT_CLICK_SEND_JS);
     const result = JSON.parse(String(raw));
     if (!result.clicked) {
@@ -7961,6 +8027,19 @@ var CopilotEdgeClient = class {
       console.log(`[send] candidate inventory: ${diagnostic}`);
       throw new Error(`\u6709\u52B9\u306A\u9001\u4FE1\u30DC\u30BF\u30F3\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u5019\u88DC\u8A3A\u65AD: ${diagnostic}`);
     }
+    if (await this.waitSendEstablished(baselineText, baselineInputLength, 1800)) return;
+    const x = Number(result.selected?.rect?.cx);
+    const y = Number(result.selected?.rect?.cy);
+    if (Number.isFinite(x) && Number.isFinite(y) && x >= 0 && y >= 0) {
+      await this.cdpMethod("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
+      await sleep(80);
+      await this.cdpMethod("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
+      if (await this.waitSendEstablished(baselineText, baselineInputLength, 1800)) {
+        console.log("[send] synthetic click\u672A\u6210\u7ACB\u306E\u305F\u3081CDP native mouse\u3067\u9001\u4FE1");
+        return;
+      }
+    }
+    throw new Error("\u9001\u4FE1\u30DC\u30BF\u30F3\u64CD\u4F5C\u5F8C\u3082\u751F\u6210\u958B\u59CB\u30FB\u5165\u529B\u6D88\u53BB\u30FB\u5FDC\u7B54\u5897\u52A0\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
   }
   async readScreenState(timeoutMs = 15e3) {
     const raw = await this.evalWithReconnect(COPILOT_SCREEN_STATE_JS, timeoutMs);
@@ -8070,7 +8149,7 @@ var CopilotEdgeClient = class {
     const baseline = (await this.readScreenState()).text;
     const baselineReadMs = Date.now() - phaseStartedAt;
     phaseStartedAt = Date.now();
-    await this.clickSend();
+    await this.clickSend(baseline);
     const sendMs = Date.now() - phaseStartedAt;
     throwIfAborted(signal);
     const response = await this.waitResponse(baseline, signal);
