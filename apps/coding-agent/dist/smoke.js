@@ -6942,6 +6942,24 @@ var CopilotEdgeClient = class {
     } catch {
     }
   }
+  readSystemClipboard(deadlineMs = Number.POSITIVE_INFINITY) {
+    if (process.platform !== "win32") return "";
+    try {
+      return String((0, import_node_child_process3.execFileSync)("powershell.exe", [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false); Get-Clipboard -Raw"
+      ], {
+        encoding: "utf8",
+        timeout: this.remainingTimeoutMs(deadlineMs, 5e3),
+        windowsHide: true,
+        maxBuffer: 2 * 1024 * 1024
+      })).trim();
+    } catch {
+      return "";
+    }
+  }
   async finalizeAnswer(fallbackText, deadlineMs = Number.POSITIVE_INFINITY) {
     const assertWithinDeadline = () => {
       assertResponseDeadline(deadlineMs, this.s.responseTimeoutSec);
@@ -6955,8 +6973,11 @@ var CopilotEdgeClient = class {
     try {
       await this.bringToFront(deadlineMs);
       assertWithinDeadline();
-      await this.grantClipboard(deadlineMs);
-      baseline = String(await this.evalWithReconnect("navigator.clipboard.readText()", this.remainingTimeoutMs(deadlineMs, 8e3))).trim();
+      baseline = this.readSystemClipboard(deadlineMs);
+      if (!baseline) {
+        await this.grantClipboard(deadlineMs);
+        baseline = String(await this.evalWithReconnect("navigator.clipboard.readText()", this.remainingTimeoutMs(deadlineMs, 8e3))).trim();
+      }
     } catch {
     }
     assertWithinDeadline();
@@ -6972,10 +6993,15 @@ var CopilotEdgeClient = class {
         console.log("[clip] candidates=" + JSON.stringify(clicked));
         if (clicked.clicked) {
           await sleepWithinDeadline(400 + attempt * 200);
-          const clip = String(await this.evalWithReconnect(
-            "navigator.clipboard.readText()",
-            this.remainingTimeoutMs(deadlineMs, 1e4)
-          ));
+          let clip = this.readSystemClipboard(deadlineMs);
+          if (!clip || clip.trim() === baseline) {
+            clip = String(await this.evalWithReconnect(
+              "navigator.clipboard.readText()",
+              this.remainingTimeoutMs(deadlineMs, 1e4)
+            ));
+          } else {
+            console.log("[clip] read via Windows clipboard");
+          }
           assertWithinDeadline();
           const s = this.stripOuterFence(clip);
           if (s.trim().length >= 10 && s.trim() !== baseline) {
@@ -8158,6 +8184,7 @@ async function testCopilotResponseCompletion() {
   };
   recoveryInternal.grantClipboard = async () => {
   };
+  recoveryInternal.readSystemClipboard = () => "";
   let recoveryEvalCalls = 0;
   recoveryInternal.evalWithReconnect = async () => {
     recoveryEvalCalls++;
@@ -8181,6 +8208,7 @@ async function testCopilotResponseCompletion() {
     };
     clipboardBoundary.grantClipboard = async () => {
     };
+    clipboardBoundary.readSystemClipboard = () => "";
     let clipboardEvalCalls = 0;
     clipboardBoundary.evalWithReconnect = async () => {
       clipboardEvalCalls++;
@@ -8200,6 +8228,7 @@ async function testCopilotResponseCompletion() {
     };
     fallbackBoundary.grantClipboard = async () => {
     };
+    fallbackBoundary.readSystemClipboard = () => "";
     let fallbackEvalCalls = 0;
     fallbackBoundary.evalWithReconnect = async () => {
       fallbackEvalCalls++;
@@ -8210,6 +8239,17 @@ async function testCopilotResponseCompletion() {
       return "fallback response";
     };
     await import_node_assert.default.rejects(fallbackBoundary.finalizeAnswer("fallback", 202), /タイムアウト/);
+    boundaryNow = 300;
+    const systemClipboardClient = new CopilotEdgeClient({ baseURL: "", model: "", provider: "copilot-edge" });
+    const systemClipboard = systemClipboardClient;
+    systemClipboard.bringToFront = async () => {
+    };
+    systemClipboard.grantClipboard = async () => {
+    };
+    let systemClipboardReads = 0;
+    systemClipboard.readSystemClipboard = () => ++systemClipboardReads === 1 ? "old clipboard" : "new clipboard response";
+    systemClipboard.evalWithReconnect = async () => JSON.stringify({ clicked: true });
+    import_node_assert.default.strictEqual(await systemClipboard.finalizeAnswer("fallback", 5e3), "new clipboard response");
     boundaryNow = 1e3;
     const waitBoundaryClient = new CopilotEdgeClient({
       baseURL: "",

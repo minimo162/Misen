@@ -548,6 +548,23 @@ export class CopilotEdgeClient {
     } catch {}
   }
 
+  private readSystemClipboard(deadlineMs = Number.POSITIVE_INFINITY): string {
+    if (process.platform !== 'win32') return ''
+    try {
+      return String(execFileSync('powershell.exe', [
+        '-NoProfile', '-NonInteractive', '-Command',
+        '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false); Get-Clipboard -Raw'
+      ], {
+        encoding: 'utf8',
+        timeout: this.remainingTimeoutMs(deadlineMs, 5000),
+        windowsHide: true,
+        maxBuffer: 2 * 1024 * 1024
+      })).trim()
+    } catch {
+      return ''
+    }
+  }
+
   private async finalizeAnswer(fallbackText: string, deadlineMs = Number.POSITIVE_INFINITY): Promise<string> {
     const assertWithinDeadline = (): void => {
       assertResponseDeadline(deadlineMs, this.s.responseTimeoutSec)
@@ -561,8 +578,11 @@ export class CopilotEdgeClient {
     try {
       await this.bringToFront(deadlineMs)
       assertWithinDeadline()
-      await this.grantClipboard(deadlineMs)
-      baseline = String(await this.evalWithReconnect('navigator.clipboard.readText()', this.remainingTimeoutMs(deadlineMs, 8000))).trim()
+      baseline = this.readSystemClipboard(deadlineMs)
+      if (!baseline) {
+        await this.grantClipboard(deadlineMs)
+        baseline = String(await this.evalWithReconnect('navigator.clipboard.readText()', this.remainingTimeoutMs(deadlineMs, 8000))).trim()
+      }
     } catch {}
     assertWithinDeadline()
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -577,10 +597,15 @@ export class CopilotEdgeClient {
         console.log('[clip] candidates=' + JSON.stringify(clicked))
         if (clicked.clicked) {
           await sleepWithinDeadline(400 + attempt * 200)
-          const clip = String(await this.evalWithReconnect(
-            'navigator.clipboard.readText()',
-            this.remainingTimeoutMs(deadlineMs, 10000)
-          ))
+          let clip = this.readSystemClipboard(deadlineMs)
+          if (!clip || clip.trim() === baseline) {
+            clip = String(await this.evalWithReconnect(
+              'navigator.clipboard.readText()',
+              this.remainingTimeoutMs(deadlineMs, 10000)
+            ))
+          } else {
+            console.log('[clip] read via Windows clipboard')
+          }
           assertWithinDeadline()
           const s = this.stripOuterFence(clip)
           if (s.trim().length >= 10 && s.trim() !== baseline) {

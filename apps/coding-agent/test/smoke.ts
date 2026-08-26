@@ -774,12 +774,14 @@ async function testCopilotResponseCompletion(): Promise<void> {
   type RecoveryInternals = {
     bringToFront: (deadlineMs?: number) => Promise<void>
     grantClipboard: (deadlineMs?: number) => Promise<void>
+    readSystemClipboard: (deadlineMs?: number) => string
     evalWithReconnect: (expression: string, timeoutMs?: number) => Promise<unknown>
     finalizeAnswer: (fallbackText: string, deadlineMs?: number) => Promise<string>
   }
   const recoveryInternal = recoveryClient as unknown as RecoveryInternals
   recoveryInternal.bringToFront = async () => {}
   recoveryInternal.grantClipboard = async () => {}
+  recoveryInternal.readSystemClipboard = () => ''
   let recoveryEvalCalls = 0
   recoveryInternal.evalWithReconnect = async () => {
     recoveryEvalCalls++
@@ -806,6 +808,7 @@ async function testCopilotResponseCompletion(): Promise<void> {
     const clipboardBoundary = clipboardBoundaryClient as unknown as ReturnBoundaryInternals
     clipboardBoundary.bringToFront = async () => {}
     clipboardBoundary.grantClipboard = async () => {}
+    clipboardBoundary.readSystemClipboard = () => ''
     let clipboardEvalCalls = 0
     clipboardBoundary.evalWithReconnect = async () => {
       clipboardEvalCalls++
@@ -824,6 +827,7 @@ async function testCopilotResponseCompletion(): Promise<void> {
     const fallbackBoundary = fallbackBoundaryClient as unknown as ReturnBoundaryInternals
     fallbackBoundary.bringToFront = async () => {}
     fallbackBoundary.grantClipboard = async () => {}
+    fallbackBoundary.readSystemClipboard = () => ''
     let fallbackEvalCalls = 0
     fallbackBoundary.evalWithReconnect = async () => {
       fallbackEvalCalls++
@@ -834,6 +838,16 @@ async function testCopilotResponseCompletion(): Promise<void> {
       return 'fallback response'
     }
     await assert.rejects(fallbackBoundary.finalizeAnswer('fallback', 202), /タイムアウト/)
+
+    boundaryNow = 300
+    const systemClipboardClient = new CopilotEdgeClient({ baseURL: '', model: '', provider: 'copilot-edge' })
+    const systemClipboard = systemClipboardClient as unknown as ReturnBoundaryInternals
+    systemClipboard.bringToFront = async () => {}
+    systemClipboard.grantClipboard = async () => {}
+    let systemClipboardReads = 0
+    systemClipboard.readSystemClipboard = () => (++systemClipboardReads === 1 ? 'old clipboard' : 'new clipboard response')
+    systemClipboard.evalWithReconnect = async () => JSON.stringify({ clicked: true })
+    assert.strictEqual(await systemClipboard.finalizeAnswer('fallback', 5000), 'new clipboard response')
 
     boundaryNow = 1000
     const waitBoundaryClient = new CopilotEdgeClient({
