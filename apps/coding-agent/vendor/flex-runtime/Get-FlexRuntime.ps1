@@ -1,6 +1,9 @@
 ﻿[CmdletBinding()]
 param(
   [string]$ReleaseBase = 'https://github.com/minimo162/company-apps-share/releases/download/flex-runtime-v1',
+  [string]$Repository = 'minimo162/company-apps-share',
+  [string]$ReleaseTag = 'flex-runtime-v1',
+  [string]$Kind = '',
   [switch]$ForceDownload,
   [switch]$DownloadOnly
 )
@@ -35,7 +38,25 @@ function Receive-VerifiedAsset(
   if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
   $url = $ReleaseBase.TrimEnd('/') + '/' + $AssetName
   Write-Host "GET $url"
-  Invoke-WebRequest -UseBasicParsing -Headers @{ 'User-Agent' = 'company-apps-flex-runtime-v1' } -Uri $url -OutFile $temporary
+  try {
+    Invoke-WebRequest -UseBasicParsing -Headers @{ 'User-Agent' = 'company-apps-flex-runtime-v1' } -Uri $url -OutFile $temporary
+  } catch {
+    $downloaded = $false
+    $gh = Get-Command 'gh.exe' -ErrorAction SilentlyContinue
+    if ($gh) {
+      Write-Host 'INFO direct download failed; retrying through authenticated gh.exe'
+      & $gh.Source 'release' 'download' $ReleaseTag '--repo' $Repository '--pattern' $AssetName '--output' $temporary
+      $downloaded = $LASTEXITCODE -eq 0
+    }
+    if (-not $downloaded) {
+      if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+      $curl = Get-Command 'curl.exe' -ErrorAction SilentlyContinue
+      if (-not $curl) { throw }
+      Write-Host 'INFO authenticated gh.exe unavailable; retrying direct URL with Windows curl.exe'
+      & $curl.Source '--fail' '--location' '--retry' '3' '--retry-delay' '2' '--output' $temporary $url
+      if ($LASTEXITCODE -ne 0) { throw "Release download failed ($LASTEXITCODE): $AssetName. For this private repository, run gh auth login first." }
+    }
+  }
   $downloaded = Get-Item -LiteralPath $temporary
   if ($downloaded.Length -ne $ExpectedBytes) {
     Remove-Item -LiteralPath $temporary -Force
@@ -54,7 +75,9 @@ function Receive-VerifiedAsset(
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $manifest = Get-Content -Raw -LiteralPath (Join-Path $here 'manifest.json') | ConvertFrom-Json
 
-foreach ($artifact in @($manifest.artifacts)) {
+$artifacts = @($manifest.artifacts | Where-Object { -not $Kind -or $_.kind -eq $Kind })
+if ($artifacts.Count -eq 0) { throw 'No matching runtime artifact in manifest.' }
+foreach ($artifact in $artifacts) {
   $target = Join-Path $here $artifact.file
   if (Test-Path -LiteralPath $target -PathType Leaf) {
     $targetInfo = Get-Item -LiteralPath $target
