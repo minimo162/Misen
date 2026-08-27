@@ -5755,7 +5755,7 @@ function resolveApiKey(cfg) {
 var import_node_readline = __toESM(require("node:readline"));
 
 // src/agent.ts
-var import_node_crypto2 = __toESM(require("node:crypto"));
+var import_node_crypto3 = __toESM(require("node:crypto"));
 var import_node_path3 = __toESM(require("node:path"));
 var import_jsonrepair2 = __toESM(require_cjs());
 
@@ -6149,6 +6149,30 @@ async function convertCopilotResponse(settings, rawResponse, tools, signal) {
   });
 }
 
+// src/audit-log.ts
+var import_node_crypto = __toESM(require("node:crypto"));
+function canonicalizeAuditValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalizeAuditValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => [key, canonicalizeAuditValue(item)]));
+  }
+  return value;
+}
+function auditArgsSha256(args) {
+  const canonical = JSON.stringify(canonicalizeAuditValue(args));
+  return import_node_crypto.default.createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+function makeAuditArguments(summary, args) {
+  return { summary, sha256: auditArgsSha256(args) };
+}
+function nullAuditTarget(target) {
+  return {
+    path: typeof target?.path === "string" ? target.path : null,
+    before_sha256: typeof target?.before_sha256 === "string" ? target.before_sha256 : null,
+    after_sha256: typeof target?.after_sha256 === "string" ? target.after_sha256 : null
+  };
+}
+
 // src/llm.ts
 var import_node_http2 = __toESM(require("node:http"));
 var import_node_https2 = __toESM(require("node:https"));
@@ -6211,7 +6235,7 @@ async function chat(cfg, messages, tools, signal) {
 // src/tools.ts
 var import_node_fs2 = __toESM(require("node:fs"));
 var import_node_child_process2 = require("node:child_process");
-var import_node_crypto = __toESM(require("node:crypto"));
+var import_node_crypto2 = __toESM(require("node:crypto"));
 var import_promises = __toESM(require("node:fs/promises"));
 var import_node_path2 = __toESM(require("node:path"));
 var import_node_util = __toESM(require("node:util"));
@@ -6532,7 +6556,7 @@ var MAX_READ_FILES_CHARS = 8e4;
 var READ_XLSX_USAGE = "powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path <\u30D1\u30B9>";
 var UPDATE_LEDGER_USAGE = "powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted <\u62BD\u51FAJSON> -Rates <\u30EC\u30FC\u30C8CSV> -Ledger <\u53F0\u5E33xlsx>";
 function sha256(text2) {
-  return import_node_crypto.default.createHash("sha256").update(text2, "utf8").digest("hex");
+  return import_node_crypto2.default.createHash("sha256").update(text2, "utf8").digest("hex");
 }
 function lineDelta(before, after) {
   const beforeLines = before === "" ? [] : before.split(/\r?\n/);
@@ -7702,12 +7726,21 @@ function attachFenceContent(raw, end, parsed) {
     parsed.args = { ...parsed.args ?? {}, content: fm[1].replace(/^\r?\n/, "").trim() };
   }
 }
+function buildToolAuditMetadata(tool2, args, permission, approval, target = {}) {
+  const pathValue = typeof args.path === "string" ? args.path : null;
+  return {
+    arguments: makeAuditArguments(summarize(tool2, args), args),
+    permission: { decision: permission },
+    approval,
+    target: nullAuditTarget({ path: pathValue, ...target })
+  };
+}
 function buildResearchBundle(question, summary, retrievedAt = (/* @__PURE__ */ new Date()).toISOString()) {
   const urls = [...summary.matchAll(/https?:\/\/[^\s<>()\[\]"'（）【】、。]+/g)].map((match2) => match2[0].replace(/[.,;:!?、。]+$/, ""));
   const uniqueUrls = [...new Set(urls)];
   const sources = uniqueUrls.map((url2) => ({ url: url2, retrievedAt }));
   const claims = summary.split(/\r?\n+/).map((text2) => text2.trim()).filter(Boolean).map((text2) => ({ text: text2, citations: sources }));
-  const contentHash = import_node_crypto2.default.createHash("sha256").update(summary, "utf8").digest("hex");
+  const contentHash = import_node_crypto3.default.createHash("sha256").update(summary, "utf8").digest("hex");
   return { researchId: `research-${contentHash.slice(0, 16)}`, question, summary, claims, sources, retrievedAt, contentHash };
 }
 var END_MARKER = "AGENT_END";
@@ -7809,8 +7842,9 @@ async function bootstrapWorkspaceEvidence(ctx, io) {
     return ["TOOL_RESULT (\u7B2C0\u30BF\u30FC\u30F3\u81EA\u52D5\u5B9F\u884C)", formatHostResult(tool2, "[tool error] list_files\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093", null, "failed", callId, ctx.runId)].join("\n");
   }
   const summary = "list_files: \u7B2C0\u30BF\u30FC\u30F3\u306E\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u8A3C\u62E0\u3092\u53D6\u5F97";
-  io.event?.({ type: "tool.requested", tool: tool2, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
-  io.event?.({ type: "step.started", tool: tool2, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
+  const audit = buildToolAuditMetadata(tool2, {}, "allow", { required: false, outcome: "not_required", actor: "policy", automatic: true });
+  io.event?.({ type: "tool.requested", tool: tool2, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
+  io.event?.({ type: "step.started", tool: tool2, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
   const startedAt = Date.now();
   let output;
   try {
@@ -7820,8 +7854,8 @@ async function bootstrapWorkspaceEvidence(ctx, io) {
   }
   const failed = output.startsWith("[tool error]");
   const durationMs = Date.now() - startedAt;
-  io.event?.({ type: failed ? "tool.failed" : "tool.succeeded", tool: tool2, summary, output: output.slice(0, 1200), durationMs, origin: "host", namespace: "app", authority: "authoritative", callId });
-  io.event?.({ type: failed ? "step.failed" : "step.completed", tool: tool2, summary, output: output.slice(0, 800), durationMs, origin: "host", namespace: "app", authority: "authoritative", callId });
+  io.event?.({ type: failed ? "tool.failed" : "tool.succeeded", tool: tool2, summary, output: output.slice(0, 1200), durationMs, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
+  io.event?.({ type: failed ? "step.failed" : "step.completed", tool: tool2, summary, output: output.slice(0, 800), durationMs, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
   return [
     "TOOL_RESULT (\u7B2C0\u30BF\u30FC\u30F3\u81EA\u52D5\u5B9F\u884C\u3002\u30E2\u30C7\u30EB\u5224\u65AD\u56DE\u6570\u30FBhost\u5B9F\u884C\u4E88\u7B97\u306B\u306F\u4E0D\u7B97\u5165)",
     formatHostResult(tool2, output, null, failed ? "failed" : "succeeded", callId, ctx.runId)
@@ -8024,34 +8058,61 @@ async function runCopilotTurn(opts) {
     const qualified = qualifiedToolName(def.name);
     const callId = `host-call-${executions + 1}`;
     const summary = summarize(qualified, args);
-    io.event?.({ type: "tool.requested", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
-    io.event?.({ type: "step.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
+    const permission = def.kind === "read" ? "allow" : "ask";
+    let audit = buildToolAuditMetadata(qualified, args, permission, {
+      required: def.kind !== "read",
+      outcome: def.kind === "read" ? "not_required" : "not_required",
+      actor: "policy",
+      automatic: def.kind === "read"
+    });
+    io.event?.({ type: "tool.requested", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
+    io.event?.({ type: "step.started", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
     if (def.kind !== "read") {
       const auto = def.kind === "write" ? policy.autoApproveWrite : policy.autoApproveCommand;
       const fileBinding = await captureFileBinding(def, args, ctx);
+      audit = buildToolAuditMetadata(qualified, args, permission, {
+        required: true,
+        outcome: "not_required",
+        actor: "policy",
+        automatic: false
+      }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
       const approvalBinding = { ...fileBinding, toolName: qualified, argsHash: JSON.stringify(normalizeForKey(args)), command: typeof args.command === "string" ? args.command : void 0, network: def.kind === "command", callId };
       if (!auto) {
+        io.event?.({ type: "approval.requested", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
         const ok = await io.askYesNo(`\u5B9F\u884C\u3092\u8A31\u53EF\u3057\u307E\u3059\u304B\uFF1F
 ${summary}`, approvalBinding);
-        if (ok) io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, origin: "host", namespace: "app", authority: "authoritative", callId });
+        audit = buildToolAuditMetadata(qualified, args, permission, {
+          required: true,
+          outcome: ok ? "approved" : "denied",
+          actor: "user",
+          automatic: false
+        }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
+        io.event?.({ type: "approval.resolved", tool: qualified, summary, approved: ok, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
+        if (ok) io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
         if (ok && await approvalPreconditionChanged(approvalBinding, ctx)) {
-          io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u627F\u8A8D\u3092\u7121\u52B9\u5316\u3057\u307E\u3057\u305F", origin: "host", namespace: "app", authority: "authoritative", callId });
+          io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u627F\u8A8D\u3092\u7121\u52B9\u5316\u3057\u307E\u3057\u305F", audit, origin: "host", namespace: "app", authority: "authoritative", callId });
           steps.push(formatHostResult(qualified, "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u5B9F\u884C\u3057\u307E\u305B\u3093\u3067\u3057\u305F", null, "denied", callId, ctx.runId));
           continue;
         }
         if (!ok) {
-          io.event?.({ type: "tool.denied", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
+          io.event?.({ type: "tool.denied", tool: qualified, summary, error: "\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F", audit, origin: "host", namespace: "app", authority: "authoritative", callId });
           steps.push(formatHostResult(qualified, "\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F", null, "denied", callId, ctx.runId));
           continue;
         }
       } else {
-        io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, metadata: { automatic: true }, origin: "host", namespace: "app", authority: "authoritative", callId });
+        audit = buildToolAuditMetadata(qualified, args, permission, {
+          required: true,
+          outcome: "approved",
+          actor: "policy",
+          automatic: true
+        }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
+        io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, audit, metadata: { automatic: true }, origin: "host", namespace: "app", authority: "authoritative", callId });
       }
     }
     executions++;
     if (def.kind === "write") writes++;
     if (def.kind === "command") commands++;
-    io.event?.({ type: "tool.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
+    io.event?.({ type: "tool.started", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
     io.print(`[tool] ${summary}`);
     if (stopRequested()) return canceled();
     const startedAt = Date.now();
@@ -8067,8 +8128,12 @@ ${summary}`, approvalBinding);
     const resultKey = `${qualified}:${metadata?.afterHash ?? output.slice(0, 1600)}`;
     noProgress = failed || resultKey === lastResultKey ? noProgress + 1 : 0;
     lastResultKey = resultKey;
-    io.event?.({ type: failed ? "tool.failed" : "tool.succeeded", tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId });
-    io.event?.({ type: failed ? "step.failed" : "step.completed", tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId });
+    const terminalAudit = buildToolAuditMetadata(qualified, args, permission, audit.approval, {
+      ...audit.target,
+      after_sha256: typeof metadata?.afterHash === "string" ? metadata.afterHash : null
+    });
+    io.event?.({ type: failed ? "tool.failed" : "tool.succeeded", tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId });
+    io.event?.({ type: failed ? "step.failed" : "step.completed", tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId });
     steps.push(formatHostResult(qualified, output, metadata, failed ? "failed" : "succeeded", callId, ctx.runId));
     steps.push(`SYSTEM: ${qualified} \u306F\u5B9F\u884C\u6E08\u307F\u3067\u3059\u3002\u7D50\u679C\u3092\u6839\u62E0\u306B\u6B21\u306E1\u624B\u3092\u5224\u65AD\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
     if (noProgress >= maxNoProgress) return stopWithWarning(`host\u30C4\u30FC\u30EB\u7D50\u679C\u306B\u9032\u5C55\u304C\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F\uFF08${maxNoProgress}\u56DE\u9023\u7D9A\uFF09`);
@@ -8202,43 +8267,75 @@ async function executeCall(call, cfg, ctx, io) {
   if (argError) return `[validation error] ${argError}`;
   const qualified = qualifiedToolName(def.name);
   const summary = summarize(qualified, args);
-  io.event?.({ type: "tool.requested", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
-  io.event?.({ type: "step.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+  const permission = def.kind === "read" ? "allow" : "ask";
+  let audit = buildToolAuditMetadata(qualified, args, permission, {
+    required: def.kind !== "read",
+    outcome: "not_required",
+    actor: "policy",
+    automatic: def.kind === "read"
+  });
+  io.event?.({ type: "tool.requested", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+  io.event?.({ type: "step.started", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
   if (def.kind !== "read") {
     const auto = def.kind === "write" ? policy.autoApproveWrite : policy.autoApproveCommand;
     const fileBinding = await captureFileBinding(def, args, ctx);
+    audit = buildToolAuditMetadata(qualified, args, permission, {
+      required: true,
+      outcome: "not_required",
+      actor: "policy",
+      automatic: false
+    }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
     const approvalBinding = { ...fileBinding, toolName: qualified, argsHash: JSON.stringify(normalizeForKey(args)), command: typeof args.command === "string" ? args.command : void 0, network: def.kind === "command", callId: call.id };
     if (!auto) {
+      io.event?.({ type: "approval.requested", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
       const ok = await io.askYesNo(`\u5B9F\u884C\u3092\u8A31\u53EF\u3057\u307E\u3059\u304B\uFF1F
 ${summary}`, approvalBinding);
-      if (ok) io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+      audit = buildToolAuditMetadata(qualified, args, permission, {
+        required: true,
+        outcome: ok ? "approved" : "denied",
+        actor: "user",
+        automatic: false
+      }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
+      io.event?.({ type: "approval.resolved", tool: qualified, summary, approved: ok, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+      if (ok) io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
       if (ok && await approvalPreconditionChanged(approvalBinding, ctx)) {
-        io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u627F\u8A8D\u3092\u7121\u52B9\u5316\u3057\u307E\u3057\u305F", origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+        io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u627F\u8A8D\u3092\u7121\u52B9\u5316\u3057\u307E\u3057\u305F", audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
         return "(\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)";
       }
       if (!ok) {
-        io.event?.({ type: "tool.denied", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+        io.event?.({ type: "tool.denied", tool: qualified, summary, error: "\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F", audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
         return "(\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)";
       }
     } else {
-      io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, metadata: { automatic: true }, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+      audit = buildToolAuditMetadata(qualified, args, permission, {
+        required: true,
+        outcome: "approved",
+        actor: "policy",
+        automatic: true
+      }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
+      io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, audit, metadata: { automatic: true }, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
     }
   }
-  io.event?.({ type: "tool.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+  io.event?.({ type: "tool.started", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
   io.print(`[tool] ${summary}`);
   const startedAt = Date.now();
   try {
     const output = await def.run(args, ctx);
     const durationMs = Date.now() - startedAt;
     const metadata = parseToolResultMeta(output);
-    io.event?.({ type: "tool.succeeded", tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
-    io.event?.({ type: "step.completed", tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+    const terminalAudit = buildToolAuditMetadata(qualified, args, permission, audit.approval, {
+      ...audit.target,
+      after_sha256: typeof metadata?.afterHash === "string" ? metadata.afterHash : null
+    });
+    io.event?.({ type: "tool.succeeded", tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+    io.event?.({ type: "step.completed", tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
     return output;
   } catch (err) {
     const output = `[tool error] ${err.message}`;
     const durationMs = Date.now() - startedAt;
-    io.event?.({ type: "tool.failed", tool: qualified, summary, output, error: output, durationMs, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
-    io.event?.({ type: "step.failed", tool: qualified, summary, output, error: output, durationMs, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+    const terminalAudit = buildToolAuditMetadata(qualified, args, permission, audit.approval, { ...audit.target });
+    io.event?.({ type: "tool.failed", tool: qualified, summary, output, error: output, durationMs, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+    io.event?.({ type: "step.failed", tool: qualified, summary, output, error: output, durationMs, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
     return output;
   }
 }
@@ -40145,8 +40242,14 @@ async function executeV2ToolCall(call, def, cfg, ctx, io, beforeHooks) {
   if (argError) return { output: `[validation error] ${argError}`, status: "failed", executed: false, metadata: null };
   const qualified = qualifiedToolName(def.name);
   const summary = summarize(qualified, args);
-  io.event?.({ type: "tool.requested", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
-  io.event?.({ type: "step.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+  let audit = buildToolAuditMetadata(qualified, args, def.kind === "read" ? "allow" : "ask", {
+    required: def.kind !== "read",
+    outcome: "not_required",
+    actor: "policy",
+    automatic: def.kind === "read"
+  });
+  io.event?.({ type: "tool.requested", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+  io.event?.({ type: "step.started", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
   const permissionController = cfg.permissions && cfg.permissions.length > 0 ? createPermissionHook(cfg.permissions) : void 0;
   const effectiveBeforeHooks = permissionController ? [...beforeHooks, permissionController.hook] : beforeHooks;
   let permissionDecision;
@@ -40156,13 +40259,28 @@ async function executeV2ToolCall(call, def, cfg, ctx, io, beforeHooks) {
   } catch (err) {
     const reason = err.message || String(err);
     const output = `[hook denied] ${reason}`;
-    io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: reason, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
-    io.event?.({ type: "step.failed", tool: qualified, summary, output, error: reason, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+    const permission2 = permissionController && /^permission denied:/u.test(reason) ? "deny" : def.kind === "read" ? "allow" : "ask";
+    audit = buildToolAuditMetadata(qualified, args, permission2, {
+      required: false,
+      outcome: "not_required",
+      actor: "policy",
+      automatic: true
+    });
+    io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: reason, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+    io.event?.({ type: "step.failed", tool: qualified, summary, output, error: reason, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
     return { output, status: "denied", executed: false, metadata: null };
   }
   const policy = capabilityPolicy(cfg, "work");
   const permissionAsk = permissionDecision === "ask";
   const permissionAllow = permissionDecision === "allow";
+  const permission = permissionDecision ?? (def.kind === "read" ? "allow" : "ask");
+  const effectiveSummary = summarize(qualified, args);
+  audit = buildToolAuditMetadata(qualified, args, permission, {
+    required: def.kind !== "read",
+    outcome: def.kind === "read" ? "not_required" : "not_required",
+    actor: "policy",
+    automatic: def.kind === "read"
+  });
   if (permissionAsk || def.kind !== "read") {
     const automatic = permissionAllow || !permissionAsk && (def.kind === "write" ? policy.autoApproveWrite : policy.autoApproveCommand);
     const fileBinding = await captureFileBinding(def, args, ctx);
@@ -40174,43 +40292,66 @@ async function executeV2ToolCall(call, def, cfg, ctx, io, beforeHooks) {
       network: def.kind === "command",
       callId: call.toolCallId
     };
+    audit = buildToolAuditMetadata(qualified, args, permission, {
+      required: true,
+      outcome: "not_required",
+      actor: "policy",
+      automatic: false
+    }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
     if (!automatic) {
-      io.event?.({ type: "approval.requested", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+      io.event?.({ type: "approval.requested", tool: qualified, summary: effectiveSummary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
       const approved = await io.askYesNo(`\u5B9F\u884C\u3092\u8A31\u53EF\u3057\u307E\u3059\u304B\uFF1F
-${summary}`, binding);
-      io.event?.({ type: "approval.resolved", tool: qualified, summary, approved, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+${effectiveSummary}`, binding);
+      audit = buildToolAuditMetadata(qualified, args, permission, {
+        required: true,
+        outcome: approved ? "approved" : "denied",
+        actor: "user",
+        automatic: false
+      }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
+      io.event?.({ type: "approval.resolved", tool: qualified, summary: effectiveSummary, approved, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
       if (approved && await approvalPreconditionChanged(binding, ctx)) {
         const output = "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u5B9F\u884C\u3057\u307E\u305B\u3093\u3067\u3057\u305F";
-        io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: output, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
-        io.event?.({ type: "step.failed", tool: qualified, summary, output, error: output, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+        io.event?.({ type: "tool.denied", tool: qualified, summary: effectiveSummary, approved: false, error: output, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+        io.event?.({ type: "step.failed", tool: qualified, summary: effectiveSummary, output, error: output, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
         return { output, status: "denied", executed: false, metadata: null };
       }
       if (!approved) {
         const output = "\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F";
-        io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
-        io.event?.({ type: "step.failed", tool: qualified, summary, output, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+        io.event?.({ type: "tool.denied", tool: qualified, summary: effectiveSummary, approved: false, output, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+        io.event?.({ type: "step.failed", tool: qualified, summary: effectiveSummary, output, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
         return { output, status: "denied", executed: false, metadata: null };
       }
-      io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+      io.event?.({ type: "tool.approved", tool: qualified, summary: effectiveSummary, approved: true, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
     } else {
-      io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, metadata: { automatic: true, ...permissionAllow ? { permission: "allow" } : {} }, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+      audit = buildToolAuditMetadata(qualified, args, permission, {
+        required: true,
+        outcome: "approved",
+        actor: "policy",
+        automatic: true
+      }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
+      io.event?.({ type: "tool.approved", tool: qualified, summary: effectiveSummary, approved: true, audit, metadata: { automatic: true, ...permissionAllow ? { permission: "allow" } : {} }, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
     }
   }
-  io.event?.({ type: "tool.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
-  io.print(`[tool] ${summary}`);
+  io.event?.({ type: "tool.started", tool: qualified, summary: effectiveSummary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+  io.print(`[tool] ${effectiveSummary}`);
   const startedAt = Date.now();
   try {
     const output = await def.run(args, ctx);
     const durationMs = Date.now() - startedAt;
     const metadata = parseToolResultMeta(output);
-    io.event?.({ type: "tool.succeeded", tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
-    io.event?.({ type: "step.completed", tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+    const terminalAudit = buildToolAuditMetadata(qualified, args, permission, audit.approval, {
+      ...audit.target,
+      after_sha256: typeof metadata?.afterHash === "string" ? metadata.afterHash : null
+    });
+    io.event?.({ type: "tool.succeeded", tool: qualified, summary: effectiveSummary, output: output.slice(0, 1200), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+    io.event?.({ type: "step.completed", tool: qualified, summary: effectiveSummary, output: output.slice(0, 800), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
     return { output, status: "succeeded", executed: true, metadata };
   } catch (err) {
     const output = `[tool error] ${err.message}`;
     const durationMs = Date.now() - startedAt;
-    io.event?.({ type: "tool.failed", tool: qualified, summary, output, error: output, durationMs, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
-    io.event?.({ type: "step.failed", tool: qualified, summary, output, error: output, durationMs, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+    const terminalAudit = buildToolAuditMetadata(qualified, args, permission, audit.approval, { ...audit.target });
+    io.event?.({ type: "tool.failed", tool: qualified, summary: effectiveSummary, output, error: output, durationMs, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+    io.event?.({ type: "step.failed", tool: qualified, summary: effectiveSummary, output, error: output, durationMs, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
     return { output, status: "failed", executed: true, metadata: null };
   }
 }

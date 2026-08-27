@@ -6,12 +6,13 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { capabilityPolicy, loadConfig, type AgentConfig, type CapabilityPolicy, type TurnMode } from './config'
 import type { AgentEvent, AgentIO, ResearchBundle, TextBackend } from './agent'
+import { auditAvailability, auditRecordFromOutcome, createAuditLog, type AuditEventLike, type AuditLog, type AuditMetadata } from './audit-log'
 import { runConfiguredAgentTurn } from './agent-loop'
 import { CopilotEdgeClient } from './copilot'
 import type { ChatMessage } from './llm'
 import { bareToolName, getFileSnapshot, rollbackFileChange, type ToolContext } from './tools'
 import { killAllManagedProcesses, listManagedProcesses, readManagedProcessLog, stopManagedProcess } from './processes'
-import { clearApprovals, getApprovalResolution, listApprovals, requestApproval, resolveApproval, type ApprovalBinding, type ApprovalRisk } from './approvals'
+import { clearApprovals, getApprovalResolution, listApprovals, requestApproval, resolveApproval, type ApprovalBinding, type ApprovalRisk, type ApprovalResolutionProvenance } from './approvals'
 
 const PORT = Number(process.env.PORT ?? 3948)
 const execFileAsync = util.promisify(execFile)
@@ -45,6 +46,19 @@ const uiAssets: Record<string, { path: string; contentType: string }> = {
 }
 const distributionStatePath = path.join(process.env.LOCALAPPDATA ?? path.dirname(here), 'CompanyApps', 'state', 'coding-agent.json')
 const persistencePath = path.join(process.env.APPDATA ?? process.env.LOCALAPPDATA ?? path.dirname(here), 'CompanyApps', 'coding-agent', 'state.json')
+let auditLog: AuditLog | null = null
+let auditInitError: string | null = null
+try {
+  // Compliance boundary: validate and open the append destination before any
+  // work turn can be accepted. Existing audit bytes are never replaced.
+  const candidate = createAuditLog({ workspace, directory: cfg.auditLogDir })
+  candidate.initialize()
+  auditLog = candidate
+} catch (err) {
+  auditInitError = (err as Error).message || String(err)
+  console.error(`[audit] 初期化に失敗しました: ${auditInitError}`)
+}
+const auditedOutcomeKeys = new Set<string>()
 
 function readDistributionState(): Record<string, unknown> {
   try {
@@ -154,6 +168,7 @@ interface RunEvent {
   tool?: string
   summary?: string
   output?: string
+  error?: string
   approved?: boolean
   durationMs?: number
   metadata?: Record<string, unknown> | null
@@ -161,6 +176,7 @@ interface RunEvent {
   namespace?: 'app' | 'native' | 'none'
   authority?: 'authoritative' | 'observed' | 'claimed' | 'derived'
   callId?: string
+  audit?: AuditMetadata
 }
 
 interface RunData {
@@ -305,12 +321,33 @@ function createRun(session: SessionData, request: string, mode: TurnMode, parent
   return run
 }
 
+function appendAuditForOutcome(run: RunData, event: RunEvent): void {
+  if (event.origin !== 'host' || (event.type !== 'tool.succeeded' && event.type !== 'tool.failed' && event.type !== 'tool.denied')) return
+  const key = `${run.id}:${event.callId ?? event.eventId ?? event.type}`
+  if (auditedOutcomeKeys.has(key)) return
+  if (!auditLog || auditInitError || !auditLog.healthy) throw new Error(`監査ログを利用できないためhostツール結果を確定できません: ${auditInitError ?? auditLog?.failureReason ?? '未初期化'}`)
+  try {
+    const record = auditRecordFromOutcome({ sessionId: run.sessionId, runId: run.id, event: event as AuditEventLike, history: (run.auditEvents ?? []) as AuditEventLike[] })
+    if (!record) return
+    auditLog.append(record, key)
+    auditedOutcomeKeys.add(key)
+  } catch (err) {
+    // A runtime append failure is a compliance outage, not a best-effort
+    // warning. Latch it for the lifetime of this server so every subsequent
+    // work/resume/retry request fails closed with 503.
+    const detail = (err as Error).message || String(err)
+    auditInitError ??= `監査ログ追記に失敗しました: ${detail}`
+    throw new Error(auditInitError)
+  }
+}
+
 function addRunEvent(run: RunData, event: Omit<RunEvent, 'sequence' | 'at'>): void {
   run.updatedAt = Date.now()
   const sequence = run.nextSequence ?? ((run.auditEvents ?? run.events).reduce((max, entry) => Math.max(max, entry.sequence), 0) + 1)
   run.nextSequence = sequence + 1
   const eventId = `${run.id}-event-${sequence}`
   const nextEvent: RunEvent = { ...event, origin: event.origin ?? 'orchestrator', namespace: event.namespace ?? 'none', authority: event.authority ?? 'derived', eventId, runId: run.id, stepId: run.phase, toolEventId: eventId, sequence, at: run.updatedAt }
+  appendAuditForOutcome(run, nextEvent)
   run.auditEvents ??= []
   run.auditEvents.push(nextEvent)
   run.events.push(nextEvent)
@@ -535,7 +572,8 @@ function updateRunFromEvent(run: RunData, event: AgentEvent): void {
     origin: event.origin,
     namespace: event.namespace,
     authority: event.authority,
-    callId: event.callId
+    callId: event.callId,
+    audit: event.audit
   })
 }
 
@@ -689,12 +727,14 @@ function makeRunIO(run: RunData, controller: AbortController): AgentIO {
       run.phase = 'execute'
       run.currentStep = question
       run.nextAction = '承認または拒否を選択してください'
-      addRunEvent(run, { type: 'approval.requested', message: question, metadata: { approval: run.approval } })
+      addRunEvent(run, { type: 'approval.requested', message: question, metadata: { approval: run.approval }, origin: 'host', namespace: 'app', authority: 'authoritative', callId: binding?.callId })
       const approved = await pending
       const resolution = run.approval?.id ? getApprovalResolution(run.approval.id) : undefined
       run.approval = { ...run.approval, approved, ...(resolution ? { reason: resolution.reason } : {}) }
-      if (resolution?.reason === '承認期限切れ') addRunEvent(run, { type: 'approval.expired', message: resolution.reason, approved: false, metadata: { approval: run.approval } })
-      addRunEvent(run, { type: 'approval.resolved', message: resolution?.reason ?? (approved ? '承認しました' : '拒否しました'), approved, metadata: { approval: run.approval } })
+      const provenance: ApprovalResolutionProvenance = resolution?.provenance ?? { actor: 'user', automatic: false }
+      const approvalMetadata = { ...run.approval, provenance }
+      if (provenance.actor === 'policy' && resolution?.reason === '承認期限切れ') addRunEvent(run, { type: 'approval.expired', message: resolution.reason, approved: false, metadata: { approval: approvalMetadata }, origin: 'host', namespace: 'app', authority: 'authoritative', callId: binding?.callId })
+      addRunEvent(run, { type: 'approval.resolved', message: resolution?.reason ?? (approved ? '承認しました' : '拒否しました'), approved, metadata: { approval: approvalMetadata }, origin: 'host', namespace: 'app', authority: 'authoritative', callId: binding?.callId })
       if (!run.cancelRequested) run.status = 'running'
       return approved
     },
@@ -771,6 +811,24 @@ function readBody(req: http.IncomingMessage): Promise<string> {
     req.on('end', () => resolve(d))
     req.on('error', reject)
   })
+}
+
+function auditFilters(url: URL): { limit: number; tool?: string; result?: 'success' | 'failure' | 'refused'; permission?: 'allow' | 'ask' | 'deny' } {
+  const rawLimit = Number(url.searchParams.get('limit') ?? 200)
+  const limit = Number.isFinite(rawLimit) ? Math.min(500, Math.max(1, Math.trunc(rawLimit))) : 200
+  const tool = url.searchParams.get('tool') || undefined
+  const resultValue = url.searchParams.get('result')
+  const permissionValue = url.searchParams.get('permission')
+  const result = resultValue === 'success' || resultValue === 'failure' || resultValue === 'refused' ? resultValue : undefined
+  const permission = permissionValue === 'allow' || permissionValue === 'ask' || permissionValue === 'deny' ? permissionValue : undefined
+  return { limit, ...(tool ? { tool } : {}), ...(result ? { result } : {}), ...(permission ? { permission } : {}) }
+}
+
+function auditUnavailable(res: http.ServerResponse): boolean {
+  const availability = auditAvailability(auditLog, auditInitError)
+  if (availability.available) return false
+  json(res, 503, { error: 'audit log unavailable', detail: availability.detail })
+  return true
 }
 
 const server = http.createServer(async (req, res) => {
@@ -859,6 +917,31 @@ const server = http.createServer(async (req, res) => {
     return
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/audit') {
+    if (auditUnavailable(res)) return
+    try {
+      const filters = auditFilters(url)
+      const records = auditLog!.records(filters.limit, filters)
+      json(res, 200, { records, count: records.length, limit: filters.limit, filters: { tool: filters.tool ?? null, result: filters.result ?? null, permission: filters.permission ?? null } })
+    } catch (err) {
+      json(res, 503, { error: 'audit log unavailable', detail: (err as Error).message })
+    }
+    return
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/audit.csv') {
+    if (auditUnavailable(res)) return
+    try {
+      const filters = auditFilters(url)
+      const csv = auditLog!.csv(filters.limit, filters)
+      res.writeHead(200, { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': 'inline; filename="audit.csv"' })
+      res.end(csv)
+    } catch (err) {
+      json(res, 503, { error: 'audit log unavailable', detail: (err as Error).message })
+    }
+    return
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/log') {
     const offset = Number(url.searchParams.get('offset') ?? 0)
     json(res, 200, { total: logLines.length, lines: logLines.slice(offset) })
@@ -866,6 +949,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'POST' && url.pathname === '/api/runs') {
+    if (auditUnavailable(res)) return
     if (activeRunId) { json(res, 409, { error: '別の実行が進行中です', activeRun: runSnapshot(runs.get(activeRunId)!) }); return }
     let body: { message?: string; mode?: string; sessionId?: string } = {}
     try { body = JSON.parse(await readBody(req)) as typeof body } catch {}
@@ -1043,6 +1127,7 @@ const server = http.createServer(async (req, res) => {
 
   const resumePath = url.pathname.match(/^\/api\/runs\/([^/]+)\/resume$/)
   if (req.method === 'POST' && resumePath) {
+    if (auditUnavailable(res)) return
     const base = runs.get(resumePath[1])
     if (!base) { json(res, 404, { error: 'run not found' }); return }
     if (activeRunId) { json(res, 409, { error: '別の実行が進行中です', activeRun: runSnapshot(runs.get(activeRunId)!) }); return }
@@ -1060,6 +1145,7 @@ const server = http.createServer(async (req, res) => {
 
   const retryPath = url.pathname.match(/^\/api\/runs\/([^/]+)\/retry$/)
   if (req.method === 'POST' && retryPath) {
+    if (auditUnavailable(res)) return
     const base = runs.get(retryPath[1])
     if (!base) { json(res, 404, { error: 'run not found' }); return }
     if (activeRunId) { json(res, 409, { error: '別の実行が進行中です', activeRun: runSnapshot(runs.get(activeRunId)!) }); return }
@@ -1090,7 +1176,7 @@ const server = http.createServer(async (req, res) => {
     run.currentStep = 'キャンセルを要求しました'
     run.nextAction = '現在のツール呼び出しが終わるのを待っています'
     addRunEvent(run, { type: 'run.cancel_requested', message: 'キャンセルを要求しました' })
-    if (run.approval?.id) resolveApproval(run.approval.id, false, '実行キャンセルにより拒否されました')
+    if (run.approval?.id) resolveApproval(run.approval.id, false, '実行キャンセルにより拒否されました', { actor: 'policy', automatic: true })
     runControllers.get(run.id)?.abort()
     for (const artifact of run.artifacts.filter((entry) => entry.processId)) { try { await stopManagedProcess(artifact.processId!) } catch {} }
     json(res, 200, { ok: true, run: runSnapshot(run) })
@@ -1105,7 +1191,10 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && url.pathname === '/api/approvals/resolve') {
     try {
       const b = JSON.parse(await readBody(req)) as { id?: string; approved?: boolean; reason?: string }
-      const ok = resolveApproval(String(b.id ?? ''), Boolean(b.approved), b.reason)
+      // The browser is a user interaction surface, not an authority for
+      // provenance. Ignore any client-supplied reason and stamp this path as
+      // a user resolution inside the approval store.
+      const ok = resolveApproval(String(b.id ?? ''), Boolean(b.approved))
       if (!ok) { json(res, 404, { error: 'approval not found' }); return }
       json(res, 200, { ok: true })
     } catch (err) {
@@ -1196,6 +1285,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'POST' && url.pathname === '/api/turn') {
+    if (auditUnavailable(res)) return
     if (activeRunId) {
       const activeRun = runs.get(activeRunId)
       json(res, 409, {

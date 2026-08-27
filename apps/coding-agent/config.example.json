@@ -12,6 +12,8 @@
   "maxNoProgress": 2,
   "allowArbitraryCommands": false,
   "safeCommandOnly": true,
+  "auditLogDir": "",
+  "_comment_auditLogDir": "空欄ならWindowsはLOCALAPPDATA\\CompanyAppsShare\\audit\\audit.jsonlを使います。指定先はワークスペース外でなければなりません。",
   "permissions": [
     { "permission": "list_files", "pattern": "*", "action": "allow" },
     { "permission": "read_file", "pattern": "*", "action": "allow" },

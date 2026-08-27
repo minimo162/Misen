@@ -161,6 +161,7 @@ function attachFenceContent(raw: string, end: number, parsed: ParsedReply): void
   }
 }
 import type { ApprovalBinding } from './approvals'
+import { makeAuditArguments, nullAuditTarget, type AuditApproval, type AuditMetadata, type AuditPermissionDecision, type AuditTarget } from './audit-log'
 import { capabilityPolicy, type AgentConfig, type TurnMode } from './config'
 import { chat, type ChatMessage, type ToolCall } from './llm'
 import { bareToolName, findHostTool, getFilePrecondition, openAITools, parseToolResultMeta, qualifiedToolName, toolDefsForContract, validateToolArgs, type ToolContext } from './tools'
@@ -178,6 +179,26 @@ export type AgentEvent = {
   namespace?: 'app' | 'native' | 'none'
   authority?: 'authoritative' | 'observed' | 'claimed' | 'derived'
   callId?: string
+  /** Redacted, terminal-tool audit metadata. Raw arguments never leave the process. */
+  audit?: AuditMetadata
+}
+
+export type AgentAuditMetadata = AuditMetadata
+
+export function buildToolAuditMetadata(
+  tool: string,
+  args: Record<string, unknown>,
+  permission: AuditPermissionDecision,
+  approval: AuditApproval,
+  target: Partial<AuditTarget> = {}
+): AgentAuditMetadata {
+  const pathValue = typeof args.path === 'string' ? args.path : null
+  return {
+    arguments: makeAuditArguments(summarize(tool, args), args),
+    permission: { decision: permission },
+    approval,
+    target: nullAuditTarget({ path: pathValue, ...target })
+  }
 }
 
 export interface Citation {
@@ -364,8 +385,9 @@ async function bootstrapWorkspaceEvidence(ctx: ToolContext, io: AgentIO): Promis
     return ['TOOL_RESULT (第0ターン自動実行)', formatHostResult(tool, '[tool error] list_filesが見つかりません', null, 'failed', callId, ctx.runId)].join('\n')
   }
   const summary = 'list_files: 第0ターンのワークスペース証拠を取得'
-  io.event?.({ type: 'tool.requested', tool, summary, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
-  io.event?.({ type: 'step.started', tool, summary, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
+  const audit = buildToolAuditMetadata(tool, {}, 'allow', { required: false, outcome: 'not_required', actor: 'policy', automatic: true })
+  io.event?.({ type: 'tool.requested', tool, summary, audit, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
+  io.event?.({ type: 'step.started', tool, summary, audit, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
   const startedAt = Date.now()
   let output: string
   try {
@@ -375,8 +397,8 @@ async function bootstrapWorkspaceEvidence(ctx: ToolContext, io: AgentIO): Promis
   }
   const failed = output.startsWith('[tool error]')
   const durationMs = Date.now() - startedAt
-  io.event?.({ type: failed ? 'tool.failed' : 'tool.succeeded', tool, summary, output: output.slice(0, 1200), durationMs, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
-  io.event?.({ type: failed ? 'step.failed' : 'step.completed', tool, summary, output: output.slice(0, 800), durationMs, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
+  io.event?.({ type: failed ? 'tool.failed' : 'tool.succeeded', tool, summary, output: output.slice(0, 1200), durationMs, audit, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
+  io.event?.({ type: failed ? 'step.failed' : 'step.completed', tool, summary, output: output.slice(0, 800), durationMs, audit, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
   return [
     'TOOL_RESULT (第0ターン自動実行。モデル判断回数・host実行予算には不算入)',
     formatHostResult(tool, output, null, failed ? 'failed' : 'succeeded', callId, ctx.runId)
@@ -606,34 +628,61 @@ async function runCopilotTurn(opts: {
     const qualified = qualifiedToolName(def.name)
     const callId = `host-call-${executions + 1}`
     const summary = summarize(qualified, args)
-    io.event?.({ type: 'tool.requested', tool: qualified, summary, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
-    io.event?.({ type: 'step.started', tool: qualified, summary, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
+    const permission = def.kind === 'read' ? 'allow' : 'ask'
+    let audit = buildToolAuditMetadata(qualified, args, permission, {
+      required: def.kind !== 'read',
+      outcome: def.kind === 'read' ? 'not_required' : 'not_required',
+      actor: 'policy',
+      automatic: def.kind === 'read'
+    })
+    io.event?.({ type: 'tool.requested', tool: qualified, summary, audit, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
+    io.event?.({ type: 'step.started', tool: qualified, summary, audit, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
     if (def.kind !== 'read') {
       const auto = def.kind === 'write' ? policy.autoApproveWrite : policy.autoApproveCommand
       const fileBinding = await captureFileBinding(def, args, ctx)
+      audit = buildToolAuditMetadata(qualified, args, permission, {
+        required: true,
+        outcome: 'not_required',
+        actor: 'policy',
+        automatic: false
+      }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null })
       const approvalBinding: ApprovalBinding = { ...fileBinding, toolName: qualified, argsHash: JSON.stringify(normalizeForKey(args)), command: typeof args.command === 'string' ? args.command : undefined, network: def.kind === 'command', callId }
 
       if (!auto) {
+        io.event?.({ type: 'approval.requested', tool: qualified, summary, audit, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
         const ok = await io.askYesNo(`実行を許可しますか？\n${summary}`, approvalBinding)
-        if (ok) io.event?.({ type: 'tool.approved', tool: qualified, summary, approved: true, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
+        audit = buildToolAuditMetadata(qualified, args, permission, {
+          required: true,
+          outcome: ok ? 'approved' : 'denied',
+          actor: 'user',
+          automatic: false
+        }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null })
+        io.event?.({ type: 'approval.resolved', tool: qualified, summary, approved: ok, audit, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
+        if (ok) io.event?.({ type: 'tool.approved', tool: qualified, summary, approved: true, audit, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
         if (ok && await approvalPreconditionChanged(approvalBinding, ctx)) {
-          io.event?.({ type: 'tool.denied', tool: qualified, summary, approved: false, error: '承認後に対象ファイルが変更されたため承認を無効化しました', origin: 'host', namespace: 'app', authority: 'authoritative', callId })
+          io.event?.({ type: 'tool.denied', tool: qualified, summary, approved: false, error: '承認後に対象ファイルが変更されたため承認を無効化しました', audit, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
           steps.push(formatHostResult(qualified, '承認後に対象ファイルが変更されたため実行しませんでした', null, 'denied', callId, ctx.runId))
           continue
         }
         if (!ok) {
-          io.event?.({ type: 'tool.denied', tool: qualified, summary, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
+          io.event?.({ type: 'tool.denied', tool: qualified, summary, error: 'ユーザーが拒否しました', audit, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
           steps.push(formatHostResult(qualified, 'ユーザーが拒否しました', null, 'denied', callId, ctx.runId))
           continue
         }
       } else {
-        io.event?.({ type: 'tool.approved', tool: qualified, summary, approved: true, metadata: { automatic: true }, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
+        audit = buildToolAuditMetadata(qualified, args, permission, {
+          required: true,
+          outcome: 'approved',
+          actor: 'policy',
+          automatic: true
+        }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null })
+        io.event?.({ type: 'tool.approved', tool: qualified, summary, approved: true, audit, metadata: { automatic: true }, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
       }
     }
     executions++
     if (def.kind === 'write') writes++
     if (def.kind === 'command') commands++
-    io.event?.({ type: 'tool.started', tool: qualified, summary, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
+    io.event?.({ type: 'tool.started', tool: qualified, summary, audit, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
     io.print(`[tool] ${summary}`)
     if (stopRequested()) return canceled()
     const startedAt = Date.now()
@@ -649,8 +698,12 @@ async function runCopilotTurn(opts: {
     const resultKey = `${qualified}:${metadata?.afterHash ?? output.slice(0, 1600)}`
     noProgress = failed || resultKey === lastResultKey ? noProgress + 1 : 0
     lastResultKey = resultKey
-    io.event?.({ type: failed ? 'tool.failed' : 'tool.succeeded', tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
-    io.event?.({ type: failed ? 'step.failed' : 'step.completed', tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
+    const terminalAudit = buildToolAuditMetadata(qualified, args, permission, audit.approval, {
+      ...audit.target,
+      after_sha256: typeof metadata?.afterHash === 'string' ? metadata.afterHash : null
+    })
+    io.event?.({ type: failed ? 'tool.failed' : 'tool.succeeded', tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, audit: terminalAudit, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
+    io.event?.({ type: failed ? 'step.failed' : 'step.completed', tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, audit: terminalAudit, origin: 'host', namespace: 'app', authority: 'authoritative', callId })
     steps.push(formatHostResult(qualified, output, metadata, failed ? 'failed' : 'succeeded', callId, ctx.runId))
     steps.push(`SYSTEM: ${qualified} は実行済みです。結果を根拠に次の1手を判断してください。`)
     if (noProgress >= maxNoProgress) return stopWithWarning(`hostツール結果に進展がないため停止しました（${maxNoProgress}回連続）`)
@@ -807,42 +860,74 @@ async function executeCall(
   if (argError) return `[validation error] ${argError}`
   const qualified = qualifiedToolName(def.name)
   const summary = summarize(qualified, args)
-  io.event?.({ type: 'tool.requested', tool: qualified, summary, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
-  io.event?.({ type: 'step.started', tool: qualified, summary, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
+  const permission = def.kind === 'read' ? 'allow' : 'ask'
+  let audit = buildToolAuditMetadata(qualified, args, permission, {
+    required: def.kind !== 'read',
+    outcome: 'not_required',
+    actor: 'policy',
+    automatic: def.kind === 'read'
+  })
+  io.event?.({ type: 'tool.requested', tool: qualified, summary, audit, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
+  io.event?.({ type: 'step.started', tool: qualified, summary, audit, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
   if (def.kind !== 'read') {
-      const auto = def.kind === 'write' ? policy.autoApproveWrite : policy.autoApproveCommand
+    const auto = def.kind === 'write' ? policy.autoApproveWrite : policy.autoApproveCommand
     const fileBinding = await captureFileBinding(def, args, ctx)
+    audit = buildToolAuditMetadata(qualified, args, permission, {
+      required: true,
+      outcome: 'not_required',
+      actor: 'policy',
+      automatic: false
+    }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null })
     const approvalBinding: ApprovalBinding = { ...fileBinding, toolName: qualified, argsHash: JSON.stringify(normalizeForKey(args)), command: typeof args.command === 'string' ? args.command : undefined, network: def.kind === 'command', callId: call.id }
     if (!auto) {
+      io.event?.({ type: 'approval.requested', tool: qualified, summary, audit, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
       const ok = await io.askYesNo(`実行を許可しますか？\n${summary}`, approvalBinding)
-      if (ok) io.event?.({ type: 'tool.approved', tool: qualified, summary, approved: true, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
+      audit = buildToolAuditMetadata(qualified, args, permission, {
+        required: true,
+        outcome: ok ? 'approved' : 'denied',
+        actor: 'user',
+        automatic: false
+      }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null })
+      io.event?.({ type: 'approval.resolved', tool: qualified, summary, approved: ok, audit, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
+      if (ok) io.event?.({ type: 'tool.approved', tool: qualified, summary, approved: true, audit, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
       if (ok && await approvalPreconditionChanged(approvalBinding, ctx)) {
-        io.event?.({ type: 'tool.denied', tool: qualified, summary, approved: false, error: '承認後に対象ファイルが変更されたため承認を無効化しました', origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
+        io.event?.({ type: 'tool.denied', tool: qualified, summary, approved: false, error: '承認後に対象ファイルが変更されたため承認を無効化しました', audit, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
         return '(ユーザーが拒否しました)'
       }
       if (!ok) {
-        io.event?.({ type: 'tool.denied', tool: qualified, summary, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
+        io.event?.({ type: 'tool.denied', tool: qualified, summary, error: 'ユーザーが拒否しました', audit, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
         return '(ユーザーが拒否しました)'
       }
     } else {
-      io.event?.({ type: 'tool.approved', tool: qualified, summary, approved: true, metadata: { automatic: true }, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
+      audit = buildToolAuditMetadata(qualified, args, permission, {
+        required: true,
+        outcome: 'approved',
+        actor: 'policy',
+        automatic: true
+      }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null })
+      io.event?.({ type: 'tool.approved', tool: qualified, summary, approved: true, audit, metadata: { automatic: true }, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
     }
   }
-  io.event?.({ type: 'tool.started', tool: qualified, summary, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
+  io.event?.({ type: 'tool.started', tool: qualified, summary, audit, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
   io.print(`[tool] ${summary}`)
   const startedAt = Date.now()
   try {
     const output = await def.run(args, ctx)
     const durationMs = Date.now() - startedAt
     const metadata = parseToolResultMeta(output) as unknown as Record<string, unknown> | null
-    io.event?.({ type: 'tool.succeeded', tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
-    io.event?.({ type: 'step.completed', tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
+    const terminalAudit = buildToolAuditMetadata(qualified, args, permission, audit.approval, {
+      ...audit.target,
+      after_sha256: typeof metadata?.afterHash === 'string' ? metadata.afterHash : null
+    })
+    io.event?.({ type: 'tool.succeeded', tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, audit: terminalAudit, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
+    io.event?.({ type: 'step.completed', tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, audit: terminalAudit, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
     return output
   } catch (err) {
     const output = `[tool error] ${(err as Error).message}`
     const durationMs = Date.now() - startedAt
-    io.event?.({ type: 'tool.failed', tool: qualified, summary, output, error: output, durationMs, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
-    io.event?.({ type: 'step.failed', tool: qualified, summary, output, error: output, durationMs, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
+    const terminalAudit = buildToolAuditMetadata(qualified, args, permission, audit.approval, { ...audit.target })
+    io.event?.({ type: 'tool.failed', tool: qualified, summary, output, error: output, durationMs, audit: terminalAudit, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
+    io.event?.({ type: 'step.failed', tool: qualified, summary, output, error: output, durationMs, audit: terminalAudit, origin: 'host', namespace: 'app', authority: 'authoritative', callId: call.id })
     return output
   }
 }

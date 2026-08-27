@@ -4,7 +4,7 @@ import net from 'node:net'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { extractJsonReply, runAgentTurn, type AgentIO, type TextBackend } from '../src/agent'
+import { extractJsonReply, runAgentTurn, type AgentEvent, type AgentIO, type TextBackend } from '../src/agent'
 import { executeV2ToolCall, runAgentTurnV2 } from '../src/agent-v2'
 import { runConfiguredAgentTurn } from '../src/agent-loop'
 import { clearToolExecuteBeforeHooks, registerToolExecuteBeforeHook } from '../src/hooks'
@@ -31,10 +31,11 @@ import {
 } from '../src/copilot'
 
 import { formatHostCommandOutput, getFileSnapshot, normalizeRunCommand, normalizeWorkspaceOpenCommand, openAITools, parseToolResultMeta, prepareHostCommand, rollbackFileChange, validateToolArgs, TOOL_DEFS, type ToolContext } from '../src/tools'
-import { listApprovals, requestApproval, resolveApproval } from '../src/approvals'
+import { getApprovalResolution, listApprovals, requestApproval, resolveApproval } from '../src/approvals'
 import { getWeather, weatherCodeLabel, type WeatherFetcher } from '../src/weather'
 import { convertCopilotResponse } from '../src/converter'
 import { buildBridgePrompt, createOpenAICompatibleBridgeServer, interpretBridgeResponse, type OpenAITool } from '../src/openai-bridge'
+import { AuditLog, auditArgsSha256, auditAvailability, auditRecordFromOutcome, auditRecordsToCsv, makeAuditRecord } from '../src/audit-log'
 
 function makeCtx(root: string, restrict = true): ToolContext {
   return { workspace: root, restrictToWorkspace: restrict }
@@ -45,6 +46,182 @@ function ioStub(approve: boolean): AgentIO {
     print: () => {},
     askYesNo: async () => approve
   }
+}
+
+async function testAuditLog(): Promise<void> {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-audit-workspace-'))
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-audit-dir-'))
+  const log = new AuditLog({ workspace, directory })
+  log.initialize()
+  const record = makeAuditRecord({
+    event_id: 'run-audit-event-1',
+    timestamp: '2026-08-27T00:00:00.000Z',
+    session_id: 'session-audit',
+    run_id: 'run-audit',
+    call_id: 'call-audit',
+    tool_name: 'host.write_file',
+    arguments: { summary: 'write_file: notes.txt', sha256: 'a'.repeat(64) },
+    permission: { decision: 'ask' },
+    approval: { required: true, outcome: 'approved', actor: 'user', automatic: false },
+    result: { outcome: 'success', duration_ms: 4, error: null },
+    target: { path: 'notes.txt', before_sha256: 'b'.repeat(64), after_sha256: 'c'.repeat(64) }
+  })
+  log.append(record)
+  const denied = { ...record, event_id: 'run-audit-event-2', call_id: 'call-denied', permission: { decision: 'deny' as const }, approval: { required: false, outcome: 'not_required' as const, actor: 'policy' as const, automatic: true }, result: { outcome: 'refused' as const, duration_ms: null, error: 'permission denied' } }
+  log.append(denied)
+  const lines = fs.readFileSync(log.filePath, 'utf8').trimEnd().split(/\r?\n/u)
+  assert.strictEqual(lines.length, 2)
+  for (const line of lines) assert.doesNotThrow(() => JSON.parse(line))
+  assert.strictEqual(log.records(1)[0].event_id, 'run-audit-event-2', 'records must return newest first')
+  assert.strictEqual(log.records(20, { result: 'success' }).length, 1)
+  assert.strictEqual(log.records(20, { permission: 'deny' })[0].result.outcome, 'refused')
+  const csv = log.csv()
+  assert.ok(csv.startsWith('schema_version,event_id,timestamp'))
+  assert.ok(csv.includes('host.write_file') && csv.includes('permission denied'))
+  assert.strictEqual(auditRecordsToCsv([record]).split(/\r?\n/u).length, 3)
+  const correlatedCallId = 'call-user-approval'
+  const correlatedAudit = auditRecordFromOutcome({
+    sessionId: 'session-correlation',
+    runId: 'run-correlation',
+    history: [
+      { type: 'tool.requested', origin: 'host', callId: correlatedCallId, tool: 'host.write_file', audit: { arguments: record.arguments, permission: { decision: 'ask' }, approval: { required: true, outcome: 'not_required', actor: 'policy', automatic: false }, target: record.target } },
+      { type: 'approval.requested', origin: 'host', callId: correlatedCallId },
+      { type: 'approval.resolved', origin: 'host', callId: correlatedCallId, approved: true, metadata: { approval: { reason: '利用者が許可しました' } } }
+    ],
+    event: { type: 'tool.succeeded', origin: 'host', eventId: 'run-correlation-event-1', at: Date.parse(record.timestamp), callId: correlatedCallId, tool: 'host.write_file', summary: record.arguments.summary, audit: { arguments: record.arguments, permission: { decision: 'ask' }, approval: { required: true, outcome: 'not_required', actor: 'policy', automatic: false }, target: record.target } }
+  })
+  assert.ok(correlatedAudit)
+  assert.deepStrictEqual(correlatedAudit.approval, { required: true, outcome: 'approved', actor: 'user', automatic: false })
+  assert.strictEqual(correlatedAudit.call_id, correlatedCallId)
+  log.append(correlatedAudit!)
+  const correlatedDenied = auditRecordFromOutcome({
+    sessionId: 'session-correlation',
+    runId: 'run-correlation',
+    // A client-controlled reason that looks like a timeout must not change
+    // the server-authenticated user provenance (there is no provenance here,
+    // so the compatibility default remains user).
+    history: [{ type: 'approval.requested', origin: 'host', callId: correlatedCallId + '-deny' }, { type: 'approval.resolved', origin: 'host', callId: correlatedCallId + '-deny', approved: false, metadata: { approval: { reason: '承認期限切れ' } } }],
+    event: { type: 'tool.denied', origin: 'host', eventId: 'run-correlation-event-2', at: Date.parse(record.timestamp), callId: correlatedCallId + '-deny', tool: 'host.write_file', summary: record.arguments.summary, error: 'ユーザーが拒否しました', audit: { arguments: record.arguments, permission: { decision: 'ask' }, approval: { required: true, outcome: 'not_required', actor: 'policy', automatic: false }, target: record.target } }
+  })
+  assert.ok(correlatedDenied)
+  assert.deepStrictEqual(correlatedDenied.approval, { required: true, outcome: 'denied', actor: 'user', automatic: false })
+  log.append(correlatedDenied!)
+  assert.deepStrictEqual(log.records(10, { result: 'refused' })[0].approval, { required: true, outcome: 'denied', actor: 'user', automatic: false })
+  // The server approval API resolves a timeout/cancel first, then the agent
+  // may emit a duplicate approval.resolved for the same call. The policy
+  // reason must win over the later user-shaped event in the terminal record.
+  const duplicateUserAudit = {
+    arguments: record.arguments,
+    permission: { decision: 'ask' as const },
+    approval: { required: true, outcome: 'denied' as const, actor: 'user' as const, automatic: false },
+    target: record.target
+  }
+  for (const policyReason of ['承認期限切れ', '実行キャンセルにより拒否されました', 'サーバー終了により拒否されました']) {
+    const policyCallId = `call-policy-${policyReason}`
+    const policyAudit = auditRecordFromOutcome({
+      sessionId: 'session-correlation',
+      runId: 'run-correlation',
+      history: [
+        { type: 'tool.requested', origin: 'host', callId: policyCallId, tool: 'host.write_file', audit: duplicateUserAudit },
+        { type: 'approval.requested', origin: 'host', callId: policyCallId },
+        { type: 'approval.resolved', origin: 'host', authority: 'authoritative', callId: policyCallId, approved: false, metadata: { approval: { reason: policyReason, provenance: { actor: 'policy', automatic: true } } } },
+        { type: 'approval.resolved', origin: 'host', callId: policyCallId, approved: false, audit: duplicateUserAudit }
+      ],
+      event: { type: 'tool.denied', origin: 'host', eventId: `${policyCallId}-terminal`, at: Date.parse(record.timestamp), callId: policyCallId, tool: 'host.write_file', summary: record.arguments.summary, error: policyReason, audit: duplicateUserAudit }
+    })
+    assert.ok(policyAudit)
+    assert.deepStrictEqual(policyAudit.approval, { required: true, outcome: 'denied', actor: 'policy', automatic: true }, `policy reason must win: ${policyReason}`)
+    assert.strictEqual(policyAudit.call_id, policyCallId)
+  }
+  assert.throws(() => new AuditLog({ workspace, directory: path.join(workspace, 'audit') }), /ワークスペース外/)
+  assert.throws(() => new AuditLog({ workspace, directory: workspace }), /ワークスペース外/)
+  const brokenLog = new AuditLog({ workspace, directory: fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-audit-broken-')) })
+  brokenLog.initialize()
+  // Simulate a runtime append failure without touching the filesystem: the
+  // persistent descriptor is intentionally made unavailable in this test.
+  ;(brokenLog as unknown as { appendHandle: number | null }).appendHandle = null
+  assert.throws(() => brokenLog.append(record), /監査ログ追記に失敗しました/)
+  assert.strictEqual(brokenLog.healthy, false)
+  assert.deepStrictEqual(auditAvailability(brokenLog, null), { available: false, detail: '監査ログの追記ハンドルがありません' })
+  assert.strictEqual(auditAvailability(log, null).available, true)
+  assert.deepStrictEqual(auditAvailability(log, '起動時障害'), { available: false, detail: '起動時障害' })
+  assert.throws(() => brokenLog.append(record), /unhealthy/)
+  const symlinkDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-audit-symlink-'))
+  const symlinkPath = path.join(symlinkDirectory, 'audit.jsonl')
+  try {
+    fs.symlinkSync(log.filePath, symlinkPath, 'file')
+    assert.throws(() => new AuditLog({ workspace, directory: symlinkDirectory }).initialize(), /シンボリックリンク／再解析点/)
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code !== 'EPERM' && code !== 'EACCES') throw err
+    console.log('SKIP audit-symlink (symlink creation is restricted on this host)')
+  }
+
+  const eventRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-audit-events-'))
+  fs.writeFileSync(path.join(eventRoot, 'read.txt'), 'readable')
+  const events: Array<{ type: string; audit?: { arguments: { sha256: string }; permission: { decision: string }; approval: { outcome: string; actor: string; automatic: boolean }; target: { before_sha256: string | null; after_sha256: string | null } } }> = []
+  const eventIo: AgentIO = {
+    print: () => {},
+    askYesNo: async () => true,
+    event: (event) => events.push(event as typeof events[number])
+  }
+  const eventCfg: AgentConfig = { baseURL: '', model: '', provider: 'openai', autoApprove: { write: false, command: false } }
+  const eventCtx = { workspace: eventRoot, restrictToWorkspace: true }
+  await executeV2ToolCall({ toolCallId: 'audit-read', toolName: 'read_file', input: { path: 'read.txt' } }, TOOL_DEFS.find((tool) => tool.name === 'read_file')!, eventCfg, eventCtx, eventIo, [])
+  const readOutcome = events.find((event) => event.type === 'tool.succeeded' && event.audit?.permission.decision === 'allow')
+  assert.ok(readOutcome?.audit)
+  assert.strictEqual(readOutcome.audit.arguments.sha256, auditArgsSha256({ path: 'read.txt' }))
+  assert.strictEqual(readOutcome.audit.approval.outcome, 'not_required')
+  await executeV2ToolCall({ toolCallId: 'audit-write', toolName: 'write_file', input: { path: 'new.txt', content: 'new content' } }, TOOL_DEFS.find((tool) => tool.name === 'write_file')!, eventCfg, eventCtx, eventIo, [])
+  const writeOutcome = events.find((event) => event.type === 'tool.succeeded' && event.audit?.permission.decision === 'ask')
+  assert.ok(writeOutcome?.audit)
+  assert.strictEqual(writeOutcome.audit.approval.actor, 'user')
+  assert.strictEqual(writeOutcome.audit.approval.outcome, 'approved')
+  assert.strictEqual(writeOutcome.audit.target.before_sha256, null)
+  assert.ok(writeOutcome.audit.target.after_sha256)
+  const deniedEvents: Array<{ type: string; audit?: { permission: { decision: string }; approval: { outcome: string }; target: { path: string | null } } }> = []
+  const deniedIo: AgentIO = { ...eventIo, event: (event) => deniedEvents.push(event as typeof deniedEvents[number]) }
+  await executeV2ToolCall({ toolCallId: 'audit-deny', toolName: 'write_file', input: { path: 'denied.txt', content: 'never' } }, TOOL_DEFS.find((tool) => tool.name === 'write_file')!, { ...eventCfg, permissions: [{ permission: 'write_file', pattern: '*', action: 'deny' }] }, eventCtx, deniedIo, [])
+  const deniedOutcome = deniedEvents.find((event) => event.type === 'tool.denied')
+  assert.strictEqual(deniedOutcome?.audit?.permission.decision, 'deny')
+  assert.strictEqual(deniedOutcome?.audit?.approval.outcome, 'not_required')
+
+  // Exercise the complete v2 host-tool event path and append each terminal
+  // outcome exactly once. The second append with the same key models server
+  // re-entry/duplicate delivery and must not create another JSONL line.
+  const terminalLog = new AuditLog({ workspace: eventRoot, directory: fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-audit-terminal-')) })
+  terminalLog.initialize()
+  const terminalCfg: AgentConfig = { ...eventCfg, autoApprove: { write: false, command: false } }
+  const terminalCalls: Array<{ id: string; name: string; input: Record<string, unknown>; cfg?: AgentConfig }> = [
+    { id: 'audit-path-list', name: 'list_files', input: { path: '.' } },
+    { id: 'audit-path-read', name: 'read_file', input: { path: 'read.txt' } },
+    { id: 'audit-path-search', name: 'search_files', input: { query: 'readable' } },
+    { id: 'audit-path-write', name: 'write_file', input: { path: 'approved.txt', content: 'approved' } },
+    { id: 'audit-path-open', name: 'start_process', input: { command: 'node -e "process.exit(0)"' } },
+    { id: 'audit-path-permission-deny', name: 'write_file', input: { path: 'denied-by-permission.txt', content: 'never' }, cfg: { ...terminalCfg, permissions: [{ permission: 'write_file', pattern: '*', action: 'deny' }] } }
+  ]
+  for (const call of terminalCalls) {
+    const callEvents: AgentEvent[] = []
+    const io: AgentIO = {
+      print: () => {},
+      askYesNo: async () => true,
+      event: (event) => callEvents.push(event)
+    }
+    const def = TOOL_DEFS.find((tool) => tool.name === call.name)!
+    await executeV2ToolCall({ toolCallId: call.id, toolName: call.name, input: call.input }, def, call.cfg ?? terminalCfg, eventCtx, io, [])
+    const terminal = callEvents.find((entry) => entry.origin === 'host' && (entry.type === 'tool.succeeded' || entry.type === 'tool.failed' || entry.type === 'tool.denied'))
+    assert.ok(terminal, `terminal event missing for ${call.name}`)
+    const audit = auditRecordFromOutcome({ sessionId: 'session-terminal', runId: 'run-terminal', event: terminal!, history: callEvents })
+    assert.ok(audit, `audit record missing for ${call.name}`)
+    terminalLog.append(audit!, `terminal:${call.id}`)
+    terminalLog.append(audit!, `terminal:${call.id}`)
+  }
+  const terminalRecords = terminalLog.records(20)
+  assert.strictEqual(terminalRecords.length, terminalCalls.length, 'each standard host path must append exactly one record')
+  assert.deepStrictEqual(new Set(terminalRecords.map((entry) => entry.call_id)).size, terminalCalls.length)
+  assert.ok(terminalRecords.some((entry) => entry.tool_name === 'host.write_file' && entry.approval.actor === 'user' && entry.approval.outcome === 'approved'))
+  assert.ok(terminalRecords.some((entry) => entry.tool_name === 'host.write_file' && entry.permission.decision === 'deny' && entry.result.outcome === 'refused'))
+  console.log('PASS audit-log')
 }
 
 async function testWeather(): Promise<void> {
@@ -93,6 +270,22 @@ async function testApprovals(): Promise<void> {
   assert.strictEqual(await pending, true)
   assert.strictEqual(listApprovals().length, 0)
   assert.strictEqual(resolveApproval('missing-approval', false), false)
+  const clientReasonPending = requestApproval('client reason is not provenance')
+  const clientReasonApproval = listApprovals()[0]
+  assert.strictEqual(resolveApproval(clientReasonApproval.id, false, '承認期限切れ'), true)
+  assert.strictEqual(await clientReasonPending, false)
+  const clientReasonResolution = getApprovalResolution(clientReasonApproval.id)
+  assert.deepStrictEqual(clientReasonResolution?.provenance, { actor: 'user', automatic: false })
+  assert.strictEqual(clientReasonResolution?.reason, '利用者が拒否しました')
+  const policyPending = requestApproval('policy provenance')
+  const policyApproval = listApprovals()[0]
+  assert.strictEqual(resolveApproval(policyApproval.id, false, '任意の内部理由', { actor: 'policy', automatic: true }), true)
+  assert.strictEqual(await policyPending, false)
+  assert.deepStrictEqual(getApprovalResolution(policyApproval.id)?.provenance, { actor: 'policy', automatic: true })
+  const timeoutPending = requestApproval({ question: 'timeout provenance', expiresAt: Date.now() })
+  const timeoutApproval = listApprovals()[0]
+  assert.strictEqual(await timeoutPending, false)
+  assert.deepStrictEqual(getApprovalResolution(timeoutApproval.id)?.provenance, { actor: 'policy', automatic: true })
   console.log('PASS approvals')
 }
 async function testTools(): Promise<void> {
@@ -2226,6 +2419,7 @@ async function testDemoRecordingContract(): Promise<void> {
 }
 
 (async () => {
+  await testAuditLog()
   await testWeather()
   await testApprovals()
   await testTools()
