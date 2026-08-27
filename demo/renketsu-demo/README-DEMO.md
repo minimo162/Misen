@@ -181,6 +181,12 @@ Update-Ledger の一行目は少なくとも次のキーを含む JSON です。
 | 会社が欠落、未提出判定が違う | `reports/` の全件 list と入力一覧を突合し、`missing` の `quote` を確認。モデルの推測で会社を追加せず、原文・ファイル名・時刻を記録して中止判断。 |
 | リハーサル間で ledger がリセット／追記される | 各 Run 前後の ledger hash と保存日時を記録。既存 ledger を削除・初期化せず、Run ごとのコピー／backup で比較し、Update-Ledger を一回だけ通す。 |
 
+## 6. ダブルクリック起動（汎用デモ起動.cmd）
+
+`汎用デモ起動.cmd` は、このファイルの場所を基準にリポジトリを解決し、`apps/coding-agent/config.flex.json` を使って `demo/renketsu-demo/workspace` だけを作業境界として起動します。`apps/coding-agent/coding-agent.cmd` の存在、flex 設定、workspace フォルダーを確認してから呼び出すため、`validation` など workspace 外の資料は実行対象になりません。
+
+この `coding-agent.cmd` は `launcher\launch.cmd` を経由します。初回起動または共有版の更新時には launcher が配布物をローカルへ版別同期し、manifest の SHA-256 を検証してから現在版を有効化します。検証済みの coding-agent が web サーバーを起動し、既定ブラウザーで表示します（通常は `http://127.0.0.1:3948`）。
+
 ## 実装メモ
 
 - `workspace` を `demo/renketsu-demo` の子に固定したのは、`validation` を相対パスで隠し、`restrictToWorkspace=true` の境界を実際のデモでも保つためです。親フォルダーを workspace にする案は、fixture 混入と誤読のリスクがあるため採用しません。
