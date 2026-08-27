@@ -889,15 +889,43 @@ var DEFAULT_CONFIG = {
 function appDataConfigPath() {
   return import_node_path.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent", "config.json");
 }
+function isLoopbackHostname(hostname) {
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/gu, "");
+  if (normalized === "localhost" || normalized === "::1" || normalized === "0:0:0:0:0:0:0:1") return true;
+  const octets = normalized.split(".");
+  if (octets.length !== 4 || octets.some((octet) => !/^\d{1,3}$/u.test(octet) || Number(octet) > 255)) return false;
+  return Number(octets[0]) === 127;
+}
+function validateProviderConfig(provider, raw, found) {
+  if (provider !== "openai" && provider !== "copilot-edge" && provider !== "ollama") {
+    throw new Error(`\u30B5\u30DD\u30FC\u30C8\u3055\u308C\u3066\u3044\u306A\u3044 provider \u3067\u3059: ${String(provider)}: ${found}`);
+  }
+  if (provider === "openai" && (!raw.baseURL || !raw.model)) {
+    throw new Error(`provider=openai \u306B\u306F baseURL / model \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
+  }
+  if (provider === "ollama") {
+    if (!raw.baseURL || !raw.model) throw new Error(`provider=ollama \u306B\u306F baseURL / model \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
+    let parsed;
+    try {
+      parsed = new URL(raw.baseURL);
+    } catch {
+      throw new Error(`provider=ollama \u306E baseURL \u304C\u4E0D\u6B63\u3067\u3059: ${found}`);
+    }
+    if (!["http:", "https:"].includes(parsed.protocol) || !isLoopbackHostname(parsed.hostname)) {
+      throw new Error(`provider=ollama \u306E baseURL \u306F loopback URL \u3067\u306A\u3051\u308C\u3070\u306A\u308A\u307E\u305B\u3093: ${found}`);
+    }
+  }
+  if (raw.reasoningEffort !== void 0 && !["high", "medium", "low", "none"].includes(raw.reasoningEffort)) {
+    throw new Error(`reasoningEffort \u306F high / medium / low / none \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+  }
+  return provider;
+}
 function parseConfig(found) {
   const raw = JSON.parse(import_node_fs.default.readFileSync(found, "utf8"));
   if (raw.agentLoop !== void 0 && raw.agentLoop !== "v1" && raw.agentLoop !== "v2") {
     throw new Error(`agentLoop \u306F v1 \u307E\u305F\u306F v2 \u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
   }
-  const provider = raw.provider ?? "openai";
-  if (provider === "openai" && (!raw.baseURL || !raw.model)) {
-    throw new Error(`provider=openai \u306B\u306F baseURL / model \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
-  }
+  const provider = validateProviderConfig(raw.provider ?? "openai", raw, found);
   const configuredPermissions = raw.permissions;
   let permissions;
   if (configuredPermissions !== void 0) {

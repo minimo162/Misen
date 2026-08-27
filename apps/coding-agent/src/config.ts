@@ -29,8 +29,9 @@ export interface CapabilityPolicy {
   allowArbitraryCommands: boolean
 }
 
-export type LlmProvider = 'openai' | 'copilot-edge'
+export type LlmProvider = 'openai' | 'copilot-edge' | 'ollama'
 export type AgentLoop = 'v1' | 'v2'
+export type ReasoningEffort = 'high' | 'medium' | 'low' | 'none'
 
 export interface CopilotSettingsPartial {
   url?: string
@@ -86,6 +87,8 @@ export interface AgentConfig {
   restrictToWorkspace?: boolean
   systemPrompt?: string
   provider?: LlmProvider
+  /** Optional provider-specific reasoning budget. Ollama sends this as reasoning_effort. */
+  reasoningEffort?: ReasoningEffort
   copilot?: CopilotSettingsPartial
   localResponseConverter?: LocalResponseConverterSettings
   weather?: WeatherSettings
@@ -117,15 +120,44 @@ function appDataConfigPath(): string {
   return path.join(process.env.APPDATA ?? process.env.USERPROFILE ?? '.', 'CompanyApps', 'coding-agent', 'config.json')
 }
 
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/gu, '')
+  if (normalized === 'localhost' || normalized === '::1' || normalized === '0:0:0:0:0:0:0:1') return true
+  // URL.hostname returns a canonical dotted IPv4 string for normal IPv4 literals.
+  const octets = normalized.split('.')
+  if (octets.length !== 4 || octets.some((octet) => !/^\d{1,3}$/u.test(octet) || Number(octet) > 255)) return false
+  return Number(octets[0]) === 127
+}
+
+function validateProviderConfig(provider: unknown, raw: AgentConfig, found: string): LlmProvider {
+  if (provider !== 'openai' && provider !== 'copilot-edge' && provider !== 'ollama') {
+    throw new Error(`サポートされていない provider です: ${String(provider)}: ${found}`)
+  }
+  if (provider === 'openai' && (!raw.baseURL || !raw.model)) {
+    throw new Error(`provider=openai には baseURL / model が必要です: ${found}`)
+  }
+  if (provider === 'ollama') {
+    if (!raw.baseURL || !raw.model) throw new Error(`provider=ollama には baseURL / model が必要です: ${found}`)
+    let parsed: URL
+    try { parsed = new URL(raw.baseURL) } catch { throw new Error(`provider=ollama の baseURL が不正です: ${found}`) }
+    if (!['http:', 'https:'].includes(parsed.protocol) || !isLoopbackHostname(parsed.hostname)) {
+      throw new Error(`provider=ollama の baseURL は loopback URL でなければなりません: ${found}`)
+    }
+  }
+  if (raw.reasoningEffort !== undefined && !['high', 'medium', 'low', 'none'].includes(raw.reasoningEffort)) {
+    throw new Error(`reasoningEffort は high / medium / low / none で指定してください: ${found}`)
+  }
+  return provider
+}
+
 function parseConfig(found: string): AgentConfig {
   const raw = JSON.parse(fs.readFileSync(found, 'utf8')) as AgentConfig
   if (raw.agentLoop !== undefined && raw.agentLoop !== 'v1' && raw.agentLoop !== 'v2') {
     throw new Error(`agentLoop は v1 または v2 を指定してください: ${found}`)
   }
-  const provider = raw.provider ?? 'openai'
-  if (provider === 'openai' && (!raw.baseURL || !raw.model)) {
-    throw new Error(`provider=openai には baseURL / model が必要です: ${found}`)
-  }
+  // Existing config files without an explicit provider remain on the generic
+  // OpenAI-compatible path. The generated no-config default is still Copilot.
+  const provider = validateProviderConfig(raw.provider ?? 'openai', raw, found)
   const configuredPermissions = (raw as unknown as { permissions?: unknown }).permissions
   let permissions: PermissionRule[] | undefined
   if (configuredPermissions !== undefined) {

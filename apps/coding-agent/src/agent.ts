@@ -175,7 +175,7 @@ export type AgentEvent = {
   approved?: boolean
   durationMs?: number
   metadata?: Record<string, unknown> | null
-  origin?: 'host' | 'orchestrator' | 'copilot'
+  origin?: 'host' | 'orchestrator' | 'copilot' | 'ollama'
   namespace?: 'app' | 'native' | 'none'
   authority?: 'authoritative' | 'observed' | 'claimed' | 'derived'
   callId?: string

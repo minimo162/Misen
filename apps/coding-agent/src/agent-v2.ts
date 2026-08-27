@@ -31,6 +31,55 @@ import {
 } from './tools'
 
 type V2ModelMessage = NonNullable<Parameters<typeof generateText>[0]['messages']>[number]
+type FetchImplementation = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+
+/**
+ * Ollama's OpenAI-compatible endpoint is local, but Japanese tool arguments
+ * still need an explicit wire encoding. Keep this middleware isolated to the
+ * Ollama provider so the existing Copilot/OpenAI request path is byte-for-byte
+ * unchanged.
+ */
+export function createOllamaFetch(baseFetch: FetchImplementation = fetch): FetchImplementation {
+  return async (input, init) => {
+    const headers = new Headers((typeof input === 'object' && input !== null && 'headers' in input)
+      ? (input as Request).headers
+      : undefined)
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+    const body = init?.body
+    const contentType = headers.get('content-type')
+    if (body !== undefined && body !== null) {
+      if (contentType && /^application\/json(?:\s*;|$)/iu.test(contentType) && !/\bcharset\s*=/iu.test(contentType)) {
+        headers.set('content-type', `${contentType}; charset=utf-8`)
+      } else if (!contentType && typeof body === 'string') {
+        headers.set('content-type', 'application/json; charset=utf-8')
+      }
+    }
+    const response = await baseFetch(input, { ...init, headers })
+    const responseType = response.headers.get('content-type') ?? ''
+    if (!/^application\/json(?:\s*;|$)/iu.test(responseType)) return response
+    // Decode with fatal UTF-8 semantics. A malformed response must fail the
+    // model turn rather than silently replacing bytes with U+FFFD.
+    const decoded = new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(await response.arrayBuffer()))
+    const responseHeaders = new Headers(response.headers)
+    responseHeaders.set('content-type', 'application/json; charset=utf-8')
+    return new Response(new TextEncoder().encode(decoded), {
+      status: response.status,
+      statusText: response.statusText,
+      headers: responseHeaders
+    })
+  }
+}
+
+function providerOptionsFor(cfg: AgentConfig): { ollama: { reasoningEffort: string } } | undefined {
+  if (cfg.provider !== 'ollama' || cfg.reasoningEffort === undefined) return undefined
+  // @ai-sdk/openai-compatible resolves this provider key and emits the
+  // snake_case HTTP field `reasoning_effort`.
+  return { ollama: { reasoningEffort: cfg.reasoningEffort } }
+}
+
+function modelEventOrigin(cfg: AgentConfig): 'copilot' | 'ollama' {
+  return cfg.provider === 'ollama' ? 'ollama' : 'copilot'
+}
 
 export interface AgentV2Options {
   cfg: AgentConfig
@@ -103,12 +152,14 @@ function aiTools(cfg: AgentConfig, ctx: ToolContext): ToolSet {
 
 function configuredModel(cfg: AgentConfig): LanguageModel {
   if (!cfg.baseURL || !cfg.model) throw new Error('agentLoop=v2 には bridge の baseURL / model が必要です')
-  const apiKey = resolveApiKey(cfg)
-  if (!apiKey) throw new Error('agentLoop=v2 には bridge の apiKey または apiKeyEnv が必要です')
+  const isOllama = cfg.provider === 'ollama'
+  const apiKey = isOllama ? undefined : resolveApiKey(cfg)
+  if (!isOllama && !apiKey) throw new Error('agentLoop=v2 には bridge の apiKey または apiKeyEnv が必要です')
   return createOpenAICompatible({
-    name: 'copilot-openai-bridge',
+    name: isOllama ? 'ollama' : 'copilot-openai-bridge',
     baseURL: cfg.baseURL.replace(/\/+$/u, ''),
-    apiKey
+    ...(apiKey ? { apiKey } : {}),
+    ...(isOllama ? { fetch: createOllamaFetch() } : {})
   }).chatModel(cfg.model)
 }
 
@@ -272,15 +323,16 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
         messages: modelMessages,
         system: systemFor(mode),
         temperature: cfg.temperature ?? 0.2,
+        providerOptions: providerOptionsFor(cfg),
         maxRetries: 0,
         abortSignal: io.signal
       })
-      io.event?.({ type: 'model.decision', summary: 'モデルの次の1手を受信しました', origin: 'copilot', namespace: 'none', authority: 'claimed' })
+      io.event?.({ type: 'model.decision', summary: 'モデルの次の1手を受信しました', origin: modelEventOrigin(cfg), namespace: 'none', authority: 'claimed' })
       messages.push({ role: 'assistant', content: result.text })
       if (mode === 'research') {
         const research = buildResearchBundle(opts.userInput, result.text)
         if (research.sources.length === 0) return warningResult('調査結果を確定できませんでした。出典URL付きで再試行してください。', messages, io)
-        io.event?.({ type: 'step.completed', summary: `調査結果を受け取りました（出典${research.sources.length}件）`, origin: 'copilot', namespace: 'native', authority: 'claimed' })
+        io.event?.({ type: 'step.completed', summary: `調査結果を受け取りました（出典${research.sources.length}件）`, origin: modelEventOrigin(cfg), namespace: 'native', authority: 'claimed' })
         return { reply: result.text, messages, aborted: false, research }
       }
       io.event?.({ type: 'step.completed', summary: '回答を受け取りました', origin: 'orchestrator', namespace: 'none', authority: 'derived' })
@@ -310,6 +362,7 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
         system: systemFor('work'),
         tools,
         temperature: cfg.temperature ?? 0.2,
+        providerOptions: providerOptionsFor(cfg),
         maxRetries: 0,
         abortSignal: io.signal
       })
@@ -317,7 +370,7 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
       io.print(`[error] ${(err as Error).message}`)
       return { reply: '', messages, aborted: true }
     }
-    io.event?.({ type: 'model.decision', summary: 'モデルの次の1手を受信しました', origin: 'copilot', namespace: 'none', authority: 'claimed' })
+    io.event?.({ type: 'model.decision', summary: 'モデルの次の1手を受信しました', origin: modelEventOrigin(cfg), namespace: 'none', authority: 'claimed' })
     modelMessages.push(...result.response.messages as V2ModelMessage[])
     const calls = result.toolCalls
     const legacyCalls: ToolCall[] = calls.map((call) => ({ id: call.toolCallId, type: 'function', function: { name: qualifiedToolName(call.toolName), arguments: JSON.stringify(call.input) } }))

@@ -12,7 +12,8 @@
     "smoke": "node esbuild.config.mjs && node dist/smoke.js",
     "flex:validate": "node esbuild.config.mjs && node dist/flex-harness.js",
     "flex:validate:live": "node esbuild.config.mjs && node dist/flex-harness.js --live",
-    "flex:measure:copilot": "node test/measure-flex-copilot.mjs"
+    "flex:measure:copilot": "node test/measure-flex-copilot.mjs",
+    "flex:measure:ollama": "node test/measure-flex-ollama.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
