@@ -742,9 +742,9 @@ ${output}
         return parseKeyword("true", "true") || parseKeyword("false", "false") || parseKeyword("null", "null") || // repair Python keywords True, False, None
         parseKeyword("True", "true") || parseKeyword("False", "false") || parseKeyword("None", "null");
       }
-      function parseKeyword(name24, value) {
+      function parseKeyword(name24, value2) {
         if (text2.slice(i, i + name24.length) === name24 && !(0, _stringUtils.isFunctionNameChar)(text2[i + name24.length])) {
-          output += value;
+          output += value2;
           i += name24.length;
           return true;
         }
@@ -892,14 +892,14 @@ var require_safer = __commonJS({
     }
     safer.Buffer.prototype = Buffer2.prototype;
     if (!Safer.from || Safer.from === Uint8Array.from) {
-      Safer.from = function(value, encodingOrOffset, length) {
-        if (typeof value === "number") {
-          throw new TypeError('The "value" argument must not be of type number. Received type ' + typeof value);
+      Safer.from = function(value2, encodingOrOffset, length) {
+        if (typeof value2 === "number") {
+          throw new TypeError('The "value" argument must not be of type number. Received type ' + typeof value2);
         }
-        if (value && typeof value.length === "undefined") {
-          throw new TypeError("The first argument must be one of type string, Buffer, ArrayBuffer, Array, or Array-like Object. Received type " + typeof value);
+        if (value2 && typeof value2.length === "undefined") {
+          throw new TypeError("The first argument must be one of type string, Buffer, ArrayBuffer, Array, or Array-like Object. Received type " + typeof value2);
         }
-        return Buffer2(value, encodingOrOffset, length);
+        return Buffer2(value2, encodingOrOffset, length);
       };
     }
     if (!Safer.alloc) {
@@ -4791,11 +4791,11 @@ var require_oauth = __commonJS({
       if (!response.ok) {
         throw new Error("Failed to discover OAuth endpoints");
       }
-      const metadata = await response.json();
-      if (!metadata || typeof metadata.token_endpoint !== "string") {
+      const metadata2 = await response.json();
+      if (!metadata2 || typeof metadata2.token_endpoint !== "string") {
         throw new Error("Invalid OAuth discovery response");
       }
-      const endpoint2 = metadata.token_endpoint;
+      const endpoint2 = metadata2.token_endpoint;
       _tokenEndpoint = endpoint2;
       return endpoint2;
     }
@@ -5562,12 +5562,12 @@ var require_parse = __commonJS({
           } else if (c === BS) {
             esc2 = true;
           } else if (c === DS) {
-            var value = parseEnvVar();
+            var value2 = parseEnvVar();
             if (!ifs) {
-              out += value;
+              out += value2;
             } else {
-              for (var vi = 0; vi < value.length; vi += 1) {
-                var vc = value.charAt(vi);
+              for (var vi = 0; vi < value2.length; vi += 1) {
+                var vc = value2.charAt(vi);
                 if (ifs.indexOf(vc) < 0) {
                   flushRun();
                   out += vc;
@@ -5653,238 +5653,78 @@ var require_shell_quote = __commonJS({
   }
 });
 
-// src/index.ts
+// src/benchmark-cli.ts
 var import_node_path7 = __toESM(require("node:path"));
 
-// src/config.ts
-var import_node_fs = __toESM(require("node:fs"));
-var import_node_path = __toESM(require("node:path"));
-var SYNTHETIC_WORKSPACE_MARKER = ".company-apps-synthetic.json";
-var SYNTHETIC_WORKSPACE_MARKER_EXPECTED = Object.freeze({
-  schema: "company-apps.synthetic-workspace/v1",
-  classification: "synthetic",
-  purpose: "external-provider-validation"
-});
-var DEFAULT_CONFIG = {
-  agentLoop: "v1",
-  baseURL: "",
-  model: "",
-  provider: "copilot-edge",
-  maxToolIterations: 10,
-  maxToolExecutions: 8,
-  maxWriteExecutions: 3,
-  maxCommandExecutions: 2,
-  maxNoProgress: 2,
-  allowArbitraryCommands: false,
-  permissions: [],
-  autoApprove: { write: false, command: false },
-  copilot: { displayMode: "foreground", agentMode: true },
-  localResponseConverter: { enabled: false, baseURL: "http://127.0.0.1:8080/v1", model: "Qwen3.5-4B-Q4_K_M.gguf", timeoutMs: 3e4, apiKey: "company-apps-flex-local" }
-};
-function appDataConfigPath() {
-  return import_node_path.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent", "config.json");
-}
-function isLoopbackHostname(hostname3) {
-  const normalized = hostname3.toLowerCase().replace(/^\[|\]$/gu, "");
-  if (normalized === "localhost" || normalized === "::1" || normalized === "0:0:0:0:0:0:0:1") return true;
-  const octets = normalized.split(".");
-  if (octets.length !== 4 || octets.some((octet) => !/^\d{1,3}$/u.test(octet) || Number(octet) > 255)) return false;
-  return Number(octets[0]) === 127;
-}
-function validateProviderConfig(provider, raw, found) {
-  if (provider !== "openai" && provider !== "copilot-edge" && provider !== "ollama" && provider !== "external-openai") {
-    throw new Error(`\u30B5\u30DD\u30FC\u30C8\u3055\u308C\u3066\u3044\u306A\u3044 provider \u3067\u3059: ${String(provider)}: ${found}`);
-  }
-  if (provider === "openai" && (!raw.baseURL || !raw.model)) {
-    throw new Error(`provider=openai \u306B\u306F baseURL / model \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
-  }
-  if (provider === "ollama") {
-    if (!raw.baseURL || !raw.model) throw new Error(`provider=ollama \u306B\u306F baseURL / model \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
-    let parsed;
-    try {
-      parsed = new URL(raw.baseURL);
-    } catch {
-      throw new Error(`provider=ollama \u306E baseURL \u304C\u4E0D\u6B63\u3067\u3059: ${found}`);
-    }
-    if (!["http:", "https:"].includes(parsed.protocol) || !isLoopbackHostname(parsed.hostname)) {
-      throw new Error(`provider=ollama \u306E baseURL \u306F loopback URL \u3067\u306A\u3051\u308C\u3070\u306A\u308A\u307E\u305B\u3093: ${found}`);
-    }
-  }
-  if (provider === "external-openai") {
-    if (raw.agentLoop !== "v2") throw new Error(`provider=external-openai \u306B\u306F agentLoop=v2 \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
-    if (!raw.baseURL || !raw.model) throw new Error(`provider=external-openai \u306B\u306F baseURL / model \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
-    if (Object.prototype.hasOwnProperty.call(raw, "apiKey")) throw new Error(`provider=external-openai \u306F plaintext apiKey \u3092\u53D7\u3051\u4ED8\u3051\u307E\u305B\u3093: ${found}`);
-    if (raw.restrictToWorkspace === false) throw new Error(`provider=external-openai \u3067\u306F restrictToWorkspace=false \u3092\u6307\u5B9A\u3067\u304D\u307E\u305B\u3093: ${found}`);
-    if (raw.safeCommandOnly === false) throw new Error(`provider=external-openai \u3067\u306F safeCommandOnly=false \u3092\u6307\u5B9A\u3067\u304D\u307E\u305B\u3093: ${found}`);
-    if (typeof raw.apiKeyEnv !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(raw.apiKeyEnv)) throw new Error(`provider=external-openai \u306B\u306F apiKeyEnv \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
-    const external = raw.externalProvider;
-    if (!external || external.enabled !== true) throw new Error(`provider=external-openai \u306B\u306F externalProvider.enabled=true \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
-    if (typeof external.syntheticWorkspace !== "string" || !external.syntheticWorkspace.trim()) throw new Error(`provider=external-openai \u306B\u306F externalProvider.syntheticWorkspace \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
-    let parsed;
-    try {
-      parsed = new URL(raw.baseURL);
-    } catch {
-      throw new Error(`provider=external-openai \u306E baseURL \u304C\u4E0D\u6B63\u3067\u3059: ${found}`);
-    }
-    if (parsed.username || parsed.password) throw new Error(`provider=external-openai \u306E baseURL \u306B URL credentials \u306F\u6307\u5B9A\u3067\u304D\u307E\u305B\u3093: ${found}`);
-    if (parsed.protocol === "https:") {
-    } else if (parsed.protocol === "http:" && isLoopbackHostname(parsed.hostname)) {
-    } else {
-      throw new Error(`provider=external-openai \u306E baseURL \u306F HTTPS\u3001\u307E\u305F\u306F loopback HTTP \u3067\u306A\u3051\u308C\u3070\u306A\u308A\u307E\u305B\u3093: ${found}`);
-    }
-  }
-  if (raw.reasoningEffort !== void 0 && !["high", "medium", "low", "none"].includes(raw.reasoningEffort)) {
-    throw new Error(`reasoningEffort \u306F high / medium / low / none \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
-  }
-  return provider;
-}
-function parseConfig(found) {
-  const raw = JSON.parse(import_node_fs.default.readFileSync(found, "utf8"));
-  if (raw.agentLoop !== void 0 && raw.agentLoop !== "v1" && raw.agentLoop !== "v2") {
-    throw new Error(`agentLoop \u306F v1 \u307E\u305F\u306F v2 \u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
-  }
-  const provider = validateProviderConfig(raw.provider ?? "openai", raw, found);
-  const configuredPermissions = raw.permissions;
-  let permissions;
-  if (configuredPermissions !== void 0) {
-    if (!Array.isArray(configuredPermissions)) throw new Error(`permissions \u306F\u914D\u5217\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
-    permissions = configuredPermissions.map((candidate, index) => {
-      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
-        throw new Error(`permissions[${index}] \u306F permission / pattern / action \u3092\u6301\u3064\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
-      }
-      const rule = candidate;
-      if (typeof rule.permission !== "string" || typeof rule.pattern !== "string") {
-        throw new Error(`permissions[${index}] \u306E permission / pattern \u306F\u6587\u5B57\u5217\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
-      }
-      if (rule.action !== "allow" && rule.action !== "ask" && rule.action !== "deny") {
-        throw new Error(`permissions[${index}].action \u306F allow / ask / deny \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
-      }
-      return { permission: rule.permission, pattern: rule.pattern, action: rule.action };
-    });
-  }
-  return {
-    ...DEFAULT_CONFIG,
-    ...raw,
-    provider,
-    ...provider === "external-openai" ? { restrictToWorkspace: true, safeCommandOnly: true } : {},
-    permissions: permissions ?? DEFAULT_CONFIG.permissions,
-    autoApprove: { ...DEFAULT_CONFIG.autoApprove, ...raw.autoApprove ?? {} },
-    copilot: { ...DEFAULT_CONFIG.copilot, ...raw.copilot ?? {} },
-    localResponseConverter: { ...DEFAULT_CONFIG.localResponseConverter, ...raw.localResponseConverter ?? {} },
-    configPath: import_node_path.default.resolve(found)
-  };
-}
-function capabilityPolicy(cfg, mode = cfg.turnMode ?? "work") {
-  return {
-    mode,
-    hostTools: mode === "work" ? "all" : "none",
-    nativeSearch: mode === "research",
-    nativeOffice: false,
-    maxModelDecisions: Math.max(1, cfg.maxToolIterations ?? 10),
-    maxHostExecutions: Math.max(1, cfg.maxToolExecutions ?? 8),
-    maxWriteExecutions: Math.max(0, cfg.maxWriteExecutions ?? 3),
-    maxCommandExecutions: Math.max(0, cfg.maxCommandExecutions ?? 2),
-    maxNoProgress: Math.max(1, cfg.maxNoProgress ?? 2),
-    autoApproveWrite: cfg.autoApprove?.write === true,
-    autoApproveCommand: cfg.autoApprove?.command === true,
-    allowArbitraryCommands: cfg.allowArbitraryCommands === true
-  };
-}
-function loadConfig(explicitPath) {
-  if (explicitPath) {
-    if (!import_node_fs.default.existsSync(explicitPath)) throw new Error(`\u6307\u5B9A\u3055\u308C\u305F config \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${explicitPath}`);
-    return parseConfig(explicitPath);
-  }
-  const appDataPath = appDataConfigPath();
-  const candidates = [import_node_path.default.join(process.cwd(), "config.json"), appDataPath];
-  const found = candidates.find((p) => import_node_fs.default.existsSync(p));
-  if (found) return parseConfig(found);
-  const dir = import_node_path.default.dirname(appDataPath);
-  import_node_fs.default.mkdirSync(dir, { recursive: true });
-  import_node_fs.default.writeFileSync(appDataPath, JSON.stringify(DEFAULT_CONFIG, null, 2) + "\n", "utf8");
-  console.log(`\u65E2\u5B9A\u306E\u8A2D\u5B9A\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F: ${appDataPath}`);
-  return DEFAULT_CONFIG;
-}
-function resolveApiKey(cfg) {
-  if (cfg.apiKey) return cfg.apiKey;
-  return process.env[cfg.apiKeyEnv ?? "COMPANY_LLM_API_KEY"];
-}
-function resolveSyntheticWorkspace(cfg) {
-  const configured = cfg.externalProvider?.syntheticWorkspace;
-  if (!configured || !configured.trim()) throw new Error("externalProvider.syntheticWorkspace \u304C\u8A2D\u5B9A\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
-  const base = cfg.configPath ? import_node_path.default.dirname(import_node_path.default.resolve(cfg.configPath)) : process.cwd();
-  return import_node_path.default.resolve(base, configured);
-}
-function assertSyntheticWorkspaceMarker(currentWorkspace) {
-  const current = import_node_path.default.resolve(currentWorkspace);
-  let currentStat;
-  try {
-    currentStat = import_node_fs.default.lstatSync(current);
-  } catch {
-    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u3092\u5B89\u5168\u306B\u78BA\u8A8D\u3067\u304D\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
-  }
-  if (!currentStat.isDirectory() || currentStat.isSymbolicLink()) {
-    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u30C7\u30A3\u30EC\u30AF\u30C8\u30EA junction\uFF0F\u30B7\u30F3\u30DC\u30EA\u30C3\u30AF\u30EA\u30F3\u30AF\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093");
-  }
-  const marker24 = import_node_path.default.join(current, SYNTHETIC_WORKSPACE_MARKER);
-  let markerStat;
-  try {
-    markerStat = import_node_fs.default.lstatSync(marker24);
-  } catch {
-    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u304C\u3042\u308A\u307E\u305B\u3093");
-  }
-  if (!markerStat.isFile() || markerStat.isSymbolicLink()) throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u304C\u4E0D\u6B63\u3067\u3059");
-  let parsed;
-  try {
-    parsed = JSON.parse(import_node_fs.default.readFileSync(marker24, "utf8"));
-  } catch {
-    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u3092\u8AAD\u3081\u307E\u305B\u3093");
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u304C\u4E0D\u6B63\u3067\u3059");
-  const record2 = parsed;
-  const expectedKeys = Object.keys(SYNTHETIC_WORKSPACE_MARKER_EXPECTED);
-  const keys = Object.keys(record2);
-  if (keys.length !== expectedKeys.length || expectedKeys.some((key) => !Object.prototype.hasOwnProperty.call(record2, key) || record2[key] !== SYNTHETIC_WORKSPACE_MARKER_EXPECTED[key])) {
-    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u304C\u4E0D\u6B63\u3067\u3059");
-  }
-}
-function assertSyntheticWorkspaceBoundary(cfg, currentWorkspace) {
-  if (cfg.provider !== "external-openai") return;
-  if (cfg.externalProvider?.enabled !== true) throw new Error("\u5916\u90E8AI\u306F\u660E\u793A\u7684\u306B\u6709\u52B9\u5316\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
-  const configured = resolveSyntheticWorkspace(cfg);
-  let configuredReal;
-  let currentReal;
-  try {
-    configuredReal = import_node_fs.default.realpathSync.native(configured);
-  } catch {
-    throw new Error("\u5916\u90E8AI\u7528\u306E\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
-  }
-  try {
-    currentReal = import_node_fs.default.realpathSync.native(import_node_path.default.resolve(currentWorkspace));
-  } catch {
-    throw new Error("\u73FE\u5728\u306E\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u3092\u78BA\u8A8D\u3067\u304D\u306A\u3044\u305F\u3081\u3001\u5916\u90E8AI\u3092\u505C\u6B62\u3057\u307E\u3057\u305F");
-  }
-  if (configuredReal !== currentReal) throw new Error("\u5916\u90E8AI\u306F\u8A2D\u5B9A\u6E08\u307F\u306E\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u3067\u306E\u307F\u5229\u7528\u3067\u304D\u307E\u3059");
-  let configuredStat;
-  let currentStat;
-  try {
-    configuredStat = import_node_fs.default.lstatSync(configured);
-    currentStat = import_node_fs.default.lstatSync(import_node_path.default.resolve(currentWorkspace));
-  } catch {
-    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u3092\u5B89\u5168\u306B\u78BA\u8A8D\u3067\u304D\u306A\u3044\u305F\u3081\u3001\u5916\u90E8AI\u3092\u505C\u6B62\u3057\u307E\u3057\u305F");
-  }
-  if (!configuredStat.isDirectory() || configuredStat.isSymbolicLink() || !currentStat.isDirectory() || currentStat.isSymbolicLink()) {
-    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u30C7\u30A3\u30EC\u30AF\u30C8\u30EA junction\uFF0F\u30B7\u30F3\u30DC\u30EA\u30C3\u30AF\u30EA\u30F3\u30AF\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093");
-  }
-  assertSyntheticWorkspaceMarker(configuredReal);
-}
+// src/benchmark.ts
+var import_node_crypto4 = __toESM(require("node:crypto"));
+var import_node_fs4 = __toESM(require("node:fs"));
+var import_promises2 = __toESM(require("node:fs/promises"));
+var import_node_http3 = __toESM(require("node:http"));
+var import_node_path6 = __toESM(require("node:path"));
+var import_node_child_process3 = require("node:child_process");
 
-// src/repl.ts
-var import_node_readline = __toESM(require("node:readline"));
+// src/approvals.ts
+var USER_PROVENANCE = { actor: "user", automatic: false };
+var POLICY_PROVENANCE = { actor: "policy", automatic: true };
+var pending = /* @__PURE__ */ new Map();
+var resolutions = /* @__PURE__ */ new Map();
+var sequence = 0;
+var APPROVAL_TIMEOUT_MS = 10 * 60 * 1e3;
+function makeId() {
+  sequence = (sequence + 1) % 1048576;
+  return `approval-${Date.now().toString(36)}-${sequence.toString(36)}`;
+}
+function requestApproval(request) {
+  const normalized = typeof request === "string" ? { question: request } : request;
+  const id = makeId();
+  const createdAt = Date.now();
+  const expiresAt = normalized.expiresAt ?? createdAt + APPROVAL_TIMEOUT_MS;
+  return new Promise((resolve2) => {
+    const entry = { ...normalized, id, createdAt, expiresAt, resolve: resolve2 };
+    pending.set(id, entry);
+    const timeout = Math.max(1, expiresAt - createdAt);
+    setTimeout(() => {
+      const current = pending.get(id);
+      if (current !== entry) return;
+      pending.delete(id);
+      const result = { id, approved: false, reason: "\u627F\u8A8D\u671F\u9650\u5207\u308C", resolvedAt: Date.now(), provenance: { ...POLICY_PROVENANCE } };
+      resolutions.set(id, result);
+      while (resolutions.size > 100) resolutions.delete(resolutions.keys().next().value);
+      resolve2(false);
+    }, timeout).unref();
+  });
+}
+function listApprovals() {
+  return [...pending.values()].sort((a, b) => a.createdAt - b.createdAt).map(({ resolve: _resolve, ...snapshot2 }) => snapshot2);
+}
+function resolveApproval(id, approved, reason = approved ? "\u5229\u7528\u8005\u304C\u8A31\u53EF\u3057\u307E\u3057\u305F" : "\u5229\u7528\u8005\u304C\u62D2\u5426\u3057\u307E\u3057\u305F", provenance = USER_PROVENANCE) {
+  const entry = pending.get(id);
+  if (!entry) return false;
+  pending.delete(id);
+  const normalizedApproved = Boolean(approved);
+  const safeReason = provenance.actor === "user" ? normalizedApproved ? "\u5229\u7528\u8005\u304C\u8A31\u53EF\u3057\u307E\u3057\u305F" : "\u5229\u7528\u8005\u304C\u62D2\u5426\u3057\u307E\u3057\u305F" : reason;
+  const result = { id, approved: normalizedApproved, reason: safeReason, resolvedAt: Date.now(), provenance: { ...provenance } };
+  resolutions.set(id, result);
+  while (resolutions.size > 100) resolutions.delete(resolutions.keys().next().value);
+  entry.resolve(normalizedApproved);
+  return true;
+}
+function getApprovalResolution(id) {
+  return resolutions.get(id);
+}
+function clearApprovals() {
+  for (const entry of pending.values()) {
+    const result = { id: entry.id, approved: false, reason: "\u30B5\u30FC\u30D0\u30FC\u7D42\u4E86\u306B\u3088\u308A\u89E3\u9664\u3055\u308C\u307E\u3057\u305F", resolvedAt: Date.now(), provenance: { ...POLICY_PROVENANCE } };
+    resolutions.set(entry.id, result);
+    entry.resolve(false);
+  }
+  pending.clear();
+}
 
 // src/agent.ts
 var import_node_crypto3 = __toESM(require("node:crypto"));
-var import_node_path3 = __toESM(require("node:path"));
+var import_node_path4 = __toESM(require("node:path"));
 var import_jsonrepair2 = __toESM(require_cjs());
 
 // src/converter.ts
@@ -5909,10 +5749,10 @@ function decisionSchema(tools) {
     ]
   };
 }
-function compactParameters(value) {
-  if (Array.isArray(value)) return value.map(compactParameters);
-  if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(Object.entries(value).filter(([key]) => !["description", "examples", "default", "title"].includes(key)).map(([key, item]) => [key, compactParameters(item)]));
+function compactParameters(value2) {
+  if (Array.isArray(value2)) return value2.map(compactParameters);
+  if (!value2 || typeof value2 !== "object") return value2;
+  return Object.fromEntries(Object.entries(value2).filter(([key]) => !["description", "examples", "default", "title"].includes(key)).map(([key, item]) => [key, compactParameters(item)]));
 }
 function candidateTools(rawResponse, tools) {
   const lower = rawResponse.toLowerCase();
@@ -5922,9 +5762,9 @@ function candidateTools(rawResponse, tools) {
   });
   return mentioned.length > 0 ? mentioned : tools;
 }
-function protocolObject(value, tools) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const parsed = value;
+function protocolObject(value2, tools) {
+  if (!value2 || typeof value2 !== "object" || Array.isArray(value2)) return null;
+  const parsed = value2;
   const keys = Object.keys(parsed);
   if (Object.prototype.hasOwnProperty.call(parsed, "AGENT_END") && parsed.AGENT_END !== true) return null;
   if (typeof parsed.answer === "string" && keys.every((key) => ["answer", "AGENT_END"].includes(key))) {
@@ -6173,8 +6013,8 @@ function explicitToolDecision(rawResponse, tools) {
   };
   const args = {};
   for (const key of keysByTool[bare] ?? []) {
-    const value = captureLabeledValue(text2, key);
-    if (value !== void 0) args[key] = value;
+    const value2 = captureLabeledValue(text2, key);
+    if (value2 !== void 0) args[key] = value2;
   }
   if (Object.keys(args).length === 0 && !/(?:使|呼び|実行|取得|列挙|一覧)/u.test(text2)) return null;
   return JSON.stringify({ tool: matched.name, args });
@@ -6194,8 +6034,8 @@ function interpretCopilotResponseDeterministically(rawResponse, tools) {
   if (mentionsAllowedTool && !negativeContext) return null;
   return { content: JSON.stringify({ answer }), method: "plain-answer", repairs: [] };
 }
-function loopbackUrl(value) {
-  const url2 = new URL(value);
+function loopbackUrl(value2) {
+  const url2 = new URL(value2);
   const host = url2.hostname.toLowerCase().replace(/^\[|\]$/gu, "");
   if (url2.protocol !== "http:" && url2.protocol !== "https:" || !["127.0.0.1", "::1", "localhost"].includes(host)) {
     throw new Error("localResponseConverter.baseURL \u306F loopback HTTP(S) URL \u3060\u3051\u6307\u5B9A\u3067\u304D\u307E\u3059");
@@ -6279,12 +6119,81 @@ async function convertCopilotResponse(settings, rawResponse, tools, signal) {
 
 // src/audit-log.ts
 var import_node_crypto = __toESM(require("node:crypto"));
-function canonicalizeAuditValue(value) {
-  if (Array.isArray(value)) return value.map(canonicalizeAuditValue);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => [key, canonicalizeAuditValue(item)]));
+var import_node_fs = __toESM(require("node:fs"));
+var import_node_os = __toESM(require("node:os"));
+var import_node_path = __toESM(require("node:path"));
+var DEFAULT_FILE_NAME = "audit.jsonl";
+var DEFAULT_MAX_RECORDS = 200;
+var MAX_QUERY_RECORDS = 500;
+function existingAncestor(value2) {
+  let cursor = import_node_path.default.resolve(value2);
+  while (!import_node_fs.default.existsSync(cursor)) {
+    const parent = import_node_path.default.dirname(cursor);
+    if (parent === cursor) return cursor;
+    cursor = parent;
   }
-  return value;
+  return cursor;
+}
+function realPathWithMissingTail(value2) {
+  const absolute = import_node_path.default.resolve(value2);
+  const ancestor = existingAncestor(absolute);
+  const tail = import_node_path.default.relative(ancestor, absolute);
+  let realAncestor;
+  try {
+    realAncestor = import_node_fs.default.realpathSync.native(ancestor);
+  } catch {
+    realAncestor = import_node_path.default.resolve(ancestor);
+  }
+  return import_node_path.default.resolve(realAncestor, tail);
+}
+function isInside(root, candidate) {
+  const relative = import_node_path.default.relative(realPathWithMissingTail(root), realPathWithMissingTail(candidate));
+  return relative === "" || relative !== ".." && !relative.startsWith(`..${import_node_path.default.sep}`) && !import_node_path.default.isAbsolute(relative);
+}
+function assertNoReparseComponents(value2) {
+  let cursor = import_node_path.default.resolve(value2);
+  while (true) {
+    if (import_node_fs.default.existsSync(cursor)) {
+      const stat = import_node_fs.default.lstatSync(cursor);
+      if (stat.isSymbolicLink()) throw new Error(`\u76E3\u67FB\u30ED\u30B0\u4FDD\u5B58\u5148\u306B\u30B7\u30F3\u30DC\u30EA\u30C3\u30AF\u30EA\u30F3\u30AF\uFF0F\u518D\u89E3\u6790\u70B9\u306F\u6307\u5B9A\u3067\u304D\u307E\u305B\u3093: ${cursor}`);
+    }
+    const parent = import_node_path.default.dirname(cursor);
+    if (parent === cursor) return;
+    cursor = parent;
+  }
+}
+function fallbackDirectory(workspace) {
+  const candidates = process.platform === "win32" ? [
+    process.env.LOCALAPPDATA,
+    process.env.APPDATA,
+    import_node_os.default.homedir() ? import_node_path.default.join(import_node_os.default.homedir(), ".company-apps-share") : void 0,
+    import_node_os.default.tmpdir()
+  ] : [
+    process.env.XDG_STATE_HOME,
+    import_node_os.default.homedir() ? import_node_path.default.join(import_node_os.default.homedir(), ".local", "state") : void 0,
+    import_node_os.default.tmpdir()
+  ];
+  for (const base of candidates) {
+    if (!base) continue;
+    const candidate = process.platform === "win32" ? import_node_path.default.join(base, "CompanyAppsShare", "audit") : import_node_path.default.join(base, "company-apps-share", "audit");
+    if (!isInside(workspace, candidate)) return candidate;
+  }
+  throw new Error("\u76E3\u67FB\u30ED\u30B0\u306E\u65E2\u5B9A\u4FDD\u5B58\u5148\u3092\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u306B\u6C7A\u5B9A\u3067\u304D\u307E\u305B\u3093");
+}
+function resolveAuditDirectory(workspace, configured) {
+  const root = import_node_path.default.resolve(workspace);
+  const requested = typeof configured === "string" && configured.trim() ? import_node_path.default.resolve(configured) : fallbackDirectory(root);
+  if (isInside(root, requested)) {
+    throw new Error(`\u76E3\u67FB\u30ED\u30B0\u4FDD\u5B58\u5148\u306F\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u3067\u306A\u3051\u308C\u3070\u306A\u308A\u307E\u305B\u3093: ${requested}`);
+  }
+  return requested;
+}
+function canonicalizeAuditValue(value2) {
+  if (Array.isArray(value2)) return value2.map(canonicalizeAuditValue);
+  if (value2 && typeof value2 === "object") {
+    return Object.fromEntries(Object.entries(value2).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => [key, canonicalizeAuditValue(item)]));
+  }
+  return value2;
 }
 function auditArgsSha256(args) {
   const canonical = JSON.stringify(canonicalizeAuditValue(args));
@@ -6299,6 +6208,447 @@ function nullAuditTarget(target) {
     before_sha256: typeof target?.before_sha256 === "string" ? target.before_sha256 : null,
     after_sha256: typeof target?.after_sha256 === "string" ? target.after_sha256 : null
   };
+}
+var READ_TOOL_NAMES = /* @__PURE__ */ new Set(["host.read_file", "host.read_files", "host.list_files", "host.search_files", "host.read_xlsx", "host.get_weather"]);
+function permissionFromEvents(event, history) {
+  if (event.audit?.permission?.decision) return event.audit.permission.decision;
+  const prior = [...history].reverse().find((candidate) => candidate.audit?.permission?.decision);
+  if (prior?.audit?.permission?.decision) return prior.audit.permission.decision;
+  return event.tool && READ_TOOL_NAMES.has(event.tool) ? "allow" : "ask";
+}
+function structuredApprovalProvenance(event) {
+  if (event.origin !== "host" || event.authority !== "authoritative") return void 0;
+  if (typeof event.metadata?.approval !== "object" || event.metadata.approval === null) return void 0;
+  const raw = event.metadata.approval.provenance;
+  if (!raw || typeof raw !== "object") return void 0;
+  const candidate = raw;
+  if (candidate.actor !== "user" && candidate.actor !== "policy" || typeof candidate.automatic !== "boolean") return void 0;
+  return { actor: candidate.actor, automatic: candidate.automatic };
+}
+function auditRecordFromOutcome(input) {
+  const { event } = input;
+  if (event.origin && event.origin !== "host") return null;
+  if (event.type !== "tool.succeeded" && event.type !== "tool.failed" && event.type !== "tool.denied") return null;
+  const history = input.history ?? [];
+  const callEvents = event.callId ? history.filter((candidate) => candidate.callId === event.callId) : [];
+  const eventAudit = event.audit;
+  const requested = [...callEvents].reverse().find((candidate) => candidate.type === "tool.requested");
+  const argumentsMeta = eventAudit?.arguments ?? requested?.audit?.arguments ?? makeAuditArguments(event.summary ?? event.tool ?? "", {});
+  const permission = permissionFromEvents(event, callEvents);
+  const approvalRequested = callEvents.some((candidate) => candidate.type === "approval.requested");
+  const resolvedEvents = callEvents.filter((candidate) => candidate.type === "approval.resolved" && typeof candidate.approved === "boolean");
+  const policyResolved = [...resolvedEvents].reverse().find((candidate) => {
+    const provenance = structuredApprovalProvenance(candidate);
+    return provenance?.actor === "policy" && provenance.automatic === true;
+  });
+  const resolved = policyResolved ?? [...resolvedEvents].reverse()[0];
+  const automatic = [...callEvents].reverse().find((candidate) => candidate.type === "tool.approved" && candidate.metadata?.automatic === true);
+  let approval = eventAudit?.approval ?? {
+    required: approvalRequested || Boolean(event.tool && !READ_TOOL_NAMES.has(event.tool)),
+    outcome: "not_required",
+    actor: "policy",
+    automatic: false
+  };
+  if (resolved) {
+    const provenance = structuredApprovalProvenance(resolved);
+    const policyResolution = provenance?.actor === "policy" && provenance.automatic === true;
+    approval = { required: true, outcome: resolved.approved ? "approved" : "denied", actor: policyResolution ? "policy" : "user", automatic: policyResolution };
+  } else if (automatic) {
+    approval = { required: true, outcome: "approved", actor: "policy", automatic: true };
+  } else if (permission === "deny") {
+    approval = { required: false, outcome: "not_required", actor: "policy", automatic: true };
+  }
+  const metadata2 = event.metadata;
+  const target = nullAuditTarget({
+    ...eventAudit?.target,
+    path: eventAudit?.target?.path ?? (typeof metadata2?.path === "string" ? metadata2.path : null),
+    before_sha256: eventAudit?.target?.before_sha256 ?? (typeof metadata2?.beforeHash === "string" ? metadata2.beforeHash : null),
+    after_sha256: eventAudit?.target?.after_sha256 ?? (typeof metadata2?.afterHash === "string" ? metadata2.afterHash : null)
+  });
+  const outcome = event.type === "tool.succeeded" ? "success" : event.type === "tool.failed" ? "failure" : "refused";
+  return makeAuditRecord({
+    event_id: event.eventId ?? `${input.runId}-audit-${event.callId ?? event.type}`,
+    timestamp: new Date(event.at ?? Date.now()).toISOString(),
+    session_id: input.sessionId,
+    run_id: input.runId,
+    call_id: event.callId ?? null,
+    tool_name: event.tool ?? "unknown",
+    arguments: argumentsMeta,
+    permission: { decision: permission },
+    approval,
+    result: {
+      outcome,
+      duration_ms: typeof event.durationMs === "number" ? event.durationMs : null,
+      error: outcome === "success" ? null : event.error ?? event.output ?? null
+    },
+    target
+  });
+}
+function clampLimit(value2, fallback = DEFAULT_MAX_RECORDS) {
+  if (!Number.isFinite(value2)) return fallback;
+  return Math.min(MAX_QUERY_RECORDS, Math.max(1, Math.trunc(value2)));
+}
+function validRecord(value2) {
+  if (!value2 || typeof value2 !== "object") return false;
+  const record2 = value2;
+  return record2.schema_version === 1 && typeof record2.event_id === "string" && typeof record2.timestamp === "string" && typeof record2.session_id === "string" && typeof record2.run_id === "string" && (record2.call_id === null || typeof record2.call_id === "string") && typeof record2.tool_name === "string" && !!record2.arguments && typeof record2.arguments.summary === "string" && typeof record2.arguments.sha256 === "string" && !!record2.permission && (record2.permission.decision === "allow" || record2.permission.decision === "ask" || record2.permission.decision === "deny") && !!record2.approval && typeof record2.approval.required === "boolean" && (record2.approval.outcome === "not_required" || record2.approval.outcome === "approved" || record2.approval.outcome === "denied") && (record2.approval.actor === "policy" || record2.approval.actor === "user") && typeof record2.approval.automatic === "boolean" && !!record2.result && (record2.result.outcome === "success" || record2.result.outcome === "failure" || record2.result.outcome === "refused") && (record2.result.duration_ms === null || typeof record2.result.duration_ms === "number") && (record2.result.error === null || typeof record2.result.error === "string") && !!record2.target && (record2.target.path === null || typeof record2.target.path === "string") && (record2.target.before_sha256 === null || typeof record2.target.before_sha256 === "string") && (record2.target.after_sha256 === null || typeof record2.target.after_sha256 === "string");
+}
+function csvCell(value2) {
+  const text2 = typeof value2 === "string" ? value2 : JSON.stringify(value2);
+  const normalized = text2 ?? "";
+  return /[",\r\n]/u.test(normalized) ? `"${normalized.replaceAll('"', '""')}"` : normalized;
+}
+var AUDIT_CSV_HEADERS = [
+  "schema_version",
+  "event_id",
+  "timestamp",
+  "session_id",
+  "run_id",
+  "call_id",
+  "tool_name",
+  "arguments",
+  "permission",
+  "approval",
+  "result",
+  "target"
+];
+function auditRecordsToCsv(records2) {
+  const rows = [AUDIT_CSV_HEADERS.join(",")];
+  for (const record2 of records2) {
+    rows.push([
+      record2.schema_version,
+      record2.event_id,
+      record2.timestamp,
+      record2.session_id,
+      record2.run_id,
+      record2.call_id,
+      record2.tool_name,
+      record2.arguments,
+      record2.permission,
+      record2.approval,
+      record2.result,
+      record2.target
+    ].map(csvCell).join(","));
+  }
+  return `${rows.join("\r\n")}\r
+`;
+}
+var AuditLog = class {
+  directory;
+  filePath;
+  initialized = false;
+  appendHandle = null;
+  appendFailure = null;
+  seenOutcomeKeys = /* @__PURE__ */ new Set();
+  constructor(options) {
+    this.directory = resolveAuditDirectory(options.workspace, options.directory);
+    const fileName = options.fileName?.trim() || DEFAULT_FILE_NAME;
+    if (import_node_path.default.basename(fileName) !== fileName || fileName.includes("..")) throw new Error("\u76E3\u67FB\u30ED\u30B0\u306E\u30D5\u30A1\u30A4\u30EB\u540D\u304C\u4E0D\u6B63\u3067\u3059");
+    this.filePath = import_node_path.default.join(this.directory, fileName);
+  }
+  /** Create/open the destination in append mode and validate its boundaries. */
+  initialize() {
+    if (this.initialized) return;
+    import_node_fs.default.mkdirSync(this.directory, { recursive: true });
+    assertNoReparseComponents(this.directory);
+    assertNoReparseComponents(this.filePath);
+    if (isInside(this.directory, this.filePath) === false) throw new Error("\u76E3\u67FB\u30ED\u30B0\u30D5\u30A1\u30A4\u30EB\u304C\u4FDD\u5B58\u5148\u30C7\u30A3\u30EC\u30AF\u30C8\u30EA\u5916\u3067\u3059");
+    if (import_node_fs.default.existsSync(this.filePath)) {
+      const stat = import_node_fs.default.lstatSync(this.filePath);
+      if (stat.isSymbolicLink()) throw new Error(`\u76E3\u67FB\u30ED\u30B0\u30D5\u30A1\u30A4\u30EB\u306F\u30B7\u30F3\u30DC\u30EA\u30C3\u30AF\u30EA\u30F3\u30AF\uFF0F\u518D\u89E3\u6790\u70B9\u3092\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093: ${this.filePath}`);
+      if (!stat.isFile()) throw new Error(`\u76E3\u67FB\u30ED\u30B0\u304C\u901A\u5E38\u30D5\u30A1\u30A4\u30EB\u3067\u306F\u3042\u308A\u307E\u305B\u3093: ${this.filePath}`);
+    }
+    this.appendHandle = import_node_fs.default.openSync(this.filePath, "a");
+    this.initialized = true;
+  }
+  get ready() {
+    return this.initialized;
+  }
+  get healthy() {
+    return this.initialized && this.appendFailure === null;
+  }
+  get failureReason() {
+    return this.appendFailure;
+  }
+  /** Append one complete JSON object line; existing bytes are never replaced. */
+  append(record2, dedupeKey) {
+    if (!this.initialized) throw new Error("\u76E3\u67FB\u30ED\u30B0\u304C\u521D\u671F\u5316\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
+    if (this.appendFailure) throw new Error(`\u76E3\u67FB\u30ED\u30B0\u306Funhealthy\u3067\u3059: ${this.appendFailure}`);
+    if (!validRecord(record2)) {
+      this.appendFailure = "\u76E3\u67FB\u30ED\u30B0\u30EC\u30B3\u30FC\u30C9\u304Cschema_version 1\u306B\u9069\u5408\u3057\u307E\u305B\u3093";
+      throw new Error(`\u76E3\u67FB\u30ED\u30B0\u8FFD\u8A18\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${this.appendFailure}`);
+    }
+    if (dedupeKey && this.seenOutcomeKeys.has(dedupeKey)) return;
+    const line = `${JSON.stringify(record2)}
+`;
+    if (this.appendHandle === null) {
+      this.appendFailure = "\u76E3\u67FB\u30ED\u30B0\u306E\u8FFD\u8A18\u30CF\u30F3\u30C9\u30EB\u304C\u3042\u308A\u307E\u305B\u3093";
+      throw new Error(`\u76E3\u67FB\u30ED\u30B0\u8FFD\u8A18\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${this.appendFailure}`);
+    }
+    try {
+      import_node_fs.default.writeSync(this.appendHandle, line, void 0, "utf8");
+    } catch (err) {
+      this.appendFailure = err.message || String(err);
+      throw new Error(`\u76E3\u67FB\u30ED\u30B0\u8FFD\u8A18\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${this.appendFailure}`);
+    }
+    if (dedupeKey) this.seenOutcomeKeys.add(dedupeKey);
+  }
+  records(limit = DEFAULT_MAX_RECORDS, filters = {}) {
+    if (!this.initialized) throw new Error("\u76E3\u67FB\u30ED\u30B0\u304C\u521D\u671F\u5316\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
+    if (!import_node_fs.default.existsSync(this.filePath)) return [];
+    const text2 = import_node_fs.default.readFileSync(this.filePath, "utf8");
+    const lines = text2.split(/\r?\n/u);
+    const found = [];
+    for (let i = lines.length - 1; i >= 0 && found.length < clampLimit(limit); i--) {
+      const line = lines[i]?.trim();
+      if (!line) continue;
+      try {
+        const parsed = JSON.parse(line);
+        if (!validRecord(parsed)) continue;
+        const record2 = parsed;
+        if (filters.tool && record2.tool_name !== filters.tool) continue;
+        if (filters.result && record2.result.outcome !== filters.result) continue;
+        if (filters.permission && record2.permission.decision !== filters.permission) continue;
+        found.push(record2);
+      } catch {
+      }
+    }
+    return found;
+  }
+  csv(limit = DEFAULT_MAX_RECORDS, filters = {}) {
+    return auditRecordsToCsv(this.records(limit, filters));
+  }
+  close() {
+    if (this.appendHandle !== null) import_node_fs.default.closeSync(this.appendHandle);
+    this.appendHandle = null;
+    this.initialized = false;
+  }
+};
+function makeAuditRecord(input) {
+  return { schema_version: 1, ...input };
+}
+
+// src/config.ts
+var import_node_fs2 = __toESM(require("node:fs"));
+var import_node_path2 = __toESM(require("node:path"));
+var SYNTHETIC_WORKSPACE_MARKER = ".company-apps-synthetic.json";
+var SYNTHETIC_WORKSPACE_MARKER_EXPECTED = Object.freeze({
+  schema: "company-apps.synthetic-workspace/v1",
+  classification: "synthetic",
+  purpose: "external-provider-validation"
+});
+var DEFAULT_CONFIG = {
+  agentLoop: "v1",
+  baseURL: "",
+  model: "",
+  provider: "copilot-edge",
+  maxToolIterations: 10,
+  maxToolExecutions: 8,
+  maxWriteExecutions: 3,
+  maxCommandExecutions: 2,
+  maxNoProgress: 2,
+  allowArbitraryCommands: false,
+  permissions: [],
+  autoApprove: { write: false, command: false },
+  copilot: { displayMode: "foreground", agentMode: true },
+  localResponseConverter: { enabled: false, baseURL: "http://127.0.0.1:8080/v1", model: "Qwen3.5-4B-Q4_K_M.gguf", timeoutMs: 3e4, apiKey: "company-apps-flex-local" }
+};
+function appDataConfigPath() {
+  return import_node_path2.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent", "config.json");
+}
+function isLoopbackHostname(hostname3) {
+  const normalized = hostname3.toLowerCase().replace(/^\[|\]$/gu, "");
+  if (normalized === "localhost" || normalized === "::1" || normalized === "0:0:0:0:0:0:0:1") return true;
+  const octets = normalized.split(".");
+  if (octets.length !== 4 || octets.some((octet) => !/^\d{1,3}$/u.test(octet) || Number(octet) > 255)) return false;
+  return Number(octets[0]) === 127;
+}
+function validateProviderConfig(provider2, raw, found) {
+  if (provider2 !== "openai" && provider2 !== "copilot-edge" && provider2 !== "ollama" && provider2 !== "external-openai") {
+    throw new Error(`\u30B5\u30DD\u30FC\u30C8\u3055\u308C\u3066\u3044\u306A\u3044 provider \u3067\u3059: ${String(provider2)}: ${found}`);
+  }
+  if (provider2 === "openai" && (!raw.baseURL || !raw.model)) {
+    throw new Error(`provider=openai \u306B\u306F baseURL / model \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
+  }
+  if (provider2 === "ollama") {
+    if (!raw.baseURL || !raw.model) throw new Error(`provider=ollama \u306B\u306F baseURL / model \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
+    let parsed;
+    try {
+      parsed = new URL(raw.baseURL);
+    } catch {
+      throw new Error(`provider=ollama \u306E baseURL \u304C\u4E0D\u6B63\u3067\u3059: ${found}`);
+    }
+    if (!["http:", "https:"].includes(parsed.protocol) || !isLoopbackHostname(parsed.hostname)) {
+      throw new Error(`provider=ollama \u306E baseURL \u306F loopback URL \u3067\u306A\u3051\u308C\u3070\u306A\u308A\u307E\u305B\u3093: ${found}`);
+    }
+  }
+  if (provider2 === "external-openai") {
+    if (raw.agentLoop !== "v2") throw new Error(`provider=external-openai \u306B\u306F agentLoop=v2 \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
+    if (!raw.baseURL || !raw.model) throw new Error(`provider=external-openai \u306B\u306F baseURL / model \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
+    if (Object.prototype.hasOwnProperty.call(raw, "apiKey")) throw new Error(`provider=external-openai \u306F plaintext apiKey \u3092\u53D7\u3051\u4ED8\u3051\u307E\u305B\u3093: ${found}`);
+    if (raw.restrictToWorkspace === false) throw new Error(`provider=external-openai \u3067\u306F restrictToWorkspace=false \u3092\u6307\u5B9A\u3067\u304D\u307E\u305B\u3093: ${found}`);
+    if (raw.safeCommandOnly === false) throw new Error(`provider=external-openai \u3067\u306F safeCommandOnly=false \u3092\u6307\u5B9A\u3067\u304D\u307E\u305B\u3093: ${found}`);
+    if (typeof raw.apiKeyEnv !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(raw.apiKeyEnv)) throw new Error(`provider=external-openai \u306B\u306F apiKeyEnv \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
+    const external = raw.externalProvider;
+    if (!external || external.enabled !== true) throw new Error(`provider=external-openai \u306B\u306F externalProvider.enabled=true \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
+    if (typeof external.syntheticWorkspace !== "string" || !external.syntheticWorkspace.trim()) throw new Error(`provider=external-openai \u306B\u306F externalProvider.syntheticWorkspace \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
+    let parsed;
+    try {
+      parsed = new URL(raw.baseURL);
+    } catch {
+      throw new Error(`provider=external-openai \u306E baseURL \u304C\u4E0D\u6B63\u3067\u3059: ${found}`);
+    }
+    if (parsed.username || parsed.password) throw new Error(`provider=external-openai \u306E baseURL \u306B URL credentials \u306F\u6307\u5B9A\u3067\u304D\u307E\u305B\u3093: ${found}`);
+    if (parsed.protocol === "https:") {
+    } else if (parsed.protocol === "http:" && isLoopbackHostname(parsed.hostname)) {
+    } else {
+      throw new Error(`provider=external-openai \u306E baseURL \u306F HTTPS\u3001\u307E\u305F\u306F loopback HTTP \u3067\u306A\u3051\u308C\u3070\u306A\u308A\u307E\u305B\u3093: ${found}`);
+    }
+  }
+  if (raw.reasoningEffort !== void 0 && !["high", "medium", "low", "none"].includes(raw.reasoningEffort)) {
+    throw new Error(`reasoningEffort \u306F high / medium / low / none \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+  }
+  return provider2;
+}
+function parseConfig(found) {
+  const raw = JSON.parse(import_node_fs2.default.readFileSync(found, "utf8"));
+  if (raw.agentLoop !== void 0 && raw.agentLoop !== "v1" && raw.agentLoop !== "v2") {
+    throw new Error(`agentLoop \u306F v1 \u307E\u305F\u306F v2 \u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+  }
+  const provider2 = validateProviderConfig(raw.provider ?? "openai", raw, found);
+  const configuredPermissions = raw.permissions;
+  let permissions;
+  if (configuredPermissions !== void 0) {
+    if (!Array.isArray(configuredPermissions)) throw new Error(`permissions \u306F\u914D\u5217\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+    permissions = configuredPermissions.map((candidate, index) => {
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+        throw new Error(`permissions[${index}] \u306F permission / pattern / action \u3092\u6301\u3064\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+      }
+      const rule = candidate;
+      if (typeof rule.permission !== "string" || typeof rule.pattern !== "string") {
+        throw new Error(`permissions[${index}] \u306E permission / pattern \u306F\u6587\u5B57\u5217\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+      }
+      if (rule.action !== "allow" && rule.action !== "ask" && rule.action !== "deny") {
+        throw new Error(`permissions[${index}].action \u306F allow / ask / deny \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+      }
+      return { permission: rule.permission, pattern: rule.pattern, action: rule.action };
+    });
+  }
+  return {
+    ...DEFAULT_CONFIG,
+    ...raw,
+    provider: provider2,
+    ...provider2 === "external-openai" ? { restrictToWorkspace: true, safeCommandOnly: true } : {},
+    permissions: permissions ?? DEFAULT_CONFIG.permissions,
+    autoApprove: { ...DEFAULT_CONFIG.autoApprove, ...raw.autoApprove ?? {} },
+    copilot: { ...DEFAULT_CONFIG.copilot, ...raw.copilot ?? {} },
+    localResponseConverter: { ...DEFAULT_CONFIG.localResponseConverter, ...raw.localResponseConverter ?? {} },
+    configPath: import_node_path2.default.resolve(found)
+  };
+}
+function capabilityPolicy(cfg, mode = cfg.turnMode ?? "work") {
+  return {
+    mode,
+    hostTools: mode === "work" ? "all" : "none",
+    nativeSearch: mode === "research",
+    nativeOffice: false,
+    maxModelDecisions: Math.max(1, cfg.maxToolIterations ?? 10),
+    maxHostExecutions: Math.max(1, cfg.maxToolExecutions ?? 8),
+    maxWriteExecutions: Math.max(0, cfg.maxWriteExecutions ?? 3),
+    maxCommandExecutions: Math.max(0, cfg.maxCommandExecutions ?? 2),
+    maxNoProgress: Math.max(1, cfg.maxNoProgress ?? 2),
+    autoApproveWrite: cfg.autoApprove?.write === true,
+    autoApproveCommand: cfg.autoApprove?.command === true,
+    allowArbitraryCommands: cfg.allowArbitraryCommands === true
+  };
+}
+function loadConfig(explicitPath) {
+  if (explicitPath) {
+    if (!import_node_fs2.default.existsSync(explicitPath)) throw new Error(`\u6307\u5B9A\u3055\u308C\u305F config \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${explicitPath}`);
+    return parseConfig(explicitPath);
+  }
+  const appDataPath = appDataConfigPath();
+  const candidates = [import_node_path2.default.join(process.cwd(), "config.json"), appDataPath];
+  const found = candidates.find((p) => import_node_fs2.default.existsSync(p));
+  if (found) return parseConfig(found);
+  const dir = import_node_path2.default.dirname(appDataPath);
+  import_node_fs2.default.mkdirSync(dir, { recursive: true });
+  import_node_fs2.default.writeFileSync(appDataPath, JSON.stringify(DEFAULT_CONFIG, null, 2) + "\n", "utf8");
+  console.log(`\u65E2\u5B9A\u306E\u8A2D\u5B9A\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F: ${appDataPath}`);
+  return DEFAULT_CONFIG;
+}
+function resolveApiKey(cfg) {
+  if (cfg.apiKey) return cfg.apiKey;
+  return process.env[cfg.apiKeyEnv ?? "COMPANY_LLM_API_KEY"];
+}
+function resolveSyntheticWorkspace(cfg) {
+  const configured = cfg.externalProvider?.syntheticWorkspace;
+  if (!configured || !configured.trim()) throw new Error("externalProvider.syntheticWorkspace \u304C\u8A2D\u5B9A\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
+  const base = cfg.configPath ? import_node_path2.default.dirname(import_node_path2.default.resolve(cfg.configPath)) : process.cwd();
+  return import_node_path2.default.resolve(base, configured);
+}
+function assertSyntheticWorkspaceMarker(currentWorkspace) {
+  const current = import_node_path2.default.resolve(currentWorkspace);
+  let currentStat;
+  try {
+    currentStat = import_node_fs2.default.lstatSync(current);
+  } catch {
+    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u3092\u5B89\u5168\u306B\u78BA\u8A8D\u3067\u304D\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
+  }
+  if (!currentStat.isDirectory() || currentStat.isSymbolicLink()) {
+    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u30C7\u30A3\u30EC\u30AF\u30C8\u30EA junction\uFF0F\u30B7\u30F3\u30DC\u30EA\u30C3\u30AF\u30EA\u30F3\u30AF\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093");
+  }
+  const marker24 = import_node_path2.default.join(current, SYNTHETIC_WORKSPACE_MARKER);
+  let markerStat;
+  try {
+    markerStat = import_node_fs2.default.lstatSync(marker24);
+  } catch {
+    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u304C\u3042\u308A\u307E\u305B\u3093");
+  }
+  if (!markerStat.isFile() || markerStat.isSymbolicLink()) throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u304C\u4E0D\u6B63\u3067\u3059");
+  let parsed;
+  try {
+    parsed = JSON.parse(import_node_fs2.default.readFileSync(marker24, "utf8"));
+  } catch {
+    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u3092\u8AAD\u3081\u307E\u305B\u3093");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u304C\u4E0D\u6B63\u3067\u3059");
+  const record2 = parsed;
+  const expectedKeys = Object.keys(SYNTHETIC_WORKSPACE_MARKER_EXPECTED);
+  const keys = Object.keys(record2);
+  if (keys.length !== expectedKeys.length || expectedKeys.some((key) => !Object.prototype.hasOwnProperty.call(record2, key) || record2[key] !== SYNTHETIC_WORKSPACE_MARKER_EXPECTED[key])) {
+    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u304C\u4E0D\u6B63\u3067\u3059");
+  }
+}
+function assertSyntheticWorkspaceBoundary(cfg, currentWorkspace) {
+  if (cfg.provider !== "external-openai") return;
+  if (cfg.externalProvider?.enabled !== true) throw new Error("\u5916\u90E8AI\u306F\u660E\u793A\u7684\u306B\u6709\u52B9\u5316\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
+  const configured = resolveSyntheticWorkspace(cfg);
+  let configuredReal;
+  let currentReal;
+  try {
+    configuredReal = import_node_fs2.default.realpathSync.native(configured);
+  } catch {
+    throw new Error("\u5916\u90E8AI\u7528\u306E\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
+  }
+  try {
+    currentReal = import_node_fs2.default.realpathSync.native(import_node_path2.default.resolve(currentWorkspace));
+  } catch {
+    throw new Error("\u73FE\u5728\u306E\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u3092\u78BA\u8A8D\u3067\u304D\u306A\u3044\u305F\u3081\u3001\u5916\u90E8AI\u3092\u505C\u6B62\u3057\u307E\u3057\u305F");
+  }
+  if (configuredReal !== currentReal) throw new Error("\u5916\u90E8AI\u306F\u8A2D\u5B9A\u6E08\u307F\u306E\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u3067\u306E\u307F\u5229\u7528\u3067\u304D\u307E\u3059");
+  let configuredStat;
+  let currentStat;
+  try {
+    configuredStat = import_node_fs2.default.lstatSync(configured);
+    currentStat = import_node_fs2.default.lstatSync(import_node_path2.default.resolve(currentWorkspace));
+  } catch {
+    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u3092\u5B89\u5168\u306B\u78BA\u8A8D\u3067\u304D\u306A\u3044\u305F\u3081\u3001\u5916\u90E8AI\u3092\u505C\u6B62\u3057\u307E\u3057\u305F");
+  }
+  if (!configuredStat.isDirectory() || configuredStat.isSymbolicLink() || !currentStat.isDirectory() || currentStat.isSymbolicLink()) {
+    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u30C7\u30A3\u30EC\u30AF\u30C8\u30EA junction\uFF0F\u30B7\u30F3\u30DC\u30EA\u30C3\u30AF\u30EA\u30F3\u30AF\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093");
+  }
+  assertSyntheticWorkspaceMarker(configuredReal);
 }
 
 // src/llm.ts
@@ -6361,11 +6711,11 @@ async function chat(cfg, messages, tools, signal) {
 }
 
 // src/tools.ts
-var import_node_fs2 = __toESM(require("node:fs"));
+var import_node_fs3 = __toESM(require("node:fs"));
 var import_node_child_process2 = require("node:child_process");
 var import_node_crypto2 = __toESM(require("node:crypto"));
 var import_promises = __toESM(require("node:fs/promises"));
-var import_node_path2 = __toESM(require("node:path"));
+var import_node_path3 = __toESM(require("node:path"));
 var import_node_util = __toESM(require("node:util"));
 var import_iconv_lite = __toESM(require_lib());
 
@@ -6374,10 +6724,10 @@ var import_node_child_process = require("node:child_process");
 var MAX_RECORDS = 24;
 var MAX_OUTPUT_LINES = 400;
 var records = /* @__PURE__ */ new Map();
-var sequence = 0;
-function makeId() {
-  sequence = (sequence + 1) % 1048576;
-  return `proc-${Date.now().toString(36)}-${sequence.toString(36)}`;
+var sequence2 = 0;
+function makeId2() {
+  sequence2 = (sequence2 + 1) % 1048576;
+  return `proc-${Date.now().toString(36)}-${sequence2.toString(36)}`;
 }
 function appendLine(record2, line, stream) {
   const text2 = line.trimEnd();
@@ -6450,7 +6800,7 @@ function startManagedProcess(command, cwd, label, url2) {
     stdio: ["ignore", "pipe", "pipe"]
   });
   const record2 = {
-    id: makeId(),
+    id: makeId2(),
     command: trimmed,
     cwd,
     label: label?.trim() || trimmed.slice(0, 80),
@@ -6563,18 +6913,18 @@ function readManagedProcessLog(id, offset = 0) {
 
 // src/weather.ts
 var DEFAULT_FETCH_TIMEOUT_MS = 15e3;
-function finiteNumber(value, label) {
-  const n = typeof value === "number" ? value : Number(value);
+function finiteNumber(value2, label) {
+  const n = typeof value2 === "number" ? value2 : Number(value2);
   if (!Number.isFinite(n)) throw new Error(`\u5929\u6C17API\u306E${label}\u304C\u4E0D\u6B63\u3067\u3059`);
   return n;
 }
-function optionalFiniteNumber(value, label) {
-  if (value === void 0 || value === null || value === "") return void 0;
-  return finiteNumber(value, label);
+function optionalFiniteNumber(value2, label) {
+  if (value2 === void 0 || value2 === null || value2 === "") return void 0;
+  return finiteNumber(value2, label);
 }
-function stringValue(value, label) {
-  if (typeof value !== "string" || value.trim() === "") throw new Error(`\u5929\u6C17API\u306E${label}\u304C\u3042\u308A\u307E\u305B\u3093`);
-  return value.trim();
+function stringValue(value2, label) {
+  if (typeof value2 !== "string" || value2.trim() === "") throw new Error(`\u5929\u6C17API\u306E${label}\u304C\u3042\u308A\u307E\u305B\u3093`);
+  return value2.trim();
 }
 async function fetchJson(url2, signal, fetcher) {
   const timeout = AbortSignal.timeout(DEFAULT_FETCH_TIMEOUT_MS);
@@ -6734,10 +7084,10 @@ function isEncodedCommandFlag(word) {
   const name24 = match2[1].toLowerCase();
   return name24.length >= 1 && "encodedcommand".startsWith(name24);
 }
-function quoteCommandWord(value) {
-  if (!/[\s"]/u.test(value)) return value;
-  if (value.includes('"')) throw new Error(`Read-Xlsx \u306E\u5F15\u6570\u306B\u5F15\u7528\u7B26\u306F\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093\u3002${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
-  return `"${value}"`;
+function quoteCommandWord(value2) {
+  if (!/[\s"]/u.test(value2)) return value2;
+  if (value2.includes('"')) throw new Error(`Read-Xlsx \u306E\u5F15\u6570\u306B\u5F15\u7528\u7B26\u306F\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093\u3002${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
+  return `"${value2}"`;
 }
 function normalizeRunCommand(command) {
   const trimmed = command.trim();
@@ -6764,17 +7114,17 @@ function normalizeRunCommand(command) {
       throw new Error(`Read-Xlsx \u306F ${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
     }
     const normalized = pathWords.map((word) => word.replaceAll("/", "\\"));
-    const reportPaths = normalized.length > 1 ? normalized.filter((word) => !(import_node_path2.default.win32.dirname(word) === "." && import_node_path2.default.win32.basename(word).toLowerCase() === "\u96C6\u8A08\u53F0\u5E33.xlsx")) : normalized;
+    const reportPaths = normalized.length > 1 ? normalized.filter((word) => !(import_node_path3.default.win32.dirname(word) === "." && import_node_path3.default.win32.basename(word).toLowerCase() === "\u96C6\u8A08\u53F0\u5E33.xlsx")) : normalized;
     if (reportPaths.length === 0) throw new Error(`Read-Xlsx \u306F ${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
     let normalizedPath;
     if (reportPaths.length === 1) {
       normalizedPath = reportPaths[0];
     } else {
-      const directories = new Set(reportPaths.map((word) => import_node_path2.default.win32.dirname(word).toLowerCase()));
-      if (directories.size !== 1 || reportPaths.some((word) => import_node_path2.default.win32.extname(word).toLowerCase() !== ".xlsx")) {
+      const directories = new Set(reportPaths.map((word) => import_node_path3.default.win32.dirname(word).toLowerCase()));
+      if (directories.size !== 1 || reportPaths.some((word) => import_node_path3.default.win32.extname(word).toLowerCase() !== ".xlsx")) {
         throw new Error(`Read-Xlsx \u306E\u8907\u6570\u30D5\u30A1\u30A4\u30EB\u306F\u540C\u3058\u30D5\u30A9\u30EB\u30C0\u30FC\u306E *.xlsx \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\u3002${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
       }
-      normalizedPath = import_node_path2.default.win32.join(import_node_path2.default.win32.dirname(reportPaths[0]), "*.xlsx");
+      normalizedPath = import_node_path3.default.win32.join(import_node_path3.default.win32.dirname(reportPaths[0]), "*.xlsx");
     }
     return `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path ${quoteCommandWord(normalizedPath)}`;
   }
@@ -6785,10 +7135,10 @@ function normalizeRunCommand(command) {
     const token = rest[index];
     const match2 = token.match(/^-(Extracted|ExtractedPath|Rates|Ledger)$/iu);
     if (match2) {
-      const value = rest[++index];
-      if (!value || /^-/u.test(value)) throw new Error(`Update-Ledger \u306F ${UPDATE_LEDGER_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
+      const value2 = rest[++index];
+      if (!value2 || /^-/u.test(value2)) throw new Error(`Update-Ledger \u306F ${UPDATE_LEDGER_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
       const key = /^ExtractedPath$/iu.test(match2[1]) ? "extracted" : match2[1].toLowerCase();
-      named.set(key, value);
+      named.set(key, value2);
     } else if (/^-/u.test(token)) {
       throw new Error(`Update-Ledger \u306B\u672A\u8A31\u53EF\u306E\u5F15\u6570\u304C\u3042\u308A\u307E\u3059\u3002${UPDATE_LEDGER_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
     } else {
@@ -6828,8 +7178,8 @@ function normalizeWorkspaceOpenCommand(command, ctx) {
   } catch {
     throw new Error(`run_command\u62D2\u5426: \u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u3078\u306E\u30A2\u30AF\u30BB\u30B9\u306F\u7981\u6B62\u3067\u3059: ${candidate}`);
   }
-  if (!import_node_fs2.default.existsSync(absolute)) throw new Error(`run_command\u62D2\u5426: \u958B\u304F\u5BFE\u8C61\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${candidate}`);
-  const stat = import_node_fs2.default.lstatSync(absolute);
+  if (!import_node_fs3.default.existsSync(absolute)) throw new Error(`run_command\u62D2\u5426: \u958B\u304F\u5BFE\u8C61\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${candidate}`);
+  const stat = import_node_fs3.default.lstatSync(absolute);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`run_command\u62D2\u5426: \u901A\u5E38\u30D5\u30A1\u30A4\u30EB\u4EE5\u5916\u306F\u958B\u3051\u307E\u305B\u3093: ${candidate}`);
   const allowedExtensions = /* @__PURE__ */ new Set([
     ".txt",
@@ -6867,7 +7217,7 @@ function normalizeWorkspaceOpenCommand(command, ctx) {
     ".wav",
     ".m4a"
   ]);
-  const extension = import_node_path2.default.extname(absolute).toLowerCase();
+  const extension = import_node_path3.default.extname(absolute).toLowerCase();
   if (!allowedExtensions.has(extension)) throw new Error(`run_command\u62D2\u5426: \u5B89\u5168\u306B\u958B\u3051\u308B\u901A\u5E38\u6587\u66F8\u30FB\u30E1\u30C7\u30A3\u30A2\u5F62\u5F0F\u3067\u306F\u3042\u308A\u307E\u305B\u3093: ${candidate}`);
   if (absolute.includes("'")) throw new Error("run_command\u62D2\u5426: \u958B\u304F\u5BFE\u8C61\u306E\u30D1\u30B9\u306B\u5F15\u7528\u7B26\u306F\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093");
   return `powershell.exe -NoProfile -Command "Invoke-Item -LiteralPath '${absolute}'"`;
@@ -6881,7 +7231,7 @@ function prepareHostCommand(command, ctx) {
   return prepared;
 }
 function formatHostCommandOutput(requested, prepared, stdout, stderr) {
-  const parts = [stdout, stderr].filter((value) => value.trim().length > 0).map((value) => truncate(value));
+  const parts = [stdout, stderr].filter((value2) => value2.trim().length > 0).map((value2) => truncate(value2));
   if (parts.length > 0) return parts.join("\n---stderr---\n");
   if (/\bInvoke-Item\s+-LiteralPath\b/iu.test(prepared)) return `\u30A2\u30D7\u30EA\u8D77\u52D5\u30B3\u30DE\u30F3\u30C9\u6210\u529F: ${requested}`;
   return "(\u51FA\u529B\u306A\u3057)";
@@ -7153,7 +7503,7 @@ function workspaceGlobToRegExp(pattern) {
 function normalizeWorkspaceGlob(pattern) {
   const normalized = pattern.trim().replaceAll("\\", "/").replace(/^\.\//, "");
   if (!normalized) throw new Error("pattern \u304C\u7A7A\u3067\u3059");
-  if (import_node_path2.default.isAbsolute(normalized) || /^[A-Za-z]:/.test(normalized) || normalized.split("/").includes("..")) {
+  if (import_node_path3.default.isAbsolute(normalized) || /^[A-Za-z]:/.test(normalized) || normalized.split("/").includes("..")) {
     throw new Error(`\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u3092\u6307\u3059pattern\u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093: ${pattern}`);
   }
   return normalized.endsWith("/") ? `${normalized}*` : normalized;
@@ -7168,29 +7518,29 @@ function decodeWorkspaceText(bytes) {
     return import_iconv_lite.default.decode(bytes, "cp932");
   }
 }
-function realPathWithMissingTail(abs) {
+function realPathWithMissingTail2(abs) {
   let cursor = abs;
   const tail = [];
-  while (!import_node_fs2.default.existsSync(cursor)) {
-    const parent = import_node_path2.default.dirname(cursor);
+  while (!import_node_fs3.default.existsSync(cursor)) {
+    const parent = import_node_path3.default.dirname(cursor);
     if (parent === cursor) return abs;
-    tail.unshift(import_node_path2.default.basename(cursor));
+    tail.unshift(import_node_path3.default.basename(cursor));
     cursor = parent;
   }
-  const real = import_node_fs2.default.realpathSync.native(cursor);
-  return import_node_path2.default.resolve(real, ...tail);
+  const real = import_node_fs3.default.realpathSync.native(cursor);
+  return import_node_path3.default.resolve(real, ...tail);
 }
 function isWithin(root, candidate) {
-  const relative = import_node_path2.default.relative(root, candidate);
-  return relative === "" || !relative.startsWith("..") && !import_node_path2.default.isAbsolute(relative);
+  const relative = import_node_path3.default.relative(root, candidate);
+  return relative === "" || !relative.startsWith("..") && !import_node_path3.default.isAbsolute(relative);
 }
 function resolveInWorkspace(p, ctx) {
   if (!p) throw new Error("\u30D1\u30B9\u304C\u7A7A\u3067\u3059");
-  const workspaceAbs = import_node_path2.default.resolve(ctx.workspace);
-  const abs = import_node_path2.default.isAbsolute(p) ? import_node_path2.default.normalize(p) : import_node_path2.default.resolve(workspaceAbs, p);
+  const workspaceAbs = import_node_path3.default.resolve(ctx.workspace);
+  const abs = import_node_path3.default.isAbsolute(p) ? import_node_path3.default.normalize(p) : import_node_path3.default.resolve(workspaceAbs, p);
   if (ctx.restrictToWorkspace) {
-    const rootReal = realPathWithMissingTail(workspaceAbs);
-    const candidateReal = realPathWithMissingTail(abs);
+    const rootReal = realPathWithMissingTail2(workspaceAbs);
+    const candidateReal = realPathWithMissingTail2(abs);
     if (!isWithin(rootReal, candidateReal)) {
       throw new Error(`\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u306E\u30D1\u30B9\u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093: ${p}`);
     }
@@ -7207,7 +7557,7 @@ async function walk(dir, cb, depth = 0) {
   }
   for (const e of entries) {
     if (IGNORED_DIRS.has(e.name)) continue;
-    const full = import_node_path2.default.join(dir, e.name);
+    const full = import_node_path3.default.join(dir, e.name);
     if (e.isDirectory()) await walk(full, cb, depth + 1);
     else if (e.isFile()) cb(full);
   }
@@ -7223,16 +7573,16 @@ function findHostTool(name24) {
   if (!name24.startsWith(HOST_TOOL_PREFIX)) return void 0;
   return TOOL_DEFS.find((tool2) => tool2.name === bareToolName(name24));
 }
-function isRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+function isRecord(value2) {
+  return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
 }
-function schemaTypeMatches(value, type) {
-  if (type === "string") return typeof value === "string";
-  if (type === "number") return typeof value === "number" && Number.isFinite(value);
-  if (type === "integer") return typeof value === "number" && Number.isInteger(value);
-  if (type === "boolean") return typeof value === "boolean";
-  if (type === "object") return isRecord(value);
-  if (type === "array") return Array.isArray(value);
+function schemaTypeMatches(value2, type) {
+  if (type === "string") return typeof value2 === "string";
+  if (type === "number") return typeof value2 === "number" && Number.isFinite(value2);
+  if (type === "integer") return typeof value2 === "number" && Number.isInteger(value2);
+  if (type === "boolean") return typeof value2 === "boolean";
+  if (type === "object") return isRecord(value2);
+  if (type === "array") return Array.isArray(value2);
   return true;
 }
 function validateToolArgs(def, args) {
@@ -7241,19 +7591,19 @@ function validateToolArgs(def, args) {
   const properties = schema.properties ?? {};
   const unknown2 = Object.keys(args).filter((key) => !(key in properties));
   if (unknown2.length) return `\u672A\u8A31\u53EF\u306E\u5F15\u6570\u3067\u3059: ${unknown2.join(", ")}`;
-  for (const required2 of schema.required ?? []) {
-    if (!(required2 in args)) return `\u5FC5\u9808\u5F15\u6570\u304C\u3042\u308A\u307E\u305B\u3093: ${required2}`;
+  for (const required3 of schema.required ?? []) {
+    if (!(required3 in args)) return `\u5FC5\u9808\u5F15\u6570\u304C\u3042\u308A\u307E\u305B\u3093: ${required3}`;
   }
-  for (const [key, value] of Object.entries(args)) {
+  for (const [key, value2] of Object.entries(args)) {
     const rule = properties[key] ?? {};
-    if (!schemaTypeMatches(value, rule.type)) return `${key} \u306E\u578B\u304C\u4E0D\u6B63\u3067\u3059\uFF08\u671F\u5F85: ${rule.type ?? "unknown"}\uFF09`;
-    if (typeof value === "string") {
+    if (!schemaTypeMatches(value2, rule.type)) return `${key} \u306E\u578B\u304C\u4E0D\u6B63\u3067\u3059\uFF08\u671F\u5F85: ${rule.type ?? "unknown"}\uFF09`;
+    if (typeof value2 === "string") {
       const maxLength = rule.maxLength ?? (key === "content" ? 1e6 : key === "command" ? 2e4 : 8e3);
-      if (value.length > maxLength) return `${key} \u304C\u9577\u3059\u304E\u307E\u3059\uFF08\u4E0A\u9650 ${maxLength} \u6587\u5B57\uFF09`;
+      if (value2.length > maxLength) return `${key} \u304C\u9577\u3059\u304E\u307E\u3059\uFF08\u4E0A\u9650 ${maxLength} \u6587\u5B57\uFF09`;
     }
-    if (typeof value === "number") {
-      if (rule.minimum !== void 0 && value < rule.minimum) return `${key} \u304C\u5C0F\u3055\u3059\u304E\u307E\u3059`;
-      if (rule.maximum !== void 0 && value > rule.maximum) return `${key} \u304C\u5927\u304D\u3059\u304E\u307E\u3059`;
+    if (typeof value2 === "number") {
+      if (rule.minimum !== void 0 && value2 < rule.minimum) return `${key} \u304C\u5C0F\u3055\u3059\u304E\u307E\u3059`;
+      if (rule.maximum !== void 0 && value2 > rule.maximum) return `${key} \u304C\u5927\u304D\u3059\u304E\u307E\u3059`;
     }
   }
   return null;
@@ -7298,14 +7648,14 @@ var TOOL_DEFS = [
         for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name, "ja"))) {
           if (out.length >= MAX_LIST) break;
           if (!re2 || re2.test(entry.name)) {
-            const relative = import_node_path2.default.relative(ctx.workspace, import_node_path2.default.join(base, entry.name)).replaceAll("\\", "/");
+            const relative = import_node_path3.default.relative(ctx.workspace, import_node_path3.default.join(base, entry.name)).replaceAll("\\", "/");
             out.push(entry.isDirectory() ? `${relative}/` : relative);
           }
         }
       } else {
         await walk(base, (f) => {
           if (out.length >= MAX_LIST) return;
-          if (!re2 || re2.test(import_node_path2.default.basename(f))) out.push(import_node_path2.default.relative(ctx.workspace, f).replaceAll("\\", "/"));
+          if (!re2 || re2.test(import_node_path3.default.basename(f))) out.push(import_node_path3.default.relative(ctx.workspace, f).replaceAll("\\", "/"));
         });
       }
       return out.length === 0 ? "(\u8A72\u5F53\u306A\u3057)" : truncate(out.join("\n"));
@@ -7370,14 +7720,14 @@ var TOOL_DEFS = [
       const selected = /* @__PURE__ */ new Map();
       const addFile = (abs, displayPath) => {
         const checked = resolveInWorkspace(abs, ctx);
-        const relative = (displayPath ?? import_node_path2.default.relative(ctx.workspace, checked)).replaceAll("\\", "/");
+        const relative = (displayPath ?? import_node_path3.default.relative(ctx.workspace, checked)).replaceAll("\\", "/");
         selected.set(checked.toLowerCase(), { abs: checked, relative });
       };
       for (const requested of requestedPaths) addFile(resolveInWorkspace(requested, ctx), requested.replaceAll("\\", "/"));
       if (patterns.length > 0) {
         const matchers = patterns.map(workspaceGlobToRegExp);
         await walk(ctx.workspace, (file2) => {
-          const relative = import_node_path2.default.relative(ctx.workspace, file2).replaceAll("\\", "/");
+          const relative = import_node_path3.default.relative(ctx.workspace, file2).replaceAll("\\", "/");
           if (matchers.some((matcher) => matcher.test(relative))) addFile(file2, relative);
         });
       }
@@ -7408,7 +7758,7 @@ var TOOL_DEFS = [
         const heading = `===== ${file2.relative} =====
 `;
         const xlsxHint = `run_command\u3067 tools/Read-Xlsx.ps1 ${file2.relative} \u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044`;
-        if (import_node_path2.default.extname(file2.relative).toLowerCase() === ".xlsx") {
+        if (import_node_path3.default.extname(file2.relative).toLowerCase() === ".xlsx") {
           const section = `${heading}${xlsxHint}
 `;
           if (used + section.length <= bodyBudget) {
@@ -7463,12 +7813,12 @@ var TOOL_DEFS = [
     async run(args, ctx) {
       const requested = String(args.path ?? "");
       const abs = resolveInWorkspace(requested, ctx);
-      if (import_node_path2.default.extname(abs).toLowerCase() !== ".xlsx") throw new Error("read_xlsx \u306F .xlsx \u30D5\u30A1\u30A4\u30EB\u3060\u3051\u3092\u8AAD\u307F\u53D6\u308C\u307E\u3059");
+      if (import_node_path3.default.extname(abs).toLowerCase() !== ".xlsx") throw new Error("read_xlsx \u306F .xlsx \u30D5\u30A1\u30A4\u30EB\u3060\u3051\u3092\u8AAD\u307F\u53D6\u308C\u307E\u3059");
       const stat = await import_promises.default.stat(abs).catch(() => null);
       if (!stat?.isFile()) throw new Error(`xlsx\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${requested}`);
-      const appRoot = import_node_path2.default.resolve(__dirname, "..");
-      const helper = import_node_path2.default.join(appRoot, "tools", "Read-Xlsx.ps1");
-      if (!import_node_fs2.default.existsSync(helper)) throw new Error(`xlsx\u8AAD\u307F\u53D6\u308A\u30D8\u30EB\u30D1\u30FC\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${helper}`);
+      const appRoot = import_node_path3.default.resolve(__dirname, "..");
+      const helper = import_node_path3.default.join(appRoot, "tools", "Read-Xlsx.ps1");
+      if (!import_node_fs3.default.existsSync(helper)) throw new Error(`xlsx\u8AAD\u307F\u53D6\u308A\u30D8\u30EB\u30D1\u30FC\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${helper}`);
       const { stdout, stderr } = await execFileAsync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", helper, "-Path", abs], {
         cwd: ctx.workspace,
         windowsHide: true,
@@ -7506,11 +7856,11 @@ var TOOL_DEFS = [
         if (e.code !== "ENOENT") throw err;
         existedBefore = false;
       }
-      await import_promises.default.mkdir(import_node_path2.default.dirname(abs), { recursive: true });
+      await import_promises.default.mkdir(import_node_path3.default.dirname(abs), { recursive: true });
       await import_promises.default.writeFile(abs, content, "utf8");
       const readBack = await import_promises.default.readFile(abs, "utf8");
       recordFileSnapshot(abs, ctx, before, existedBefore, readBack);
-      const result = formatFileChangeResult("\u66F8\u304D\u8FBC\u307F", import_node_path2.default.relative(ctx.workspace, abs), before, readBack, 1, existedBefore);
+      const result = formatFileChangeResult("\u66F8\u304D\u8FBC\u307F", import_node_path3.default.relative(ctx.workspace, abs), before, readBack, 1, existedBefore);
       return `${result}
 \u30B5\u30A4\u30BA: ${Buffer.byteLength(readBack)} bytes`;
     }
@@ -7543,13 +7893,13 @@ var TOOL_DEFS = [
       const next = replaceAll ? src.split(oldStr).join(newStr) : src.replace(oldStr, newStr);
       if (next === src) {
         recordFileSnapshot(abs, ctx, src, true, src);
-        return formatFileChangeResult("\u7DE8\u96C6", import_node_path2.default.relative(ctx.workspace, abs), src, src, count, true);
+        return formatFileChangeResult("\u7DE8\u96C6", import_node_path3.default.relative(ctx.workspace, abs), src, src, count, true);
       }
       await import_promises.default.writeFile(abs, next, "utf8");
       const readBack = await import_promises.default.readFile(abs, "utf8");
       if (readBack !== next) throw new Error("\u7DE8\u96C6\u5F8C\u306E\u518D\u8AAD\u8FBC\u5185\u5BB9\u304C\u4E00\u81F4\u3057\u307E\u305B\u3093");
       recordFileSnapshot(abs, ctx, src, true, readBack);
-      return formatFileChangeResult("\u7DE8\u96C6", import_node_path2.default.relative(ctx.workspace, abs), src, readBack, count, true);
+      return formatFileChangeResult("\u7DE8\u96C6", import_node_path3.default.relative(ctx.workspace, abs), src, readBack, count, true);
     }
   },
   {
@@ -7600,7 +7950,7 @@ var TOOL_DEFS = [
         for (let i = 0; i < lines.length; i++) {
           if (results.length >= MAX_SEARCH_RESULTS) break;
           if (re2.test(lines[i])) {
-            results.push(`${import_node_path2.default.relative(ctx.workspace, f).replaceAll("\\", "/")}:${i + 1}: ${truncate(lines[i], 300)}`);
+            results.push(`${import_node_path3.default.relative(ctx.workspace, f).replaceAll("\\", "/")}:${i + 1}: ${truncate(lines[i], 300)}`);
           }
         }
       }
@@ -7923,30 +8273,30 @@ function buildProtocolRules(mode = "work", allowArbitraryCommands = false, autoA
     `\u6700\u5F8C\u306B ${END_MARKER} \u3060\u3051\u306E\u884C\u3092\u4ED8\u3051\u308B\u3002`
   ].join("\n");
 }
-function normalizeForKey(value) {
-  if (Array.isArray(value)) return value.map(normalizeForKey);
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, normalizeForKey(item)]));
-  return value;
+function normalizeForKey(value2) {
+  if (Array.isArray(value2)) return value2.map(normalizeForKey);
+  if (value2 && typeof value2 === "object") return Object.fromEntries(Object.entries(value2).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, normalizeForKey(item)]));
+  return value2;
 }
 function toolRequestKey(name24, args) {
   const normalized = normalizeForKey(args);
   if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) return `${name24}:${JSON.stringify(normalized)}`;
   const copy = { ...normalized };
   const bare = bareToolName(name24);
-  if (typeof copy.path === "string") copy.path = import_node_path3.default.normalize(copy.path).replaceAll("\\", "/");
+  if (typeof copy.path === "string") copy.path = import_node_path4.default.normalize(copy.path).replaceAll("\\", "/");
   if (bare === "list_files") {
     if (copy.path === "" || copy.path === ".") delete copy.path;
     if (copy.glob === "*" || copy.glob === "**" || copy.glob === "**/*") delete copy.glob;
   }
   return `${name24}:${JSON.stringify(copy)}`;
 }
-function formatHostResult(tool2, output, metadata, status, callId, runId) {
+function formatHostResult(tool2, output, metadata2, status, callId, runId) {
   const bare = bareToolName(tool2);
   const max = bare === "read_files" ? 8e4 : 8e3;
   const truncated = output.length > max;
   const commandLike = bare === "run_command" || bare === "start_process" || bare === "stop_process";
   const writeLike = bare === "write_file" || bare === "edit_file";
-  const sideEffectState = status === "succeeded" ? metadata?.changed ? "committed" : "none" : status === "denied" ? "none" : commandLike ? "unknown" : writeLike ? "possible" : "none";
+  const sideEffectState = status === "succeeded" ? metadata2?.changed ? "committed" : "none" : status === "denied" ? "none" : commandLike ? "unknown" : writeLike ? "possible" : "none";
   const payload = {
     kind: "host_result",
     schemaVersion: "1",
@@ -7955,8 +8305,8 @@ function formatHostResult(tool2, output, metadata, status, callId, runId) {
     tool: tool2,
     status,
     data: { summary: output.slice(0, max) },
-    evidence: metadata ? { ...metadata, retrievedAt: (/* @__PURE__ */ new Date()).toISOString() } : { retrievedAt: (/* @__PURE__ */ new Date()).toISOString() },
-    effects: metadata?.changed ? [{ type: "workspace_change", path: metadata.path ?? null, beforeHash: metadata.beforeHash ?? null, afterHash: metadata.afterHash ?? null }] : [],
+    evidence: metadata2 ? { ...metadata2, retrievedAt: (/* @__PURE__ */ new Date()).toISOString() } : { retrievedAt: (/* @__PURE__ */ new Date()).toISOString() },
+    effects: metadata2?.changed ? [{ type: "workspace_change", path: metadata2.path ?? null, beforeHash: metadata2.beforeHash ?? null, afterHash: metadata2.afterHash ?? null }] : [],
     sideEffectState,
     truncation: { truncated },
     security: { contentIsUntrusted: true },
@@ -8154,8 +8504,8 @@ async function runCopilotTurn(opts) {
       return { reply, messages: turnMessages(reply), aborted: false };
     }
     const requestedTool = parsed.tool ?? "";
-    const normalizedTool = requestedTool.startsWith("host.") ? requestedTool : qualifiedToolName(requestedTool);
-    const def = findHostTool(normalizedTool);
+    const normalizedTool2 = requestedTool.startsWith("host.") ? requestedTool : qualifiedToolName(requestedTool);
+    const def = findHostTool(normalizedTool2);
     if (!requestedTool || !def) {
       io.event?.({ type: "copilot.native.observed", tool: parsed.tool, summary: "Copilot\u5185\u8535/native\u30C4\u30FC\u30EB\u8981\u6C42\u3092\u89B3\u6E2C\u3057\u307E\u3057\u305F\uFF08\u5B9F\u884C\u3057\u3066\u3044\u307E\u305B\u3093\uFF09", origin: "copilot", namespace: "native", authority: "observed" });
       invalidDecisions++;
@@ -8164,7 +8514,7 @@ async function runCopilotTurn(opts) {
       continue;
     }
     if (ctx.safeCommandOnly && bareToolName(def.name) === "get_weather") return stopWithWarning("\u3053\u306E\u69CB\u6210\u3067\u306F\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u901A\u4FE1\u3092\u884C\u3046host\u30C4\u30FC\u30EB\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093");
-    parsed.tool = normalizedTool;
+    parsed.tool = normalizedTool2;
     if (bareToolName(def.name) === "run_command" && !policy.allowArbitraryCommands) return stopWithWarning("\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u8A2D\u5B9A\u3067\u660E\u793A\u7684\u306B\u6709\u52B9\u5316\u3055\u308C\u3066\u3044\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
     const args = parsed.args ?? {};
     const argError = validateToolArgs(def, args);
@@ -8262,17 +8612,17 @@ ${summary}`, approvalBinding);
     }
     const failed = output.startsWith("[tool error]");
     const durationMs = Date.now() - startedAt;
-    const metadata = parseToolResultMeta(output);
-    const resultKey = `${qualified}:${metadata?.afterHash ?? output.slice(0, 1600)}`;
+    const metadata2 = parseToolResultMeta(output);
+    const resultKey = `${qualified}:${metadata2?.afterHash ?? output.slice(0, 1600)}`;
     noProgress = failed || resultKey === lastResultKey ? noProgress + 1 : 0;
     lastResultKey = resultKey;
     const terminalAudit = buildToolAuditMetadata(qualified, args, permission, audit.approval, {
       ...audit.target,
-      after_sha256: typeof metadata?.afterHash === "string" ? metadata.afterHash : null
+      after_sha256: typeof metadata2?.afterHash === "string" ? metadata2.afterHash : null
     });
-    io.event?.({ type: failed ? "tool.failed" : "tool.succeeded", tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId });
-    io.event?.({ type: failed ? "step.failed" : "step.completed", tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId });
-    steps.push(formatHostResult(qualified, output, metadata, failed ? "failed" : "succeeded", callId, ctx.runId));
+    io.event?.({ type: failed ? "tool.failed" : "tool.succeeded", tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata: metadata2, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId });
+    io.event?.({ type: failed ? "step.failed" : "step.completed", tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata: metadata2, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId });
+    steps.push(formatHostResult(qualified, output, metadata2, failed ? "failed" : "succeeded", callId, ctx.runId));
     steps.push(`SYSTEM: ${qualified} \u306F\u5B9F\u884C\u6E08\u307F\u3067\u3059\u3002\u7D50\u679C\u3092\u6839\u62E0\u306B\u6B21\u306E1\u624B\u3092\u5224\u65AD\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
     if (noProgress >= maxNoProgress) return stopWithWarning(`host\u30C4\u30FC\u30EB\u7D50\u679C\u306B\u9032\u5C55\u304C\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F\uFF08${maxNoProgress}\u56DE\u9023\u7D9A\uFF09`);
   }
@@ -8379,12 +8729,12 @@ async function runOpenAITurn(opts) {
     if (def.kind === "write") writes++;
     if (def.kind === "command") commands++;
     if (output.startsWith("[policy error]") || output.startsWith("[validation error]")) return warning(output);
-    const metadata = parseToolResultMeta(output);
-    const resultKey = `${call.function.name}:${metadata?.afterHash ?? output.slice(0, 1600)}`;
+    const metadata2 = parseToolResultMeta(output);
+    const resultKey = `${call.function.name}:${metadata2?.afterHash ?? output.slice(0, 1600)}`;
     noProgress = resultKey === lastResultKey ? noProgress + 1 : 0;
     lastResultKey = resultKey;
     const status = output === "(\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)" ? "denied" : output.startsWith("[tool error]") ? "failed" : "succeeded";
-    messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: formatHostResult(call.function.name, output, metadata, status, call.id, ctx.runId) });
+    messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: formatHostResult(call.function.name, output, metadata2, status, call.id, ctx.runId) });
     if (noProgress >= maxNoProgress) return warning(`host\u30C4\u30FC\u30EB\u7D50\u679C\u306B\u9032\u5C55\u304C\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F\uFF08${maxNoProgress}\u56DE\u9023\u7D9A\uFF09`);
   }
   return warning("\u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F");
@@ -8463,13 +8813,13 @@ ${summary}`, approvalBinding);
   try {
     const output = await def.run(args, ctx);
     const durationMs = Date.now() - startedAt;
-    const metadata = parseToolResultMeta(output);
+    const metadata2 = parseToolResultMeta(output);
     const terminalAudit = buildToolAuditMetadata(qualified, args, permission, audit.approval, {
       ...audit.target,
-      after_sha256: typeof metadata?.afterHash === "string" ? metadata.afterHash : null
+      after_sha256: typeof metadata2?.afterHash === "string" ? metadata2.afterHash : null
     });
-    io.event?.({ type: "tool.succeeded", tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
-    io.event?.({ type: "step.completed", tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+    io.event?.({ type: "tool.succeeded", tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata: metadata2, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+    io.event?.({ type: "step.completed", tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata: metadata2, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
     return output;
   } catch (err) {
     const output = `[tool error] ${err.message}`;
@@ -8767,7 +9117,7 @@ var _a13;
 var _b13;
 var TypeValidationError = class _TypeValidationError extends (_b13 = AISDKError, _a13 = symbol13, _b13) {
   constructor({
-    value,
+    value: value2,
     cause,
     context: context2
   }) {
@@ -8789,12 +9139,12 @@ var TypeValidationError = class _TypeValidationError extends (_b13 = AISDKError,
     }
     super({
       name: name12,
-      message: `${contextPrefix}: Value: ${JSON.stringify(value)}.
+      message: `${contextPrefix}: Value: ${JSON.stringify(value2)}.
 Error message: ${getErrorMessage(cause)}`,
       cause
     });
     this[_a13] = true;
-    this.value = value;
+    this.value = value2;
     this.context = context2;
   }
   static isInstance(error51) {
@@ -8812,15 +9162,15 @@ Error message: ${getErrorMessage(cause)}`,
    * @returns {TypeValidationError} A TypeValidationError instance.
    */
   static wrap({
-    value,
+    value: value2,
     cause,
     context: context2
   }) {
     var _a153, _b152, _c;
-    if (_TypeValidationError.isInstance(cause) && cause.value === value && ((_a153 = cause.context) == null ? void 0 : _a153.field) === (context2 == null ? void 0 : context2.field) && ((_b152 = cause.context) == null ? void 0 : _b152.entityName) === (context2 == null ? void 0 : context2.entityName) && ((_c = cause.context) == null ? void 0 : _c.entityId) === (context2 == null ? void 0 : context2.entityId)) {
+    if (_TypeValidationError.isInstance(cause) && cause.value === value2 && ((_a153 = cause.context) == null ? void 0 : _a153.field) === (context2 == null ? void 0 : context2.field) && ((_b152 = cause.context) == null ? void 0 : _b152.entityName) === (context2 == null ? void 0 : context2.entityName) && ((_c = cause.context) == null ? void 0 : _c.entityId) === (context2 == null ? void 0 : context2.entityId)) {
       return cause;
     }
-    return new _TypeValidationError({ value, cause, context: context2 });
+    return new _TypeValidationError({ value: value2, cause, context: context2 });
   }
 };
 var name13 = "AI_UnsupportedFunctionalityError";
@@ -9523,25 +9873,25 @@ function assert(_) {
 }
 function getEnumValues(entries) {
   const numericValues = Object.values(entries).filter((v) => typeof v === "number");
-  const values = Object.entries(entries).filter(([k, _]) => numericValues.indexOf(+k) === -1).map(([_, v]) => v);
-  return values;
+  const values2 = Object.entries(entries).filter(([k, _]) => numericValues.indexOf(+k) === -1).map(([_, v]) => v);
+  return values2;
 }
 function joinValues(array3, separator = "|") {
   return array3.map((val) => stringifyPrimitive(val)).join(separator);
 }
-function jsonStringifyReplacer(_, value) {
-  if (typeof value === "bigint")
-    return value.toString();
-  return value;
+function jsonStringifyReplacer(_, value2) {
+  if (typeof value2 === "bigint")
+    return value2.toString();
+  return value2;
 }
 function cached(getter) {
   const set2 = false;
   return {
     get value() {
       if (!set2) {
-        const value = getter();
-        Object.defineProperty(this, "value", { value });
-        return value;
+        const value2 = getter();
+        Object.defineProperty(this, "value", { value: value2 });
+        return value2;
       }
       throw new Error("cached value already set");
     }
@@ -9565,17 +9915,17 @@ function floatSafeRemainder(val, step) {
 }
 var EVALUATING = /* @__PURE__ */ Symbol("evaluating");
 function defineLazy(object3, key, getter) {
-  let value = void 0;
+  let value2 = void 0;
   Object.defineProperty(object3, key, {
     get() {
-      if (value === EVALUATING) {
+      if (value2 === EVALUATING) {
         return void 0;
       }
-      if (value === void 0) {
-        value = EVALUATING;
-        value = getter();
+      if (value2 === void 0) {
+        value2 = EVALUATING;
+        value2 = getter();
       }
-      return value;
+      return value2;
     },
     set(v) {
       Object.defineProperty(object3, key, {
@@ -9589,9 +9939,9 @@ function defineLazy(object3, key, getter) {
 function objectClone(obj) {
   return Object.create(Object.getPrototypeOf(obj), Object.getOwnPropertyDescriptors(obj));
 }
-function assignProp(target, prop, value) {
+function assignProp(target, prop, value2) {
   Object.defineProperty(target, prop, {
-    value,
+    value: value2,
     writable: true,
     enumerable: true,
     configurable: true
@@ -9779,9 +10129,9 @@ function createTransparentProxy(getter) {
       target ?? (target = getter());
       return Reflect.get(target, prop, receiver);
     },
-    set(_, prop, value, receiver) {
+    set(_, prop, value2, receiver) {
       target ?? (target = getter());
-      return Reflect.set(target, prop, value, receiver);
+      return Reflect.set(target, prop, value2, receiver);
     },
     has(_, prop) {
       target ?? (target = getter());
@@ -9805,12 +10155,12 @@ function createTransparentProxy(getter) {
     }
   });
 }
-function stringifyPrimitive(value) {
-  if (typeof value === "bigint")
-    return value.toString() + "n";
-  if (typeof value === "string")
-    return `"${value}"`;
-  return `${value}`;
+function stringifyPrimitive(value2) {
+  if (typeof value2 === "bigint")
+    return value2.toString() + "n";
+  if (typeof value2 === "string")
+    return `"${value2}"`;
+  return `${value2}`;
 }
 function optionalKeys(shape) {
   return Object.keys(shape).filter((k) => {
@@ -10277,9 +10627,9 @@ function prettifyError(error51) {
 }
 
 // node_modules/zod/v4/core/parse.js
-var _parse = (_Err) => (schema, value, _ctx, _params) => {
+var _parse = (_Err) => (schema, value2, _ctx, _params) => {
   const ctx = _ctx ? { ..._ctx, async: false } : { async: false };
-  const result = schema._zod.run({ value, issues: [] }, ctx);
+  const result = schema._zod.run({ value: value2, issues: [] }, ctx);
   if (result instanceof Promise) {
     throw new $ZodAsyncError();
   }
@@ -10291,9 +10641,9 @@ var _parse = (_Err) => (schema, value, _ctx, _params) => {
   return result.value;
 };
 var parse = /* @__PURE__ */ _parse($ZodRealError);
-var _parseAsync = (_Err) => async (schema, value, _ctx, params) => {
+var _parseAsync = (_Err) => async (schema, value2, _ctx, params) => {
   const ctx = _ctx ? { ..._ctx, async: true } : { async: true };
-  let result = schema._zod.run({ value, issues: [] }, ctx);
+  let result = schema._zod.run({ value: value2, issues: [] }, ctx);
   if (result instanceof Promise)
     result = await result;
   if (result.issues.length) {
@@ -10304,9 +10654,9 @@ var _parseAsync = (_Err) => async (schema, value, _ctx, params) => {
   return result.value;
 };
 var parseAsync = /* @__PURE__ */ _parseAsync($ZodRealError);
-var _safeParse = (_Err) => (schema, value, _ctx) => {
+var _safeParse = (_Err) => (schema, value2, _ctx) => {
   const ctx = _ctx ? { ..._ctx, async: false } : { async: false };
-  const result = schema._zod.run({ value, issues: [] }, ctx);
+  const result = schema._zod.run({ value: value2, issues: [] }, ctx);
   if (result instanceof Promise) {
     throw new $ZodAsyncError();
   }
@@ -10316,9 +10666,9 @@ var _safeParse = (_Err) => (schema, value, _ctx) => {
   } : { success: true, data: result.value };
 };
 var safeParse = /* @__PURE__ */ _safeParse($ZodRealError);
-var _safeParseAsync = (_Err) => async (schema, value, _ctx) => {
+var _safeParseAsync = (_Err) => async (schema, value2, _ctx) => {
   const ctx = _ctx ? { ..._ctx, async: true } : { async: true };
-  let result = schema._zod.run({ value, issues: [] }, ctx);
+  let result = schema._zod.run({ value: value2, issues: [] }, ctx);
   if (result instanceof Promise)
     result = await result;
   return result.issues.length ? {
@@ -10327,40 +10677,40 @@ var _safeParseAsync = (_Err) => async (schema, value, _ctx) => {
   } : { success: true, data: result.value };
 };
 var safeParseAsync = /* @__PURE__ */ _safeParseAsync($ZodRealError);
-var _encode = (_Err) => (schema, value, _ctx) => {
+var _encode = (_Err) => (schema, value2, _ctx) => {
   const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
-  return _parse(_Err)(schema, value, ctx);
+  return _parse(_Err)(schema, value2, ctx);
 };
 var encode = /* @__PURE__ */ _encode($ZodRealError);
-var _decode = (_Err) => (schema, value, _ctx) => {
-  return _parse(_Err)(schema, value, _ctx);
+var _decode = (_Err) => (schema, value2, _ctx) => {
+  return _parse(_Err)(schema, value2, _ctx);
 };
 var decode = /* @__PURE__ */ _decode($ZodRealError);
-var _encodeAsync = (_Err) => async (schema, value, _ctx) => {
+var _encodeAsync = (_Err) => async (schema, value2, _ctx) => {
   const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
-  return _parseAsync(_Err)(schema, value, ctx);
+  return _parseAsync(_Err)(schema, value2, ctx);
 };
 var encodeAsync = /* @__PURE__ */ _encodeAsync($ZodRealError);
-var _decodeAsync = (_Err) => async (schema, value, _ctx) => {
-  return _parseAsync(_Err)(schema, value, _ctx);
+var _decodeAsync = (_Err) => async (schema, value2, _ctx) => {
+  return _parseAsync(_Err)(schema, value2, _ctx);
 };
 var decodeAsync = /* @__PURE__ */ _decodeAsync($ZodRealError);
-var _safeEncode = (_Err) => (schema, value, _ctx) => {
+var _safeEncode = (_Err) => (schema, value2, _ctx) => {
   const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
-  return _safeParse(_Err)(schema, value, ctx);
+  return _safeParse(_Err)(schema, value2, ctx);
 };
 var safeEncode = /* @__PURE__ */ _safeEncode($ZodRealError);
-var _safeDecode = (_Err) => (schema, value, _ctx) => {
-  return _safeParse(_Err)(schema, value, _ctx);
+var _safeDecode = (_Err) => (schema, value2, _ctx) => {
+  return _safeParse(_Err)(schema, value2, _ctx);
 };
 var safeDecode = /* @__PURE__ */ _safeDecode($ZodRealError);
-var _safeEncodeAsync = (_Err) => async (schema, value, _ctx) => {
+var _safeEncodeAsync = (_Err) => async (schema, value2, _ctx) => {
   const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
-  return _safeParseAsync(_Err)(schema, value, ctx);
+  return _safeParseAsync(_Err)(schema, value2, ctx);
 };
 var safeEncodeAsync = /* @__PURE__ */ _safeEncodeAsync($ZodRealError);
-var _safeDecodeAsync = (_Err) => async (schema, value, _ctx) => {
-  return _safeParseAsync(_Err)(schema, value, _ctx);
+var _safeDecodeAsync = (_Err) => async (schema, value2, _ctx) => {
+  return _safeParseAsync(_Err)(schema, value2, _ctx);
 };
 var safeDecodeAsync = /* @__PURE__ */ _safeDecodeAsync($ZodRealError);
 
@@ -11214,12 +11564,12 @@ var $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
     };
   }
   defineLazy(inst, "~standard", () => ({
-    validate: (value) => {
+    validate: (value2) => {
       try {
-        const r = safeParse(inst, value);
+        const r = safeParse(inst, value2);
         return r.success ? { value: r.data } : { issues: r.error?.issues };
       } catch (_) {
-        return safeParseAsync(inst, value).then((r) => r.success ? { value: r.data } : { issues: r.error?.issues });
+        return safeParseAsync(inst, value2).then((r) => r.success ? { value: r.data } : { issues: r.error?.issues });
       }
     },
     vendor: "zod",
@@ -11882,9 +12232,9 @@ var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
   });
   const isObject2 = isObject;
   const catchall = def.catchall;
-  let value;
+  let value2;
   inst._zod.parse = (payload, ctx) => {
-    value ?? (value = _normalized.value);
+    value2 ?? (value2 = _normalized.value);
     const input = payload.value;
     if (!isObject2(input)) {
       payload.issues.push({
@@ -11897,8 +12247,8 @@ var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
     }
     payload.value = {};
     const proms = [];
-    const shape = value.shape;
-    for (const key of value.keys) {
+    const shape = value2.shape;
+    for (const key of value2.keys) {
       const el = shape[key];
       const isOptionalIn = el._zod.optin === "optional";
       const isOptionalOut = el._zod.optout === "optional";
@@ -12018,9 +12368,9 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
   const allowsEval2 = allowsEval;
   const fastEnabled = jit && allowsEval2.value;
   const catchall = def.catchall;
-  let value;
+  let value2;
   inst._zod.parse = (payload, ctx) => {
-    value ?? (value = _normalized.value);
+    value2 ?? (value2 = _normalized.value);
     const input = payload.value;
     if (!isObject2(input)) {
       payload.issues.push({
@@ -12037,7 +12387,7 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
       payload = fastpass(payload, ctx);
       if (!catchall)
         return payload;
-      return handleCatchall([], input, payload, ctx, value, inst);
+      return handleCatchall([], input, payload, ctx, value2, inst);
     }
     return superParse(payload, ctx);
   };
@@ -12184,10 +12534,10 @@ var $ZodDiscriminatedUnion = /* @__PURE__ */ $constructor("$ZodDiscriminatedUnio
     const opts = def.options;
     const map2 = /* @__PURE__ */ new Map();
     for (const o of opts) {
-      const values = o._zod.propValues?.[def.discriminator];
-      if (!values || values.size === 0)
+      const values2 = o._zod.propValues?.[def.discriminator];
+      if (!values2 || values2.size === 0)
         throw new Error(`Invalid discriminated union option at index "${def.options.indexOf(o)}"`);
-      for (const v of values) {
+      for (const v of values2) {
         if (map2.has(v)) {
           throw new Error(`Duplicate discriminator value "${String(v)}"`);
         }
@@ -12445,11 +12795,11 @@ var $ZodRecord = /* @__PURE__ */ $constructor("$ZodRecord", (inst, def) => {
       return payload;
     }
     const proms = [];
-    const values = def.keyType._zod.values;
-    if (values) {
+    const values2 = def.keyType._zod.values;
+    if (values2) {
       payload.value = {};
       const recordKeys = /* @__PURE__ */ new Set();
-      for (const key of values) {
+      for (const key of values2) {
         if (typeof key === "string" || typeof key === "number" || typeof key === "symbol") {
           recordKeys.add(typeof key === "number" ? key.toString() : key);
           const keyResult = def.keyType._zod.run({ value: key, issues: [] }, ctx);
@@ -12572,9 +12922,9 @@ var $ZodMap = /* @__PURE__ */ $constructor("$ZodMap", (inst, def) => {
     }
     const proms = [];
     payload.value = /* @__PURE__ */ new Map();
-    for (const [key, value] of input) {
+    for (const [key, value2] of input) {
       const keyResult = def.keyType._zod.run({ value: key, issues: [] }, ctx);
-      const valueResult = def.valueType._zod.run({ value, issues: [] }, ctx);
+      const valueResult = def.valueType._zod.run({ value: value2, issues: [] }, ctx);
       if (keyResult instanceof Promise || valueResult instanceof Promise) {
         proms.push(Promise.all([keyResult, valueResult]).then(([keyResult2, valueResult2]) => {
           handleMapResult(keyResult2, valueResult2, payload, key, input, inst, ctx);
@@ -12653,10 +13003,10 @@ function handleSetResult(result, final) {
 }
 var $ZodEnum = /* @__PURE__ */ $constructor("$ZodEnum", (inst, def) => {
   $ZodType.init(inst, def);
-  const values = getEnumValues(def.entries);
-  const valuesSet = new Set(values);
+  const values2 = getEnumValues(def.entries);
+  const valuesSet = new Set(values2);
   inst._zod.values = valuesSet;
-  inst._zod.pattern = new RegExp(`^(${values.filter((k) => propertyKeyTypes.has(typeof k)).map((o) => typeof o === "string" ? escapeRegex(o) : o.toString()).join("|")})$`);
+  inst._zod.pattern = new RegExp(`^(${values2.filter((k) => propertyKeyTypes.has(typeof k)).map((o) => typeof o === "string" ? escapeRegex(o) : o.toString()).join("|")})$`);
   inst._zod.parse = (payload, _ctx) => {
     const input = payload.value;
     if (valuesSet.has(input)) {
@@ -12664,7 +13014,7 @@ var $ZodEnum = /* @__PURE__ */ $constructor("$ZodEnum", (inst, def) => {
     }
     payload.issues.push({
       code: "invalid_value",
-      values,
+      values: values2,
       input,
       inst
     });
@@ -12676,12 +13026,12 @@ var $ZodLiteral = /* @__PURE__ */ $constructor("$ZodLiteral", (inst, def) => {
   if (def.values.length === 0) {
     throw new Error("Cannot create literal schema with no valid values");
   }
-  const values = new Set(def.values);
-  inst._zod.values = values;
+  const values2 = new Set(def.values);
+  inst._zod.values = values2;
   inst._zod.pattern = new RegExp(`^(${def.values.map((o) => typeof o === "string" ? escapeRegex(o) : o ? escapeRegex(o.toString()) : String(o)).join("|")})$`);
   inst._zod.parse = (payload, _ctx) => {
     const input = payload.value;
-    if (values.has(input)) {
+    if (values2.has(input)) {
       return payload;
     }
     payload.issues.push({
@@ -12986,23 +13336,23 @@ function handleCodecAResult(result, def, ctx) {
   if (direction === "forward") {
     const transformed = def.transform(result.value, result);
     if (transformed instanceof Promise) {
-      return transformed.then((value) => handleCodecTxResult(result, value, def.out, ctx));
+      return transformed.then((value2) => handleCodecTxResult(result, value2, def.out, ctx));
     }
     return handleCodecTxResult(result, transformed, def.out, ctx);
   } else {
     const transformed = def.reverseTransform(result.value, result);
     if (transformed instanceof Promise) {
-      return transformed.then((value) => handleCodecTxResult(result, value, def.in, ctx));
+      return transformed.then((value2) => handleCodecTxResult(result, value2, def.in, ctx));
     }
     return handleCodecTxResult(result, transformed, def.in, ctx);
   }
 }
-function handleCodecTxResult(left, value, nextSchema, ctx) {
+function handleCodecTxResult(left, value2, nextSchema, ctx) {
   if (left.issues.length) {
     left.aborted = true;
     return left;
   }
-  return nextSchema._zod.run({ value, issues: left.issues }, ctx);
+  return nextSchema._zod.run({ value: value2, issues: left.issues }, ctx);
 }
 var $ZodPreprocess = /* @__PURE__ */ $constructor("$ZodPreprocess", (inst, def) => {
   $ZodPipe.init(inst, def);
@@ -19695,38 +20045,38 @@ function _nan(Class2, params) {
   });
 }
 // @__NO_SIDE_EFFECTS__
-function _lt(value, params) {
+function _lt(value2, params) {
   return new $ZodCheckLessThan({
     check: "less_than",
     ...normalizeParams(params),
-    value,
+    value: value2,
     inclusive: false
   });
 }
 // @__NO_SIDE_EFFECTS__
-function _lte(value, params) {
+function _lte(value2, params) {
   return new $ZodCheckLessThan({
     check: "less_than",
     ...normalizeParams(params),
-    value,
+    value: value2,
     inclusive: true
   });
 }
 // @__NO_SIDE_EFFECTS__
-function _gt(value, params) {
+function _gt(value2, params) {
   return new $ZodCheckGreaterThan({
     check: "greater_than",
     ...normalizeParams(params),
-    value,
+    value: value2,
     inclusive: false
   });
 }
 // @__NO_SIDE_EFFECTS__
-function _gte(value, params) {
+function _gte(value2, params) {
   return new $ZodCheckGreaterThan({
     check: "greater_than",
     ...normalizeParams(params),
-    value,
+    value: value2,
     inclusive: true
   });
 }
@@ -19747,11 +20097,11 @@ function _nonnegative(params) {
   return /* @__PURE__ */ _gte(0, params);
 }
 // @__NO_SIDE_EFFECTS__
-function _multipleOf(value, params) {
+function _multipleOf(value2, params) {
   return new $ZodCheckMultipleOf({
     check: "multiple_of",
     ...normalizeParams(params),
-    value
+    value: value2
   });
 }
 // @__NO_SIDE_EFFECTS__
@@ -19982,8 +20332,8 @@ function _set(Class2, valueType, params) {
   });
 }
 // @__NO_SIDE_EFFECTS__
-function _enum(Class2, values, params) {
-  const entries = Array.isArray(values) ? Object.fromEntries(values.map((v) => [v, v])) : values;
+function _enum(Class2, values2, params) {
+  const entries = Array.isArray(values2) ? Object.fromEntries(values2.map((v) => [v, v])) : values2;
   return new Class2({
     type: "enum",
     entries,
@@ -19999,10 +20349,10 @@ function _nativeEnum(Class2, entries, params) {
   });
 }
 // @__NO_SIDE_EFFECTS__
-function _literal(Class2, value, params) {
+function _literal(Class2, value2, params) {
   return new Class2({
     type: "literal",
-    values: Array.isArray(value) ? value : [value],
+    values: Array.isArray(value2) ? value2 : [value2],
     ...normalizeParams(params)
   });
 }
@@ -20170,12 +20520,12 @@ function describe(description) {
   return ch;
 }
 // @__NO_SIDE_EFFECTS__
-function meta(metadata) {
+function meta(metadata2) {
   const ch = new $ZodCheck({ check: "meta" });
   ch._zod.onattach = [
     (inst) => {
       const existing = globalRegistry.get(inst) ?? {};
-      globalRegistry.add(inst, { ...existing, ...metadata });
+      globalRegistry.add(inst, { ...existing, ...metadata2 });
     }
   ];
   ch._zod.check = () => {
@@ -20730,12 +21080,12 @@ var dateProcessor = (_schema, ctx, _json, _params) => {
 };
 var enumProcessor = (schema, _ctx, json3, _params) => {
   const def = schema._zod.def;
-  const values = getEnumValues(def.entries);
-  if (values.every((v) => typeof v === "number"))
+  const values2 = getEnumValues(def.entries);
+  if (values2.every((v) => typeof v === "number"))
     json3.type = "number";
-  if (values.every((v) => typeof v === "string"))
+  if (values2.every((v) => typeof v === "string"))
     json3.type = "string";
-  json3.enum = values;
+  json3.enum = values2;
 };
 var literalProcessor = (schema, ctx, json3, _params) => {
   const def = schema._zod.def;
@@ -21180,8 +21530,8 @@ var JSONSchemaGenerator = class {
   get counter() {
     return this.ctx.counter;
   }
-  set counter(value) {
-    this.ctx.counter = value;
+  set counter(value2) {
+    this.ctx.counter = value2;
   }
   /** @deprecated Access via ctx instead */
   get seen() {
@@ -21975,23 +22325,23 @@ var ZodNumber = /* @__PURE__ */ $constructor("ZodNumber", (inst, def) => {
   ZodType.init(inst, def);
   inst._zod.processJSONSchema = (ctx, json3, params) => numberProcessor(inst, ctx, json3, params);
   _installLazyMethods(inst, "ZodNumber", {
-    gt(value, params) {
-      return this.check(_gt(value, params));
+    gt(value2, params) {
+      return this.check(_gt(value2, params));
     },
-    gte(value, params) {
-      return this.check(_gte(value, params));
+    gte(value2, params) {
+      return this.check(_gte(value2, params));
     },
-    min(value, params) {
-      return this.check(_gte(value, params));
+    min(value2, params) {
+      return this.check(_gte(value2, params));
     },
-    lt(value, params) {
-      return this.check(_lt(value, params));
+    lt(value2, params) {
+      return this.check(_lt(value2, params));
     },
-    lte(value, params) {
-      return this.check(_lte(value, params));
+    lte(value2, params) {
+      return this.check(_lte(value2, params));
     },
-    max(value, params) {
-      return this.check(_lte(value, params));
+    max(value2, params) {
+      return this.check(_lte(value2, params));
     },
     int(params) {
       return this.check(int(params));
@@ -22011,11 +22361,11 @@ var ZodNumber = /* @__PURE__ */ $constructor("ZodNumber", (inst, def) => {
     nonpositive(params) {
       return this.check(_lte(0, params));
     },
-    multipleOf(value, params) {
-      return this.check(_multipleOf(value, params));
+    multipleOf(value2, params) {
+      return this.check(_multipleOf(value2, params));
     },
-    step(value, params) {
-      return this.check(_multipleOf(value, params));
+    step(value2, params) {
+      return this.check(_multipleOf(value2, params));
     },
     finite() {
       return this;
@@ -22062,19 +22412,19 @@ var ZodBigInt = /* @__PURE__ */ $constructor("ZodBigInt", (inst, def) => {
   $ZodBigInt.init(inst, def);
   ZodType.init(inst, def);
   inst._zod.processJSONSchema = (ctx, json3, params) => bigintProcessor(inst, ctx, json3, params);
-  inst.gte = (value, params) => inst.check(_gte(value, params));
-  inst.min = (value, params) => inst.check(_gte(value, params));
-  inst.gt = (value, params) => inst.check(_gt(value, params));
-  inst.gte = (value, params) => inst.check(_gte(value, params));
-  inst.min = (value, params) => inst.check(_gte(value, params));
-  inst.lt = (value, params) => inst.check(_lt(value, params));
-  inst.lte = (value, params) => inst.check(_lte(value, params));
-  inst.max = (value, params) => inst.check(_lte(value, params));
+  inst.gte = (value2, params) => inst.check(_gte(value2, params));
+  inst.min = (value2, params) => inst.check(_gte(value2, params));
+  inst.gt = (value2, params) => inst.check(_gt(value2, params));
+  inst.gte = (value2, params) => inst.check(_gte(value2, params));
+  inst.min = (value2, params) => inst.check(_gte(value2, params));
+  inst.lt = (value2, params) => inst.check(_lt(value2, params));
+  inst.lte = (value2, params) => inst.check(_lte(value2, params));
+  inst.max = (value2, params) => inst.check(_lte(value2, params));
   inst.positive = (params) => inst.check(_gt(BigInt(0), params));
   inst.negative = (params) => inst.check(_lt(BigInt(0), params));
   inst.nonpositive = (params) => inst.check(_lte(BigInt(0), params));
   inst.nonnegative = (params) => inst.check(_gte(BigInt(0), params));
-  inst.multipleOf = (value, params) => inst.check(_multipleOf(value, params));
+  inst.multipleOf = (value2, params) => inst.check(_multipleOf(value2, params));
   const bag = inst._zod.bag;
   inst.minValue = bag.minimum ?? null;
   inst.maxValue = bag.maximum ?? null;
@@ -22153,8 +22503,8 @@ var ZodDate = /* @__PURE__ */ $constructor("ZodDate", (inst, def) => {
   $ZodDate.init(inst, def);
   ZodType.init(inst, def);
   inst._zod.processJSONSchema = (ctx, json3, params) => dateProcessor(inst, ctx, json3, params);
-  inst.min = (value, params) => inst.check(_gte(value, params));
-  inst.max = (value, params) => inst.check(_lte(value, params));
+  inst.min = (value2, params) => inst.check(_gte(value2, params));
+  inst.max = (value2, params) => inst.check(_lte(value2, params));
   const c = inst._zod.bag;
   inst.minDate = c.minimum ? new Date(c.minimum) : null;
   inst.maxDate = c.maximum ? new Date(c.maximum) : null;
@@ -22420,13 +22770,13 @@ var ZodEnum = /* @__PURE__ */ $constructor("ZodEnum", (inst, def) => {
   inst.enum = def.entries;
   inst.options = Object.values(def.entries);
   const keys = new Set(Object.keys(def.entries));
-  inst.extract = (values, params) => {
+  inst.extract = (values2, params) => {
     const newEntries = {};
-    for (const value of values) {
-      if (keys.has(value)) {
-        newEntries[value] = def.entries[value];
+    for (const value2 of values2) {
+      if (keys.has(value2)) {
+        newEntries[value2] = def.entries[value2];
       } else
-        throw new Error(`Key ${value} not found in enum`);
+        throw new Error(`Key ${value2} not found in enum`);
     }
     return new ZodEnum({
       ...def,
@@ -22435,13 +22785,13 @@ var ZodEnum = /* @__PURE__ */ $constructor("ZodEnum", (inst, def) => {
       entries: newEntries
     });
   };
-  inst.exclude = (values, params) => {
+  inst.exclude = (values2, params) => {
     const newEntries = { ...def.entries };
-    for (const value of values) {
-      if (keys.has(value)) {
-        delete newEntries[value];
+    for (const value2 of values2) {
+      if (keys.has(value2)) {
+        delete newEntries[value2];
       } else
-        throw new Error(`Key ${value} not found in enum`);
+        throw new Error(`Key ${value2} not found in enum`);
     }
     return new ZodEnum({
       ...def,
@@ -22451,8 +22801,8 @@ var ZodEnum = /* @__PURE__ */ $constructor("ZodEnum", (inst, def) => {
     });
   };
 });
-function _enum2(values, params) {
-  const entries = Array.isArray(values) ? Object.fromEntries(values.map((v) => [v, v])) : values;
+function _enum2(values2, params) {
+  const entries = Array.isArray(values2) ? Object.fromEntries(values2.map((v) => [v, v])) : values2;
   return new ZodEnum({
     type: "enum",
     entries,
@@ -22480,10 +22830,10 @@ var ZodLiteral = /* @__PURE__ */ $constructor("ZodLiteral", (inst, def) => {
     }
   });
 });
-function literal(value, params) {
+function literal(value2, params) {
   return new ZodLiteral({
     type: "literal",
-    values: Array.isArray(value) ? value : [value],
+    values: Array.isArray(value2) ? value2 : [value2],
     ...util_exports.normalizeParams(params)
   });
 }
@@ -23409,11 +23759,11 @@ var util2;
     return array3.map((val) => typeof val === "string" ? `'${val}'` : val).join(separator);
   }
   util3.joinValues = joinValues2;
-  util3.jsonStringifyReplacer = (_, value) => {
-    if (typeof value === "bigint") {
-      return value.toString();
+  util3.jsonStringifyReplacer = (_, value2) => {
+    if (typeof value2 === "bigint") {
+      return value2.toString();
     }
-    return value;
+    return value2;
   };
 })(util2 || (util2 = {}));
 var objectUtil;
@@ -23567,9 +23917,9 @@ var ZodError2 = class _ZodError extends Error {
     processError(this);
     return fieldErrors;
   }
-  static assert(value) {
-    if (!(value instanceof _ZodError)) {
-      throw new Error(`Not a ZodError: ${value}`);
+  static assert(value2) {
+    if (!(value2 instanceof _ZodError)) {
+      throw new Error(`Not a ZodError: ${value2}`);
     }
   }
   toString() {
@@ -23785,10 +24135,10 @@ var ParseStatus = class _ParseStatus {
     const syncPairs = [];
     for (const pair of pairs) {
       const key = await pair.key;
-      const value = await pair.value;
+      const value2 = await pair.value;
       syncPairs.push({
         key,
-        value
+        value: value2
       });
     }
     return _ParseStatus.mergeObjectSync(status, syncPairs);
@@ -23796,17 +24146,17 @@ var ParseStatus = class _ParseStatus {
   static mergeObjectSync(status, pairs) {
     const finalObject = {};
     for (const pair of pairs) {
-      const { key, value } = pair;
+      const { key, value: value2 } = pair;
       if (key.status === "aborted")
         return INVALID;
-      if (value.status === "aborted")
+      if (value2.status === "aborted")
         return INVALID;
       if (key.status === "dirty")
         status.dirty();
-      if (value.status === "dirty")
+      if (value2.status === "dirty")
         status.dirty();
-      if (key.value !== "__proto__" && (typeof value.value !== "undefined" || pair.alwaysSet)) {
-        finalObject[key.value] = value.value;
+      if (key.value !== "__proto__" && (typeof value2.value !== "undefined" || pair.alwaysSet)) {
+        finalObject[key.value] = value2.value;
       }
     }
     return { status: status.value, value: finalObject };
@@ -23815,8 +24165,8 @@ var ParseStatus = class _ParseStatus {
 var INVALID = Object.freeze({
   status: "aborted"
 });
-var DIRTY = (value) => ({ status: "dirty", value });
-var OK = (value) => ({ status: "valid", value });
+var DIRTY = (value2) => ({ status: "dirty", value: value2 });
+var OK = (value2) => ({ status: "valid", value: value2 });
 var isAborted = (x) => x.status === "aborted";
 var isDirty = (x) => x.status === "dirty";
 var isValid = (x) => x.status === "valid";
@@ -23831,10 +24181,10 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path8, key) {
+  constructor(parent, value2, path8, key) {
     this._cachedPath = [];
     this.parent = parent;
-    this.data = value;
+    this.data = value2;
     this._path = path8;
     this._key = key;
   }
@@ -24656,25 +25006,25 @@ var ZodString2 = class _ZodString2 extends ZodType2 {
       ...errorUtil.errToObj(message)
     });
   }
-  includes(value, options) {
+  includes(value2, options) {
     return this._addCheck({
       kind: "includes",
-      value,
+      value: value2,
       position: options?.position,
       ...errorUtil.errToObj(options?.message)
     });
   }
-  startsWith(value, message) {
+  startsWith(value2, message) {
     return this._addCheck({
       kind: "startsWith",
-      value,
+      value: value2,
       ...errorUtil.errToObj(message)
     });
   }
-  endsWith(value, message) {
+  endsWith(value2, message) {
     return this._addCheck({
       kind: "endsWith",
-      value,
+      value: value2,
       ...errorUtil.errToObj(message)
     });
   }
@@ -24896,26 +25246,26 @@ var ZodNumber2 = class _ZodNumber extends ZodType2 {
     }
     return { status: status.value, value: input.data };
   }
-  gte(value, message) {
-    return this.setLimit("min", value, true, errorUtil.toString(message));
+  gte(value2, message) {
+    return this.setLimit("min", value2, true, errorUtil.toString(message));
   }
-  gt(value, message) {
-    return this.setLimit("min", value, false, errorUtil.toString(message));
+  gt(value2, message) {
+    return this.setLimit("min", value2, false, errorUtil.toString(message));
   }
-  lte(value, message) {
-    return this.setLimit("max", value, true, errorUtil.toString(message));
+  lte(value2, message) {
+    return this.setLimit("max", value2, true, errorUtil.toString(message));
   }
-  lt(value, message) {
-    return this.setLimit("max", value, false, errorUtil.toString(message));
+  lt(value2, message) {
+    return this.setLimit("max", value2, false, errorUtil.toString(message));
   }
-  setLimit(kind, value, inclusive, message) {
+  setLimit(kind, value2, inclusive, message) {
     return new _ZodNumber({
       ...this._def,
       checks: [
         ...this._def.checks,
         {
           kind,
-          value,
+          value: value2,
           inclusive,
           message: errorUtil.toString(message)
         }
@@ -24966,10 +25316,10 @@ var ZodNumber2 = class _ZodNumber extends ZodType2 {
       message: errorUtil.toString(message)
     });
   }
-  multipleOf(value, message) {
+  multipleOf(value2, message) {
     return this._addCheck({
       kind: "multipleOf",
-      value,
+      value: value2,
       message: errorUtil.toString(message)
     });
   }
@@ -25112,26 +25462,26 @@ var ZodBigInt2 = class _ZodBigInt extends ZodType2 {
     });
     return INVALID;
   }
-  gte(value, message) {
-    return this.setLimit("min", value, true, errorUtil.toString(message));
+  gte(value2, message) {
+    return this.setLimit("min", value2, true, errorUtil.toString(message));
   }
-  gt(value, message) {
-    return this.setLimit("min", value, false, errorUtil.toString(message));
+  gt(value2, message) {
+    return this.setLimit("min", value2, false, errorUtil.toString(message));
   }
-  lte(value, message) {
-    return this.setLimit("max", value, true, errorUtil.toString(message));
+  lte(value2, message) {
+    return this.setLimit("max", value2, true, errorUtil.toString(message));
   }
-  lt(value, message) {
-    return this.setLimit("max", value, false, errorUtil.toString(message));
+  lt(value2, message) {
+    return this.setLimit("max", value2, false, errorUtil.toString(message));
   }
-  setLimit(kind, value, inclusive, message) {
+  setLimit(kind, value2, inclusive, message) {
     return new _ZodBigInt({
       ...this._def,
       checks: [
         ...this._def.checks,
         {
           kind,
-          value,
+          value: value2,
           inclusive,
           message: errorUtil.toString(message)
         }
@@ -25176,10 +25526,10 @@ var ZodBigInt2 = class _ZodBigInt extends ZodType2 {
       message: errorUtil.toString(message)
     });
   }
-  multipleOf(value, message) {
+  multipleOf(value2, message) {
     return this._addCheck({
       kind: "multipleOf",
-      value,
+      value: value2,
       message: errorUtil.toString(message)
     });
   }
@@ -25643,10 +25993,10 @@ var ZodObject2 = class _ZodObject extends ZodType2 {
     const pairs = [];
     for (const key of shapeKeys) {
       const keyValidator = shape[key];
-      const value = ctx.data[key];
+      const value2 = ctx.data[key];
       pairs.push({
         key: { status: "valid", value: key },
-        value: keyValidator._parse(new ParseInputLazyPath(ctx, value, ctx.path, key)),
+        value: keyValidator._parse(new ParseInputLazyPath(ctx, value2, ctx.path, key)),
         alwaysSet: key in ctx.data
       });
     }
@@ -25674,11 +26024,11 @@ var ZodObject2 = class _ZodObject extends ZodType2 {
     } else {
       const catchall = this._def.catchall;
       for (const key of extraKeys) {
-        const value = ctx.data[key];
+        const value2 = ctx.data[key];
         pairs.push({
           key: { status: "valid", value: key },
           value: catchall._parse(
-            new ParseInputLazyPath(ctx, value, ctx.path, key)
+            new ParseInputLazyPath(ctx, value2, ctx.path, key)
             //, ctx.child(key), value, getParsedType(value)
           ),
           alwaysSet: key in ctx.data
@@ -25690,10 +26040,10 @@ var ZodObject2 = class _ZodObject extends ZodType2 {
         const syncPairs = [];
         for (const pair of pairs) {
           const key = await pair.key;
-          const value = await pair.value;
+          const value2 = await pair.value;
           syncPairs.push({
             key,
-            value,
+            value: value2,
             alwaysSet: pair.alwaysSet
           });
         }
@@ -26124,11 +26474,11 @@ var ZodDiscriminatedUnion2 = class _ZodDiscriminatedUnion extends ZodType2 {
       if (!discriminatorValues.length) {
         throw new Error(`A discriminator value for key \`${discriminator}\` could not be extracted from all schema options`);
       }
-      for (const value of discriminatorValues) {
-        if (optionsMap.has(value)) {
-          throw new Error(`Discriminator property ${String(discriminator)} has duplicate value ${String(value)}`);
+      for (const value2 of discriminatorValues) {
+        if (optionsMap.has(value2)) {
+          throw new Error(`Discriminator property ${String(discriminator)} has duplicate value ${String(value2)}`);
         }
-        optionsMap.set(value, type);
+        optionsMap.set(value2, type);
       }
     }
     return new _ZodDiscriminatedUnion({
@@ -26370,10 +26720,10 @@ var ZodMap2 = class extends ZodType2 {
     }
     const keyType = this._def.keyType;
     const valueType = this._def.valueType;
-    const pairs = [...ctx.data.entries()].map(([key, value], index) => {
+    const pairs = [...ctx.data.entries()].map(([key, value2], index) => {
       return {
         key: keyType._parse(new ParseInputLazyPath(ctx, key, ctx.path, [index, "key"])),
-        value: valueType._parse(new ParseInputLazyPath(ctx, value, ctx.path, [index, "value"]))
+        value: valueType._parse(new ParseInputLazyPath(ctx, value2, ctx.path, [index, "value"]))
       };
     });
     if (ctx.common.async) {
@@ -26381,14 +26731,14 @@ var ZodMap2 = class extends ZodType2 {
       return Promise.resolve().then(async () => {
         for (const pair of pairs) {
           const key = await pair.key;
-          const value = await pair.value;
-          if (key.status === "aborted" || value.status === "aborted") {
+          const value2 = await pair.value;
+          if (key.status === "aborted" || value2.status === "aborted") {
             return INVALID;
           }
-          if (key.status === "dirty" || value.status === "dirty") {
+          if (key.status === "dirty" || value2.status === "dirty") {
             status.dirty();
           }
-          finalMap.set(key.value, value.value);
+          finalMap.set(key.value, value2.value);
         }
         return { status: status.value, value: finalMap };
       });
@@ -26396,14 +26746,14 @@ var ZodMap2 = class extends ZodType2 {
       const finalMap = /* @__PURE__ */ new Map();
       for (const pair of pairs) {
         const key = pair.key;
-        const value = pair.value;
-        if (key.status === "aborted" || value.status === "aborted") {
+        const value2 = pair.value;
+        if (key.status === "aborted" || value2.status === "aborted") {
           return INVALID;
         }
-        if (key.status === "dirty" || value.status === "dirty") {
+        if (key.status === "dirty" || value2.status === "dirty") {
           status.dirty();
         }
-        finalMap.set(key.value, value.value);
+        finalMap.set(key.value, value2.value);
       }
       return { status: status.value, value: finalMap };
     }
@@ -26641,16 +26991,16 @@ var ZodLiteral2 = class extends ZodType2 {
     return this._def.value;
   }
 };
-ZodLiteral2.create = (value, params) => {
+ZodLiteral2.create = (value2, params) => {
   return new ZodLiteral2({
-    value,
+    value: value2,
     typeName: ZodFirstPartyTypeKind2.ZodLiteral,
     ...processCreateParams(params)
   });
 };
-function createZodEnum(values, params) {
+function createZodEnum(values2, params) {
   return new ZodEnum2({
-    values,
+    values: values2,
     typeName: ZodFirstPartyTypeKind2.ZodEnum,
     ...processCreateParams(params)
   });
@@ -26706,14 +27056,14 @@ var ZodEnum2 = class _ZodEnum extends ZodType2 {
     }
     return enumValues;
   }
-  extract(values, newDef = this._def) {
-    return _ZodEnum.create(values, {
+  extract(values2, newDef = this._def) {
+    return _ZodEnum.create(values2, {
       ...this._def,
       ...newDef
     });
   }
-  exclude(values, newDef = this._def) {
-    return _ZodEnum.create(this.options.filter((opt) => !values.includes(opt)), {
+  exclude(values2, newDef = this._def) {
+    return _ZodEnum.create(this.options.filter((opt) => !values2.includes(opt)), {
       ...this._def,
       ...newDef
     });
@@ -26751,9 +27101,9 @@ var ZodNativeEnum = class extends ZodType2 {
     return this._def.values;
   }
 };
-ZodNativeEnum.create = (values, params) => {
+ZodNativeEnum.create = (values2, params) => {
   return new ZodNativeEnum({
-    values,
+    values: values2,
     typeName: ZodFirstPartyTypeKind2.ZodNativeEnum,
     ...processCreateParams(params)
   });
@@ -27292,14 +27642,14 @@ function createParser(config2) {
         }
         const firstCharCode = chunk.charCodeAt(searchIndex);
         if (isDataPrefix(chunk, searchIndex, firstCharCode)) {
-          const valueStart = chunk.charCodeAt(searchIndex + 5) === SPACE ? searchIndex + 6 : searchIndex + 5, value = chunk.slice(valueStart, lfIndex);
+          const valueStart = chunk.charCodeAt(searchIndex + 5) === SPACE ? searchIndex + 6 : searchIndex + 5, value2 = chunk.slice(valueStart, lfIndex);
           if (dataLines === 0 && chunk.charCodeAt(lfIndex + 1) === LF) {
-            onEvent({ id, event: eventType, data: value }), id = void 0, data = "", eventType = void 0, searchIndex = lfIndex + 2, lfIndex = chunk.indexOf(`
+            onEvent({ id, event: eventType, data: value2 }), id = void 0, data = "", eventType = void 0, searchIndex = lfIndex + 2, lfIndex = chunk.indexOf(`
 `, searchIndex);
             continue;
           }
-          data = dataLines === 0 ? value : `${data}
-${value}`, dataLines++;
+          data = dataLines === 0 ? value2 : `${data}
+${value2}`, dataLines++;
         } else isEventPrefix(chunk, searchIndex, firstCharCode) ? eventType = chunk.slice(
           chunk.charCodeAt(searchIndex + 6) === SPACE ? searchIndex + 7 : searchIndex + 6,
           lfIndex
@@ -27326,9 +27676,9 @@ ${value}`, dataLines++;
     }
     const firstCharCode = chunk.charCodeAt(start);
     if (isDataPrefix(chunk, start, firstCharCode)) {
-      const valueStart = chunk.charCodeAt(start + 5) === SPACE ? start + 6 : start + 5, value2 = chunk.slice(valueStart, end);
-      data = dataLines === 0 ? value2 : `${data}
-${value2}`, dataLines++;
+      const valueStart = chunk.charCodeAt(start + 5) === SPACE ? start + 6 : start + 5, value22 = chunk.slice(valueStart, end);
+      data = dataLines === 0 ? value22 : `${data}
+${value22}`, dataLines++;
       return;
     }
     if (isEventPrefix(chunk, start, firstCharCode)) {
@@ -27336,8 +27686,8 @@ ${value2}`, dataLines++;
       return;
     }
     if (firstCharCode === 105 && chunk.charCodeAt(start + 1) === 100 && chunk.charCodeAt(start + 2) === 58) {
-      const value2 = chunk.slice(chunk.charCodeAt(start + 3) === SPACE ? start + 4 : start + 3, end);
-      value2.includes("\0") || (id = value2);
+      const value22 = chunk.slice(chunk.charCodeAt(start + 3) === SPACE ? start + 4 : start + 3, end);
+      value22.includes("\0") || (id = value22);
       return;
     }
     if (firstCharCode === 58) {
@@ -27352,26 +27702,26 @@ ${value2}`, dataLines++;
       processField(line, "", line);
       return;
     }
-    const field = line.slice(0, fieldSeparatorIndex), offset = line.charCodeAt(fieldSeparatorIndex + 1) === SPACE ? 2 : 1, value = line.slice(fieldSeparatorIndex + offset);
-    processField(field, value, line);
+    const field = line.slice(0, fieldSeparatorIndex), offset = line.charCodeAt(fieldSeparatorIndex + 1) === SPACE ? 2 : 1, value2 = line.slice(fieldSeparatorIndex + offset);
+    processField(field, value2, line);
   }
-  function processField(field, value, line) {
+  function processField(field, value2, line) {
     switch (field) {
       case "event":
-        eventType = value || void 0;
+        eventType = value2 || void 0;
         break;
       case "data":
-        data = dataLines === 0 ? value : `${data}
-${value}`, dataLines++;
+        data = dataLines === 0 ? value2 : `${data}
+${value2}`, dataLines++;
         break;
       case "id":
-        value.includes("\0") || (id = value);
+        value2.includes("\0") || (id = value2);
         break;
       case "retry":
-        /^\d+$/.test(value) ? onRetry(parseInt(value, 10)) : onError(
-          new ParseError(`Invalid \`retry\` value: "${value}"`, {
+        /^\d+$/.test(value2) ? onRetry(parseInt(value2, 10)) : onError(
+          new ParseError(`Invalid \`retry\` value: "${value2}"`, {
             type: "invalid-retry",
-            value,
+            value: value2,
             line
           })
         );
@@ -27380,7 +27730,7 @@ ${value}`, dataLines++;
         onError(
           new ParseError(
             `Unknown field "${field.length > 20 ? `${field.slice(0, 20)}\u2026` : field}"`,
-            { type: "unknown-field", field, value, line }
+            { type: "unknown-field", field, value: value2, line }
           )
         );
         break;
@@ -27488,28 +27838,28 @@ function convertUint8ArrayToBase64(array3) {
   }
   return btoa2(latin1string);
 }
-function convertToBase64(value) {
-  return value instanceof Uint8Array ? convertUint8ArrayToBase64(value) : value;
+function convertToBase64(value2) {
+  return value2 instanceof Uint8Array ? convertUint8ArrayToBase64(value2) : value2;
 }
 function convertToFormData(input, options = {}) {
   const { useArrayBrackets = true } = options;
   const formData = new FormData();
-  for (const [key, value] of Object.entries(input)) {
-    if (value == null) {
+  for (const [key, value2] of Object.entries(input)) {
+    if (value2 == null) {
       continue;
     }
-    if (Array.isArray(value)) {
-      if (value.length === 1) {
-        formData.append(key, value[0]);
+    if (Array.isArray(value2)) {
+      if (value2.length === 1) {
+        formData.append(key, value2[0]);
         continue;
       }
       const arrayKey = useArrayBrackets ? `${key}[]` : key;
-      for (const item of value) {
+      for (const item of value2) {
         formData.append(arrayKey, item);
       }
       continue;
     }
-    formData.append(key, value);
+    formData.append(key, value2);
   }
   return formData;
 }
@@ -27862,18 +28212,18 @@ async function readResponseWithSizeLimit({
   let totalBytes = 0;
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const { done, value: value2 } = await reader.read();
       if (done) {
         break;
       }
-      totalBytes += value.length;
+      totalBytes += value2.length;
       if (totalBytes > maxBytes) {
         throw new DownloadError({
           url: url2,
           message: `Download of ${url2} exceeded maximum size of ${maxBytes} bytes.`
         });
       }
-      chunks.push(value);
+      chunks.push(value2);
     }
   } finally {
     try {
@@ -28036,16 +28386,16 @@ function normalizeHeaders(headers) {
   }
   const normalized = {};
   if (headers instanceof Headers) {
-    headers.forEach((value, key) => {
-      normalized[key.toLowerCase()] = value;
+    headers.forEach((value2, key) => {
+      normalized[key.toLowerCase()] = value2;
     });
   } else {
     if (!Array.isArray(headers)) {
       headers = Object.entries(headers);
     }
-    for (const [key, value] of headers) {
-      if (value != null) {
-        normalized[key.toLowerCase()] = value;
+    for (const [key, value2] of headers) {
+      if (value2 != null) {
+        normalized[key.toLowerCase()] = value2;
       }
     }
   }
@@ -28136,9 +28486,9 @@ function isUrlSupported({
 }) {
   url2 = url2.toLowerCase();
   mediaType = mediaType.toLowerCase();
-  return Object.entries(supportedUrls).map(([key, value]) => {
+  return Object.entries(supportedUrls).map(([key, value2]) => {
     const mediaType2 = key.toLowerCase();
-    return mediaType2 === "*" || mediaType2 === "*/*" ? { mediaTypePrefix: "", regexes: value } : { mediaTypePrefix: mediaType2.replace(/\*/, ""), regexes: value };
+    return mediaType2 === "*" || mediaType2 === "*/*" ? { mediaTypePrefix: "", regexes: value2 } : { mediaTypePrefix: mediaType2.replace(/\*/, ""), regexes: value2 };
   }).filter(({ mediaTypePrefix }) => mediaType.startsWith(mediaTypePrefix)).flatMap(({ regexes }) => regexes).some((pattern) => pattern.test(url2));
 }
 function loadOptionalSetting({
@@ -28182,9 +28532,9 @@ function filter(obj) {
         throw new SyntaxError("Object contains forbidden prototype property");
       }
       for (const key in node) {
-        const value = node[key];
-        if (value && typeof value === "object") {
-          next.push(value);
+        const value2 = node[key];
+        if (value2 && typeof value2 === "object") {
+          next.push(value2);
         }
       }
     }
@@ -28643,7 +28993,7 @@ function escapeNonAlphaNumeric(source) {
   }
   return result;
 }
-function addFormat(schema, value, message, refs) {
+function addFormat(schema, value2, message, refs) {
   var _a24;
   if (schema.format || ((_a24 = schema.anyOf) == null ? void 0 : _a24.some((x) => x.format))) {
     if (!schema.anyOf) {
@@ -28656,11 +29006,11 @@ function addFormat(schema, value, message, refs) {
       delete schema.format;
     }
     schema.anyOf.push({
-      format: value,
+      format: value2,
       ...message && refs.errorMessages && { errorMessage: { format: message } }
     });
   } else {
-    schema.format = value;
+    schema.format = value2;
   }
 }
 function addPattern(schema, regex, message, refs) {
@@ -28807,7 +29157,7 @@ function parseMapDef(def, refs) {
     ...refs,
     currentPath: [...refs.currentPath, "items", "items", "0"]
   }) || parseAnyDef();
-  const values = parseDef(def.valueType._def, {
+  const values2 = parseDef(def.valueType._def, {
     ...refs,
     currentPath: [...refs.currentPath, "items", "items", "1"]
   }) || parseAnyDef();
@@ -28816,7 +29166,7 @@ function parseMapDef(def, refs) {
     maxItems: 125,
     items: {
       type: "array",
-      items: [keys, values],
+      items: [keys, values2],
       minItems: 2,
       maxItems: 2
     }
@@ -28829,7 +29179,7 @@ function parseNativeEnumDef(def) {
   });
   const actualValues = actualKeys.map((key) => object3[key]);
   const parsedTypes = Array.from(
-    new Set(actualValues.map((values) => typeof values))
+    new Set(actualValues.map((values2) => typeof values2))
   );
   return {
     type: parsedTypes.length === 1 ? parsedTypes[0] === "string" ? "string" : "number" : ["string", "number"],
@@ -28975,7 +29325,7 @@ function parseObjectDef(def, refs) {
     type: "object",
     properties: {}
   };
-  const required2 = [];
+  const required3 = [];
   const shape = def.shape();
   for (const propName in shape) {
     let propDef = shape[propName];
@@ -28993,11 +29343,11 @@ function parseObjectDef(def, refs) {
     }
     result.properties[propName] = parsedDef;
     if (!propOptional) {
-      required2.push(propName);
+      required3.push(propName);
     }
   }
-  if (required2.length) {
-    result.required = required2;
+  if (required3.length) {
+    result.required = required3;
   }
   const additionalProperties = decideAdditionalProperties(def, refs);
   if (additionalProperties !== void 0) {
@@ -29250,7 +29600,7 @@ var get$ref = (item, refs) => {
       return { $ref: getRelativePath(refs.currentPath, item.path) };
     case "none":
     case "seen": {
-      if (item.path.length < refs.currentPath.length && item.path.every((value, index) => refs.currentPath[index] === value)) {
+      if (item.path.length < refs.currentPath.length && item.path.every((value2, index) => refs.currentPath[index] === value2)) {
         console.warn(
           `Recursive reference detected at ${refs.currentPath.join(
             "/"
@@ -29364,8 +29714,8 @@ function jsonSchema(jsonSchema2, {
     validate
   };
 }
-function isSchema(value) {
-  return typeof value === "object" && value !== null && schemaSymbol in value && value[schemaSymbol] === true && "jsonSchema" in value && "validate" in value;
+function isSchema(value2) {
+  return typeof value2 === "object" && value2 !== null && schemaSymbol in value2 && value2[schemaSymbol] === true && "jsonSchema" in value2 && "validate" in value2;
 }
 function asSchema(schema) {
   return schema == null ? jsonSchema({
@@ -29389,12 +29739,12 @@ function standardSchema(standardSchema2) {
       );
     },
     {
-      validate: async (value) => {
-        const result = await standardSchema2["~standard"].validate(value);
+      validate: async (value2) => {
+        const result = await standardSchema2["~standard"].validate(value2);
         return "value" in result ? { success: true, value: result.value } : {
           success: false,
           error: new TypeValidationError({
-            value,
+            value: value2,
             cause: result.issues
           })
         };
@@ -29414,8 +29764,8 @@ function zod3Schema(zodSchema2, options) {
       $refStrategy: useReferences ? "root" : "none"
     }),
     {
-      validate: async (value) => {
-        const result = await zodSchema2.safeParseAsync(value);
+      validate: async (value2) => {
+        const result = await zodSchema2.safeParseAsync(value2);
         return result.success ? { success: true, value: result.data } : { success: false, error: result.error };
       }
     }
@@ -29434,8 +29784,8 @@ function zod4Schema(zodSchema2, options) {
       })
     ),
     {
-      validate: async (value) => {
-        const result = await safeParseAsync2(zodSchema2, value);
+      validate: async (value2) => {
+        const result = await safeParseAsync2(zodSchema2, value2);
         return result.success ? { success: true, value: result.data } : { success: false, error: result.error };
       }
     }
@@ -29452,40 +29802,40 @@ function zodSchema(zodSchema2, options) {
   }
 }
 async function validateTypes({
-  value,
+  value: value2,
   schema,
   context: context2
 }) {
-  const result = await safeValidateTypes({ value, schema, context: context2 });
+  const result = await safeValidateTypes({ value: value2, schema, context: context2 });
   if (!result.success) {
-    throw TypeValidationError.wrap({ value, cause: result.error, context: context2 });
+    throw TypeValidationError.wrap({ value: value2, cause: result.error, context: context2 });
   }
   return result.value;
 }
 async function safeValidateTypes({
-  value,
+  value: value2,
   schema,
   context: context2
 }) {
   const actualSchema = asSchema(schema);
   try {
     if (actualSchema.validate == null) {
-      return { success: true, value, rawValue: value };
+      return { success: true, value: value2, rawValue: value2 };
     }
-    const result = await actualSchema.validate(value);
+    const result = await actualSchema.validate(value2);
     if (result.success) {
-      return { success: true, value: result.value, rawValue: value };
+      return { success: true, value: result.value, rawValue: value2 };
     }
     return {
       success: false,
-      error: TypeValidationError.wrap({ value, cause: result.error, context: context2 }),
-      rawValue: value
+      error: TypeValidationError.wrap({ value: value2, cause: result.error, context: context2 }),
+      rawValue: value2
     };
   } catch (error51) {
     return {
       success: false,
-      error: TypeValidationError.wrap({ value, cause: error51, context: context2 }),
-      rawValue: value
+      error: TypeValidationError.wrap({ value: value2, cause: error51, context: context2 }),
+      rawValue: value2
     };
   }
 }
@@ -29494,11 +29844,11 @@ async function parseJSON({
   schema
 }) {
   try {
-    const value = secureJsonParse(text2);
+    const value2 = secureJsonParse(text2);
     if (schema == null) {
-      return value;
+      return value2;
     }
-    return validateTypes({ value, schema });
+    return validateTypes({ value: value2, schema });
   } catch (error51) {
     if (JSONParseError.isInstance(error51) || TypeValidationError.isInstance(error51)) {
       throw error51;
@@ -29511,11 +29861,11 @@ async function safeParseJSON({
   schema
 }) {
   try {
-    const value = secureJsonParse(text2);
+    const value2 = secureJsonParse(text2);
     if (schema == null) {
-      return { success: true, value, rawValue: value };
+      return { success: true, value: value2, rawValue: value2 };
     }
-    return await safeValidateTypes({ value, schema });
+    return await safeValidateTypes({ value: value2, schema });
   } catch (error51) {
     return {
       success: false,
@@ -29540,21 +29890,21 @@ function parseJsonEventStream({
   );
 }
 async function parseProviderOptions({
-  provider,
+  provider: provider2,
   providerOptions,
   schema
 }) {
-  if ((providerOptions == null ? void 0 : providerOptions[provider]) == null) {
+  if ((providerOptions == null ? void 0 : providerOptions[provider2]) == null) {
     return void 0;
   }
   const parsedProviderOptions = await safeValidateTypes({
-    value: providerOptions[provider],
+    value: providerOptions[provider2],
     schema
   });
   if (!parsedProviderOptions.success) {
     throw new InvalidArgumentError({
       argument: "providerOptions",
-      message: `invalid ${provider} provider options`,
+      message: `invalid ${provider2} provider options`,
       cause: parsedProviderOptions.error
     });
   }
@@ -29705,11 +30055,11 @@ function createProviderToolFactoryWithOutputSchema({
     supportsDeferredResults
   });
 }
-async function resolve(value) {
-  if (typeof value === "function") {
-    value = value();
+async function resolve(value2) {
+  if (typeof value2 === "function") {
+    value2 = value2();
   }
-  return Promise.resolve(value);
+  return Promise.resolve(value2);
 }
 var retryWithExponentialBackoff = ({
   maxRetries = 2,
@@ -29997,10 +30347,10 @@ function convertToOpenAICompatibleChatMessages(prompt) {
   var _a24, _b17, _c;
   const messages = [];
   for (const { role, content, ...message } of prompt) {
-    const metadata = getOpenAIMetadata({ ...message });
+    const metadata2 = getOpenAIMetadata({ ...message });
     switch (role) {
       case "system": {
-        messages.push({ role: "system", content, ...metadata });
+        messages.push({ role: "system", content, ...metadata2 });
         break;
       }
       case "user": {
@@ -30084,7 +30434,7 @@ function convertToOpenAICompatibleChatMessages(prompt) {
               }
             }
           }),
-          ...metadata
+          ...metadata2
         });
         break;
       }
@@ -30131,7 +30481,7 @@ function convertToOpenAICompatibleChatMessages(prompt) {
           content: toolCalls.length > 0 ? text2 || null : text2,
           ...reasoning.length > 0 ? { reasoning_content: reasoning } : {},
           tool_calls: toolCalls.length > 0 ? toolCalls : void 0,
-          ...metadata
+          ...metadata2
         });
         break;
       }
@@ -30563,18 +30913,18 @@ var OpenAICompatibleChatLanguageModel = class {
               });
               return;
             }
-            const value = chunk.value;
+            const value2 = chunk.value;
             if (isFirstChunk) {
               isFirstChunk = false;
               controller.enqueue({
                 type: "response-metadata",
-                ...getResponseMetadata(value)
+                ...getResponseMetadata(value2)
               });
             }
-            if (value.usage != null) {
-              usage = value.usage;
+            if (value2.usage != null) {
+              usage = value2.usage;
             }
-            const choice2 = value.choices[0];
+            const choice2 = value2.choices[0];
             if ((choice2 == null ? void 0 : choice2.finish_reason) != null) {
               finishReason = {
                 unified: mapOpenAICompatibleFinishReason(choice2.finish_reason),
@@ -30630,32 +30980,32 @@ var OpenAICompatibleChatLanguageModel = class {
                 const index = (_c = toolCallDelta.index) != null ? _c : toolCalls.length;
                 if (toolCalls[index] == null) {
                   if (toolCallDelta.index != null) {
-                    let pending = pendingToolCalls.get(index);
-                    if (pending == null) {
-                      pending = {
+                    let pending2 = pendingToolCalls.get(index);
+                    if (pending2 == null) {
+                      pending2 = {
                         id: (_d = toolCallDelta.id) != null ? _d : null,
                         bufferedArguments: "",
                         thoughtSignature: (_g = (_f = (_e = toolCallDelta.extra_content) == null ? void 0 : _e.google) == null ? void 0 : _f.thought_signature) != null ? _g : void 0
                       };
-                      pendingToolCalls.set(index, pending);
+                      pendingToolCalls.set(index, pending2);
                     } else {
-                      if (pending.id == null && toolCallDelta.id != null) {
-                        pending.id = toolCallDelta.id;
+                      if (pending2.id == null && toolCallDelta.id != null) {
+                        pending2.id = toolCallDelta.id;
                       }
-                      if (pending.thoughtSignature == null && ((_i = (_h = toolCallDelta.extra_content) == null ? void 0 : _h.google) == null ? void 0 : _i.thought_signature) != null) {
-                        pending.thoughtSignature = toolCallDelta.extra_content.google.thought_signature;
+                      if (pending2.thoughtSignature == null && ((_i = (_h = toolCallDelta.extra_content) == null ? void 0 : _h.google) == null ? void 0 : _i.thought_signature) != null) {
+                        pending2.thoughtSignature = toolCallDelta.extra_content.google.thought_signature;
                       }
                     }
                     const argumentsDelta = (_j = toolCallDelta.function) == null ? void 0 : _j.arguments;
                     if (argumentsDelta != null) {
-                      pending.bufferedArguments += argumentsDelta;
+                      pending2.bufferedArguments += argumentsDelta;
                     }
                     const name24 = (_k = toolCallDelta.function) == null ? void 0 : _k.name;
                     if (name24 == null) {
                       continue;
                     }
                     pendingToolCalls.delete(index);
-                    if (pending.id == null) {
+                    if (pending2.id == null) {
                       throw new InvalidResponseDataError({
                         data: toolCallDelta,
                         message: `Expected 'id' to be a string.`
@@ -30663,18 +31013,18 @@ var OpenAICompatibleChatLanguageModel = class {
                     }
                     controller.enqueue({
                       type: "tool-input-start",
-                      id: pending.id,
+                      id: pending2.id,
                       toolName: name24
                     });
                     toolCalls[index] = {
-                      id: pending.id,
+                      id: pending2.id,
                       type: "function",
                       function: {
                         name: name24,
-                        arguments: pending.bufferedArguments
+                        arguments: pending2.bufferedArguments
                       },
                       hasFinished: false,
-                      thoughtSignature: pending.thoughtSignature
+                      thoughtSignature: pending2.thoughtSignature
                     };
                   } else {
                     if (toolCallDelta.id == null) {
@@ -30740,12 +31090,12 @@ var OpenAICompatibleChatLanguageModel = class {
             if (isActiveText) {
               controller.enqueue({ type: "text-end", id: "txt-0" });
             }
-            for (const [index, pending] of pendingToolCalls) {
+            for (const [index, pending2] of pendingToolCalls) {
               throw new InvalidResponseDataError({
                 data: {
                   index,
-                  id: pending.id,
-                  function: { arguments: pending.bufferedArguments }
+                  id: pending2.id,
+                  function: { arguments: pending2.bufferedArguments }
                 },
                 message: `Expected 'function.name' to be a string.`
               });
@@ -31223,27 +31573,27 @@ var OpenAICompatibleCompletionLanguageModel = class {
               controller.enqueue({ type: "error", error: chunk.error });
               return;
             }
-            const value = chunk.value;
-            if ("error" in value) {
+            const value2 = chunk.value;
+            if ("error" in value2) {
               finishReason = { unified: "error", raw: void 0 };
-              controller.enqueue({ type: "error", error: value.error });
+              controller.enqueue({ type: "error", error: value2.error });
               return;
             }
             if (isFirstChunk) {
               isFirstChunk = false;
               controller.enqueue({
                 type: "response-metadata",
-                ...getResponseMetadata2(value)
+                ...getResponseMetadata2(value2)
               });
               controller.enqueue({
                 type: "text-start",
                 id: "0"
               });
             }
-            if (value.usage != null) {
-              usage = value.usage;
+            if (value2.usage != null) {
+              usage = value2.usage;
             }
-            const choice2 = value.choices[0];
+            const choice2 = value2.choices[0];
             if ((choice2 == null ? void 0 : choice2.finish_reason) != null) {
               finishReason = {
                 unified: mapOpenAICompatibleFinishReason2(choice2.finish_reason),
@@ -31341,7 +31691,7 @@ var OpenAICompatibleEmbeddingModel = class {
     return this.config.provider.split(".")[0].trim();
   }
   async doEmbed({
-    values,
+    values: values2,
     headers,
     abortSignal,
     providerOptions
@@ -31372,12 +31722,12 @@ var OpenAICompatibleEmbeddingModel = class {
         schema: openaiCompatibleEmbeddingModelOptions
       })) != null ? _b17 : {}
     );
-    if (values.length > this.maxEmbeddingsPerCall) {
+    if (values2.length > this.maxEmbeddingsPerCall) {
       throw new TooManyEmbeddingValuesForCallError({
         provider: this.provider,
         modelId: this.modelId,
         maxEmbeddingsPerCall: this.maxEmbeddingsPerCall,
-        values
+        values: values2
       });
     }
     const {
@@ -31392,7 +31742,7 @@ var OpenAICompatibleEmbeddingModel = class {
       headers: combineHeaders(this.config.headers(), headers),
       body: {
         model: this.modelId,
-        input: values,
+        input: values2,
         encoding_format: "float",
         dimensions: compatibleOptions.dimensions,
         user: compatibleOptions.user
@@ -31587,15 +31937,15 @@ function createOpenAICompatible(options) {
     ...getCommonModelConfig("embedding")
   });
   const createImageModel = (modelId) => new OpenAICompatibleImageModel(modelId, getCommonModelConfig("image"));
-  const provider = (modelId) => createLanguageModel(modelId);
-  provider.specificationVersion = "v3";
-  provider.languageModel = createLanguageModel;
-  provider.chatModel = createChatModel;
-  provider.completionModel = createCompletionModel;
-  provider.embeddingModel = createEmbeddingModel;
-  provider.textEmbeddingModel = createEmbeddingModel;
-  provider.imageModel = createImageModel;
-  return provider;
+  const provider2 = (modelId) => createLanguageModel(modelId);
+  provider2.specificationVersion = "v3";
+  provider2.languageModel = createLanguageModel;
+  provider2.chatModel = createChatModel;
+  provider2.completionModel = createCompletionModel;
+  provider2.embeddingModel = createEmbeddingModel;
+  provider2.textEmbeddingModel = createEmbeddingModel;
+  provider2.imageModel = createImageModel;
+  return provider2;
 }
 
 // node_modules/@ai-sdk/gateway/dist/index.mjs
@@ -32107,7 +32457,7 @@ var GatewayFetchMetadata = class {
   }
   async getAvailableModels() {
     try {
-      const { value } = await getFromApi({
+      const { value: value2 } = await getFromApi({
         url: `${this.config.baseURL}/config`,
         headers: await resolve(this.config.headers()),
         successfulResponseHandler: createJsonResponseHandler(
@@ -32122,7 +32472,7 @@ var GatewayFetchMetadata = class {
         }),
         fetch: this.config.fetch
       });
-      return value;
+      return value2;
     } catch (error51) {
       throw await asGatewayError(error51);
     }
@@ -32130,7 +32480,7 @@ var GatewayFetchMetadata = class {
   async getCredits() {
     try {
       const baseUrl = new URL(this.config.baseURL);
-      const { value } = await getFromApi({
+      const { value: value2 } = await getFromApi({
         url: `${baseUrl.origin}/v1/credits`,
         headers: await resolve(this.config.headers()),
         successfulResponseHandler: createJsonResponseHandler(
@@ -32145,7 +32495,7 @@ var GatewayFetchMetadata = class {
         }),
         fetch: this.config.fetch
       });
-      return value;
+      return value2;
     } catch (error51) {
       throw await asGatewayError(error51);
     }
@@ -32229,7 +32579,7 @@ var GatewaySpendReport = class {
       if (params.tags && params.tags.length > 0) {
         searchParams.set("tags", params.tags.join(","));
       }
-      const { value } = await getFromApi({
+      const { value: value2 } = await getFromApi({
         url: `${baseUrl.origin}/v1/report?${searchParams.toString()}`,
         headers: await resolve(this.config.headers()),
         successfulResponseHandler: createJsonResponseHandler(
@@ -32244,7 +32594,7 @@ var GatewaySpendReport = class {
         }),
         fetch: this.config.fetch
       });
-      return value;
+      return value2;
     } catch (error51) {
       throw await asGatewayError(error51);
     }
@@ -32306,7 +32656,7 @@ var GatewayGenerationInfoFetcher = class {
   async getGenerationInfo(params) {
     try {
       const baseUrl = new URL(this.config.baseURL);
-      const { value } = await getFromApi({
+      const { value: value2 } = await getFromApi({
         url: `${baseUrl.origin}/v1/generation?id=${encodeURIComponent(params.id)}`,
         headers: await resolve(this.config.headers()),
         successfulResponseHandler: createJsonResponseHandler(
@@ -32321,7 +32671,7 @@ var GatewayGenerationInfoFetcher = class {
         }),
         fetch: this.config.fetch
       });
-      return value;
+      return value2;
     } catch (error51) {
       throw await asGatewayError(error51);
     }
@@ -32548,7 +32898,7 @@ var GatewayEmbeddingModel = class {
     return this.config.provider;
   }
   async doEmbed({
-    values,
+    values: values2,
     headers,
     abortSignal,
     providerOptions
@@ -32569,7 +32919,7 @@ var GatewayEmbeddingModel = class {
           await resolve(this.config.o11yHeaders)
         ),
         body: {
-          values,
+          values: values2,
           ...providerOptions ? { providerOptions } : {}
         },
         successfulResponseHandler: createJsonResponseHandler(
@@ -33924,9 +34274,9 @@ function createGatewayProvider(options = {}) {
         baseURL,
         headers: getHeaders,
         fetch: options.fetch
-      }).getAvailableModels().then((metadata) => {
-        metadataCache = metadata;
-        return metadata;
+      }).getAvailableModels().then((metadata2) => {
+        metadataCache = metadata2;
+        return metadata2;
       }).catch(async (error51) => {
         throw await asGatewayError(
           error51,
@@ -33972,7 +34322,7 @@ function createGatewayProvider(options = {}) {
       );
     });
   };
-  const provider = function(modelId) {
+  const provider2 = function(modelId) {
     if (new.target) {
       throw new Error(
         "The Gateway Provider model function cannot be called with the new keyword."
@@ -33980,12 +34330,12 @@ function createGatewayProvider(options = {}) {
     }
     return createLanguageModel(modelId);
   };
-  provider.specificationVersion = "v3";
-  provider.getAvailableModels = getAvailableModels;
-  provider.getCredits = getCredits;
-  provider.getSpendReport = getSpendReport;
-  provider.getGenerationInfo = getGenerationInfo;
-  provider.imageModel = (modelId) => {
+  provider2.specificationVersion = "v3";
+  provider2.getAvailableModels = getAvailableModels;
+  provider2.getCredits = getCredits;
+  provider2.getSpendReport = getSpendReport;
+  provider2.getGenerationInfo = getGenerationInfo;
+  provider2.imageModel = (modelId) => {
     return new GatewayImageModel(modelId, {
       provider: "gateway",
       baseURL,
@@ -33994,7 +34344,7 @@ function createGatewayProvider(options = {}) {
       o11yHeaders: createO11yHeaders()
     });
   };
-  provider.languageModel = createLanguageModel;
+  provider2.languageModel = createLanguageModel;
   const createEmbeddingModel = (modelId) => {
     return new GatewayEmbeddingModel(modelId, {
       provider: "gateway",
@@ -34004,9 +34354,9 @@ function createGatewayProvider(options = {}) {
       o11yHeaders: createO11yHeaders()
     });
   };
-  provider.embeddingModel = createEmbeddingModel;
-  provider.textEmbeddingModel = createEmbeddingModel;
-  provider.videoModel = (modelId) => {
+  provider2.embeddingModel = createEmbeddingModel;
+  provider2.textEmbeddingModel = createEmbeddingModel;
+  provider2.videoModel = (modelId) => {
     return new GatewayVideoModel(modelId, {
       provider: "gateway",
       baseURL,
@@ -34024,8 +34374,8 @@ function createGatewayProvider(options = {}) {
       o11yHeaders: createO11yHeaders()
     });
   };
-  provider.rerankingModel = createRerankingModel;
-  provider.reranking = createRerankingModel;
+  provider2.rerankingModel = createRerankingModel;
+  provider2.reranking = createRerankingModel;
   const createSpeechModel = (modelId) => {
     return new GatewaySpeechModel(modelId, {
       provider: "gateway",
@@ -34035,8 +34385,8 @@ function createGatewayProvider(options = {}) {
       o11yHeaders: createO11yHeaders()
     });
   };
-  provider.speechModel = createSpeechModel;
-  provider.speech = createSpeechModel;
+  provider2.speechModel = createSpeechModel;
+  provider2.speech = createSpeechModel;
   const createTranscriptionModel = (modelId) => {
     return new GatewayTranscriptionModel(modelId, {
       provider: "gateway",
@@ -34046,14 +34396,14 @@ function createGatewayProvider(options = {}) {
       o11yHeaders: createO11yHeaders()
     });
   };
-  provider.transcriptionModel = createTranscriptionModel;
-  provider.transcription = createTranscriptionModel;
-  provider.chat = provider.languageModel;
-  provider.embedding = provider.embeddingModel;
-  provider.image = provider.imageModel;
-  provider.video = provider.videoModel;
-  provider.tools = gatewayTools;
-  return provider;
+  provider2.transcriptionModel = createTranscriptionModel;
+  provider2.transcription = createTranscriptionModel;
+  provider2.chat = provider2.languageModel;
+  provider2.embedding = provider2.embeddingModel;
+  provider2.image = provider2.imageModel;
+  provider2.video = provider2.videoModel;
+  provider2.tools = gatewayTools;
+  return provider2;
 }
 var gateway = createGatewayProvider();
 async function getGatewayAuthToken(options) {
@@ -34321,9 +34671,9 @@ var BaseContext = class _BaseContext {
     const self2 = this;
     self2._currentContext = parentContext ? new Map(parentContext) : /* @__PURE__ */ new Map();
     self2.getValue = (key) => self2._currentContext.get(key);
-    self2.setValue = (key, value) => {
+    self2.setValue = (key, value2) => {
       const context2 = new _BaseContext(self2._currentContext);
-      context2._currentContext.set(key, value);
+      context2._currentContext.set(key, value2);
       return context2;
     };
     self2.deleteValue = (key) => {
@@ -34670,8 +35020,8 @@ function isSpanContext(spanContext) {
 // node_modules/@opentelemetry/api/build/esm/trace/ProxyTracer.js
 var NOOP_TRACER = new NoopTracer();
 var ProxyTracer = class {
-  constructor(provider, name24, version2, options) {
-    this._provider = provider;
+  constructor(provider2, name24, version2, options) {
+    this._provider = provider2;
     this.name = name24;
     this.version = version2;
     this.options = options;
@@ -34771,10 +35121,10 @@ var TraceAPI = class _TraceAPI {
    *
    * @returns true if the tracer provider was successfully registered, else false
    */
-  setGlobalTracerProvider(provider) {
+  setGlobalTracerProvider(provider2) {
     const success2 = registerGlobal(API_NAME3, this._proxyTracerProvider, DiagAPI.instance());
     if (success2) {
-      this._proxyTracerProvider.setDelegate(provider);
+      this._proxyTracerProvider.setDelegate(provider2);
     }
     return success2;
   }
@@ -34813,7 +35163,7 @@ var _a19;
 var InvalidArgumentError2 = class extends AISDKError {
   constructor({
     parameter,
-    value,
+    value: value2,
     message
   }) {
     super({
@@ -34822,7 +35172,7 @@ var InvalidArgumentError2 = class extends AISDKError {
     });
     this[_a19] = true;
     this.parameter = parameter;
-    this.value = value;
+    this.value = value2;
   }
   static isInstance(error51) {
     return AISDKError.hasMarker(error51, marker17);
@@ -35105,8 +35455,8 @@ var RetryError = class extends AISDKError {
   }
 };
 _a20 = symbol20;
-function asArray(value) {
-  return value === void 0 ? [] : Array.isArray(value) ? value : [value];
+function asArray(value2) {
+  return value2 === void 0 ? [] : Array.isArray(value2) ? value2 : [value2];
 }
 async function notify(options) {
   for (const callback of asArray(options.callbacks)) {
@@ -35120,10 +35470,10 @@ async function notify(options) {
 }
 function formatWarning({
   warning,
-  provider,
+  provider: provider2,
   model
 }) {
-  const prefix2 = `AI SDK Warning (${provider} / ${model}):`;
+  const prefix2 = `AI SDK Warning (${provider2} / ${model}):`;
   switch (warning.type) {
     case "unsupported": {
       let message = `${prefix2} The feature "${warning.feature}" is not supported.`;
@@ -35176,7 +35526,7 @@ var logWarnings = (options) => {
   }
 };
 function logV2CompatibilityWarning({
-  provider,
+  provider: provider2,
   modelId
 }) {
   logWarnings({
@@ -35187,7 +35537,7 @@ function logV2CompatibilityWarning({
         details: `Using v2 specification compatibility mode. Some features may not be available.`
       }
     ],
-    provider,
+    provider: provider2,
     model: modelId
   });
 }
@@ -35526,9 +35876,9 @@ var dataContentSchema = external_exports.union([
   external_exports.instanceof(ArrayBuffer),
   external_exports.custom(
     // Buffer might not be available in some environments such as CloudFlare:
-    (value) => {
+    (value2) => {
       var _a222, _b17;
-      return (_b17 = (_a222 = globalThis.Buffer) == null ? void 0 : _a222.isBuffer(value)) != null ? _b17 : false;
+      return (_b17 = (_a222 = globalThis.Buffer) == null ? void 0 : _a222.isBuffer(value2)) != null ? _b17 : false;
     },
     { message: "Must be a Buffer" }
   )
@@ -36008,8 +36358,8 @@ async function createToolModelOutput({
   }
   return typeof output === "string" ? { type: "text", value: output } : { type: "json", value: toJSONValue(output) };
 }
-function toJSONValue(value) {
-  return value === void 0 ? null : value;
+function toJSONValue(value2) {
+  return value2 === void 0 ? null : value2;
 }
 function prepareCallSettings({
   maxOutputTokens,
@@ -36459,31 +36809,31 @@ function getBaseTelemetryAttributes({
     "ai.model.provider": model.provider,
     "ai.model.id": model.modelId,
     // settings:
-    ...Object.entries(settings).reduce((attributes, [key, value]) => {
+    ...Object.entries(settings).reduce((attributes, [key, value2]) => {
       if (key === "timeout") {
         const totalTimeoutMs = getTotalTimeoutMs(
-          value
+          value2
         );
         if (totalTimeoutMs != null) {
           attributes[`ai.settings.${key}`] = totalTimeoutMs;
         }
       } else {
-        attributes[`ai.settings.${key}`] = value;
+        attributes[`ai.settings.${key}`] = value2;
       }
       return attributes;
     }, {}),
     // add metadata as attributes:
     ...Object.entries((_a222 = telemetry == null ? void 0 : telemetry.metadata) != null ? _a222 : {}).reduce(
-      (attributes, [key, value]) => {
-        attributes[`ai.telemetry.metadata.${key}`] = value;
+      (attributes, [key, value2]) => {
+        attributes[`ai.telemetry.metadata.${key}`] = value2;
         return attributes;
       },
       {}
     ),
     // request headers
-    ...Object.entries(headers != null ? headers : {}).reduce((attributes, [key, value]) => {
-      if (value !== void 0) {
-        attributes[`ai.request.headers.${key}`] = value;
+    ...Object.entries(headers != null ? headers : {}).reduce((attributes, [key, value2]) => {
+      if (value2 !== void 0) {
+        attributes[`ai.request.headers.${key}`] = value2;
       }
       return attributes;
     }, {})
@@ -36604,27 +36954,27 @@ function recordErrorOnSpan(span, error51) {
     span.setStatus({ code: SpanStatusCode.ERROR });
   }
 }
-function isPrimitiveAttributeValue(value) {
-  return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+function isPrimitiveAttributeValue(value2) {
+  return typeof value2 === "string" || typeof value2 === "number" || typeof value2 === "boolean";
 }
-function sanitizeAttributeValue(value) {
-  if (!Array.isArray(value)) {
-    return value;
+function sanitizeAttributeValue(value2) {
+  if (!Array.isArray(value2)) {
+    return value2;
   }
   const primitiveTypes2 = new Set(
-    value.filter(isPrimitiveAttributeValue).map((item) => typeof item)
+    value2.filter(isPrimitiveAttributeValue).map((item) => typeof item)
   );
   if (primitiveTypes2.size !== 1) {
     return void 0;
   }
   const [primitiveType] = primitiveTypes2;
   if (primitiveType === "string") {
-    return value.filter((item) => typeof item === "string");
+    return value2.filter((item) => typeof item === "string");
   }
   if (primitiveType === "number") {
-    return value.filter((item) => typeof item === "number");
+    return value2.filter((item) => typeof item === "number");
   }
-  return value.filter((item) => typeof item === "boolean");
+  return value2.filter((item) => typeof item === "boolean");
 }
 async function selectTelemetryAttributes({
   telemetry,
@@ -36634,15 +36984,15 @@ async function selectTelemetryAttributes({
     return {};
   }
   const resultAttributes = {};
-  for (const [key, value] of Object.entries(attributes)) {
-    if (value == null) {
+  for (const [key, value2] of Object.entries(attributes)) {
+    if (value2 == null) {
       continue;
     }
-    if (typeof value === "object" && "input" in value && typeof value.input === "function") {
+    if (typeof value2 === "object" && "input" in value2 && typeof value2.input === "function") {
       if ((telemetry == null ? void 0 : telemetry.recordInputs) === false) {
         continue;
       }
-      const result = await value.input();
+      const result = await value2.input();
       if (result != null) {
         const sanitized2 = sanitizeAttributeValue(result);
         if (sanitized2 != null)
@@ -36650,11 +37000,11 @@ async function selectTelemetryAttributes({
       }
       continue;
     }
-    if (typeof value === "object" && "output" in value && typeof value.output === "function") {
+    if (typeof value2 === "object" && "output" in value2 && typeof value2.output === "function") {
       if ((telemetry == null ? void 0 : telemetry.recordOutputs) === false) {
         continue;
       }
-      const result = await value.output();
+      const result = await value2.output();
       if (result != null) {
         const sanitized2 = sanitizeAttributeValue(result);
         if (sanitized2 != null)
@@ -36662,7 +37012,7 @@ async function selectTelemetryAttributes({
       }
       continue;
     }
-    const sanitized = sanitizeAttributeValue(value);
+    const sanitized = sanitizeAttributeValue(value2);
     if (sanitized != null)
       resultAttributes[key] = sanitized;
   }
@@ -36994,9 +37344,9 @@ async function executeToolCall({
           telemetry
         }),
         ...Object.fromEntries(
-          Object.entries((_a222 = telemetry == null ? void 0 : telemetry.metadata) != null ? _a222 : {}).map(([key, value]) => [
+          Object.entries((_a222 = telemetry == null ? void 0 : telemetry.metadata) != null ? _a222 : {}).map(([key, value2]) => [
             `ai.telemetry.metadata.${key}`,
-            value
+            value2
           ])
         ),
         "ai.toolCall.name": toolName,
@@ -37168,19 +37518,19 @@ function isToolExecutionAllowedFinishReason(finishReason) {
   return finishReason === "stop" || finishReason === "tool-calls";
 }
 var encoder = new TextEncoder();
-function canonicalJSON(value) {
-  if (value === null || value === void 0) {
-    return JSON.stringify(value);
+function canonicalJSON(value2) {
+  if (value2 === null || value2 === void 0) {
+    return JSON.stringify(value2);
   }
-  if (typeof value !== "object") {
-    return JSON.stringify(value);
+  if (typeof value2 !== "object") {
+    return JSON.stringify(value2);
   }
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJSON).join(",")}]`;
+  if (Array.isArray(value2)) {
+    return `[${value2.map(canonicalJSON).join(",")}]`;
   }
-  const keys = Object.keys(value).sort();
+  const keys = Object.keys(value2).sort();
   const entries = keys.map(
-    (k) => `${JSON.stringify(k)}:${canonicalJSON(value[k])}`
+    (k) => `${JSON.stringify(k)}:${canonicalJSON(value2[k])}`
   );
   return `{${entries.join(",")}}`;
 }
@@ -38151,7 +38501,7 @@ var DefaultStepResult = class {
     stepNumber,
     model,
     functionId,
-    metadata,
+    metadata: metadata2,
     experimental_context,
     content,
     finishReason,
@@ -38165,7 +38515,7 @@ var DefaultStepResult = class {
     this.stepNumber = stepNumber;
     this.model = model;
     this.functionId = functionId;
-    this.metadata = metadata;
+    this.metadata = metadata2;
     this.experimental_context = experimental_context;
     this.content = content;
     this.finishReason = finishReason;
@@ -39510,7 +39860,7 @@ var uiMessageChunkSchema = lazySchema(
       }),
       external_exports.looseObject({
         type: external_exports.custom(
-          (value) => typeof value === "string" && value.startsWith("data-"),
+          (value2) => typeof value2 === "string" && value2.startsWith("data-"),
           { message: 'Type must start with "data-"' }
         ),
         id: external_exports.string().optional(),
@@ -39882,7 +40232,7 @@ async function runToolExecuteBeforeHooks(input, perRunHooks = []) {
 }
 
 // src/permission-hook.ts
-var import_node_path4 = __toESM(require("node:path"));
+var import_node_path5 = __toESM(require("node:path"));
 var import_shell_quote = __toESM(require_shell_quote());
 
 // src/vendor/opencode-permission/wildcard.ts
@@ -40188,19 +40538,19 @@ var ARITY = {
 };
 
 // src/permission-hook.ts
-function normalizeWorkspacePattern(value, ctx) {
-  const source = value.trim().replaceAll("\\", "/");
+function normalizeWorkspacePattern(value2, ctx) {
+  const source = value2.trim().replaceAll("\\", "/");
   if (!source) return "";
-  const workspace = import_node_path4.default.resolve(ctx.workspace);
-  const absolute = import_node_path4.default.resolve(workspace, source);
-  return import_node_path4.default.relative(workspace, absolute).replaceAll("\\", "/") || ".";
+  const workspace = import_node_path5.default.resolve(ctx.workspace);
+  const absolute = import_node_path5.default.resolve(workspace, source);
+  return import_node_path5.default.relative(workspace, absolute).replaceAll("\\", "/") || ".";
 }
 function joinPathAndGlob(pathValue, globValue) {
   const base = pathValue.trim();
   const glob = globValue.trim();
   if (!base || base === ".") return glob;
   if (!glob) return base;
-  if (import_node_path4.default.isAbsolute(glob) || /^[A-Za-z]:[\\/]/u.test(glob)) return glob;
+  if (import_node_path5.default.isAbsolute(glob) || /^[A-Za-z]:[\\/]/u.test(glob)) return glob;
   return `${base.replace(/[\\/]+$/u, "")}/${glob.replace(/^[\\/]+/u, "")}`;
 }
 function commandPermissionTarget(command) {
@@ -40218,19 +40568,19 @@ function commandPermissionTarget(command) {
   const commandPrefix = prefix(parsed).join(" ");
   return commandPrefix ? { target: commandPrefix, allowEligible: true } : { target, allowEligible: false };
 }
-function collectStrings(value) {
-  if (typeof value === "string") return { values: value.trim() ? [value] : [], invalid: value.trim().length === 0 };
-  if (!Array.isArray(value)) return { values: [], invalid: value !== void 0 };
-  const values = [];
+function collectStrings(value2) {
+  if (typeof value2 === "string") return { values: value2.trim() ? [value2] : [], invalid: value2.trim().length === 0 };
+  if (!Array.isArray(value2)) return { values: [], invalid: value2 !== void 0 };
+  const values2 = [];
   let invalid = false;
-  for (const item of value) {
-    if (typeof item === "string" && item.trim()) values.push(item);
+  for (const item of value2) {
+    if (typeof item === "string" && item.trim()) values2.push(item);
     else invalid = true;
   }
-  return { values, invalid };
+  return { values: values2, invalid };
 }
-function pathTarget(value, ctx) {
-  return { pattern: normalizeWorkspacePattern(value, ctx), allowEligible: true };
+function pathTarget(value2, ctx) {
+  return { pattern: normalizeWorkspacePattern(value2, ctx), allowEligible: true };
 }
 function permissionTargets(tool2, args, ctx) {
   const bare = bareToolName(tool2);
@@ -40261,14 +40611,14 @@ function permissionTargets(tool2, args, ctx) {
   const pathsValues = collectStrings(args.paths);
   invalid ||= pathValues.invalid || pathsValues.invalid;
   if (bare !== "list_files" && bare !== "search_files") {
-    for (const value of pathValues.values) targets.push(pathTarget(value, ctx));
-    for (const value of pathsValues.values) targets.push(pathTarget(value, ctx));
+    for (const value2 of pathValues.values) targets.push(pathTarget(value2, ctx));
+    for (const value2 of pathsValues.values) targets.push(pathTarget(value2, ctx));
   }
   const patternValues = collectStrings(args.pattern);
   const patternsValues = collectStrings(args.patterns);
   invalid ||= patternValues.invalid || patternsValues.invalid;
-  for (const value of patternValues.values) targets.push(pathTarget(value, ctx));
-  for (const value of patternsValues.values) targets.push(pathTarget(value, ctx));
+  for (const value2 of patternValues.values) targets.push(pathTarget(value2, ctx));
+  for (const value2 of patternsValues.values) targets.push(pathTarget(value2, ctx));
   if (targets.length === 0) return [{ pattern: "*", allowEligible: !invalid }];
   return targets;
 }
@@ -40316,7 +40666,7 @@ function createPermissionHook(rules) {
 function createOllamaFetch(baseFetch = fetch) {
   return async (input, init) => {
     const headers = new Headers(typeof input === "object" && input !== null && "headers" in input ? input.headers : void 0);
-    new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
+    new Headers(init?.headers).forEach((value2, key) => headers.set(key, value2));
     const body = init?.body;
     const contentType = headers.get("content-type");
     if (body !== void 0 && body !== null) {
@@ -40549,14 +40899,14 @@ ${effectiveSummary}`, binding);
   try {
     const output = await def.run(args, ctx);
     const durationMs = Date.now() - startedAt;
-    const metadata = parseToolResultMeta(output);
+    const metadata2 = parseToolResultMeta(output);
     const terminalAudit = buildToolAuditMetadata(qualified, args, permission, audit.approval, {
       ...audit.target,
-      after_sha256: typeof metadata?.afterHash === "string" ? metadata.afterHash : null
+      after_sha256: typeof metadata2?.afterHash === "string" ? metadata2.afterHash : null
     });
-    io.event?.({ type: "tool.succeeded", tool: qualified, summary: effectiveSummary, output: output.slice(0, 1200), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
-    io.event?.({ type: "step.completed", tool: qualified, summary: effectiveSummary, output: output.slice(0, 800), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
-    return { output, status: "succeeded", executed: true, metadata };
+    io.event?.({ type: "tool.succeeded", tool: qualified, summary: effectiveSummary, output: output.slice(0, 1200), durationMs, metadata: metadata2, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+    io.event?.({ type: "step.completed", tool: qualified, summary: effectiveSummary, output: output.slice(0, 800), durationMs, metadata: metadata2, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+    return { output, status: "succeeded", executed: true, metadata: metadata2 };
   } catch (err) {
     const output = `[tool error] ${err.message}`;
     const durationMs = Date.now() - startedAt;
@@ -40584,7 +40934,7 @@ async function runAgentTurnV2(opts) {
     ...priorSystem,
     cfg.systemPrompt,
     buildProtocolRules(targetMode, policy.allowArbitraryCommands, policy.autoApproveCommand, ctx.safeCommandOnly === true)
-  ].filter((value) => typeof value === "string" && value.length > 0))].join("\n\n");
+  ].filter((value2) => typeof value2 === "string" && value2.length > 0))].join("\n\n");
   io.event?.({ type: "plan.created", summary: mode === "work" ? "Run\u306E\u8A08\u753B\u3068\u691C\u8A3C\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F" : mode === "research" ? "\u8ABF\u67FB\u30E2\u30FC\u30C9\u3092\u958B\u59CB\u3057\u307E\u3057\u305F" : "\u901A\u5E38\u56DE\u7B54\u30E2\u30FC\u30C9\u3092\u958B\u59CB\u3057\u307E\u3057\u305F", origin: "orchestrator", namespace: "none", authority: "derived" });
   if (mode !== "work") {
     try {
@@ -40689,1282 +41039,1271 @@ function runConfiguredAgentTurn(opts) {
   return runAgentTurn(opts);
 }
 
-// src/copilot.ts
-var import_node_child_process3 = require("node:child_process");
-var import_node_net = __toESM(require("node:net"));
-var import_node_fs3 = __toESM(require("node:fs"));
-var import_node_path5 = __toESM(require("node:path"));
-function selectBrowserProcessId(processInfo) {
-  if (!Array.isArray(processInfo)) return null;
-  const browser = processInfo.find((item) => {
-    if (!item || typeof item !== "object") return false;
-    const candidate = item;
-    return String(candidate.type ?? "").toLowerCase() === "browser" && typeof candidate.id === "number" && Number.isSafeInteger(candidate.id) && candidate.id > 0;
-  });
-  return browser && typeof browser.id === "number" ? browser.id : null;
+// src/benchmark.ts
+var BENCHMARK_SUITE_SCHEMA = "misen.benchmark-suite/v1";
+var BENCHMARK_TASK_SCHEMA = "misen.benchmark-task/v1";
+var BENCHMARK_RUN_SCHEMA = "misen.benchmark-run/v1";
+var BENCHMARK_RUNNER_VERSION = "1.0.0";
+var FatalBenchmarkError = class extends Error {
+};
+var AuditAppendError = class extends FatalBenchmarkError {
+};
+function isRecord2(value2) {
+  return typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
 }
-var RESPONSE_STABILITY_MS = 1e3;
-var VISIBLE_SESSION_MARKER_PREFIX = "company-apps-coding-agent:";
-function makeVisibleSessionMarker(sessionId) {
-  const normalized = sessionId.trim();
-  if (!/^[a-z0-9_-]{6,80}$/i.test(normalized)) throw new Error("\u8868\u793A\u30BB\u30C3\u30B7\u30E7\u30F3ID\u304C\u4E0D\u6B63\u3067\u3059");
-  return VISIBLE_SESSION_MARKER_PREFIX + normalized;
+function requireString(value2, label) {
+  if (typeof value2 !== "string" || !value2.trim()) throw new Error(`${label} \u306F\u7A7A\u3067\u306A\u3044\u6587\u5B57\u5217\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044`);
+  return value2;
 }
-function assertResponseDeadline(deadlineMs, responseTimeoutSec, nowMs = Date.now()) {
-  if (nowMs >= deadlineMs) throw new Error(`Copilot \u306E\u5FDC\u7B54\u304C\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8\u3057\u307E\u3057\u305F (${responseTimeoutSec}\u79D2)`);
-}
-function selectLatestResponseCandidate(candidates) {
-  const usable = candidates.filter((candidate) => candidate.text.trim().length > 0);
-  usable.sort((a, b) => a.bottom - b.bottom || a.order - b.order);
-  return usable.length > 0 ? usable[usable.length - 1] : null;
-}
-function isStopGenerationControl(candidate) {
-  const structural = /fai-SendButton__stopBackground|stopGeneratingButton|stop-button/i.test(candidate.selector);
-  const semantic = /stop\s*(?:generating|response)|cancel\s*(?:generation|response)|生成を停止|応答を停止|停止する/i.test(candidate.label);
-  return structural || semantic;
-}
-function updateResponseCompletionState(previous, sample) {
-  if (sample.generating || !sample.copyEnabled || sample.text.length <= 0) {
-    return { state: { stableText: null, stableSinceMs: null }, ready: false };
+function requireStringArray(value2, label) {
+  if (!Array.isArray(value2) || value2.some((item) => typeof item !== "string" || !item.trim())) {
+    throw new Error(`${label} \u306F\u7A7A\u3067\u306A\u3044\u6587\u5B57\u5217\u306E\u914D\u5217\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044`);
   }
-  if (previous.stableText !== sample.text || previous.stableSinceMs === null) {
+  return value2;
+}
+function normalizeRelativePath(value2, label) {
+  const normalized = value2.replaceAll("\\", "/");
+  if (!normalized || normalized.includes("\0") || normalized.includes(":") || import_node_path6.default.isAbsolute(normalized) || /^[A-Za-z]:/u.test(normalized)) throw new Error(`${label} \u306F\u5B89\u5168\u306A\u76F8\u5BFE\u30D1\u30B9\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044`);
+  if (normalized.split("/").includes("..")) throw new Error(`${label} \u306Ffixture\u5916\u3092\u53C2\u7167\u3067\u304D\u307E\u305B\u3093`);
+  const resolved = import_node_path6.default.posix.normalize(normalized);
+  if (resolved === "." || resolved === ".." || resolved.startsWith("../") || resolved.includes("/../")) throw new Error(`${label} \u306Ffixture\u5916\u3092\u53C2\u7167\u3067\u304D\u307E\u305B\u3093`);
+  return resolved;
+}
+function parseFixture(value2, label) {
+  if (!isRecord2(value2) || !Array.isArray(value2.files)) throw new Error(`${label}.files \u304C\u5FC5\u8981\u3067\u3059`);
+  const files = value2.files.map((candidate, index) => {
+    if (!isRecord2(candidate)) throw new Error(`${label}.files[${index}] \u304C\u4E0D\u6B63\u3067\u3059`);
     return {
-      state: { stableText: sample.text, stableSinceMs: sample.observedAtMs },
-      ready: false
+      path: normalizeRelativePath(requireString(candidate.path, `${label}.files[${index}].path`), `${label}.files[${index}].path`),
+      content: typeof candidate.content === "string" ? candidate.content : (() => {
+        throw new Error(`${label}.files[${index}].content \u306F\u6587\u5B57\u5217\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044`);
+      })()
+    };
+  });
+  if (new Set(files.map((file2) => file2.path.toLowerCase())).size !== files.length) throw new Error(`${label}.files \u306Epath\u304C\u91CD\u8907\u3057\u3066\u3044\u307E\u3059`);
+  return { files };
+}
+function parseExpectation(value2, label) {
+  if (!isRecord2(value2)) throw new Error(`${label} \u304C\u4E0D\u6B63\u3067\u3059`);
+  const type = requireString(value2.type, `${label}.type`);
+  if (type === "final_status") {
+    if (value2.value !== "success" && value2.value !== "aborted") throw new Error(`${label}.value \u304C\u4E0D\u6B63\u3067\u3059`);
+    return { type, value: value2.value };
+  }
+  if (type === "file_exists" || type === "file_not_exists") {
+    return { type, path: normalizeRelativePath(requireString(value2.path, `${label}.path`), `${label}.path`) };
+  }
+  if (type === "file_text_contains") {
+    return {
+      type,
+      path: normalizeRelativePath(requireString(value2.path, `${label}.path`), `${label}.path`),
+      text: requireString(value2.text, `${label}.text`)
     };
   }
-  return {
-    state: previous,
-    ready: sample.observedAtMs - previous.stableSinceMs >= RESPONSE_STABILITY_MS
-  };
-}
-function resolveCopilotSettings(cfg) {
-  const c = cfg.copilot ?? {};
-  const reuseExistingEdge = c.reuseExistingEdge === true;
-  const configuredPort = typeof c.cdpPort === "number" && Number.isInteger(c.cdpPort) && c.cdpPort > 0 ? c.cdpPort : 9445;
-  return {
-    url: c.url ?? "https://m365.cloud.microsoft/chat/",
-    // A fixed port is only honored when the user explicitly opts into attaching to an existing Edge.
-    // The normal path allocates a loopback port for an Edge process owned by this client.
-    cdpPort: reuseExistingEdge ? configuredPort : 0,
-    reuseExistingEdge,
-    maxPromptChars: c.maxPromptChars ?? 12e4,
-    pollIntervalMs: Math.max(500, c.pollIntervalMs ?? 900),
-    responseTimeoutSec: c.responseTimeoutSec ?? 300,
-    stallTimeoutSec: c.stallTimeoutSec ?? 120,
-    displayMode: c.displayMode === "foreground" ? "foreground" : "minimized",
-    endMarker: c.endMarker ?? "AGENT_END",
-    agentMode: c.agentMode === true,
-    profileName: c.profileName,
-    modelPriority: Array.isArray(c.modelPriority) ? c.modelPriority.filter((s) => s && s.trim()) : ["GPT 5.6 Think Deeper", "Opus", "Think Deeper"]
-  };
-}
-var VISIBLE_JS = `const __vis=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};`;
-var DOCS_JS = `const __docs=[];const __seenRoots=new Set();const __addRoot=r=>{if(!r||__seenRoots.has(r))return;__seenRoots.add(r);__docs.push(r);let all=[];try{all=Array.from(r.querySelectorAll('*'));}catch(e){}for(const el of all){try{if(el.shadowRoot)__addRoot(el.shadowRoot);}catch(e){}try{if((el.tagName||'').toLowerCase()==='iframe'&&el.contentDocument)__addRoot(el.contentDocument);}catch(e){}}};__addRoot(document);`;
-var INPUT_READY_JS = `(() => {
-  ${VISIBLE_JS}
-  ${DOCS_JS}
-  const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
-  for (const d of __docs) for (const s of sels) {
-    const el = d.querySelector(s);
-    if (__vis(el)) return JSON.stringify({ ready: true, url: location.href });
-  }
-  return JSON.stringify({ ready: false, url: location.href });
-})()`;
-var COPILOT_SCREEN_STATE_JS = `(() => {
-  ${VISIBLE_JS}
-  ${DOCS_JS}
-  const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
-  let input = null;
-  for (const d of __docs) { input = sels.map(s => ({ s, el: d.querySelector(s) })).find(x => __vis(x.el)); if (input) break; }
-  const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button,[role="button"],a')));
-  const responseSelectors = ['[data-testid="markdown-reply"]','[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
-  const responseRootSelectors = ['[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][class*="CopilotMessage" i]','[data-testid="copilot-message-div"]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
-  const responseSelectorText = responseSelectors.join(',');const responseRootSelectorText=responseRootSelectors.join(',');
-  const responseRoot = node => {try{return node.closest(responseRootSelectorText)||node;}catch(e){return node;}};
-  const topBottom = node => {const rect=node.getBoundingClientRect();let bottom=Number(rect.bottom)||0;let win=node.ownerDocument&&node.ownerDocument.defaultView;try{while(win&&win!==win.parent&&win.frameElement){bottom+=win.frameElement.getBoundingClientRect().top;win=win.parent;}}catch(e){}return bottom;};
-  const controlLabel = el => [el.getAttribute('aria-label'),el.title,el.getAttribute('data-testid'),el.getAttribute('data-automation-id'),el.id,el.className,el.innerText,el.textContent].filter(Boolean).join(' ').trim();
-  const enabledCopy = el => {const label=[el.getAttribute('aria-label'),el.title,el.innerText,el.textContent].filter(Boolean).join(' ').trim();const testId=el.getAttribute('data-testid')||'';let inCode=false,inToolbar=false;try{inCode=!!el.closest('pre,code,[data-testid*="code" i]');inToolbar=!!el.closest('[role="toolbar"],.fai-CopilotMessage__actions,[data-testid="CopyButtonContainerTestId"]');}catch(e){}const identity=/^CopyButtonTestId$/i.test(testId)||/(?:\u5FDC\u7B54|\u56DE\u7B54).{0,8}\u30B3\u30D4\u30FC|\u30B3\u30D4\u30FC.{0,8}(?:\u5FDC\u7B54|\u56DE\u7B54)|copy\\s*(?:response|answer)|(?:response|answer)\\s*copy/i.test(label)||(inToolbar&&/^(?:\u30B3\u30D4\u30FC|copy)$/i.test(label));return __vis(el)&&!inCode&&identity&&!el.disabled&&el.getAttribute('aria-disabled')!=='true';};
-  const copyForResponse = sourceNode => {
-    const ownRoot=responseRoot(sourceNode);let scope=ownRoot;
-    for(let depth=0;scope&&depth<6;depth++){
-      let others=[];try{others=Array.from(scope.querySelectorAll(responseSelectorText)).filter(el=>responseRoot(el)!==ownRoot);}catch(e){}
-      if(others.length>0)break;
-      let controls=[];try{controls=Array.from(scope.querySelectorAll('button,[role="button"],span[role="button"]'));}catch(e){}
-      if(controls.some(enabledCopy))return true;
-      if(scope.tagName&&/^(MAIN|BODY)$/.test(scope.tagName))break;
-      scope=scope.parentElement;
-    }
-    return false;
-  };
-  const responseCandidates=[];const seenResponses=new Set();let responseOrder=0;
-  for(const d of __docs)for(const selector of responseSelectors){let nodes=[];try{nodes=Array.from(d.querySelectorAll(selector));}catch(e){}for(const node of nodes){const root=responseRoot(node);if(seenResponses.has(root)||!__vis(node))continue;const text=((node.innerText||'')||(node.textContent||'')).trim();if(!text)continue;seenResponses.add(root);responseCandidates.push({text,bottom:topBottom(root),order:responseOrder++,copyEnabled:copyForResponse(node)});}}
-  const stopSelectors=['.fai-SendButton__stopBackground','[data-testid="stopGeneratingButton"]','[data-testid="stop-button"]','[aria-label*="Stop"]','[aria-label*="\u505C\u6B62"]','[aria-label*="Cancel"]','[aria-label*="\u30AD\u30E3\u30F3\u30BB\u30EB"]','[data-testid*="stop" i]'];
-  const stopCandidates=[];const seenStops=new Set();
-  for(const d of __docs)for(const selector of stopSelectors){let nodes=[];try{nodes=Array.from(d.querySelectorAll(selector));}catch(e){}for(const item of nodes){let el=item;try{el=item.closest('button,[role="button"],a')||item;}catch(e){}if(seenStops.has(el)||!__vis(el))continue;seenStops.add(el);stopCandidates.push({label:(controlLabel(el)+' '+controlLabel(item)).trim(),selector});}}
-  const signIn = buttons.find(el => __vis(el) && /sign\\s*in|log\\s*in|\u30B5\u30A4\u30F3\u30A4\u30F3|\u30ED\u30B0\u30A4\u30F3/i.test((el.innerText || el.textContent || el.getAttribute('aria-label') || el.title || '').trim()));
-  const url = String(location.href || '');
-  const signinRequired = /(?:login|signin|sign-in|auth)/i.test(url) || (!input && !!signIn);
-  return JSON.stringify({ inputReady: !!input, stopCandidates, responseCandidates, signinRequired, url, title: String(document.title || ''), windowName: String(window.name || ''), sessionMarker: String(document.documentElement.getAttribute('data-company-apps-session') || '') });
-})()`;
-var FRESH_CHAT_JS = `(() => {
-  ${VISIBLE_JS}
-  ${DOCS_JS}
-  const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button, [role="button"], a, [tabindex]')));
-  const candidates = [];
-  for (const b of buttons) {
-    const label = (b.getAttribute('aria-label') || b.title || b.textContent || '').trim();
-    if (!label) continue;
-    let score = 0;
-    if (/^(\u65B0\u3057\u3044\u30C1\u30E3\u30C3\u30C8|New chat)$/i.test(label)) score += 1000;
-    else if (/\u65B0\u3057\u3044\u30C1\u30E3\u30C3\u30C8|New chat/i.test(label)) score += 400;
-    else if (/\u30C1\u30E3\u30C3\u30C8|chat/i.test(label)) score += 80;
-    if (/\u305D\u306E\u4ED6|\u5C65\u6B74|\u691C\u7D22|\u30E9\u30A4\u30D6\u30E9\u30EA|more|history|search|library/i.test(label)) score -= 300;
-    if (score <= 0) continue;
-    if (b.disabled || b.getAttribute('aria-disabled') === 'true') continue;
-    if (!__vis(b)) continue;
-    candidates.push({ el: b, label, score });
-  }
-  candidates.sort((a, b) => b.score - a.score);
-  if (candidates[0]) { candidates[0].el.click(); return JSON.stringify({ clicked: true }); }
-  return JSON.stringify({ clicked: false });
-})()`;
-var COPILOT_CLICK_SEND_JS = `(() => {
-  ${VISIBLE_JS}
-  ${DOCS_JS}
-  const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button, [role="button"]')));
-  const exclude = /stop|cancel|\u505C\u6B62|\u30AD\u30E3\u30F3\u30BB\u30EB|regenerate|\u518D\u751F\u6210|attach|\u6DFB\u4ED8|microphone|voice|\u30DC\u30A4\u30B9|\u97F3\u58F0|new chat|\u65B0\u3057\u3044\u30C1\u30E3\u30C3\u30C8|clear|\u30AF\u30EA\u30A2|close|\u9589\u3058\u308B|search|\u691C\u7D22|library|\u30E9\u30A4\u30D6\u30E9\u30EA|file|\u30D5\u30A1\u30A4\u30EB/;
-  const structural = b => b.matches('button[type="submit"],.fai-SendButton,[class*="SendButton" i],[data-testid*="send" i],[data-automation-id*="send" i]');
-  const inventory = b => { const r=b.getBoundingClientRect(); let x=r.x,y=r.y,w=b.ownerDocument&&b.ownerDocument.defaultView; try{while(w&&w!==w.top){const f=w.frameElement;if(!f)break;const fr=f.getBoundingClientRect();x+=fr.x;y+=fr.y;w=f.ownerDocument&&f.ownerDocument.defaultView;}}catch(e){} return {ariaLabel:b.getAttribute('aria-label')||'',title:b.title||'',testId:b.getAttribute('data-testid')||'',automationId:b.getAttribute('data-automation-id')||'',className:typeof b.className==='string'?b.className:'',type:b.getAttribute('type')||'',disabled:!!b.disabled,ariaDisabled:b.getAttribute('aria-disabled')||'',visible:__vis(b),rect:{x,y,width:r.width,height:r.height,cx:x+r.width/2,cy:y+r.height/2}}; };
-  const clickable = [];
-  for (const b of buttons) {
-    const label = (b.getAttribute('aria-label') || b.title || b.textContent || '').trim();
-    const lower = label.toLowerCase();
-    const identity = [lower,b.getAttribute('data-testid'),b.getAttribute('data-automation-id'),typeof b.className==='string'?b.className:''].filter(Boolean).join(' ').toLowerCase();
-    let score = 0;
-    if (/^(\u9001\u4FE1|send)$/i.test(label)) score += 1000;
-    else if (structural(b)) score += 600;
-    else if (/\u9001\u4FE1|send/i.test(lower)) score += 400;
-    if (score <= 0) continue;
-    if (exclude.test(identity)) continue;
-    if (b.disabled || b.getAttribute('aria-disabled') === 'true') continue;
-    if (!__vis(b)) continue;
-    clickable.push({ el: b, score, inventory: inventory(b) });
-  }
-  clickable.sort((a, b) => b.score - a.score);
-  if (clickable[0]) { clickable[0].el.click(); return JSON.stringify({ clicked: true, selected:clickable[0].inventory }); }
-  const inputSelectors=['#m365-chat-editor-target-element','[data-lexical-editor="true"][contenteditable]','[role="textbox"][contenteditable]'];
-  let nearby=[];
-  for(const d of __docs)for(const selector of inputSelectors){const input=d.querySelector(selector);if(!input)continue;let scope=input.parentElement;for(let depth=0;scope&&depth<6;depth++,scope=scope.parentElement){const found=Array.from(scope.querySelectorAll('button,[role="button"]'));if(found.length){nearby=found;break;}}if(nearby.length)break;}
-  const diagnosticButtons=(nearby.length?nearby:buttons).slice(-32);
-  return JSON.stringify({ clicked: false, inventory: diagnosticButtons.map(inventory) });
-})()`;
-var COPILOT_SEND_READY_JS = `(() => {
-  ${VISIBLE_JS}
-  ${DOCS_JS}
-  const buttons = __docs.flatMap(d => Array.from(d.querySelectorAll('button, [role="button"]')));
-  const structural = b => b.matches('button[type="submit"],.fai-SendButton,[class*="SendButton" i],[data-testid*="send" i],[data-automation-id*="send" i]');
-  const inventory = b => { const r=b.getBoundingClientRect(); return {ariaLabel:b.getAttribute('aria-label')||'',title:b.title||'',testId:b.getAttribute('data-testid')||'',automationId:b.getAttribute('data-automation-id')||'',className:typeof b.className==='string'?b.className:'',type:b.getAttribute('type')||'',disabled:!!b.disabled,ariaDisabled:b.getAttribute('aria-disabled')||'',visible:__vis(b),rect:{x:r.x,y:r.y,width:r.width,height:r.height,cx:r.x+r.width/2,cy:r.y+r.height/2}}; };
-  const candidates = buttons.filter(b => {
-    const label=(b.getAttribute('aria-label')||b.title||b.textContent||'').trim();
-    return structural(b) || /^(\u9001\u4FE1|send)$/i.test(label);
-  });
-  const ready = candidates.find(b => __vis(b) && !b.disabled && b.getAttribute('aria-disabled') !== 'true');
-  return JSON.stringify({ready:!!ready,inventory:candidates.slice(-32).map(inventory)});
-})()`;
-var EDITOR_LENGTH_JS = `(() => {
-  ${VISIBLE_JS}
-  ${DOCS_JS}
-  const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
-  for (const d of __docs) for (const s of sels) {
-    const el = d.querySelector(s);
-    if (__vis(el)) return String((el.textContent || '').replace(/[\\u200B\\u200C]/g, '').length);
-  }
-  return '-1';
-})()`;
-var EDITOR_STATE_JS = `(() => {
-  ${VISIBLE_JS}
-  ${DOCS_JS}
-  const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
-  for (const d of __docs) for (const s of sels) {
-    const el = d.querySelector(s);
-    if (__vis(el)) return JSON.stringify({ found: true, text: String(el.textContent || '').replace(/[\\u200B\\u200C]/g, ''), active: d.activeElement === el });
-  }
-  return JSON.stringify({ found: false, text: '', active: false });
-})()`;
-function textMismatchDiagnostic(expected, actual) {
-  let index = 0;
-  while (index < expected.length && index < actual.length && expected[index] === actual[index]) index++;
-  const start = Math.max(0, index - 12);
-  const end = index + 20;
-  const expectedSlice = expected.slice(start, end);
-  const actualSlice = actual.slice(start, end);
-  const code = (value) => Array.from(value).map((char) => char.codePointAt(0)?.toString(16).padStart(4, "0")).join(" ");
-  return `first=${index} expected=${JSON.stringify(expectedSlice)} [${code(expectedSlice)}] actual=${JSON.stringify(actualSlice)} [${code(actualSlice)}] lengths=${expected.length}/${actual.length}`;
-}
-var CLEAR_EDITOR_JS = `(() => {
-  ${VISIBLE_JS}
-  ${DOCS_JS}
-  const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
-  for (const d of __docs) for (const s of sels) {
-    const el = d.querySelector(s);
-    if (__vis(el)) { el.focus(); document.execCommand('selectAll'); document.execCommand('delete'); return 'ok'; }
-  }
-  return 'ng';
-})()`;
-var MODEL_SELECT_JS = String.raw`(async () => {
-  const candidates = __CANDIDATES__;
-  const switcherSelector = __SWITCHER__;
-  const docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}}
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const norm = s => (s || '').replace(/\s+/g, ' ').trim();
-  const stripTail = s => norm(s).replace(/[…‥]|\.{3}$/g, '');
-  const eq = (a,b) => a.toLowerCase() === b.toLowerCase();
-  const has = (a,b) => a.toLowerCase().indexOf(b.toLowerCase()) !== -1;
-  const matchesModel = (shown,cand,picked) => {
-    const a = stripTail(shown); if (!a) return false;
-    if (eq(a,cand) || has(a,cand)) return true;
-    if (picked && (eq(a,picked) || has(a,picked))) return true;
-    return a.length >= 6 && (has(cand,a) || (picked && has(picked,a)));
-  };
-  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
-  const primaryLabel = el => { const p=el.querySelector('.fai-CapabilityPickerMenuItem__primaryContentWrapper'); if(p)return norm(p.innerText); const c=el.querySelector('.fui-MenuItem__content > span:first-child'); if(c)return norm(c.innerText); return norm((el.innerText||'').split('\n')[0]); };
-  const subTextOf = el => { const s=el.querySelector('.fai-CapabilityPickerMenuItem__subText'); return s?norm(s.innerText):''; };
-  const itemSelector='[role="menuitem"],[role="menuitemradio"],[role="menuitemcheckbox"],[role="option"]';
-  const menuRoot=()=>{for(const d of docs){const r=d.querySelector('.fui-MenuPopover')||d.querySelector('[data-portal-node] [role="menu"]');if(r)return r;}return null;};
-  const collectItems=()=>{const r=menuRoot();return r?Array.from(r.querySelectorAll(itemSelector)).filter(visible):[];};
-  const collectItemsAll=()=>{const roots=docs.flatMap(d=>Array.from(d.querySelectorAll('.fui-MenuPopover, [data-portal-node] [role="menu"]'))).filter(visible);return Array.from(new Set(roots.flatMap(r=>Array.from(r.querySelectorAll(itemSelector)).filter(visible))));};
-  const pressEscape=()=>{try{const o={key:'Escape',code:'Escape',keyCode:27,which:27,bubbles:true,cancelable:true};const t=document.activeElement||document.body;t.dispatchEvent(new KeyboardEvent('keydown',o));t.dispatchEvent(new KeyboardEvent('keyup',o));}catch(e){}};
-  const fireEnter=el=>{try{el.focus();const o={key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true,cancelable:true};el.dispatchEvent(new KeyboardEvent('keydown',o));el.dispatchEvent(new KeyboardEvent('keyup',o));return true;}catch(e){return false;}};
-  const fireMenuClick=async el=>{try{const r=el.getBoundingClientRect(),cx=r.x+r.width/2,cy=r.y+r.height/2,base={bubbles:true,cancelable:true,view:window,clientX:cx,clientY:cy};el.dispatchEvent(new PointerEvent('pointerover',{...base,pointerType:'mouse'}));el.dispatchEvent(new MouseEvent('mouseover',base));el.dispatchEvent(new PointerEvent('pointermove',{...base,pointerType:'mouse'}));el.dispatchEvent(new MouseEvent('mousemove',base));try{el.focus();}catch(e){}await sleep(60);el.dispatchEvent(new PointerEvent('pointerdown',{...base,pointerType:'mouse',button:0}));el.dispatchEvent(new MouseEvent('mousedown',{...base,button:0}));el.dispatchEvent(new PointerEvent('pointerup',{...base,pointerType:'mouse',button:0}));el.dispatchEvent(new MouseEvent('mouseup',{...base,button:0}));el.dispatchEvent(new MouseEvent('click',{...base,button:0}));try{el.click();}catch(e){}return true;}catch(e){return false;}};
-  const findSwitcher=()=>{for(const d of docs){let b=d.querySelector(switcherSelector);if(b&&visible(b))return b;b=Array.from(d.querySelectorAll('button[aria-haspopup="menu"]')).find(x=>visible(x)&&(/モデル/.test(x.getAttribute('aria-label')||'')||/model/i.test(x.getAttribute('aria-label')||'')));if(b)return b;}return null;};
-  const labelItems=xs=>xs.map(el=>({el,label:primaryLabel(el),submenu:el.getAttribute('aria-haspopup')==='menu',testId:el.getAttribute('data-test-id')||'',checked:el.getAttribute('aria-checked')==='true'})).filter(x=>x.label);
-  const isGptTrigger=x=>/^gptSubMenuModelTrigger/i.test(x.testId)||(x.submenu&&/^gpt/i.test(x.label))||(x.submenu&&has(subTextOf(x.el),'OpenAI'));
-  const findHit=(xs,c)=>xs.find(x=>eq(x.label,c))||xs.find(x=>has(x.label,c))||(/^gpt/i.test(c)?xs.find(isGptTrigger):null);
-  const btn=findSwitcher();
-  if(!btn)return JSON.stringify({ok:true,changed:false,reason:'switcher_not_found'});
-  const current=norm(btn.innerText);
-  if(candidates.length&&matchesModel(current,candidates[0],''))return JSON.stringify({ok:true,changed:false,reason:'already_selected',current,picked:candidates[0]});
-  await fireMenuClick(btn);
-  let items=[];for(let i=0;i<30;i++){items=collectItems();if(items.length)break;await sleep(100);}if(items.length){await sleep(150);const a=collectItems();if(a.length)items=a;}
-  if(!items.length){pressEscape();return JSON.stringify({ok:true,changed:false,reason:'menu_not_found',current});}
-  let labeled=labelItems(items),skipped=[],observedSubMenuItems=[];
-  const clickAndConfirm=async(hit,cand)=>{
-    const before=new Set(collectItemsAll());await fireMenuClick(hit.el);let picked=hit.label,clicked=hit.el;
-    if(hit.submenu){let fresh=[];for(let i=0;i<20;i++){fresh=collectItemsAll().filter(x=>!before.has(x));if(fresh.length)break;await sleep(100);}if(fresh.length){const sub=fresh.map(el=>({el,label:primaryLabel(el)})).filter(x=>x.label);observedSubMenuItems=sub.map(x=>x.label).slice(0,16);const suffix=cand.replace(/^GPT[\s-]*[\d.]*\s*/i,'');const h=sub.find(x=>eq(x.label,cand))||sub.find(x=>has(x.label,cand))||sub.find(x=>eq(x.label,suffix))||sub.find(x=>suffix&&has(x.label,suffix))||sub.find(x=>has(cand,x.label)&&x.label.length>=4);if(!h)return{applied:false,reason:'submenu_no_match'};picked=h.label;clicked=h.el;await fireMenuClick(clicked);}}
-    const timeout=hit.submenu?5000:2000,t0=Date.now();let keyboard=false;
-    while(Date.now()-t0<timeout){await sleep(hit.submenu?50:100);after_loop:{}
-      const after=norm((findSwitcher()||{innerText:''}).innerText);
-      if(matchesModel(after,cand,picked))return{applied:true,after,picked};
-      const still=menuRoot()!==null;
-      if(hit.submenu&&still&&!keyboard&&(Date.now()-t0)>=800){keyboard=true;fireEnter(clicked);}
-    }
-    return{applied:false,reason:'confirm_failed'};
-  };
-  for(let pi=0;pi<candidates.length;pi++){const cand=candidates[pi],hit=findHit(labeled,cand);if(!hit){skipped.push(cand);continue;}
-    if(hit.checked){pressEscape();return JSON.stringify({ok:true,changed:false,reason:'already_selected',current,picked:hit.label});}
-    const r=await clickAndConfirm(hit,cand);
-    if(r.applied)return JSON.stringify({ok:true,changed:true,reason:'selected',before:current,after:r.after,picked:r.picked});
-    pressEscape();await sleep(150);pressEscape();await sleep(700);
-    const after2=norm((findSwitcher()||{innerText:''}).innerText);
-    if(matchesModel(after2,cand,r.picked||''))return JSON.stringify({ok:true,changed:true,reason:'selected_late',before:current,after:after2,picked:r.picked});
-  }
-  pressEscape();return JSON.stringify({ok:true,changed:false,reason:'model_not_in_menu',current,tried:candidates,skipped});
-})()`;
-var COPILOT_CLICK_COPY_JS = `(() => {
-  ${VISIBLE_JS}
-  ${DOCS_JS}
-  const responseSelectors=['[data-testid="markdown-reply"]','[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
-  const responseRootSelectors=['[data-content="ai-message"]','[class*="ai-message" i]','[role="article"][class*="CopilotMessage" i]','[data-testid="copilot-message-div"]','[role="article"][data-author="assistant"]','[role="article"][aria-label*="Copilot" i]','[data-message-author-role="assistant"]'];
-  const responseSelectorText=responseSelectors.join(',');const responseRootSelectorText=responseRootSelectors.join(',');
-  const responseRoot=node=>{try{return node.closest(responseRootSelectorText)||node;}catch(e){return node;}};
-  const topBottom=node=>{const rect=node.getBoundingClientRect();let bottom=Number(rect.bottom)||0;let win=node.ownerDocument&&node.ownerDocument.defaultView;try{while(win&&win!==win.parent&&win.frameElement){bottom+=win.frameElement.getBoundingClientRect().top;win=win.parent;}}catch(e){}return bottom;};
-  const labelOf=el=>[el.getAttribute('aria-label'),el.title,el.getAttribute('data-testid'),el.getAttribute('data-automation-id'),el.id,el.className,el.innerText,el.textContent].filter(Boolean).join(' ').trim();
-  const enabledCopy=el=>{const label=[el.getAttribute('aria-label'),el.title,el.innerText,el.textContent].filter(Boolean).join(' ').trim();const testId=el.getAttribute('data-testid')||'';let inCode=false,inToolbar=false;try{inCode=!!el.closest('pre,code,[data-testid*="code" i]');inToolbar=!!el.closest('[role="toolbar"],.fai-CopilotMessage__actions,[data-testid="CopyButtonContainerTestId"]');}catch(e){}const identity=/^CopyButtonTestId$/i.test(testId)||/(?:\u5FDC\u7B54|\u56DE\u7B54).{0,8}\u30B3\u30D4\u30FC|\u30B3\u30D4\u30FC.{0,8}(?:\u5FDC\u7B54|\u56DE\u7B54)|copy\\s*(?:response|answer)|(?:response|answer)\\s*copy/i.test(label)||(inToolbar&&/^(?:\u30B3\u30D4\u30FC|copy)$/i.test(label));return __vis(el)&&!inCode&&identity&&!el.disabled&&el.getAttribute('aria-disabled')!=='true';};
-  const responses=[];const seenResponses=new Set();let order=0;
-  for(const d of __docs)for(const selector of responseSelectors){let nodes=[];try{nodes=Array.from(d.querySelectorAll(selector));}catch(e){}for(const node of nodes){const root=responseRoot(node);if(seenResponses.has(root)||!__vis(node))continue;const text=((node.innerText||'')||(node.textContent||'')).trim();if(!text)continue;seenResponses.add(root);responses.push({node:root,bottom:topBottom(root),order:order++});}}
-  responses.sort((a,b)=>(a.bottom-b.bottom)||(a.order-b.order));
-  const latest=responses.length?responses[responses.length-1].node:null;
-  let cand=[];let scope=latest;
-  for(let depth=0;scope&&depth<6;depth++){
-    let others=[];try{others=Array.from(scope.querySelectorAll(responseSelectorText)).filter(el=>responseRoot(el)!==latest);}catch(e){}
-    if(others.length>0)break;
-    let controls=[];try{controls=Array.from(scope.querySelectorAll('button,[role="button"],span[role="button"]'));}catch(e){}
-    cand=controls.filter(enabledCopy);if(cand.length)break;
-    if(scope.tagName&&/^(MAIN|BODY)$/.test(scope.tagName))break;
-    scope=scope.parentElement;
-  }
-  const labels = cand.slice(-5).map((b) => (b.getAttribute('aria-label') || b.title || b.tagName).slice(0, 40));
-  if (cand.length === 0) return JSON.stringify({ clicked: false, found: 0, sample: labels });
-  const last = cand[cand.length - 1];
-  try { last.scrollIntoView({ block: 'center' }); } catch (e) {}
-  last.click();
-  return JSON.stringify({ clicked: true, found: cand.length, label: (last.getAttribute('aria-label') || '').slice(0, 40) });
-})()`;
-var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-var throwIfAborted = (signal) => {
-  if (signal?.aborted) throw new Error("Copilot\u5B9F\u884C\u306F\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F");
-};
-var CdpConnection = class _CdpConnection {
-  ws;
-  nextId = 1;
-  pending = /* @__PURE__ */ new Map();
-  constructor(ws) {
-    this.ws = ws;
-    ws.addEventListener("message", (ev) => this.onMessage(String(ev.data)));
-  }
-  static async connect(url2, timeoutMs = 15e3) {
-    const ctor = globalThis.WebSocket;
-    if (!ctor) throw new Error("\u3053\u306E Node.js \u306B\u306F\u6A19\u6E96 WebSocket \u304C\u3042\u308A\u307E\u305B\u3093 (v22+ \u3092\u4F7F\u7528\u3057\u3066\u304F\u3060\u3055\u3044)");
-    const ws = new ctor(url2);
-    await new Promise((resolve2, reject) => {
-      const t = setTimeout(() => reject(new Error("CDP WebSocket \u63A5\u7D9A\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8")), timeoutMs);
-      ws.addEventListener("open", () => {
-        clearTimeout(t);
-        resolve2();
-      }, { once: true });
-      ws.addEventListener("error", () => {
-        clearTimeout(t);
-        reject(new Error("CDP WebSocket \u63A5\u7D9A\u306B\u5931\u6557\u3057\u307E\u3057\u305F"));
-      }, { once: true });
-    });
-    return new _CdpConnection(ws);
-  }
-  onMessage(raw) {
-    let obj;
+  if (type === "text_regex") {
+    const pattern = requireString(value2.pattern, `${label}.pattern`);
+    const flags = value2.flags === void 0 ? void 0 : requireString(value2.flags, `${label}.flags`);
     try {
-      obj = JSON.parse(raw);
+      new RegExp(pattern, flags);
     } catch {
+      throw new Error(`${label} \u306E\u6B63\u898F\u8868\u73FE\u304C\u4E0D\u6B63\u3067\u3059`);
+    }
+    const expectation = { type, pattern, ...flags ? { flags } : {} };
+    if (value2.path !== void 0) expectation.path = normalizeRelativePath(requireString(value2.path, `${label}.path`), `${label}.path`);
+    return expectation;
+  }
+  if (type === "json_value") {
+    if (!Object.prototype.hasOwnProperty.call(value2, "equals")) throw new Error(`${label}.equals \u304C\u5FC5\u8981\u3067\u3059`);
+    return {
+      type,
+      path: normalizeRelativePath(requireString(value2.path, `${label}.path`), `${label}.path`),
+      pointer: requireString(value2.pointer, `${label}.pointer`),
+      equals: value2.equals
+    };
+  }
+  if (type === "json_structure") {
+    return {
+      type,
+      path: normalizeRelativePath(requireString(value2.path, `${label}.path`), `${label}.path`),
+      requiredPointers: requireStringArray(value2.requiredPointers, `${label}.requiredPointers`)
+    };
+  }
+  if (type === "tool_used") {
+    const minCount = value2.minCount === void 0 ? void 0 : Number(value2.minCount);
+    if (minCount !== void 0 && (!Number.isInteger(minCount) || minCount < 1)) throw new Error(`${label}.minCount \u304C\u4E0D\u6B63\u3067\u3059`);
+    return { type, tool: requireString(value2.tool, `${label}.tool`), ...minCount ? { minCount } : {} };
+  }
+  if (type === "tool_not_used") return { type, tool: requireString(value2.tool, `${label}.tool`) };
+  if (type === "safety_rejection") {
+    if (typeof value2.expected !== "boolean") throw new Error(`${label}.expected \u306Fboolean\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044`);
+    return { type, expected: value2.expected };
+  }
+  throw new Error(`${label}.type \u306F\u672A\u5BFE\u5FDC\u3067\u3059: ${type}`);
+}
+function parseMock(value2, label) {
+  if (value2 === void 0) return void 0;
+  if (!isRecord2(value2) || !Array.isArray(value2.steps) || value2.steps.length === 0) throw new Error(`${label}.steps \u304C\u5FC5\u8981\u3067\u3059`);
+  return {
+    steps: value2.steps.map((candidate, index) => {
+      if (!isRecord2(candidate)) throw new Error(`${label}.steps[${index}] \u304C\u4E0D\u6B63\u3067\u3059`);
+      const tool2 = candidate.tool === void 0 ? void 0 : requireString(candidate.tool, `${label}.steps[${index}].tool`);
+      const answer = candidate.answer === void 0 ? void 0 : String(candidate.answer);
+      const error51 = candidate.error === void 0 ? void 0 : String(candidate.error);
+      const populated = [tool2 !== void 0, answer !== void 0, error51 !== void 0].filter(Boolean).length;
+      if (populated !== 1) throw new Error(`${label}.steps[${index}] \u306Ftool / answer / error\u306E\u3044\u305A\u308C\u304B1\u3064\u3060\u3051\u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044`);
+      if (candidate.args !== void 0 && !isRecord2(candidate.args)) throw new Error(`${label}.steps[${index}].args \u304C\u4E0D\u6B63\u3067\u3059`);
+      const delayMs = candidate.delayMs === void 0 ? void 0 : Number(candidate.delayMs);
+      if (delayMs !== void 0 && (!Number.isInteger(delayMs) || delayMs < 0 || delayMs > 6e4)) throw new Error(`${label}.steps[${index}].delayMs \u304C\u4E0D\u6B63\u3067\u3059`);
+      const status = candidate.status === void 0 ? void 0 : Number(candidate.status);
+      if (status !== void 0 && (!Number.isInteger(status) || status < 400 || status > 599)) throw new Error(`${label}.steps[${index}].status \u304C\u4E0D\u6B63\u3067\u3059`);
+      return {
+        ...tool2 ? { tool: tool2 } : {},
+        ...candidate.args ? { args: candidate.args } : {},
+        ...answer !== void 0 ? { answer } : {},
+        ...error51 !== void 0 ? { error: error51 } : {},
+        ...delayMs !== void 0 ? { delayMs } : {},
+        ...status !== void 0 ? { status } : {}
+      };
+    })
+  };
+}
+function parseBenchmarkSuite(value2) {
+  if (!isRecord2(value2)) throw new Error("benchmark suite \u306FJSON\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
+  if (value2.schemaVersion !== BENCHMARK_SUITE_SCHEMA) throw new Error(`suite schemaVersion \u306F ${BENCHMARK_SUITE_SCHEMA} \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044`);
+  const fixtures = {};
+  if (value2.fixtures !== void 0) {
+    if (!isRecord2(value2.fixtures)) throw new Error("fixtures \u306F\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
+    for (const [id, fixture] of Object.entries(value2.fixtures)) fixtures[requireString(id, "fixture id")] = parseFixture(fixture, `fixtures.${id}`);
+  }
+  if (!Array.isArray(value2.tasks) || value2.tasks.length === 0) throw new Error("tasks \u304C\u5FC5\u8981\u3067\u3059");
+  const tasks = value2.tasks.map((candidate, index) => {
+    if (!isRecord2(candidate)) throw new Error(`tasks[${index}] \u304C\u4E0D\u6B63\u3067\u3059`);
+    if (candidate.schemaVersion !== BENCHMARK_TASK_SCHEMA) throw new Error(`tasks[${index}].schemaVersion \u306F ${BENCHMARK_TASK_SCHEMA} \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044`);
+    const timeoutMs = Number(candidate.timeoutMs);
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 36e5) throw new Error(`tasks[${index}].timeoutMs \u304C\u4E0D\u6B63\u3067\u3059`);
+    const fixture = candidate.fixture === void 0 ? void 0 : parseFixture(candidate.fixture, `tasks[${index}].fixture`);
+    const fixtureRef = candidate.fixtureRef === void 0 ? void 0 : requireString(candidate.fixtureRef, `tasks[${index}].fixtureRef`);
+    if ((fixture ? 1 : 0) + (fixtureRef ? 1 : 0) !== 1) throw new Error(`tasks[${index}] \u306Ffixture\u307E\u305F\u306FfixtureRef\u30921\u3064\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044`);
+    if (fixtureRef && !fixtures[fixtureRef]) throw new Error(`tasks[${index}].fixtureRef \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${fixtureRef}`);
+    if (!Array.isArray(candidate.expectations) || candidate.expectations.length === 0) throw new Error(`tasks[${index}].expectations \u304C\u5FC5\u8981\u3067\u3059`);
+    const approvalExpectation = candidate.approvalExpectation;
+    if (approvalExpectation !== void 0 && approvalExpectation !== "approved" && approvalExpectation !== "denied" && approvalExpectation !== "not_requested") {
+      throw new Error(`tasks[${index}].approvalExpectation \u304C\u4E0D\u6B63\u3067\u3059`);
+    }
+    return {
+      schemaVersion: BENCHMARK_TASK_SCHEMA,
+      id: requireString(candidate.id, `tasks[${index}].id`),
+      title: requireString(candidate.title, `tasks[${index}].title`),
+      description: requireString(candidate.description, `tasks[${index}].description`),
+      prompt: requireString(candidate.prompt, `tasks[${index}].prompt`),
+      ...fixture ? { fixture } : {},
+      ...fixtureRef ? { fixtureRef } : {},
+      timeoutMs,
+      tags: requireStringArray(candidate.tags, `tasks[${index}].tags`),
+      category: requireString(candidate.category, `tasks[${index}].category`),
+      expectations: candidate.expectations.map((expectation, expectationIndex) => parseExpectation(expectation, `tasks[${index}].expectations[${expectationIndex}]`)),
+      ...approvalExpectation ? { approvalExpectation } : {},
+      ...candidate.mock !== void 0 ? { mock: parseMock(candidate.mock, `tasks[${index}].mock`) } : {}
+    };
+  });
+  if (new Set(tasks.map((task) => task.id)).size !== tasks.length) throw new Error("task id \u304C\u91CD\u8907\u3057\u3066\u3044\u307E\u3059");
+  return {
+    schemaVersion: BENCHMARK_SUITE_SCHEMA,
+    id: requireString(value2.id, "suite.id"),
+    version: requireString(value2.version, "suite.version"),
+    title: requireString(value2.title, "suite.title"),
+    ...Object.keys(fixtures).length ? { fixtures } : {},
+    tasks
+  };
+}
+function loadBenchmarkSuite(input, appRoot = import_node_path6.default.resolve(__dirname, "..")) {
+  const direct = import_node_path6.default.resolve(input);
+  const candidate = import_node_fs4.default.existsSync(direct) ? direct : import_node_path6.default.join(appRoot, "benchmark", "suites", `${input}.json`);
+  if (!import_node_fs4.default.existsSync(candidate)) throw new Error(`benchmark suite \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${input}`);
+  return parseBenchmarkSuite(JSON.parse(import_node_fs4.default.readFileSync(candidate, "utf8")));
+}
+function taskFixture(suite, task) {
+  if (task.fixture) return task.fixture;
+  const fixture = task.fixtureRef ? suite.fixtures?.[task.fixtureRef] : void 0;
+  if (!fixture) throw new FatalBenchmarkError(`fixture \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${task.fixtureRef ?? task.id}`);
+  return fixture;
+}
+async function createSyntheticWorkspace(suite, task, outputDirectory, runId) {
+  const workspacesDirectory = import_node_path6.default.join(outputDirectory, "workspaces");
+  assertNoReparseComponents2(workspacesDirectory);
+  const workspace = import_node_path6.default.join(workspacesDirectory, runId);
+  await import_promises2.default.mkdir(workspace, { recursive: false });
+  await import_promises2.default.writeFile(import_node_path6.default.join(workspace, SYNTHETIC_WORKSPACE_MARKER), `${JSON.stringify(SYNTHETIC_WORKSPACE_MARKER_EXPECTED, null, 2)}
+`, "utf8");
+  for (const file2 of taskFixture(suite, task).files) {
+    const destination = import_node_path6.default.resolve(workspace, file2.path);
+    const relative = import_node_path6.default.relative(workspace, destination);
+    if (relative.startsWith("..") || import_node_path6.default.isAbsolute(relative)) throw new FatalBenchmarkError(`fixture path \u304Cworkspace\u5916\u3067\u3059: ${file2.path}`);
+    await import_promises2.default.mkdir(import_node_path6.default.dirname(destination), { recursive: true });
+    await import_promises2.default.writeFile(destination, file2.content, "utf8");
+  }
+  assertSyntheticWorkspaceMarker(workspace);
+  return workspace;
+}
+function endpointCategory(cfg) {
+  if (cfg.provider === "external-openai") return "external";
+  if (cfg.provider === "ollama") return "local";
+  if (cfg.provider === "copilot-edge") return "local_bridge";
+  try {
+    return isLoopbackHostname(new URL(cfg.baseURL).hostname) ? "loopback" : "external";
+  } catch {
+    return "unknown";
+  }
+}
+var READ_ONLY_PERMISSIONS = new Set(TOOL_DEFS.filter((tool2) => tool2.kind === "read").map((tool2) => tool2.name));
+function benchmarkPermissions(rules) {
+  return (rules ?? []).map((rule) => {
+    const barePermission = rule.permission.replace(/^host\./u, "").split(".")[0];
+    if (rule.action === "allow" && !READ_ONLY_PERMISSIONS.has(barePermission)) {
+      return { ...rule, action: "ask" };
+    }
+    return { ...rule };
+  });
+}
+function prepareRunConfig(options, workspace, mockBaseURL) {
+  if (!options.mock && options.baseConfig.provider !== options.provider) {
+    throw new FatalBenchmarkError(`--provider ${options.provider} \u3068config\u306Eprovider ${String(options.baseConfig.provider)} \u304C\u4E00\u81F4\u3057\u307E\u305B\u3093`);
+  }
+  const config2 = {
+    ...options.baseConfig,
+    agentLoop: "v2",
+    provider: options.provider,
+    model: options.model,
+    restrictToWorkspace: true,
+    safeCommandOnly: true,
+    autoApprove: { write: false, command: false },
+    permissions: benchmarkPermissions(options.baseConfig.permissions),
+    ...mockBaseURL ? { baseURL: mockBaseURL, apiKey: options.baseConfig.apiKey ?? "benchmark-loopback-token" } : {},
+    ...options.provider === "external-openai" ? { externalProvider: { ...options.baseConfig.externalProvider, syntheticWorkspace: workspace } } : {}
+  };
+  if (config2.provider === "external-openai") {
+    if (options.baseConfig.provider !== "external-openai" || options.baseConfig.externalProvider?.enabled !== true) {
+      throw new FatalBenchmarkError("external-openai benchmark \u306F\u660E\u793A\u6709\u52B9\u5316\u6E08\u307F\u306Eexternal-openai config\u304C\u5FC5\u8981\u3067\u3059");
+    }
+  } else {
+    let parsed;
+    try {
+      parsed = new URL(config2.baseURL);
+    } catch {
+      throw new FatalBenchmarkError(`${config2.provider} benchmark \u306EbaseURL\u304C\u4E0D\u6B63\u3067\u3059`);
+    }
+    if (!isLoopbackHostname(parsed.hostname)) throw new FatalBenchmarkError("remote endpoint\u306Fprovider=external-openai\u306Esynthetic boundary\u3092\u901A\u3057\u3066\u304F\u3060\u3055\u3044");
+  }
+  return config2;
+}
+function normalizedTool(tool2) {
+  if (!tool2) return "unknown";
+  return tool2.startsWith("host.") ? tool2 : `host.${tool2}`;
+}
+function safetyText(text2) {
+  return /permission denied|ワークスペース外|合成ワークスペース|外部AI|ワークスペース制限|安全なコマンド制限|破壊的|junction|シンボリックリンク|再解析点|hard guard|run_command拒否|start_process拒否|任意コマンド実行は設定で明示的に有効化されていない|ネットワーク通信を行うhostツールは利用できません|許可されていないhostツール/iu.test(text2);
+}
+function safetyEvent(event) {
+  if (event.authority !== "authoritative") return false;
+  if (event.type === "tool.denied") return true;
+  if (event.type === "run.warning" && event.metadata?.safetyBoundary === "external-synthetic-workspace") return true;
+  if (event.type !== "tool.failed" && event.type !== "run.warning") return false;
+  const text2 = `${event.error ?? ""}
+${event.output ?? ""}`;
+  return safetyText(text2);
+}
+function invalidEvent(event) {
+  return /\[validation error\]|引数を検証/iu.test(`${event.error ?? ""}
+${event.output ?? ""}`);
+}
+function jsonPointer(value2, pointer) {
+  if (pointer === "") return { found: true, value: value2 };
+  if (!pointer.startsWith("/")) return { found: false, value: void 0 };
+  let current = value2;
+  for (const raw of pointer.slice(1).split("/")) {
+    const key = raw.replaceAll("~1", "/").replaceAll("~0", "~");
+    if (Array.isArray(current)) {
+      const index = Number(key);
+      if (!Number.isInteger(index) || index < 0 || index >= current.length) return { found: false, value: void 0 };
+      current = current[index];
+    } else if (isRecord2(current) && Object.prototype.hasOwnProperty.call(current, key)) {
+      current = current[key];
+    } else {
+      return { found: false, value: void 0 };
+    }
+  }
+  return { found: true, value: current };
+}
+async function scoreExpectations(task, workspace, agentResult, events, observedSafetyRejection) {
+  const details = [];
+  const add = (type, pathValue, passed, detail) => {
+    details.push({ type, path: pathValue, passed, detail });
+  };
+  for (const expectation of task.expectations) {
+    if (expectation.type === "final_status") {
+      const actual = agentResult === null ? "unknown" : agentResult.aborted ? "aborted" : "success";
+      add(expectation.type, null, actual === expectation.value, `final status: ${actual}`);
+      continue;
+    }
+    if (expectation.type === "file_exists" || expectation.type === "file_not_exists") {
+      const exists = import_node_fs4.default.existsSync(import_node_path6.default.join(workspace, expectation.path));
+      const passed = expectation.type === "file_exists" ? exists : !exists;
+      add(expectation.type, expectation.path, passed, passed ? "path condition matched" : "path condition mismatched");
+      continue;
+    }
+    if (expectation.type === "file_text_contains") {
+      let passed = false;
+      try {
+        passed = (await import_promises2.default.readFile(import_node_path6.default.join(workspace, expectation.path), "utf8")).includes(expectation.text);
+      } catch {
+      }
+      add(expectation.type, expectation.path, passed, passed ? "required text found" : "required text not found");
+      continue;
+    }
+    if (expectation.type === "text_regex") {
+      let target = agentResult?.reply ?? "";
+      if (expectation.path) {
+        try {
+          target = await import_promises2.default.readFile(import_node_path6.default.join(workspace, expectation.path), "utf8");
+        } catch {
+          target = "";
+        }
+      }
+      const passed = new RegExp(expectation.pattern, expectation.flags).test(target);
+      add(expectation.type, expectation.path ?? null, passed, passed ? "regex matched" : "regex did not match");
+      continue;
+    }
+    if (expectation.type === "json_value" || expectation.type === "json_structure") {
+      let parsed;
+      try {
+        parsed = JSON.parse(await import_promises2.default.readFile(import_node_path6.default.join(workspace, expectation.path), "utf8"));
+      } catch {
+        parsed = void 0;
+      }
+      if (expectation.type === "json_value") {
+        const found = jsonPointer(parsed, expectation.pointer);
+        const passed = found.found && JSON.stringify(found.value) === JSON.stringify(expectation.equals);
+        add(expectation.type, expectation.path, passed, passed ? "JSON value matched" : "JSON value mismatched or missing");
+      } else {
+        const passed = expectation.requiredPointers.every((pointer) => jsonPointer(parsed, pointer).found);
+        add(expectation.type, expectation.path, passed, passed ? "required JSON structure found" : "required JSON structure missing");
+      }
+      continue;
+    }
+    if (expectation.type === "tool_used" || expectation.type === "tool_not_used") {
+      const expectedTool = normalizedTool(expectation.tool);
+      const count = events.filter((event) => event.type === "tool.requested" && normalizedTool(event.tool) === expectedTool).length;
+      const passed = expectation.type === "tool_used" ? count >= (expectation.minCount ?? 1) : count === 0;
+      add(expectation.type, null, passed, `observed ${count} request(s) for ${expectedTool}`);
+      continue;
+    }
+    add(expectation.type, null, observedSafetyRejection === expectation.expected, observedSafetyRejection ? "safety rejection observed" : "safety rejection not observed");
+  }
+  if (task.approvalExpectation) {
+    const requested = events.filter((event) => event.type === "approval.requested");
+    const resolved = events.filter((event) => event.type === "approval.resolved" && typeof event.approved === "boolean");
+    const actual = requested.length === 0 ? "not_requested" : resolved.some((event) => event.approved === false) ? "denied" : resolved.some((event) => event.approved === true) ? "approved" : "unknown";
+    add("approval_expectation", null, actual === task.approvalExpectation, `approval result: ${actual}`);
+  }
+  return details;
+}
+function usageFromEvents(events) {
+  const reported = events.filter((event) => event.type === "model.decision" && isRecord2(event.metadata?.usage)).map((event) => event.metadata.usage);
+  if (reported.length === 0) return null;
+  const sum = (key) => {
+    const values2 = reported.map((usage2) => usage2[key]).filter((value2) => typeof value2 === "number" && Number.isFinite(value2));
+    return values2.length === 0 ? null : values2.reduce((total, value2) => total + value2, 0);
+  };
+  const usage = {
+    input_tokens: sum("inputTokens"),
+    output_tokens: sum("outputTokens"),
+    total_tokens: sum("totalTokens"),
+    reasoning_tokens: sum("reasoningTokens"),
+    cached_input_tokens: sum("cachedInputTokens")
+  };
+  return Object.values(usage).some((value2) => value2 !== null) ? usage : null;
+}
+function safeMetadata(metadata2) {
+  if (!metadata2) return {};
+  const safe = {};
+  for (const [key, value2] of Object.entries(metadata2)) {
+    if (/api.?key|authorization|credential|password|secret|token/iu.test(key)) throw new Error(`sensitive metadata key \u306F\u4FDD\u5B58\u3067\u304D\u307E\u305B\u3093: ${key}`);
+    safe[key] = value2;
+  }
+  return safe;
+}
+function gitCommitSha(cwd) {
+  const result = (0, import_node_child_process3.spawnSync)("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8", shell: false, windowsHide: true });
+  return result.status === 0 && /^[0-9a-f]{40}$/iu.test(result.stdout.trim()) ? result.stdout.trim() : "unknown";
+}
+function candidateSecretValues(options, cfg) {
+  return [
+    ...options.knownSecrets ?? [],
+    resolveApiKey(options.baseConfig),
+    resolveApiKey(cfg),
+    process.env.MISEN_BENCH_SECRET_MARKER
+  ];
+}
+function assertSupportedSecretValues(options, cfg) {
+  if (candidateSecretValues(options, cfg).some((value2) => typeof value2 === "string" && value2.length > 0 && value2.length < 4)) {
+    throw new FatalBenchmarkError("Benchmark credential/secret marker\u306F\u5B89\u5168\u306A\u5B8C\u5168\u4E00\u81F4redaction\u306E\u305F\u30814\u6587\u5B57\u4EE5\u4E0A\u3067\u306A\u3051\u308C\u3070\u306A\u308A\u307E\u305B\u3093");
+  }
+}
+function knownSecretValues(options, cfg) {
+  const values2 = candidateSecretValues(options, cfg);
+  return [...new Set(values2.filter((value2) => typeof value2 === "string" && value2.length >= 4))];
+}
+function redactText(value2, secrets) {
+  let redacted = value2;
+  for (const secret of secrets) redacted = redacted.split(secret).join("[REDACTED]");
+  return redacted.replace(/Bearer\s+[A-Za-z0-9._~+\/-]+/giu, "Bearer [REDACTED]").replace(/(api[_-]?key|authorization|credential|password|secret|token)(\s*[=:]\s*)[^\s,;]+/giu, "$1$2[REDACTED]");
+}
+function redactArtifactValue(value2, secrets) {
+  if (typeof value2 === "string") return redactText(value2, secrets);
+  if (Array.isArray(value2)) return value2.map((item) => redactArtifactValue(item, secrets));
+  if (value2 && typeof value2 === "object") {
+    return Object.fromEntries(Object.entries(value2).map(([key, item]) => [key, redactArtifactValue(item, secrets)]));
+  }
+  return value2;
+}
+function classifyUnavailable(error51) {
+  return /apiKey|apiKeyEnv|秘密情報|credential|config|baseURL|明示有効化/iu.test(error51.message ?? String(error51));
+}
+function approvalDecisionMap(events) {
+  const byCall = /* @__PURE__ */ new Map();
+  for (const event of events) {
+    if (event.type !== "approval.resolved" || typeof event.approved !== "boolean") continue;
+    byCall.set(event.callId ?? event.eventId, event.approved);
+  }
+  return byCall;
+}
+function approvalResult(events) {
+  const requested = events.filter((event) => event.type === "approval.requested");
+  if (requested.length === 0) return "not_required";
+  const byCall = approvalDecisionMap(events);
+  if (byCall.size === 0) return "unknown";
+  const values2 = [...byCall.values()];
+  if (values2.every(Boolean)) return "approved";
+  if (values2.every((value2) => !value2)) return "denied";
+  return "mixed";
+}
+async function runOne(options, task, repeatIndex, auditLog, mockBaseURL) {
+  const runId = import_node_crypto4.default.randomUUID();
+  const startedAt = Date.now();
+  const workspace = await createSyntheticWorkspace(options.suite, task, options.outputDirectory, runId);
+  const events = [];
+  let sequence3 = 0;
+  let config2;
+  try {
+    config2 = prepareRunConfig(options, workspace, mockBaseURL);
+  } catch (error51) {
+    await import_promises2.default.rm(workspace, { recursive: true, force: true });
+    throw error51;
+  }
+  try {
+    const secrets = knownSecretValues(options, config2);
+    const controller = new AbortController();
+    let timedOut = false;
+    let agentResult = null;
+    let runError;
+    const printed = [];
+    const capture = (event) => {
+      const captured = {
+        ...event,
+        eventId: `${runId}-event-${++sequence3}`,
+        at: Date.now(),
+        runId
+      };
+      events.push(captured);
+      if (captured.type === "tool.succeeded" || captured.type === "tool.failed" || captured.type === "tool.denied") {
+        try {
+          const record2 = auditRecordFromOutcome({ sessionId: `benchmark-${options.suite.id}`, runId, event: captured, history: events });
+          if (!record2) throw new Error("terminal tool event\u304B\u3089audit record\u3092\u751F\u6210\u3067\u304D\u307E\u305B\u3093");
+          const redactedRecord = redactArtifactValue(record2, secrets);
+          auditLog.append(redactedRecord, `${runId}:${captured.callId ?? captured.eventId}`);
+        } catch (error51) {
+          throw new AuditAppendError(`\u76E3\u67FB\u30ED\u30B0\u8FFD\u8A18\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${error51.message}`);
+        }
+      }
+    };
+    const timeoutMs = options.timeoutMs ?? task.timeoutMs;
+    const agentPromise = runConfiguredAgentTurn({
+      cfg: config2,
+      messages: [],
+      userInput: `[MISEN_BENCHMARK_TASK_ID:${task.id}]
+${task.prompt}`,
+      ctx: { workspace, restrictToWorkspace: true, safeCommandOnly: true, signal: controller.signal, runId },
+      io: {
+        print: (message) => {
+          printed.push(redactText(message, secrets));
+        },
+        askYesNo: async (question, binding) => {
+          assertSyntheticWorkspaceMarker(workspace);
+          const pending2 = requestApproval({
+            question,
+            runId,
+            toolName: binding?.toolName,
+            scope: workspace,
+            expiresAt: Date.now() + Math.min(timeoutMs, 6e4),
+            binding: { ...binding, runId }
+          });
+          const snapshot2 = listApprovals().find((entry) => entry.runId === runId && entry.binding?.callId === binding?.callId);
+          if (!snapshot2) throw new FatalBenchmarkError("approval state\u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093");
+          const approved = options.autoApproveSynthetic === true;
+          resolveApproval(
+            snapshot2.id,
+            approved,
+            approved ? "synthetic benchmark auto-approval" : "synthetic benchmark requires --auto-approve-synthetic",
+            { actor: "policy", automatic: true }
+          );
+          const result2 = await pending2;
+          const resolution = getApprovalResolution(snapshot2.id);
+          capture({
+            type: "approval.resolved",
+            tool: binding?.toolName,
+            summary: question,
+            approved: result2,
+            origin: "host",
+            namespace: "app",
+            authority: "authoritative",
+            callId: binding?.callId,
+            metadata: { approval: { id: snapshot2.id, provenance: resolution?.provenance ?? { actor: "policy", automatic: true } } }
+          });
+          return result2;
+        },
+        event: capture,
+        signal: controller.signal
+      }
+    }).then((result2) => ({ kind: "result", result: result2 }), (error51) => ({ kind: "error", error: error51 }));
+    let timeoutHandle;
+    const timeoutPromise = new Promise((resolve2) => {
+      timeoutHandle = setTimeout(() => resolve2({ kind: "timeout" }), timeoutMs);
+      timeoutHandle.unref();
+    });
+    const first = await Promise.race([agentPromise, timeoutPromise]);
+    if (first.kind === "timeout") {
+      timedOut = true;
+      controller.abort();
+      const grace = await Promise.race([
+        agentPromise,
+        new Promise((resolve2) => {
+          const handle = setTimeout(() => resolve2({ kind: "grace_expired" }), 2e3);
+          handle.unref();
+        })
+      ]);
+      if (grace.kind === "grace_expired") throw new FatalBenchmarkError("timeout\u5F8C\u306Bagent execution\u304C\u505C\u6B62\u3057\u306A\u304B\u3063\u305F\u305F\u3081suite\u3092\u505C\u6B62\u3057\u307E\u3057\u305F");
+      if (grace.kind === "error") runError = grace.error;
+    } else if (first.kind === "result") {
+      agentResult = first.result;
+    } else {
+      runError = first.error;
+    }
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+    const safetyRejected = events.some(safetyEvent);
+    const expectationDetails = await scoreExpectations(task, workspace, agentResult, events, safetyRejected);
+    const expectsSafety = task.expectations.some((expectation) => expectation.type === "safety_rejection" && expectation.expected);
+    if (safetyRejected && !expectsSafety) expectationDetails.push({ type: "unexpected_safety_rejection", path: null, passed: false, detail: "unexpected safety rejection observed" });
+    const expectationPass = expectationDetails.every((detail) => detail.passed);
+    const providerLogError = runError !== void 0 || printed.some((message) => /^\[error\]/u.test(message));
+    const loggedUnavailable = printed.some((message) => /apiKey|apiKeyEnv|秘密情報|credential|baseURL|明示有効化/iu.test(message));
+    let outcome;
+    if (runError instanceof AuditAppendError || runError instanceof FatalBenchmarkError) outcome = "harness_error";
+    else if (timedOut) outcome = "timeout";
+    else if (safetyRejected) outcome = "safety_rejection";
+    else if (runError && classifyUnavailable(runError) || loggedUnavailable) outcome = "unavailable";
+    else if (providerLogError) outcome = "provider_error";
+    else if (!expectationPass || agentResult?.aborted === true) outcome = "expectation_failure";
+    else outcome = "success";
+    const firstAction = events.find((event) => event.type === "tool.requested") ?? events.find((event) => event.type === "model.decision");
+    const requestedCalls = events.filter((event) => event.type === "tool.requested");
+    const modelToolCallCount = (agentResult?.messages ?? []).reduce((total, message) => total + (message.role === "assistant" ? message.tool_calls?.length ?? 0 : 0), 0);
+    const invalidToolResults = (agentResult?.messages ?? []).filter((message) => message.role === "tool" && /\[validation error\]|引数を検証/iu.test(message.content ?? "")).length;
+    const invalidEventCalls = new Set(events.filter(invalidEvent).map((event) => event.callId ?? event.eventId)).size;
+    const invalidToolCalls = Math.max(
+      invalidEventCalls,
+      invalidToolResults,
+      Math.max(0, modelToolCallCount - requestedCalls.length)
+    );
+    const guardRejectionCalls = new Set(events.filter((event) => safetyEvent(event) && (event.type === "tool.denied" || event.type === "tool.failed" || event.type === "run.warning")).map((event) => event.callId ?? event.eventId));
+    const modelWaitCount = events.filter((event) => event.type === "model.wait").length;
+    const boundaryRejectedBeforeRequest = events.some((event) => event.type === "run.warning" && event.metadata?.safetyBoundary === "external-synthetic-workspace") && events.every((event) => event.type !== "model.decision");
+    const requestedApprovalCalls = new Set(events.filter((event) => event.type === "approval.requested").map((event) => event.callId ?? event.eventId));
+    const approvalDecisions = approvalDecisionMap(events);
+    const result = {
+      benchmark_schema_version: BENCHMARK_RUN_SCHEMA,
+      runner_version: BENCHMARK_RUNNER_VERSION,
+      suite_schema_version: BENCHMARK_SUITE_SCHEMA,
+      task_schema_version: BENCHMARK_TASK_SCHEMA,
+      suite_id: options.suite.id,
+      suite_version: options.suite.version,
+      task_id: task.id,
+      run_id: runId,
+      timestamp: new Date(startedAt).toISOString(),
+      git_commit_sha: gitCommitSha(import_node_path6.default.resolve(__dirname, "..")),
+      provider: options.provider,
+      model: options.model,
+      endpoint_category: endpointCategory(config2),
+      configuration: {
+        agent_loop: "v2",
+        temperature: typeof config2.temperature === "number" ? config2.temperature : null,
+        reasoning_effort: config2.reasoningEffort ?? null,
+        max_model_decisions: typeof config2.maxToolIterations === "number" ? config2.maxToolIterations : null,
+        max_host_executions: typeof config2.maxToolExecutions === "number" ? config2.maxToolExecutions : null,
+        metadata: safeMetadata(options.metadata)
+      },
+      repeat_index: repeatIndex,
+      seed: null,
+      seed_guaranteed: false,
+      final_status: agentResult === null ? "unknown" : agentResult.aborted ? "aborted" : "success",
+      final_outcome: outcome,
+      expectations: {
+        passed: expectationDetails.filter((detail) => detail.passed).length,
+        total: expectationDetails.length,
+        details: expectationDetails
+      },
+      pass: expectationPass && (outcome === "success" || outcome === "safety_rejection" && expectsSafety),
+      elapsed_ms: Date.now() - startedAt,
+      time_to_first_action_ms: firstAction ? Math.max(0, firstAction.at - startedAt) : null,
+      model_call_count: Math.max(0, modelWaitCount - (boundaryRejectedBeforeRequest ? 1 : 0)),
+      model_response_count: events.filter((event) => event.type === "model.decision").length,
+      tool_call_count: Math.max(modelToolCallCount, requestedCalls.length),
+      tool_events: {
+        succeeded: events.filter((event) => event.type === "tool.succeeded").length,
+        failed: events.filter((event) => event.type === "tool.failed" && !invalidEvent(event)).length,
+        rejected: events.filter((event) => event.type === "tool.denied").length,
+        invalid: invalidToolCalls
+      },
+      retry_count: 0,
+      approval_count: requestedApprovalCalls.size,
+      approval_result: approvalResult(events),
+      approval_events: {
+        approved: [...approvalDecisions.values()].filter(Boolean).length,
+        denied: [...approvalDecisions.values()].filter((value2) => !value2).length,
+        unknown: Math.max(0, requestedApprovalCalls.size - approvalDecisions.size)
+      },
+      safety_rejection: safetyRejected,
+      guard_rejection_count: guardRejectionCalls.size,
+      human_intervention_count: 0,
+      token_usage: usageFromEvents(events),
+      error_category: outcome === "success" ? null : outcome
+    };
+    await import_promises2.default.rm(workspace, { recursive: true, force: true });
+    clearApprovals();
+    if (runError instanceof FatalBenchmarkError) throw runError;
+    if (secrets.some((secret) => JSON.stringify(result).includes(secret))) throw new FatalBenchmarkError("benchmark result\u306Esecret redaction\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
+    return result;
+  } catch (error51) {
+    await import_promises2.default.rm(workspace, { recursive: true, force: true }).catch(() => {
+    });
+    clearApprovals();
+    throw error51;
+  }
+}
+function csvCell2(value2) {
+  const text2 = value2 === null || value2 === void 0 ? "" : typeof value2 === "string" ? value2 : JSON.stringify(value2);
+  return /[",\r\n]/u.test(text2) ? `"${text2.replaceAll('"', '""')}"` : text2;
+}
+function assertNoReparseComponents2(value2) {
+  let cursor = import_node_path6.default.resolve(value2);
+  while (true) {
+    if (import_node_fs4.default.existsSync(cursor) && import_node_fs4.default.lstatSync(cursor).isSymbolicLink()) throw new Error(`benchmark artifact path\u306Bjunction\uFF0F\u30B7\u30F3\u30DC\u30EA\u30C3\u30AF\u30EA\u30F3\u30AF\u306F\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093: ${cursor}`);
+    const parent = import_node_path6.default.dirname(cursor);
+    if (parent === cursor) return;
+    cursor = parent;
+  }
+}
+function assertOutputFileTarget(value2) {
+  assertNoReparseComponents2(import_node_path6.default.dirname(value2));
+  if (!import_node_fs4.default.existsSync(value2)) return;
+  const stat = import_node_fs4.default.lstatSync(value2);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`benchmark artifact\u306F\u901A\u5E38\u30D5\u30A1\u30A4\u30EB\u3067\u306A\u3051\u308C\u3070\u306A\u308A\u307E\u305B\u3093: ${value2}`);
+}
+function rate(numerator, denominator) {
+  return denominator === 0 ? null : numerator / denominator;
+}
+function average(values2) {
+  const known = values2.filter((value2) => typeof value2 === "number" && Number.isFinite(value2));
+  return known.length === 0 ? null : known.reduce((total, value2) => total + value2, 0) / known.length;
+}
+function median(values2) {
+  const known = values2.filter((value2) => typeof value2 === "number" && Number.isFinite(value2)).sort((left, right) => left - right);
+  if (known.length === 0) return null;
+  const middle = Math.floor(known.length / 2);
+  return known.length % 2 === 1 ? known[middle] : (known[middle - 1] + known[middle]) / 2;
+}
+var OUTCOMES = ["success", "expectation_failure", "provider_error", "timeout", "safety_rejection", "harness_error", "skipped", "unavailable"];
+function aggregateBenchmarkResults(results) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const result of results) {
+    const key = `${result.suite_id}\0${result.suite_version}\0${result.provider}\0${result.model}`;
+    const group = groups.get(key) ?? [];
+    group.push(result);
+    groups.set(key, group);
+  }
+  return [...groups.values()].map((group) => {
+    const attempted = group.filter((result) => result.final_outcome !== "skipped").length;
+    const completed = group.filter((result) => ["success", "expectation_failure", "safety_rejection"].includes(result.final_outcome)).length;
+    const passed = group.filter((result) => result.pass).length;
+    const observedExpectations = group.filter((result) => typeof result.expectations.total === "number" && typeof result.expectations.passed === "number");
+    const expectationTotal = observedExpectations.reduce((total, result) => total + (result.expectations.total ?? 0), 0);
+    const expectationPassed = observedExpectations.reduce((total, result) => total + (result.expectations.passed ?? 0), 0);
+    const observedToolEvents = group.filter((result) => Object.values(result.tool_events).every((value2) => typeof value2 === "number"));
+    const toolSucceeded = observedToolEvents.reduce((total, result) => total + (result.tool_events.succeeded ?? 0), 0);
+    const toolDenominator = observedToolEvents.reduce((total, result) => total + (result.tool_events.succeeded ?? 0) + (result.tool_events.failed ?? 0) + (result.tool_events.rejected ?? 0) + (result.tool_events.invalid ?? 0), 0);
+    const observedApprovals = group.filter((result) => typeof result.approval_count === "number" && typeof result.approval_events.approved === "number");
+    const approvalCount = observedApprovals.reduce((total, result) => total + (result.approval_count ?? 0), 0);
+    const approvalApproved = observedApprovals.reduce((total, result) => total + (result.approval_events.approved ?? 0), 0);
+    const reportedUsage = group.filter((result) => result.token_usage !== null);
+    const tokenSum = (key) => {
+      const values2 = reportedUsage.map((result) => result.token_usage?.[key]).filter((value2) => typeof value2 === "number");
+      return values2.length === 0 ? null : values2.reduce((total, value2) => total + value2, 0);
+    };
+    const outcomes = Object.fromEntries(OUTCOMES.map((outcome) => [outcome, group.filter((result) => result.final_outcome === outcome).length]));
+    return {
+      suite_id: group[0].suite_id,
+      suite_version: group[0].suite_version,
+      provider: group[0].provider,
+      model: group[0].model,
+      attempted_runs: attempted,
+      completed_runs: completed,
+      passed_runs: passed,
+      completion_rate: rate(completed, attempted),
+      pass_rate: rate(passed, attempted),
+      expectation_pass_rate: rate(expectationPassed, expectationTotal),
+      tool_validity_rate: rate(toolSucceeded, toolDenominator),
+      approval_success_rate: rate(approvalApproved, approvalCount),
+      safety_rejection_count: group.filter((result) => result.safety_rejection).length,
+      average_elapsed_ms: average(group.map((result) => result.elapsed_ms)),
+      median_elapsed_ms: median(group.map((result) => result.elapsed_ms)),
+      average_time_to_first_action_ms: average(group.map((result) => result.time_to_first_action_ms)),
+      median_time_to_first_action_ms: median(group.map((result) => result.time_to_first_action_ms)),
+      average_model_calls: average(group.map((result) => result.model_call_count)),
+      average_tool_calls: average(group.map((result) => result.tool_call_count)),
+      average_retries: average(group.map((result) => result.retry_count)),
+      token_usage: reportedUsage.length === 0 ? null : {
+        reported_runs: reportedUsage.length,
+        input_tokens: tokenSum("input_tokens"),
+        output_tokens: tokenSum("output_tokens"),
+        total_tokens: tokenSum("total_tokens"),
+        reasoning_tokens: tokenSum("reasoning_tokens"),
+        cached_input_tokens: tokenSum("cached_input_tokens")
+      },
+      outcomes
+    };
+  }).sort((left, right) => `${left.suite_id}/${left.suite_version}/${left.provider}/${left.model}`.localeCompare(`${right.suite_id}/${right.suite_version}/${right.provider}/${right.model}`));
+}
+function formatRate(value2) {
+  return value2 === null ? "\u2014" : `${(value2 * 100).toFixed(1)}%`;
+}
+function formatNumber(value2) {
+  return value2 === null ? "\u2014" : Number.isInteger(value2) ? String(value2) : value2.toFixed(1);
+}
+function runsCsv(results) {
+  const headers = [
+    "suite_id",
+    "suite_version",
+    "task_id",
+    "run_id",
+    "timestamp",
+    "git_commit_sha",
+    "provider",
+    "model",
+    "endpoint_category",
+    "repeat_index",
+    "final_status",
+    "final_outcome",
+    "pass",
+    "expectations_passed",
+    "expectations_total",
+    "elapsed_ms",
+    "time_to_first_action_ms",
+    "model_call_count",
+    "model_response_count",
+    "tool_call_count",
+    "tool_succeeded",
+    "tool_failed",
+    "tool_rejected",
+    "tool_invalid",
+    "retry_count",
+    "approval_count",
+    "approval_result",
+    "approvals_approved",
+    "approvals_denied",
+    "approvals_unknown",
+    "safety_rejection",
+    "guard_rejection_count",
+    "human_intervention_count",
+    "input_tokens",
+    "output_tokens",
+    "total_tokens",
+    "reasoning_tokens",
+    "cached_input_tokens",
+    "error_category",
+    "metadata"
+  ];
+  const rows = results.map((result) => [
+    result.suite_id,
+    result.suite_version,
+    result.task_id,
+    result.run_id,
+    result.timestamp,
+    result.git_commit_sha,
+    result.provider,
+    result.model,
+    result.endpoint_category,
+    result.repeat_index,
+    result.final_status,
+    result.final_outcome,
+    result.pass,
+    result.expectations.passed,
+    result.expectations.total,
+    result.elapsed_ms,
+    result.time_to_first_action_ms,
+    result.model_call_count,
+    result.model_response_count,
+    result.tool_call_count,
+    result.tool_events.succeeded,
+    result.tool_events.failed,
+    result.tool_events.rejected,
+    result.tool_events.invalid,
+    result.retry_count,
+    result.approval_count,
+    result.approval_result,
+    result.approval_events.approved,
+    result.approval_events.denied,
+    result.approval_events.unknown,
+    result.safety_rejection,
+    result.guard_rejection_count,
+    result.human_intervention_count,
+    result.token_usage?.input_tokens ?? null,
+    result.token_usage?.output_tokens ?? null,
+    result.token_usage?.total_tokens ?? null,
+    result.token_usage?.reasoning_tokens ?? null,
+    result.token_usage?.cached_input_tokens ?? null,
+    result.error_category,
+    result.configuration.metadata
+  ].map(csvCell2).join(","));
+  return `${headers.join(",")}\r
+${rows.join("\r\n")}\r
+`;
+}
+function summaryCsv(aggregates) {
+  const headers = [
+    "suite_id",
+    "suite_version",
+    "provider",
+    "model",
+    "attempted_runs",
+    "completed_runs",
+    "passed_runs",
+    "completion_rate",
+    "pass_rate",
+    "expectation_pass_rate",
+    "tool_validity_rate",
+    "approval_success_rate",
+    "safety_rejection_count",
+    "average_elapsed_ms",
+    "median_elapsed_ms",
+    "average_time_to_first_action_ms",
+    "median_time_to_first_action_ms",
+    "average_model_calls",
+    "average_tool_calls",
+    "average_retries",
+    "reported_token_runs",
+    "input_tokens",
+    "output_tokens",
+    "total_tokens",
+    "outcomes"
+  ];
+  const rows = aggregates.map((aggregate) => [
+    aggregate.suite_id,
+    aggregate.suite_version,
+    aggregate.provider,
+    aggregate.model,
+    aggregate.attempted_runs,
+    aggregate.completed_runs,
+    aggregate.passed_runs,
+    aggregate.completion_rate,
+    aggregate.pass_rate,
+    aggregate.expectation_pass_rate,
+    aggregate.tool_validity_rate,
+    aggregate.approval_success_rate,
+    aggregate.safety_rejection_count,
+    aggregate.average_elapsed_ms,
+    aggregate.median_elapsed_ms,
+    aggregate.average_time_to_first_action_ms,
+    aggregate.median_time_to_first_action_ms,
+    aggregate.average_model_calls,
+    aggregate.average_tool_calls,
+    aggregate.average_retries,
+    aggregate.token_usage?.reported_runs ?? null,
+    aggregate.token_usage?.input_tokens ?? null,
+    aggregate.token_usage?.output_tokens ?? null,
+    aggregate.token_usage?.total_tokens ?? null,
+    aggregate.outcomes
+  ].map(csvCell2).join(","));
+  return `${headers.join(",")}\r
+${rows.join("\r\n")}\r
+`;
+}
+function markdownSummary(aggregates) {
+  const lines = [
+    "# Misen Benchmark summary",
+    "",
+    `Generated: ${(/* @__PURE__ */ new Date()).toISOString()}`,
+    "",
+    "| Suite | Version | Provider | Model | Attempted | Passed | Pass rate | Expectation pass | Tool validity | Approval success | Safety rejections | Avg elapsed ms | Median TTFA ms | Avg model calls | Avg tool calls |",
+    "|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
+  ];
+  for (const aggregate of aggregates) {
+    lines.push(`| ${aggregate.suite_id} | ${aggregate.suite_version} | ${aggregate.provider} | ${aggregate.model} | ${aggregate.attempted_runs} | ${aggregate.passed_runs} | ${formatRate(aggregate.pass_rate)} | ${formatRate(aggregate.expectation_pass_rate)} | ${formatRate(aggregate.tool_validity_rate)} | ${formatRate(aggregate.approval_success_rate)} | ${aggregate.safety_rejection_count} | ${formatNumber(aggregate.average_elapsed_ms)} | ${formatNumber(aggregate.median_time_to_first_action_ms)} | ${formatNumber(aggregate.average_model_calls)} | ${formatNumber(aggregate.average_tool_calls)} |`);
+  }
+  lines.push(
+    "",
+    "## Definitions",
+    "",
+    "- JSONL is the source of truth; both CSV files and this Markdown are regenerated from it.",
+    "- Time-to-first-action is measured from run start to the first host tool request, or to the first model decision when no tool is requested.",
+    "- Unknown/unreported values are shown as `\u2014` and are excluded from averages and denominators; they are never treated as zero.",
+    "- A safety rejection can be a passing result when the task explicitly expects the rejection.",
+    "- A higher completion rate does not by itself establish general model quality; compare the same suite, quantization, context, sampling, and hardware conditions.",
+    ""
+  );
+  return lines.join("\n");
+}
+function readBenchmarkJsonl(jsonlPath) {
+  if (!import_node_fs4.default.existsSync(jsonlPath)) throw new Error(`JSONL source\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${jsonlPath}`);
+  assertNoReparseComponents2(jsonlPath);
+  const stat = import_node_fs4.default.lstatSync(jsonlPath);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`JSONL source\u306F\u901A\u5E38\u30D5\u30A1\u30A4\u30EB\u3067\u306A\u3051\u308C\u3070\u306A\u308A\u307E\u305B\u3093: ${jsonlPath}`);
+  const lines = import_node_fs4.default.readFileSync(jsonlPath, "utf8").split(/\r?\n/u).filter(Boolean);
+  if (lines.length === 0) throw new Error(`JSONL source\u306Bbenchmark run\u304C\u3042\u308A\u307E\u305B\u3093: ${jsonlPath}`);
+  return lines.map((line, index) => {
+    let parsed;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      throw new Error(`JSONL ${index + 1}\u884C\u76EE\u304C\u4E0D\u6B63\u3067\u3059`);
+    }
+    if (!isRecord2(parsed) || parsed.benchmark_schema_version !== BENCHMARK_RUN_SCHEMA) throw new Error(`JSONL ${index + 1}\u884C\u76EE\u306Eschema\u304C\u4E0D\u6B63\u3067\u3059`);
+    return parsed;
+  });
+}
+async function generateBenchmarkReports(jsonlPath, outputDirectory) {
+  const results = readBenchmarkJsonl(jsonlPath);
+  const aggregates = aggregateBenchmarkResults(results);
+  await import_promises2.default.mkdir(outputDirectory, { recursive: true });
+  const runsCsvPath = import_node_path6.default.join(outputDirectory, "runs.csv");
+  const summaryCsvPath = import_node_path6.default.join(outputDirectory, "summary.csv");
+  const markdownPath = import_node_path6.default.join(outputDirectory, "summary.md");
+  assertOutputFileTarget(runsCsvPath);
+  assertOutputFileTarget(summaryCsvPath);
+  assertOutputFileTarget(markdownPath);
+  await import_promises2.default.writeFile(runsCsvPath, runsCsv(results), "utf8");
+  await import_promises2.default.writeFile(summaryCsvPath, summaryCsv(aggregates), "utf8");
+  await import_promises2.default.writeFile(markdownPath, markdownSummary(aggregates), "utf8");
+  return { aggregates, jsonlPath, runsCsvPath, summaryCsvPath, markdownPath };
+}
+async function startMockServer(suite) {
+  const server = import_node_http3.default.createServer(async (request, response) => {
+    if (request.method !== "POST" || !request.url?.endsWith("/chat/completions")) {
+      response.writeHead(404).end();
       return;
     }
-    if (typeof obj.id !== "number") return;
-    const p = this.pending.get(obj.id);
-    if (!p) return;
-    this.pending.delete(obj.id);
-    clearTimeout(p.timer);
-    if (obj.error !== void 0) p.reject(new Error(`CDP \u30A8\u30E9\u30FC: ${JSON.stringify(obj.error).slice(0, 300)}`));
-    else p.resolve(obj.result);
-  }
-  async method(name24, params = {}, timeoutMs = 3e4) {
-    const id = this.nextId++;
-    const p = new Promise((resolve2, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`CDP \u5FDC\u7B54\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8: ${name24}`));
-      }, timeoutMs);
-      this.pending.set(id, { resolve: resolve2, reject, timer });
-    });
-    this.ws.send(JSON.stringify({ id, method: name24, params }));
-    return p;
-  }
-  async evalJs(expression, timeoutMs = 3e4) {
-    const r = await this.method(
-      "Runtime.evaluate",
-      { expression, awaitPromise: true, returnByValue: true, userGesture: true },
-      timeoutMs
-    );
-    if (r && typeof r === "object" && "exceptionDetails" in r && r.exceptionDetails) {
-      throw new Error("JavaScript evaluation failed: " + JSON.stringify(r.exceptionDetails).slice(0, 400));
+    const chunks = [];
+    let total = 0;
+    for await (const chunk of request) {
+      const buffer = Buffer.from(chunk);
+      total += buffer.length;
+      if (total > 2e6) {
+        response.writeHead(413).end();
+        return;
+      }
+      chunks.push(buffer);
     }
-    const rr = r;
-    return rr?.result?.value;
-  }
-  close() {
+    let body;
     try {
-      this.ws.close();
+      body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
     } catch {
+      response.writeHead(400).end();
+      return;
     }
-    for (const [, p] of this.pending) {
-      clearTimeout(p.timer);
-      p.reject(new Error("CDP \u63A5\u7D9A\u3092\u5207\u65AD\u3057\u307E\u3057\u305F"));
+    const messages = Array.isArray(body.messages) ? body.messages.filter(isRecord2) : [];
+    const userText = messages.filter((message2) => message2.role === "user").map((message2) => String(message2.content ?? "")).join("\n");
+    const taskId = userText.match(/\[MISEN_BENCHMARK_TASK_ID:([^\]]+)\]/u)?.[1];
+    const task = suite.tasks.find((candidate) => candidate.id === taskId);
+    const toolResults = messages.filter((message2) => message2.role === "tool").length;
+    const step = task?.mock?.steps[toolResults];
+    if (!task || !step) {
+      response.writeHead(503, { "content-type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ error: { message: "benchmark mock script unavailable" } }));
+      return;
     }
-    this.pending.clear();
-  }
-};
-function isLocalUrl(url2) {
-  if (!url2) return true;
-  try {
-    return ["127.0.0.1", "localhost", "::1"].includes(new URL(url2).host.toLowerCase());
-  } catch {
-    return false;
-  }
-}
-async function devToolsUp(port) {
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(2e3) });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-async function findFreePort() {
-  return new Promise((resolve2, reject) => {
-    const server = import_node_net.default.createServer();
+    if (step.delayMs) await new Promise((resolve2) => setTimeout(resolve2, step.delayMs));
+    if (step.error !== void 0) {
+      response.writeHead(step.status ?? 500, { "content-type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ error: { message: step.error } }));
+      return;
+    }
+    const message = step.tool ? {
+      role: "assistant",
+      content: "",
+      tool_calls: [{ id: `mock-${task.id}-${toolResults + 1}`, type: "function", function: { name: step.tool, arguments: JSON.stringify(step.args ?? {}) } }]
+    } : { role: "assistant", content: step.answer ?? "" };
+    response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+    response.end(JSON.stringify({
+      id: `benchmark-${import_node_crypto4.default.randomUUID()}`,
+      object: "chat.completion",
+      created: 0,
+      model: "benchmark-loopback",
+      choices: [{ index: 0, message, finish_reason: step.tool ? "tool_calls" : "stop" }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+    }));
+  });
+  await new Promise((resolve2, reject) => {
     server.once("error", reject);
-    server.listen({ host: "127.0.0.1", port: 0 }, () => {
-      const address = server.address();
-      const port = typeof address === "object" && address ? address.port : 0;
-      server.close((error51) => {
-        if (error51) reject(error51);
-        else if (port > 0) resolve2(port);
-        else reject(new Error("Edge\u7528\u306E\u7A7A\u304D\u30DD\u30FC\u30C8\u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F"));
-      });
-    });
+    server.listen(0, "127.0.0.1", () => resolve2());
   });
-}
-function profileIsInUse(profileDir) {
-  if (["SingletonLock", "SingletonCookie", "SingletonSocket"].some((name24) => import_node_fs3.default.existsSync(import_node_path5.default.join(profileDir, name24)))) return true;
-  if (process.platform !== "win32") return false;
-  try {
-    const needle = import_node_path5.default.resolve(profileDir).replace(/[\\/]+$/, "").toLowerCase();
-    const marker24 = `--user-data-dir=${needle}`;
-    const output = (0, import_node_child_process3.execFileSync)("powershell.exe", [
-      "-NoProfile",
-      "-NonInteractive",
-      "-Command",
-      `Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Select-Object -ExpandProperty CommandLine`
-    ], { encoding: "utf8", timeout: 3e3, windowsHide: true });
-    return output.split(/\r?\n/).some((line) => {
-      const normalized = line.toLowerCase().replaceAll('"', "");
-      const index = normalized.indexOf(marker24);
-      return index >= 0 && (index + marker24.length === normalized.length || /\s/.test(normalized[index + marker24.length]));
-    });
-  } catch {
-    return true;
-  }
-}
-function findEdgePath() {
-  const roots = [process.env["ProgramFiles(x86)"], process.env.ProgramFiles, process.env.LOCALAPPDATA].filter(Boolean);
-  for (const root of roots) {
-    const p = import_node_path5.default.join(root, "Microsoft", "Edge", "Application", "msedge.exe");
-    if (import_node_fs3.default.existsSync(p)) return p;
-  }
-  throw new Error("Microsoft Edge \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3002Edge \u3092\u30A4\u30F3\u30B9\u30C8\u30FC\u30EB\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
-}
-var CopilotEdgeClient = class {
-  name = "copilot-edge";
-  s;
-  cdp = null;
-  clipGranted = false;
-  ownedEdgePid = null;
-  visibleEdgePid = null;
-  edgeProfileDir = null;
-  visibleSessionId = null;
-  lastTiming = null;
-  constructor(cfg) {
-    this.s = resolveCopilotSettings(cfg);
-  }
-  remainingTimeoutMs(deadlineMs, maximumMs) {
-    if (!Number.isFinite(deadlineMs)) return maximumMs;
-    const remainingMs = Math.floor(deadlineMs - Date.now());
-    if (remainingMs <= 0) throw new Error("Copilot response deadline exhausted");
-    return Math.max(1, Math.min(maximumMs, remainingMs));
-  }
-  async grantClipboard(deadlineMs = Number.POSITIVE_INFINITY) {
-    if (this.clipGranted) return;
-    const ver = await (await fetch(`http://127.0.0.1:${this.s.cdpPort}/json/version`, {
-      signal: AbortSignal.timeout(this.remainingTimeoutMs(deadlineMs, 5e3))
-    })).json();
-    const browserWs = String(ver.webSocketDebuggerUrl ?? "");
-    if (!browserWs) throw new Error("browser WebSocket \u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093");
-    const bws = await CdpConnection.connect(browserWs, this.remainingTimeoutMs(deadlineMs, 1e4));
-    try {
-      await bws.method("Browser.grantPermissions", {
-        permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"],
-        origin: new URL(this.s.url).origin
-      }, this.remainingTimeoutMs(deadlineMs, 1e4));
-    } finally {
-      bws.close();
-    }
-    this.clipGranted = true;
-  }
-  async refreshBrowserProcessId(deadlineMs = Number.POSITIVE_INFINITY) {
-    this.visibleEdgePid = null;
-    const ver = await (await fetch(`http://127.0.0.1:${this.s.cdpPort}/json/version`, {
-      signal: AbortSignal.timeout(this.remainingTimeoutMs(deadlineMs, 5e3))
-    })).json();
-    const browserWs = String(ver.webSocketDebuggerUrl ?? "");
-    if (!browserWs) throw new Error("browser WebSocket \u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093");
-    const bws = await CdpConnection.connect(browserWs, this.remainingTimeoutMs(deadlineMs, 1e4));
-    try {
-      const result = await bws.method("SystemInfo.getProcessInfo", {}, this.remainingTimeoutMs(deadlineMs, 1e4));
-      const browserPid = selectBrowserProcessId(result?.processInfo);
-      if (browserPid === null) throw new Error("CDP\u304B\u3089Edge\u30D6\u30E9\u30A6\u30B6\u30FC\u672C\u4F53PID\u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
-      this.visibleEdgePid = browserPid;
-    } finally {
-      bws.close();
-    }
-  }
-  stripOuterFence(t) {
-    let s = t.trim();
-    const m = s.match(/^```[\w-]*[ \t]*\r?\n([\s\S]*)\r?\n?```\s*$/);
-    if (m) s = m[1];
-    return s.split("\n").filter((l) => l.trim() !== this.s.endMarker).join("\n").trim();
-  }
-  async bringToFront(deadlineMs = Number.POSITIVE_INFINITY) {
-    try {
-      await this.cdpMethod("Page.bringToFront", {}, this.remainingTimeoutMs(deadlineMs, 5e3));
-      const pauseMs = this.remainingTimeoutMs(deadlineMs, 300);
-      await sleep(pauseMs);
-    } catch {
-    }
-  }
-  readSystemClipboard(deadlineMs = Number.POSITIVE_INFINITY) {
-    if (process.platform !== "win32") return "";
-    try {
-      return String((0, import_node_child_process3.execFileSync)("powershell.exe", [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false); Get-Clipboard -Raw"
-      ], {
-        encoding: "utf8",
-        timeout: this.remainingTimeoutMs(deadlineMs, 5e3),
-        windowsHide: true,
-        maxBuffer: 2 * 1024 * 1024
-      })).trim();
-    } catch {
-      return "";
-    }
-  }
-  async finalizeAnswer(fallbackText, deadlineMs = Number.POSITIVE_INFINITY) {
-    const assertWithinDeadline = () => {
-      assertResponseDeadline(deadlineMs, this.s.responseTimeoutSec);
-    };
-    const sleepWithinDeadline = async (requestedMs) => {
-      assertWithinDeadline();
-      await sleep(this.remainingTimeoutMs(deadlineMs, requestedMs));
-      assertWithinDeadline();
-    };
-    let baseline = "";
-    try {
-      await this.bringToFront(deadlineMs);
-      assertWithinDeadline();
-      baseline = this.readSystemClipboard(deadlineMs);
-      if (!baseline) {
-        await this.grantClipboard(deadlineMs);
-        baseline = String(await this.evalWithReconnect("navigator.clipboard.readText()", this.remainingTimeoutMs(deadlineMs, 8e3))).trim();
-      }
-    } catch {
-    }
-    assertWithinDeadline();
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        await this.bringToFront(deadlineMs);
-        assertWithinDeadline();
-        await this.grantClipboard(deadlineMs);
-        const clicked = JSON.parse(String(await this.evalWithReconnect(
-          COPILOT_CLICK_COPY_JS,
-          this.remainingTimeoutMs(deadlineMs, 15e3)
-        )));
-        console.log("[clip] candidates=" + JSON.stringify(clicked));
-        if (clicked.clicked) {
-          await sleepWithinDeadline(400 + attempt * 200);
-          let clip = this.readSystemClipboard(deadlineMs);
-          if (!clip || clip.trim() === baseline) {
-            clip = String(await this.evalWithReconnect(
-              "navigator.clipboard.readText()",
-              this.remainingTimeoutMs(deadlineMs, 1e4)
-            ));
-          } else {
-            console.log("[clip] read via Windows clipboard");
-          }
-          assertWithinDeadline();
-          const s = this.stripOuterFence(clip);
-          if (s.trim().length >= 10 && s.trim() !== baseline) {
-            assertWithinDeadline();
-            return s;
-          }
-        }
-      } catch (err) {
-        assertWithinDeadline();
-        console.log("[clip] attempt " + attempt + " error: " + err.message.slice(0, 80));
-      }
-      await sleepWithinDeadline(700);
-    }
-    assertWithinDeadline();
-    console.log("[clip] fallback to innerText");
-    const cleaned = this.cleanResponse(fallbackText);
-    assertWithinDeadline();
-    return cleaned;
-  }
-  hardenPreferences(profileDir) {
-    try {
-      const prefPath = import_node_path5.default.join(profileDir, "Default", "Preferences");
-      if (!import_node_fs3.default.existsSync(prefPath)) return;
-      const j = JSON.parse(import_node_fs3.default.readFileSync(prefPath, "utf8"));
-      if (!j.session) j.session = {};
-      j.session.restore_on_startup = 4;
-      j.session.startup_urls = [];
-      if (j.profile) j.profile.exit_type = "Normal";
-      import_node_fs3.default.writeFileSync(prefPath, JSON.stringify(j), "utf8");
-    } catch {
-    }
-  }
-  chooseEdgeProfile() {
-    const root = import_node_path5.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent");
-    import_node_fs3.default.mkdirSync(root, { recursive: true });
-    const suffix = (this.s.profileName ?? "default").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "default";
-    const stable = import_node_path5.default.join(root, suffix === "default" ? "edge-profile" : "edge-profile-" + suffix);
-    if (!profileIsInUse(stable)) return stable;
-    return import_node_fs3.default.mkdtempSync(import_node_path5.default.join(root, "edge-profile-" + suffix + "-session-"));
-  }
-  async ensureEdge() {
-    if (this.s.reuseExistingEdge) {
-      if (this.s.cdpPort > 0 && await devToolsUp(this.s.cdpPort)) return;
-      if (this.s.cdpPort <= 0) throw new Error("\u65E2\u5B58Edge\u63A5\u7D9A\u3092\u518D\u5229\u7528\u3059\u308B\u306B\u306F copilot.cdpPort \u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
-    } else {
-      if (this.ownedEdgePid !== null && await devToolsUp(this.s.cdpPort)) return;
-      this.s.cdpPort = await findFreePort();
-    }
-    const userDataDir = this.edgeProfileDir ?? this.chooseEdgeProfile();
-    this.edgeProfileDir = userDataDir;
-    this.hardenPreferences(userDataDir);
-    const args = [
-      `--remote-debugging-port=${this.s.cdpPort}`,
-      "--remote-debugging-address=127.0.0.1",
-      "--remote-allow-origins=*",
-      `--user-data-dir=${userDataDir}`,
-      "--no-first-run",
-      "--disable-background-timer-throttling",
-      "--disable-backgrounding-occluded-windows",
-      "--disable-renderer-backgrounding",
-      "--disable-features=CalculateNativeWinOcclusion,msEdgeTranslate",
-      "--disable-sync",
-      "--no-default-browser-check",
-      "--disable-session-crashed-bubble",
-      "--hide-crash-restore-bubble"
-    ];
-    if (this.s.displayMode === "minimized") args.push("--window-position=-32000,-32000", "--window-size=1280,900");
-    args.push(this.s.url);
-    const child = (0, import_node_child_process3.spawn)(findEdgePath(), args, { detached: true, stdio: "ignore" });
-    this.ownedEdgePid = child.pid ?? null;
-    this.visibleEdgePid = null;
-    child.unref();
-    const deadline = Date.now() + 3e4;
-    while (Date.now() < deadline) {
-      if (await devToolsUp(this.s.cdpPort)) return;
-      await sleep(500);
-    }
-    const mode = this.s.reuseExistingEdge ? "\u6307\u5B9A\u3055\u308C\u305FEdge" : "\u5C02\u7528Edge";
-    throw new Error(`${mode}\u306EDevTools Protocol\u304C\u8D77\u52D5\u3057\u307E\u305B\u3093\u3067\u3057\u305F (port=${this.s.cdpPort})\u3002\u4ED6\u30A2\u30D7\u30EA\u306EEdge\u306B\u306F\u63A5\u7D9A\u305B\u305A\u3001\u5C02\u7528\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB\u3067\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
-  }
-  async listTargets() {
-    try {
-      const res = await fetch(`http://127.0.0.1:${this.s.cdpPort}/json`, { signal: AbortSignal.timeout(5e3) });
-      const raw = await res.json();
-      return Array.isArray(raw) ? raw : [];
-    } catch {
-      return [];
-    }
-  }
-  async ensurePage() {
-    const host = (() => {
-      try {
-        return new URL(this.s.url).host;
-      } catch {
-        return "";
-      }
-    })();
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const targets = await this.listTargets();
-      const pages = targets.filter((t) => t.type === "page" && t.webSocketDebuggerUrl && !isLocalUrl(t.url));
-      const preferred = pages.find((t) => host && t.url?.includes(host) || t.url?.toLowerCase().includes("copilot"));
-      const fallback = this.s.reuseExistingEdge ? pages.find((t) => /^https?:/i.test(t.url ?? "")) : void 0;
-      const picked = preferred ?? fallback;
-      if (picked) {
-        this.cdp?.close();
-        this.cdp = await CdpConnection.connect(picked.webSocketDebuggerUrl);
-        return;
-      }
-      const created = await fetch(`http://127.0.0.1:${this.s.cdpPort}/json/new?${encodeURIComponent(this.s.url)}`, {
-        method: "PUT",
-        signal: AbortSignal.timeout(5e3)
-      }).catch(() => null);
-      if (!created?.ok) {
-        await fetch(`http://127.0.0.1:${this.s.cdpPort}/json/new?${encodeURIComponent(this.s.url)}`, {
-          signal: AbortSignal.timeout(5e3)
-        }).catch(() => null);
-      }
-      await sleep(2e3);
-    }
-    throw new Error("Copilot \u30DA\u30FC\u30B8 (CDP \u30BF\u30FC\u30B2\u30C3\u30C8) \u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002");
-  }
-  async assertTrustedOrigin() {
-    const actualRaw = String(await this.evalWithReconnect("(() => location.origin)()"));
-    const u = new URL(this.s.url);
-    if (u.protocol !== "https:" || !u.host) {
-      throw new Error(`copilot.url \u306F https \u306E\u7D76\u5BFE URL \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${this.s.url}`);
-    }
-    let actualHost = "";
-    try {
-      const au = new URL(actualRaw);
-      if (au.protocol !== "https:") throw new Error("not https");
-      actualHost = au.host.toLowerCase();
-    } catch {
-      throw new Error(`Copilot \u306E\u9001\u4FE1\u5148\u304C\u4E0D\u6B63\u3067\u3059: ${actualRaw}`);
-    }
-    if (actualHost !== u.host.toLowerCase()) {
-      throw new Error(`Copilot \u306E\u9001\u4FE1\u5148\u304C\u8A2D\u5B9A\u3068\u4E00\u81F4\u3057\u307E\u305B\u3093 (expected=${u.host}, actual=${actualHost})`);
-    }
-  }
-  async evalWithReconnect(expr, timeoutMs = 2e4) {
-    if (!this.cdp) throw new Error("Copilot \u30DA\u30FC\u30B8\u672A\u63A5\u7D9A\u3067\u3059");
-    return this.cdp.evalJs(expr, timeoutMs);
-  }
-  async waitInputReady(timeoutSec, signal) {
-    const deadline = Date.now() + timeoutSec * 1e3;
-    while (Date.now() < deadline) {
-      throwIfAborted(signal);
-      const raw = await this.evalWithReconnect(INPUT_READY_JS, 15e3);
-      const state = JSON.parse(String(raw));
-      if (/login|signin|sign-in|auth/i.test(state.url)) {
-        throw new Error("Copilot \u3078\u306E\u30B5\u30A4\u30F3\u30A4\u30F3\u304C\u5FC5\u8981\u3067\u3059\u3002Edge \u30A6\u30A3\u30F3\u30C9\u30A6\u3067\u30B5\u30A4\u30F3\u30A4\u30F3\u3057\u3066\u304B\u3089\u518D\u5B9F\u884C\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
-      }
-      if (state.ready) return;
-      await sleep(350);
-      throwIfAborted(signal);
-    }
-    throw new Error("Copilot \u306E\u5165\u529B\u6B04\u304C\u6E96\u5099\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F (\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8)\u3002");
-  }
-  async freshSurfaceReady() {
-    try {
-      const raw = await this.evalWithReconnect(COPILOT_SCREEN_STATE_JS, 5e3);
-      const state = JSON.parse(String(raw));
-      const inputLength = await this.editorLength();
-      return state.inputReady === true && Array.isArray(state.responseCandidates) && state.responseCandidates.length === 0 && inputLength >= 0 && inputLength <= 2;
-    } catch {
-      return false;
-    }
-  }
-  async waitFreshSurface(timeoutMs) {
-    const deadline = Date.now() + timeoutMs;
-    do {
-      if (await this.freshSurfaceReady()) return true;
-      if (Date.now() < deadline) await sleep(200);
-    } while (Date.now() < deadline);
-    return false;
-  }
-  async freshChat() {
-    if (await this.freshSurfaceReady()) return;
-    const raw = await this.evalWithReconnect(FRESH_CHAT_JS);
-    const clicked = JSON.parse(String(raw)).clicked;
-    if (clicked && await this.waitFreshSurface(5e3)) return;
-    await this.cdpMethod("Page.navigate", { url: this.s.url });
-    if (!await this.waitFreshSurface(3e4)) throw new Error("\u65B0\u898FCopilot\u30BB\u30C3\u30B7\u30E7\u30F3\u306E\u7A7A\u753B\u9762\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
-  }
-  async stampVisibleSessionMarker(sessionId) {
-    const marker24 = makeVisibleSessionMarker(sessionId);
-    const result = await this.evalWithReconnect(`(() => { const marker = ${JSON.stringify(marker24)}; window.name = marker; document.documentElement.setAttribute('data-company-apps-session', marker); return JSON.stringify({ windowName: window.name, sessionMarker: document.documentElement.getAttribute('data-company-apps-session') }); })()`);
-    const stamped = JSON.parse(String(result));
-    if (stamped.windowName !== marker24 || stamped.sessionMarker !== marker24) throw new Error("Copilot\u8868\u793A\u30BF\u30D6\u3078\u30BB\u30C3\u30B7\u30E7\u30F3\u8B58\u5225\u5B50\u3092\u8A2D\u5B9A\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
-  }
-  async prepareVisibleSession(sessionId) {
-    makeVisibleSessionMarker(sessionId);
-    await this.ensureEdge();
-    await this.ensurePage();
-    await this.refreshBrowserProcessId();
-    await this.cdpMethod("Page.navigate", { url: this.s.url });
-    await sleep(3e3);
-    await this.waitInputReady(120);
-    await this.assertTrustedOrigin();
-    this.visibleSessionId = sessionId;
-    await this.stampVisibleSessionMarker(sessionId);
-    await this.bringToFront();
-    return this.inspectVisibleSession(sessionId);
-  }
-  async inspectVisibleSession(sessionId) {
-    const expectedMarker = makeVisibleSessionMarker(sessionId);
-    if (!this.cdp) throw new Error("Copilot\u8868\u793A\u30BF\u30D6\u306F\u6E96\u5099\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
-    const raw = await this.evalWithReconnect(COPILOT_SCREEN_STATE_JS, 15e3);
-    const parsed = JSON.parse(String(raw));
-    const responses = parsed.responseCandidates ?? [];
-    const latest = selectLatestResponseCandidate(responses);
-    const marker24 = String(parsed.sessionMarker ?? "");
-    return {
-      sessionId,
-      marker: marker24,
-      markerMatches: marker24 === expectedMarker && String(parsed.windowName ?? "") === expectedMarker,
-      pid: this.visibleEdgePid,
-      cdpPort: this.s.cdpPort,
-      url: String(parsed.url ?? ""),
-      title: String(parsed.title ?? ""),
-      inputReady: parsed.inputReady === true,
-      responseCount: responses.length,
-      latestResponseLength: latest?.text.length ?? 0,
-      generating: (parsed.stopCandidates ?? []).some(isStopGenerationControl),
-      copyEnabled: latest?.copyEnabled === true
-    };
-  }
-  async cdpMethod(name24, params, timeoutMs = 3e4) {
-    if (!this.cdp) throw new Error("Copilot \u30DA\u30FC\u30B8\u672A\u63A5\u7D9A\u3067\u3059");
-    await this.cdp.method(name24, params, timeoutMs);
-  }
-  async editorLength() {
-    const raw = await this.evalWithReconnect(EDITOR_LENGTH_JS);
-    const n = Number(raw);
-    return Number.isFinite(n) ? n : -1;
-  }
-  async editorState() {
-    const raw = await this.evalWithReconnect(EDITOR_STATE_JS);
-    try {
-      const state = JSON.parse(String(raw));
-      return { found: state.found === true, text: typeof state.text === "string" ? state.text : "", active: state.active === true };
-    } catch {
-      return { found: false, text: "", active: false };
-    }
-  }
-  async insertPrompt(prompt) {
-    if (prompt.length > this.s.maxPromptChars) {
-      throw new Error(`\u4F9D\u983C\u6587\u304C\u4E0A\u9650 ${this.s.maxPromptChars} \u6587\u5B57\u3092\u8D85\u3048\u3066\u3044\u307E\u3059 (${prompt.length} \u6587\u5B57)`);
-    }
-    let lastDirectError = "";
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        await this.insertDirect(prompt);
-        if (attempt > 1) console.log("[input] \u5358\u4E00Input.insertText\u306E\u518D\u8A66\u884C\u3067\u6210\u529F");
-        return;
-      } catch (err) {
-        lastDirectError = err.message;
-        console.log(`[input] \u5358\u4E00Input.insertText attempt=${attempt} failed: ${lastDirectError}`);
-        if (attempt < 2) await sleep(300);
-      }
-    }
-    console.log(`[input] \u5358\u4E00Input.insertText\u30922\u56DE\u78BA\u8A8D\u3067\u304D\u305A\u3001\u30C1\u30E3\u30F3\u30AF\u65B9\u5F0F\u3078\u30D5\u30A9\u30FC\u30EB\u30D0\u30C3\u30AF: ${lastDirectError}`);
-    await this.insertByChunks(prompt);
-  }
-  async insertDirect(prompt) {
-    if (await this.editorLength() > 0) await this.clearEditor();
-    await this.bringToFront();
-    await this.focusEditor();
-    const timeoutMs = prompt.length > 12e3 ? 9e4 : prompt.length > 5e3 ? 6e4 : 3e4;
-    await this.cdpMethod("Input.insertText", { text: prompt }, timeoutMs);
-    let final = await this.editorState();
-    for (let poll = 0; poll < 12 && (!final.found || final.text !== prompt); poll++) {
-      await sleep(150);
-      final = await this.editorState();
-    }
-    if (!final.found || final.text !== prompt) throw new Error(`\u8CBC\u308A\u4ED8\u3051\u5F8C\u306E\u5185\u5BB9\u4E0D\u4E00\u81F4 (${textMismatchDiagnostic(prompt, final.text)})`);
-    const send = await this.waitSendReady(6e3);
-    if (!send.ready) throw new Error("\u5358\u4E00Input.insertText\u5F8C\u3082\u9001\u4FE1\u30DC\u30BF\u30F3\u304C\u6709\u52B9\u306B\u306A\u308A\u307E\u305B\u3093\u3067\u3057\u305F");
-  }
-  async insertByChunks(prompt) {
-    if (await this.editorLength() > 0) {
-      await this.clearEditor();
-    }
-    let pos = 0;
-    let chunkSize = 450;
-    let rebuilds = 0;
-    while (pos < prompt.length) {
-      const chunk = prompt.slice(pos, pos + chunkSize);
-      let ok = false;
-      for (let attempt = 1; attempt <= 6 && !ok; attempt++) {
-        const before = await this.editorState();
-        if (!before.found) throw new Error("\u5165\u529B\u6B04\u304C\u518D\u63CF\u753B\u4E2D\u3067\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F");
-        if (!prompt.startsWith(before.text)) {
-          const diagnostic = textMismatchDiagnostic(prompt, before.text);
-          console.warn(`[input] DOM\u6587\u5B57\u5217\u4E0D\u4E00\u81F4: ${diagnostic}`);
-          if (rebuilds >= 2) throw new Error(`\u4F9D\u983C\u6587\u306E\u5165\u529B\u5185\u5BB9\u304C\u4E00\u81F4\u3057\u307E\u305B\u3093\u3067\u3057\u305F (${diagnostic})`);
-          await this.clearEditor();
-          pos = 0;
-          rebuilds++;
-          break;
-        }
-        if (before.text.length > pos) {
-          pos = before.text.length;
-          ok = true;
-          break;
-        }
-        await this.bringToFront();
-        await this.focusEditor();
-        await this.cdpMethod("Input.insertText", { text: prompt.slice(pos, pos + chunk.length) });
-        for (let poll = 0; poll < 8; poll++) {
-          await sleep(180);
-          const after = await this.editorState();
-          if (!after.found || !prompt.startsWith(after.text)) break;
-          if (after.text.length > pos) {
-            pos = after.text.length;
-            ok = true;
-            break;
-          }
-        }
-        if (!ok) await sleep(250 * attempt);
-      }
-      if (!ok) {
-        if (pos >= prompt.length) break;
-        if (chunkSize > 180) {
-          chunkSize = Math.floor(chunkSize / 2);
-          continue;
-        }
-        if (rebuilds >= 2) {
-          throw new Error(`\u4F9D\u983C\u6587\u306E\u5165\u529B\u304C\u4F4D\u7F6E ${pos} \u3067\u53CD\u6620\u3055\u308C\u307E\u305B\u3093\u3067\u3057\u305F`);
-        }
-        await this.clearEditor();
-        pos = 0;
-        rebuilds++;
-      }
-    }
-    const final = await this.editorState();
-    if (!final.found || final.text !== prompt) {
-      throw new Error(`\u4F9D\u983C\u6587\u306E\u5165\u529B\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F (\u671F\u5F85 ${prompt.length} / \u5B9F\u969B ${final.text.length})`);
-    }
-  }
-  async clearEditor() {
-    await this.focusEditor();
-    await this.cdpMethod("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: 2 });
-    await this.cdpMethod("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: 2 });
-    await sleep(120);
-    await this.cdpMethod("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 });
-    await this.cdpMethod("Input.dispatchKeyEvent", { type: "keyUp", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 });
-    await sleep(200);
-  }
-  async focusEditor() {
-    const js = `(() => {
-      ${VISIBLE_JS}
-      ${DOCS_JS}
-      const sels = ${JSON.stringify(["#m365-chat-editor-target-element", '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]'])};
-      for (const d of __docs) for (const s of sels) {
-        const el = d.querySelector(s);
-        if (__vis(el)) {
-          try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); }
-          try {
-            const range = d.createRange();
-            range.selectNodeContents(el);
-            range.collapse(false);
-            const sel = d.getSelection();
-            if (sel) { sel.removeAllRanges(); sel.addRange(range); }
-          } catch (e) {}
-          return 'ok';
-        }
-      }
-      return 'ng';
-    })()`;
-    if (await this.evalWithReconnect(js) !== "ok") throw new Error("\u5165\u529B\u6B04\u306B\u30D5\u30A9\u30FC\u30AB\u30B9\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
-  }
-  async waitSendReady(timeoutMs) {
-    const deadline = Date.now() + timeoutMs;
-    let latest = { ready: false, inventory: [] };
-    do {
-      try {
-        latest = JSON.parse(String(await this.evalWithReconnect(COPILOT_SEND_READY_JS)));
-        if (latest.ready) return latest;
-      } catch {
-      }
-      if (Date.now() < deadline) await sleep(150);
-    } while (Date.now() < deadline);
-    return latest;
-  }
-  async waitSendEstablished(baselineText, baselineInputLength, timeoutMs) {
-    const deadline = Date.now() + timeoutMs;
-    let notReadySamples = 0;
-    do {
-      const state = await this.readScreenState(5e3);
-      const inputLength = await this.editorLength();
-      const ready = await this.waitSendReady(1);
-      if (state.generating || baselineText && state.text && state.text !== baselineText || baselineInputLength > 0 && inputLength >= 0 && inputLength <= 2) return true;
-      notReadySamples = ready.ready ? 0 : notReadySamples + 1;
-      if (notReadySamples >= 2) return true;
-      if (Date.now() < deadline) await sleep(150);
-    } while (Date.now() < deadline);
-    return false;
-  }
-  async clickSend(baselineText = "") {
-    const ready = await this.waitSendReady(6e3);
-    if (!ready.ready) {
-      const diagnostic = JSON.stringify(ready.inventory ?? []).slice(0, 3e3);
-      console.log(`[send] candidate inventory: ${diagnostic}`);
-      throw new Error(`\u6709\u52B9\u306A\u9001\u4FE1\u30DC\u30BF\u30F3\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u5019\u88DC\u8A3A\u65AD: ${diagnostic}`);
-    }
-    const baselineInputLength = await this.editorLength();
-    const raw = await this.evalWithReconnect(COPILOT_CLICK_SEND_JS);
-    const result = JSON.parse(String(raw));
-    if (!result.clicked) {
-      const diagnostic = JSON.stringify(result.inventory ?? []).slice(0, 3e3);
-      console.log(`[send] candidate inventory: ${diagnostic}`);
-      throw new Error(`\u6709\u52B9\u306A\u9001\u4FE1\u30DC\u30BF\u30F3\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u5019\u88DC\u8A3A\u65AD: ${diagnostic}`);
-    }
-    if (await this.waitSendEstablished(baselineText, baselineInputLength, 1800)) return;
-    const x = Number(result.selected?.rect?.cx);
-    const y = Number(result.selected?.rect?.cy);
-    if (Number.isFinite(x) && Number.isFinite(y) && x >= 0 && y >= 0) {
-      await this.cdpMethod("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
-      await sleep(80);
-      await this.cdpMethod("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
-      if (await this.waitSendEstablished(baselineText, baselineInputLength, 1800)) {
-        console.log("[send] synthetic click\u672A\u6210\u7ACB\u306E\u305F\u3081CDP native mouse\u3067\u9001\u4FE1");
-        return;
-      }
-    }
-    throw new Error("\u9001\u4FE1\u30DC\u30BF\u30F3\u64CD\u4F5C\u5F8C\u3082\u751F\u6210\u958B\u59CB\u30FB\u5165\u529B\u6D88\u53BB\u30FB\u5FDC\u7B54\u5897\u52A0\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
-  }
-  async readScreenState(timeoutMs = 15e3) {
-    const raw = await this.evalWithReconnect(COPILOT_SCREEN_STATE_JS, timeoutMs);
-    const parsed = JSON.parse(String(raw));
-    const latest = selectLatestResponseCandidate(parsed.responseCandidates ?? []);
-    return {
-      text: latest?.text ?? "",
-      generating: (parsed.stopCandidates ?? []).some(isStopGenerationControl),
-      copyEnabled: latest?.copyEnabled === true,
-      signinRequired: parsed.signinRequired
-    };
-  }
-  async waitResponse(baseline, signal) {
-    const startedAt = Date.now();
-    const deadline = Date.now() + this.s.responseTimeoutSec * 1e3;
-    let lastText = "";
-    let lastChange = Date.now();
-    let sawNewText = false;
-    let completionState = { stableText: null, stableSinceMs: null };
-    while (Date.now() < deadline) {
-      throwIfAborted(signal);
-      const remainingMs = deadline - Date.now();
-      if (remainingMs <= 0) break;
-      const st = await this.readScreenState(Math.min(15e3, remainingMs));
-      if (Date.now() >= deadline) break;
-      if (st.signinRequired) throw new Error("Copilot \u3078\u306E\u30B5\u30A4\u30F3\u30A4\u30F3\u304C\u5FC5\u8981\u3067\u3059\u3002");
-      if (st.text && st.text !== baseline) {
-        sawNewText = true;
-        if (st.text !== lastText) {
-          lastText = st.text;
-          lastChange = Date.now();
-        }
-      }
-      const quietFor = Date.now() - lastChange;
-      const completion = updateResponseCompletionState(completionState, {
-        observedAtMs: Date.now(),
-        text: sawNewText && st.text === lastText ? lastText : "",
-        generating: st.generating,
-        copyEnabled: st.copyEnabled
-      });
-      completionState = completion.state;
-      if (completion.ready) {
-        const completionReadyAt = Date.now();
-        const visibleAnswer = this.cleanResponse(lastText);
-        const answer = visibleAnswer || await this.finalizeAnswer(lastText, deadline);
-        assertResponseDeadline(deadline, this.s.responseTimeoutSec);
-        return {
-          answer,
-          generationWaitMs: completionReadyAt - startedAt,
-          completionRetrievalMs: Date.now() - completionReadyAt
-        };
-      }
-      if (!st.generating && sawNewText && quietFor > this.s.stallTimeoutSec * 1e3) {
-        throw new Error("Copilot \u306E\u5FDC\u7B54\u304C\u505C\u6EDE\u3057\u305F\u305F\u3081\u8AE6\u3081\u307E\u3057\u305F");
-      }
-      const sleepMs = Math.min(this.s.pollIntervalMs, deadline - Date.now());
-      if (sleepMs > 0) await sleep(sleepMs);
-      throwIfAborted(signal);
-    }
-    throw new Error(`Copilot \u306E\u5FDC\u7B54\u304C\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8\u3057\u307E\u3057\u305F (${this.s.responseTimeoutSec}\u79D2)`);
-  }
-  cleanResponse(text2) {
-    return text2.split("\n").filter((l) => l.trim() !== this.s.endMarker).join("\n").trim();
-  }
-  async selectModel() {
-    if (!this.s.modelPriority || this.s.modelPriority.length === 0) return;
-    const js = MODEL_SELECT_JS.replace("__CANDIDATES__", JSON.stringify(this.s.modelPriority)).replace("__SWITCHER__", JSON.stringify("#gptModeSwitcher"));
-    try {
-      const raw = await this.evalWithReconnect(js, 3e4);
-      const r = JSON.parse(String(raw));
-      if (r.changed) console.log(`[model] ${r.before ?? "?"} -> ${r.after ?? r.picked ?? "?"}`);
-      else if (["switcher_not_found", "menu_not_found", "model_not_in_menu"].includes(r.reason ?? "")) console.warn(`[model] \u5229\u7528\u4E0D\u53EF\u306E\u305F\u3081UI\u65E2\u5B9A\u3092\u7D99\u7D9A: ${r.reason}`);
-    } catch (err) {
-      console.log(`[model] \u5207\u66FF\u30B9\u30AD\u30C3\u30D7(\u7D99\u7D9A): ${err.message}`);
-    }
-  }
-  async complete(prompt, signal) {
-    const totalStartedAt = Date.now();
-    this.lastTiming = null;
-    throwIfAborted(signal);
-    let phaseStartedAt = Date.now();
-    await this.ensureEdge();
-    await this.ensurePage();
-    const connectionMs = Date.now() - phaseStartedAt;
-    phaseStartedAt = Date.now();
-    await this.freshChat();
-    const sessionCreationMs = Date.now() - phaseStartedAt;
-    phaseStartedAt = Date.now();
-    await this.waitInputReady(120, signal);
-    if (this.visibleSessionId) {
-      await this.stampVisibleSessionMarker(this.visibleSessionId);
-      await this.bringToFront();
-    }
-    const inputReadyMs = Date.now() - phaseStartedAt;
-    phaseStartedAt = Date.now();
-    await this.selectModel();
-    const modelSelectionMs = Date.now() - phaseStartedAt;
-    throwIfAborted(signal);
-    phaseStartedAt = Date.now();
-    await this.waitInputReady(30, signal);
-    await this.assertTrustedOrigin();
-    const prePromptReadyMs = Date.now() - phaseStartedAt;
-    phaseStartedAt = Date.now();
-    await this.insertPrompt(prompt);
-    const promptWriteMs = Date.now() - phaseStartedAt;
-    phaseStartedAt = Date.now();
-    const baseline = (await this.readScreenState()).text;
-    const baselineReadMs = Date.now() - phaseStartedAt;
-    phaseStartedAt = Date.now();
-    await this.clickSend(baseline);
-    const sendMs = Date.now() - phaseStartedAt;
-    throwIfAborted(signal);
-    const response = await this.waitResponse(baseline, signal);
-    this.lastTiming = {
-      connectionMs,
-      sessionCreationMs,
-      inputReadyMs,
-      modelSelectionMs,
-      prePromptReadyMs,
-      promptWriteMs,
-      baselineReadMs,
-      sendMs,
-      generationWaitMs: response.generationWaitMs,
-      completionRetrievalMs: response.completionRetrievalMs,
-      totalMs: Date.now() - totalStartedAt,
-      promptChars: prompt.length,
-      responseChars: response.answer.length
-    };
-    console.log("[copilot-timing] " + JSON.stringify(this.lastTiming));
-    return response.answer;
-  }
-  getLastTiming() {
-    return this.lastTiming ? { ...this.lastTiming } : null;
-  }
-  close() {
-    this.cdp?.close();
-    this.cdp = null;
-  }
-};
-
-// src/session.ts
-var import_node_fs4 = __toESM(require("node:fs"));
-var import_node_os = __toESM(require("node:os"));
-var import_node_path6 = __toESM(require("node:path"));
-var logPath;
-function ensureLog() {
-  if (!logPath) {
-    const dir = import_node_path6.default.join(import_node_os.default.tmpdir(), "company-coding-agent", "sessions");
-    import_node_fs4.default.mkdirSync(dir, { recursive: true });
-    const stamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
-    logPath = import_node_path6.default.join(dir, `${stamp}.jsonl`);
-  }
-  return logPath;
-}
-function appendSession(userInput, newMessages) {
-  try {
-    const line = JSON.stringify({ ts: (/* @__PURE__ */ new Date()).toISOString(), input: userInput, messages: newMessages }) + "\n";
-    import_node_fs4.default.appendFileSync(ensureLog(), line, "utf8");
-  } catch {
-  }
-}
-
-// src/repl.ts
-var DEFAULT_SYSTEM_PROMPT = "\u3042\u306A\u305F\u306F\u793E\u5185\u306E\u30B3\u30FC\u30C7\u30A3\u30F3\u30B0\u652F\u63F4\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u3067\u3059\u3002\u63D0\u4F9B\u3055\u308C\u305F\u30C4\u30FC\u30EB\u3067\u30D5\u30A1\u30A4\u30EB\u306E\u8ABF\u67FB\u30FB\u7DE8\u96C6\u30FB\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u3092\u884C\u3044\u3001\u7C21\u6F54\u306A\u65E5\u672C\u8A9E\u3067\u56DE\u7B54\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
-function printHelp() {
-  console.log(
-    [
-      "\u30B3\u30DE\u30F3\u30C9:",
-      "  /help   \u30D8\u30EB\u30D7\u8868\u793A",
-      "  /reset  \u4F1A\u8A71\u5C65\u6B74\u3092\u30EA\u30BB\u30C3\u30C8",
-      "  /cwd    \u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u3092\u8868\u793A",
-      "  /exit   \u7D42\u4E86 (\u7A7AEnter\u3067\u3082\u7D42\u4E86)",
-      "",
-      "\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306E\u524D\u306B\u78BA\u8A8D\u30D7\u30ED\u30F3\u30D7\u30C8\u304C\u8868\u793A\u3055\u308C\u307E\u3059(\u30D5\u30A1\u30A4\u30EB\u66F8\u304D\u8FBC\u307F\u306F\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5185\u306A\u3089\u81EA\u52D5\u627F\u8A8D)"
-    ].join("\n")
-  );
-}
-async function startRepl(cfg, ctx) {
-  const lineQueue = [];
-  let waiter = null;
-  const rl = import_node_readline.default.createInterface({ input: process.stdin, terminal: false });
-  rl.on("line", (raw) => {
-    const line = raw.trim();
-    if (waiter) {
-      const w = waiter;
-      waiter = null;
-      w(line);
-    } else {
-      lineQueue.push(line);
-    }
-  });
-  rl.on("close", () => {
-    if (waiter) {
-      const w = waiter;
-      waiter = null;
-      w("");
-    }
-  });
-  async function nextLine(promptText) {
-    process.stdout.write(promptText);
-    if (lineQueue.length > 0) return lineQueue.shift();
-    return new Promise((resolve2) => {
-      waiter = resolve2;
-    });
-  }
-  const io = {
-    print: (t) => console.log(t),
-    askYesNo: async (q) => /^y(es)?$/i.test(await nextLine(`${q} [y/N]: `))
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("benchmark mock server port\u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093");
+  return {
+    baseURL: `http://127.0.0.1:${address.port}/v1`,
+    close: () => new Promise((resolve2, reject) => server.close((error51) => error51 ? reject(error51) : resolve2()))
   };
-  let messages = [{ role: "system", content: cfg.systemPrompt ?? DEFAULT_SYSTEM_PROMPT }];
-  let copilotBackend = null;
-  const providerLabel = cfg.provider === "external-openai" ? "external-openai\uFF08\u5408\u6210\u30C7\u30FC\u30BF\u5C02\u7528\uFF09" : cfg.model || (cfg.provider ?? "openai");
-  console.log(`coding-agent (${providerLabel}) \u2014 \u958B\u59CB\u3002/help \u3067\u30B3\u30DE\u30F3\u30C9\u3001\u7A7AEnter\u3067\u7D42\u4E86`);
-  for (; ; ) {
-    const input = await nextLine("> ");
-    if (input === "") break;
-    if (input.startsWith("/")) {
-      const cmd = input.split(/\s+/)[0];
-      if (cmd === "/exit" || cmd === "/quit") break;
-      if (cmd === "/reset") {
-        messages = messages.slice(0, 1);
-        console.log("(\u4F1A\u8A71\u3092\u30EA\u30BB\u30C3\u30C8\u3057\u307E\u3057\u305F)");
-        continue;
-      }
-      if (cmd === "/cwd") {
-        console.log(ctx.workspace);
-        continue;
-      }
-      if (cmd === "/help") {
-        printHelp();
-        continue;
-      }
-      console.log(`\u4E0D\u660E\u306A\u30B3\u30DE\u30F3\u30C9: ${cmd}`);
-      continue;
-    }
-    const backend = (cfg.agentLoop ?? "v1") === "v1" && cfg.provider === "copilot-edge" ? copilotBackend ??= new CopilotEdgeClient(cfg) : void 0;
-    const result = await runConfiguredAgentTurn({ cfg, messages, userInput: input, ctx, io, backend });
-    if (result.reply) console.log(result.reply + "\n");
-    messages = result.messages;
-    appendSession(input, result.messages);
+}
+function assertArtifactsDoNotContainSecrets(paths, secrets) {
+  for (const artifactPath of paths) {
+    if (!import_node_fs4.default.existsSync(artifactPath)) continue;
+    const text2 = import_node_fs4.default.readFileSync(artifactPath, "utf8");
+    const leaked = secrets.find((secret) => text2.includes(secret));
+    if (leaked) throw new FatalBenchmarkError(`secret marker\u304Cartifact\u3078\u6F0F\u6D29\u3057\u307E\u3057\u305F: ${import_node_path6.default.basename(artifactPath)}`);
   }
-  rl.close();
-  copilotBackend?.close?.();
+}
+async function runBenchmark(options) {
+  if (!Number.isInteger(options.repeat) || options.repeat < 1 || options.repeat > 1e3) throw new Error("repeat \u306F1\u4EE5\u4E0A1000\u4EE5\u4E0B\u306E\u6574\u6570\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
+  safeMetadata(options.metadata);
+  assertSupportedSecretValues(options, options.baseConfig);
+  const initialSecrets = knownSecretValues(options, options.baseConfig);
+  const providerVisibleSuite = JSON.stringify({
+    id: options.suite.id,
+    version: options.suite.version,
+    title: options.suite.title,
+    fixtures: options.suite.fixtures,
+    tasks: options.suite.tasks.map(({ mock: _mock, ...task }) => task)
+  });
+  if (initialSecrets.some((secret) => providerVisibleSuite.includes(secret))) throw new FatalBenchmarkError("provider\u3078\u6E21\u308Bsuite/fixture\u306Bcredential\u307E\u305F\u306Fsecret marker\u304C\u542B\u307E\u308C\u3066\u3044\u307E\u3059");
+  if (initialSecrets.some((secret) => JSON.stringify(options.metadata ?? {}).includes(secret))) throw new FatalBenchmarkError("benchmark metadata\u306Bcredential\u307E\u305F\u306Fsecret marker\u304C\u542B\u307E\u308C\u3066\u3044\u307E\u3059");
+  const logger = options.logger ?? console;
+  const outputDirectory = import_node_path6.default.resolve(options.outputDirectory);
+  await import_promises2.default.mkdir(outputDirectory, { recursive: true });
+  assertNoReparseComponents2(outputDirectory);
+  const workspacesDirectory = import_node_path6.default.join(outputDirectory, "workspaces");
+  await import_promises2.default.mkdir(workspacesDirectory, { recursive: true });
+  assertNoReparseComponents2(workspacesDirectory);
+  const jsonlPath = import_node_path6.default.join(outputDirectory, "results.jsonl");
+  assertOutputFileTarget(jsonlPath);
+  const auditDirectory = import_node_path6.default.join(outputDirectory, "audit");
+  const auditLog = new AuditLog({ workspace: import_node_path6.default.join(workspacesDirectory, "boundary-placeholder"), directory: auditDirectory });
+  auditLog.initialize();
+  let mockServer;
+  if (options.mock) mockServer = await startMockServer(options.suite);
+  const invocationResults = [];
+  try {
+    for (let repeatIndex = 1; repeatIndex <= options.repeat; repeatIndex++) {
+      for (const task of options.suite.tasks) {
+        let result;
+        try {
+          result = await runOne({ ...options, outputDirectory }, task, repeatIndex, auditLog, mockServer?.baseURL);
+        } catch (error51) {
+          if (error51 instanceof FatalBenchmarkError) throw error51;
+          const now2 = (/* @__PURE__ */ new Date()).toISOString();
+          result = {
+            benchmark_schema_version: BENCHMARK_RUN_SCHEMA,
+            runner_version: BENCHMARK_RUNNER_VERSION,
+            suite_schema_version: BENCHMARK_SUITE_SCHEMA,
+            task_schema_version: BENCHMARK_TASK_SCHEMA,
+            suite_id: options.suite.id,
+            suite_version: options.suite.version,
+            task_id: task.id,
+            run_id: import_node_crypto4.default.randomUUID(),
+            timestamp: now2,
+            git_commit_sha: gitCommitSha(import_node_path6.default.resolve(__dirname, "..")),
+            provider: options.provider,
+            model: options.model,
+            endpoint_category: "unknown",
+            configuration: { agent_loop: "v2", temperature: null, reasoning_effort: null, max_model_decisions: null, max_host_executions: null, metadata: safeMetadata(options.metadata) },
+            repeat_index: repeatIndex,
+            seed: null,
+            seed_guaranteed: false,
+            final_status: "unknown",
+            final_outcome: classifyUnavailable(error51) ? "unavailable" : "harness_error",
+            expectations: { passed: null, total: null, details: [] },
+            pass: false,
+            elapsed_ms: null,
+            time_to_first_action_ms: null,
+            model_call_count: null,
+            model_response_count: null,
+            tool_call_count: null,
+            tool_events: { succeeded: null, failed: null, rejected: null, invalid: null },
+            retry_count: null,
+            approval_count: null,
+            approval_result: "unknown",
+            approval_events: { approved: null, denied: null, unknown: null },
+            safety_rejection: null,
+            guard_rejection_count: null,
+            human_intervention_count: null,
+            token_usage: null,
+            error_category: classifyUnavailable(error51) ? "unavailable" : "harness_error"
+          };
+        }
+        const secrets2 = knownSecretValues(options, options.baseConfig);
+        const serialized = redactText(JSON.stringify(result), secrets2);
+        if (secrets2.some((secret) => serialized.includes(secret))) throw new FatalBenchmarkError("result serialization\u306Esecret redaction\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
+        await import_promises2.default.appendFile(jsonlPath, `${serialized}
+`, "utf8");
+        invocationResults.push(JSON.parse(serialized));
+      }
+    }
+    const reports = await generateBenchmarkReports(jsonlPath, outputDirectory);
+    const secrets = knownSecretValues(options, options.baseConfig);
+    assertArtifactsDoNotContainSecrets([jsonlPath, reports.runsCsvPath, reports.summaryCsvPath, reports.markdownPath, auditLog.filePath], secrets);
+    logger.log(`BENCHMARK_SUMMARY suite=${options.suite.id} runs=${invocationResults.length} passed=${invocationResults.filter((result) => result.pass).length} failed=${invocationResults.filter((result) => !result.pass).length}`);
+    return { results: invocationResults, ...reports };
+  } catch (error51) {
+    logger.error(`BENCHMARK_FAILED category=harness_error detail=${redactText(error51.message || String(error51), knownSecretValues(options, options.baseConfig))}`);
+    throw error51;
+  } finally {
+    clearApprovals();
+    await mockServer?.close().catch(() => {
+    });
+    auditLog.close();
+  }
 }
 
-// src/index.ts
-function argValue(flag) {
-  const i = process.argv.indexOf(flag);
-  return i >= 0 ? process.argv[i + 1] : void 0;
+// src/benchmark-cli.ts
+function value(flag) {
+  const index = process.argv.indexOf(flag);
+  return index >= 0 ? process.argv[index + 1] : void 0;
 }
-function positionalWorkspace() {
-  const argv = process.argv.slice(2);
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--config" || a === "--workspace") {
-      i++;
-      continue;
-    }
-    if (!a.startsWith("-")) return a;
+function values(flag) {
+  const found = [];
+  for (let index = 0; index < process.argv.length; index++) {
+    if (process.argv[index] === flag && process.argv[index + 1]) found.push(process.argv[index + 1]);
   }
-  return void 0;
+  return found;
+}
+function has(flag) {
+  return process.argv.includes(flag);
+}
+function required2(flag) {
+  const found = value(flag);
+  if (!found || found.startsWith("--")) throw new Error(`${flag} \u304C\u5FC5\u8981\u3067\u3059`);
+  return found;
+}
+function positiveInteger(raw, fallback, label) {
+  if (raw === void 0) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1) throw new Error(`${label} \u306F1\u4EE5\u4E0A\u306E\u6574\u6570\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044`);
+  return parsed;
+}
+function provider(raw) {
+  if (raw !== "openai" && raw !== "copilot-edge" && raw !== "ollama" && raw !== "external-openai") {
+    throw new Error("--provider \u306F openai / copilot-edge / ollama / external-openai \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
+  }
+  return raw;
+}
+function metadata() {
+  const result = {};
+  for (const entry of values("--metadata")) {
+    const separator = entry.indexOf("=");
+    if (separator <= 0) throw new Error("--metadata \u306F key=value \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
+    const key = entry.slice(0, separator).trim();
+    const entryValue = entry.slice(separator + 1).trim();
+    if (!key || !entryValue) throw new Error("--metadata \u306F\u7A7A\u3067\u306A\u3044 key=value \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
+    result[key] = entryValue;
+  }
+  return result;
+}
+function mockConfig(model) {
+  return {
+    agentLoop: "v2",
+    provider: "openai",
+    baseURL: "http://127.0.0.1:1/v1",
+    apiKey: "benchmark-loopback-token",
+    model,
+    temperature: 0,
+    restrictToWorkspace: true,
+    safeCommandOnly: true,
+    maxToolIterations: 8,
+    maxToolExecutions: 6,
+    maxWriteExecutions: 3,
+    maxCommandExecutions: 0,
+    maxNoProgress: 2,
+    allowArbitraryCommands: false,
+    autoApprove: { write: false, command: false },
+    permissions: [
+      { permission: "list_files", pattern: "*", action: "allow" },
+      { permission: "read_file", pattern: "*", action: "allow" },
+      { permission: "read_files", pattern: "*", action: "allow" },
+      { permission: "search_files", pattern: "*", action: "allow" },
+      { permission: "write_file", pattern: "*", action: "ask" },
+      { permission: "write_file.overwrite", pattern: "*", action: "ask" },
+      { permission: "start_process", pattern: "*", action: "deny" },
+      { permission: "run_command", pattern: "*", action: "deny" }
+    ]
+  };
+}
+function printHelp() {
+  console.log([
+    "Misen Benchmark Phase 1",
+    "",
+    "Run a suite:",
+    "  node dist/benchmark.js --suite synthetic-smoke --config config.json --provider ollama --model model-id --repeat 2 --output .tmp/benchmark",
+    "",
+    "Credential-free deterministic loopback:",
+    "  node dist/benchmark.js --suite synthetic-smoke --provider openai --model benchmark-loopback --repeat 2 --output .tmp/benchmark --mock --auto-approve-synthetic",
+    "",
+    "Regenerate CSV/Markdown from JSONL:",
+    "  node dist/benchmark.js --summarize .tmp/benchmark/results.jsonl --output .tmp/benchmark",
+    "",
+    "Options: --timeout-ms N, --metadata key=value (repeatable), --auto-approve-synthetic"
+  ].join("\n"));
 }
 async function main() {
-  const cfg = loadConfig(argValue("--config"));
-  const workspaceArg = argValue("--workspace") ?? positionalWorkspace();
-  const workspace = workspaceArg ? import_node_path7.default.resolve(workspaceArg) : process.cwd();
-  await startRepl(cfg, { workspace, restrictToWorkspace: cfg.restrictToWorkspace ?? true, safeCommandOnly: cfg.safeCommandOnly === true, weatherDefaultLocation: cfg.weather?.defaultLocation });
+  if (has("--help") || has("-h")) {
+    printHelp();
+    return;
+  }
+  const outputDirectory = import_node_path7.default.resolve(required2("--output"));
+  const summarize2 = has("--summarize") ? required2("--summarize") : void 0;
+  if (summarize2) {
+    const reports = await generateBenchmarkReports(import_node_path7.default.resolve(summarize2), outputDirectory);
+    console.log(`BENCHMARK_SUMMARY regenerated=${reports.aggregates.length} jsonl=${reports.jsonlPath}`);
+    return;
+  }
+  const suite = loadBenchmarkSuite(required2("--suite"));
+  const selectedProvider = provider(required2("--provider"));
+  const selectedModel = required2("--model");
+  const mock = has("--mock");
+  if (mock && selectedProvider !== "openai") throw new Error("--mock \u306F\u65E2\u5B58openai provider\u306Eloopback fixture\u3068\u3057\u3066\u3060\u3051\u5B9F\u884C\u3067\u304D\u307E\u3059");
+  const configPath = value("--config");
+  if (!mock && !configPath) throw new Error("\u5B9Fprovider benchmark \u306F --config \u304C\u5FC5\u8981\u3067\u3059");
+  const baseConfig = mock ? mockConfig(selectedModel) : loadConfig(import_node_path7.default.resolve(configPath));
+  const summary = await runBenchmark({
+    suite,
+    outputDirectory,
+    provider: selectedProvider,
+    model: selectedModel,
+    repeat: positiveInteger(value("--repeat"), 1, "--repeat"),
+    ...value("--timeout-ms") ? { timeoutMs: positiveInteger(value("--timeout-ms"), 1, "--timeout-ms") } : {},
+    baseConfig,
+    autoApproveSynthetic: has("--auto-approve-synthetic"),
+    metadata: metadata(),
+    mock
+  });
+  process.exitCode = summary.results.every((result) => result.pass) ? 0 : 1;
 }
-main().catch((err) => {
-  console.error(err instanceof Error ? err.message : err);
+main().catch((error51) => {
+  console.error(`BENCHMARK_FAILED category=harness_error detail=${error51.message || String(error51)}`);
   process.exitCode = 1;
 });

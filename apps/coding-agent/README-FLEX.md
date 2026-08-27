@@ -13,6 +13,7 @@ npm run gate
 | typecheck | `npx tsc --noEmit` | PASS / FAIL |
 | build | `node esbuild.config.mjs` | PASS / FAIL |
 | smoke | `node dist/smoke.js`（直前のbuild成果物を使用） | PASS / FAIL |
+| benchmark | `node dist/benchmark-test.js`（mock unit / integration / E2E） | PASS / FAIL |
 | flex-validate | `node dist/flex-harness.js` | PASS / FAIL |
 | live-converter | `node dist/flex-harness.js --live` | フラグなしはSKIP |
 | live-copilot | `node test/measure-flex-copilot.mjs` | フラグなしはSKIP |
@@ -27,6 +28,8 @@ npm run gate -- --live-copilot http://127.0.0.1:3951 .tmp/flex-copilot-performan
 ```
 
 機械可読な全段の結果は、実行のたびに `.tmp/gate-result.json` へUTF-8のJSONとして保存されます。
+
+モデル横断の合成Benchmark Phase 1は [BENCHMARK.md](BENCHMARK.md) を参照してください。既定UIと`/classic`にはBenchmark画面を追加せず、CLI・JSONL・CSV・Markdownだけで実行します。
 
 ## 日本語アシスタント UI
 

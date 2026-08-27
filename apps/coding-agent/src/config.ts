@@ -139,7 +139,7 @@ function appDataConfigPath(): string {
   return path.join(process.env.APPDATA ?? process.env.USERPROFILE ?? '.', 'CompanyApps', 'coding-agent', 'config.json')
 }
 
-function isLoopbackHostname(hostname: string): boolean {
+export function isLoopbackHostname(hostname: string): boolean {
   const normalized = hostname.toLowerCase().replace(/^\[|\]$/gu, '')
   if (normalized === 'localhost' || normalized === '::1' || normalized === '0:0:0:0:0:0:0:1') return true
   // URL.hostname returns a canonical dotted IPv4 string for normal IPv4 literals.
@@ -275,6 +275,29 @@ export function resolveSyntheticWorkspace(cfg: AgentConfig): string {
   return path.resolve(base, configured)
 }
 
+/** Validate the marker contract for any generated synthetic fixture workspace. */
+export function assertSyntheticWorkspaceMarker(currentWorkspace: string): void {
+  const current = path.resolve(currentWorkspace)
+  let currentStat: fs.Stats
+  try { currentStat = fs.lstatSync(current) } catch { throw new Error('合成ワークスペースを安全に確認できないため停止しました') }
+  if (!currentStat.isDirectory() || currentStat.isSymbolicLink()) {
+    throw new Error('合成ワークスペースのディレクトリ junction／シンボリックリンクは利用できません')
+  }
+  const marker = path.join(current, SYNTHETIC_WORKSPACE_MARKER)
+  let markerStat: fs.Stats
+  try { markerStat = fs.lstatSync(marker) } catch { throw new Error('合成ワークスペースの確認マーカーがありません') }
+  if (!markerStat.isFile() || markerStat.isSymbolicLink()) throw new Error('合成ワークスペースの確認マーカーが不正です')
+  let parsed: unknown
+  try { parsed = JSON.parse(fs.readFileSync(marker, 'utf8')) as unknown } catch { throw new Error('合成ワークスペースの確認マーカーを読めません') }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('合成ワークスペースの確認マーカーが不正です')
+  const record = parsed as Record<string, unknown>
+  const expectedKeys = Object.keys(SYNTHETIC_WORKSPACE_MARKER_EXPECTED)
+  const keys = Object.keys(record)
+  if (keys.length !== expectedKeys.length || expectedKeys.some((key) => !Object.prototype.hasOwnProperty.call(record, key) || record[key] !== SYNTHETIC_WORKSPACE_MARKER_EXPECTED[key as keyof typeof SYNTHETIC_WORKSPACE_MARKER_EXPECTED])) {
+    throw new Error('合成ワークスペースの確認マーカーが不正です')
+  }
+}
+
 /**
  * Fail closed before an external model request unless the caller is exactly in
  * the configured synthetic workspace and its marker has the expected contract.
@@ -313,17 +336,5 @@ export function assertSyntheticWorkspaceBoundary(cfg: AgentConfig, currentWorksp
     throw new Error('合成ワークスペースのディレクトリ junction／シンボリックリンクは利用できません')
   }
 
-  const marker = path.join(configuredReal, SYNTHETIC_WORKSPACE_MARKER)
-  let markerStat: fs.Stats
-  try { markerStat = fs.lstatSync(marker) } catch { throw new Error('合成ワークスペースの確認マーカーがありません') }
-  if (!markerStat.isFile() || markerStat.isSymbolicLink()) throw new Error('合成ワークスペースの確認マーカーが不正です')
-  let parsed: unknown
-  try { parsed = JSON.parse(fs.readFileSync(marker, 'utf8')) as unknown } catch { throw new Error('合成ワークスペースの確認マーカーを読めません') }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('合成ワークスペースの確認マーカーが不正です')
-  const record = parsed as Record<string, unknown>
-  const expectedKeys = Object.keys(SYNTHETIC_WORKSPACE_MARKER_EXPECTED)
-  const keys = Object.keys(record)
-  if (keys.length !== expectedKeys.length || expectedKeys.some((key) => !Object.prototype.hasOwnProperty.call(record, key) || record[key] !== SYNTHETIC_WORKSPACE_MARKER_EXPECTED[key as keyof typeof SYNTHETIC_WORKSPACE_MARKER_EXPECTED])) {
-    throw new Error('合成ワークスペースの確認マーカーが不正です')
-  }
+  assertSyntheticWorkspaceMarker(configuredReal)
 }

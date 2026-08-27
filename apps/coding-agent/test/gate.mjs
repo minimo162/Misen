@@ -25,6 +25,7 @@ const stages = [
   { name: 'typecheck', ...typecheckCommand },
   { name: 'build', command: nodeCommand, args: ['esbuild.config.mjs'] },
   { name: 'smoke', command: nodeCommand, args: ['dist/smoke.js'], requiresBuild: true },
+  { name: 'benchmark', command: nodeCommand, args: ['dist/benchmark-test.js'], requiresBuild: true },
   { name: 'flex-validate', command: nodeCommand, args: ['dist/flex-harness.js'], requiresBuild: true },
   {
     name: 'live-converter',

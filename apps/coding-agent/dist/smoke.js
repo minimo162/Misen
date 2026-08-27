@@ -6357,6 +6357,11 @@ var AuditLog = class {
   csv(limit = DEFAULT_MAX_RECORDS, filters = {}) {
     return auditRecordsToCsv(this.records(limit, filters));
   }
+  close() {
+    if (this.appendHandle !== null) import_node_fs.default.closeSync(this.appendHandle);
+    this.appendHandle = null;
+    this.initialized = false;
+  }
 };
 function auditAvailability(log, initError) {
   if (log?.healthy && !initError) return { available: true, detail: null };
@@ -6525,6 +6530,39 @@ function resolveSyntheticWorkspace(cfg) {
   const base = cfg.configPath ? import_node_path2.default.dirname(import_node_path2.default.resolve(cfg.configPath)) : process.cwd();
   return import_node_path2.default.resolve(base, configured);
 }
+function assertSyntheticWorkspaceMarker(currentWorkspace) {
+  const current = import_node_path2.default.resolve(currentWorkspace);
+  let currentStat;
+  try {
+    currentStat = import_node_fs2.default.lstatSync(current);
+  } catch {
+    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u3092\u5B89\u5168\u306B\u78BA\u8A8D\u3067\u304D\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F");
+  }
+  if (!currentStat.isDirectory() || currentStat.isSymbolicLink()) {
+    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u30C7\u30A3\u30EC\u30AF\u30C8\u30EA junction\uFF0F\u30B7\u30F3\u30DC\u30EA\u30C3\u30AF\u30EA\u30F3\u30AF\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093");
+  }
+  const marker24 = import_node_path2.default.join(current, SYNTHETIC_WORKSPACE_MARKER);
+  let markerStat;
+  try {
+    markerStat = import_node_fs2.default.lstatSync(marker24);
+  } catch {
+    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u304C\u3042\u308A\u307E\u305B\u3093");
+  }
+  if (!markerStat.isFile() || markerStat.isSymbolicLink()) throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u304C\u4E0D\u6B63\u3067\u3059");
+  let parsed;
+  try {
+    parsed = JSON.parse(import_node_fs2.default.readFileSync(marker24, "utf8"));
+  } catch {
+    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u3092\u8AAD\u3081\u307E\u305B\u3093");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u304C\u4E0D\u6B63\u3067\u3059");
+  const record2 = parsed;
+  const expectedKeys = Object.keys(SYNTHETIC_WORKSPACE_MARKER_EXPECTED);
+  const keys = Object.keys(record2);
+  if (keys.length !== expectedKeys.length || expectedKeys.some((key) => !Object.prototype.hasOwnProperty.call(record2, key) || record2[key] !== SYNTHETIC_WORKSPACE_MARKER_EXPECTED[key])) {
+    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u304C\u4E0D\u6B63\u3067\u3059");
+  }
+}
 function assertSyntheticWorkspaceBoundary(cfg, currentWorkspace) {
   if (cfg.provider !== "external-openai") return;
   if (cfg.externalProvider?.enabled !== true) throw new Error("\u5916\u90E8AI\u306F\u660E\u793A\u7684\u306B\u6709\u52B9\u5316\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
@@ -6553,27 +6591,7 @@ function assertSyntheticWorkspaceBoundary(cfg, currentWorkspace) {
   if (!configuredStat.isDirectory() || configuredStat.isSymbolicLink() || !currentStat.isDirectory() || currentStat.isSymbolicLink()) {
     throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u30C7\u30A3\u30EC\u30AF\u30C8\u30EA junction\uFF0F\u30B7\u30F3\u30DC\u30EA\u30C3\u30AF\u30EA\u30F3\u30AF\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093");
   }
-  const marker24 = import_node_path2.default.join(configuredReal, SYNTHETIC_WORKSPACE_MARKER);
-  let markerStat;
-  try {
-    markerStat = import_node_fs2.default.lstatSync(marker24);
-  } catch {
-    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u304C\u3042\u308A\u307E\u305B\u3093");
-  }
-  if (!markerStat.isFile() || markerStat.isSymbolicLink()) throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u304C\u4E0D\u6B63\u3067\u3059");
-  let parsed;
-  try {
-    parsed = JSON.parse(import_node_fs2.default.readFileSync(marker24, "utf8"));
-  } catch {
-    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u3092\u8AAD\u3081\u307E\u305B\u3093");
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u304C\u4E0D\u6B63\u3067\u3059");
-  const record2 = parsed;
-  const expectedKeys = Object.keys(SYNTHETIC_WORKSPACE_MARKER_EXPECTED);
-  const keys = Object.keys(record2);
-  if (keys.length !== expectedKeys.length || expectedKeys.some((key) => !Object.prototype.hasOwnProperty.call(record2, key) || record2[key] !== SYNTHETIC_WORKSPACE_MARKER_EXPECTED[key])) {
-    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u304C\u4E0D\u6B63\u3067\u3059");
-  }
+  assertSyntheticWorkspaceMarker(configuredReal);
 }
 
 // src/llm.ts
@@ -40661,6 +40679,17 @@ function providerOptionsFor(cfg) {
   if (cfg.provider !== "ollama" || cfg.reasoningEffort === void 0) return void 0;
   return { ollama: { reasoningEffort: cfg.reasoningEffort } };
 }
+function modelUsageMetadata(usage) {
+  return {
+    usage: {
+      inputTokens: typeof usage.inputTokens === "number" ? usage.inputTokens : null,
+      outputTokens: typeof usage.outputTokens === "number" ? usage.outputTokens : null,
+      totalTokens: typeof usage.totalTokens === "number" ? usage.totalTokens : null,
+      reasoningTokens: typeof usage.outputTokenDetails?.reasoningTokens === "number" ? usage.outputTokenDetails.reasoningTokens : null,
+      cachedInputTokens: typeof usage.inputTokenDetails?.cacheReadTokens === "number" ? usage.inputTokenDetails.cacheReadTokens : null
+    }
+  };
+}
 function toModelMessages(messages) {
   const converted = [];
   for (const message of messages) {
@@ -40734,8 +40763,22 @@ function enforceExternalProviderSafety(cfg, suppliedCtx) {
   if (suppliedCtx.safeCommandOnly === false) throw new Error("provider=external-openai \u306E ToolContext \u306F\u5B89\u5168\u306A\u30B3\u30DE\u30F3\u30C9\u5236\u9650\u304C\u5FC5\u9808\u3067\u3059");
   return { ...suppliedCtx, restrictToWorkspace: true, safeCommandOnly: true };
 }
-function assertExternalBoundaryBeforeRequest(cfg, ctx) {
-  if (cfg.provider === "external-openai") assertSyntheticWorkspaceBoundary(cfg, ctx.workspace);
+function assertExternalBoundaryBeforeRequest(cfg, ctx, io) {
+  if (cfg.provider !== "external-openai") return;
+  try {
+    assertSyntheticWorkspaceBoundary(cfg, ctx.workspace);
+  } catch (error51) {
+    const message = error51.message || String(error51);
+    io.event?.({
+      type: "run.warning",
+      error: message,
+      metadata: { safetyBoundary: "external-synthetic-workspace" },
+      origin: "orchestrator",
+      namespace: "none",
+      authority: "authoritative"
+    });
+    throw error51;
+  }
 }
 async function executeV2ToolCall(call, def, cfg, ctx, io, beforeHooks) {
   if (!call.input || typeof call.input !== "object" || Array.isArray(call.input)) {
@@ -40862,7 +40905,7 @@ ${effectiveSummary}`, binding);
 async function runAgentTurnV2(opts) {
   const { cfg, io } = opts;
   const ctx = enforceExternalProviderSafety(cfg, opts.ctx);
-  assertSyntheticWorkspaceBoundary(cfg, ctx.workspace);
+  assertExternalBoundaryBeforeRequest(cfg, ctx, io);
   if (cfg.provider === "external-openai") {
     if (Object.prototype.hasOwnProperty.call(cfg, "apiKey")) throw new Error("provider=external-openai \u306F plaintext apiKey \u3092\u53D7\u3051\u4ED8\u3051\u307E\u305B\u3093");
     if (!cfg.apiKeyEnv || !process.env[cfg.apiKeyEnv]) throw new Error("provider=external-openai \u306E\u79D8\u5BC6\u60C5\u5831\u304C\u74B0\u5883\u5909\u6570\u306B\u3042\u308A\u307E\u305B\u3093");
@@ -40882,7 +40925,7 @@ async function runAgentTurnV2(opts) {
   if (mode !== "work") {
     try {
       emitModelWait(io, cfg);
-      assertExternalBoundaryBeforeRequest(cfg, ctx);
+      assertExternalBoundaryBeforeRequest(cfg, ctx, io);
       const result = await generateText({
         model,
         messages: modelMessages,
@@ -40892,7 +40935,7 @@ async function runAgentTurnV2(opts) {
         maxRetries: 0,
         abortSignal: io.signal
       });
-      io.event?.({ type: "model.decision", summary: "\u30E2\u30C7\u30EB\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: modelEventOrigin(cfg), namespace: "none", authority: "claimed" });
+      io.event?.({ type: "model.decision", summary: "\u30E2\u30C7\u30EB\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", metadata: modelUsageMetadata(result.usage), origin: modelEventOrigin(cfg), namespace: "none", authority: "claimed" });
       messages.push({ role: "assistant", content: result.text });
       if (mode === "research") {
         const research = buildResearchBundle(opts.userInput, result.text);
@@ -40920,7 +40963,7 @@ async function runAgentTurnV2(opts) {
     let result;
     try {
       emitModelWait(io, cfg);
-      assertExternalBoundaryBeforeRequest(cfg, ctx);
+      assertExternalBoundaryBeforeRequest(cfg, ctx, io);
       result = await generateText({
         model,
         messages: modelMessages,
@@ -40935,7 +40978,7 @@ async function runAgentTurnV2(opts) {
       io.print(`[error] ${err.message}`);
       return { reply: "", messages, aborted: true };
     }
-    io.event?.({ type: "model.decision", summary: "\u30E2\u30C7\u30EB\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: modelEventOrigin(cfg), namespace: "none", authority: "claimed" });
+    io.event?.({ type: "model.decision", summary: "\u30E2\u30C7\u30EB\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", metadata: modelUsageMetadata(result.usage), origin: modelEventOrigin(cfg), namespace: "none", authority: "claimed" });
     modelMessages.push(...result.response.messages);
     const calls = result.toolCalls;
     const legacyCalls = calls.map((call2) => ({ id: call2.toolCallId, type: "function", function: { name: qualifiedToolName(call2.toolName), arguments: JSON.stringify(call2.input) } }));
