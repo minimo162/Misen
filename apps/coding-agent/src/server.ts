@@ -33,6 +33,16 @@ const indexCandidates = [
   path.join(process.cwd(), 'public', 'index.html')
 ]
 const indexHtmlPath = indexCandidates.find((p): p is string => typeof p === 'string' && fs.existsSync(p))
+const classicCandidates = [
+  process.env.CLASSIC_HTML,
+  path.join(here, '..', 'public', 'classic.html'),
+  path.join(process.cwd(), 'public', 'classic.html')
+]
+const classicHtmlPath = classicCandidates.find((p): p is string => typeof p === 'string' && fs.existsSync(p))
+const uiAssets: Record<string, { path: string; contentType: string }> = {
+  '/assets/ui.js': { path: path.join(here, 'ui.js'), contentType: 'text/javascript; charset=utf-8' },
+  '/assets/ui.css': { path: path.join(here, 'ui.css'), contentType: 'text/css; charset=utf-8' }
+}
 const distributionStatePath = path.join(process.env.LOCALAPPDATA ?? path.dirname(here), 'CompanyApps', 'state', 'coding-agent.json')
 const persistencePath = path.join(process.env.APPDATA ?? process.env.LOCALAPPDATA ?? path.dirname(here), 'CompanyApps', 'coding-agent', 'state.json')
 
@@ -773,6 +783,29 @@ const server = http.createServer(async (req, res) => {
     } else {
       res.writeHead(500)
       res.end('public/index.html が見つかりません')
+    }
+    return
+  }
+
+  if (req.method === 'GET' && url.pathname === '/classic') {
+    if (classicHtmlPath) {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(fs.readFileSync(classicHtmlPath))
+    } else {
+      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+      res.end('classic UI not found')
+    }
+    return
+  }
+
+  const uiAsset = uiAssets[url.pathname]
+  if (req.method === 'GET' && uiAsset) {
+    if (fs.existsSync(uiAsset.path)) {
+      res.writeHead(200, { 'content-type': uiAsset.contentType, 'cache-control': 'no-cache' })
+      res.end(fs.readFileSync(uiAsset.path))
+    } else {
+      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+      res.end('UI asset not found')
     }
     return
   }

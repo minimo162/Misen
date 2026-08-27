@@ -28,6 +28,14 @@ npm run gate -- --live-copilot http://127.0.0.1:3951 .tmp/flex-copilot-performan
 
 機械可読な全段の結果は、実行のたびに `.tmp/gate-result.json` へUTF-8のJSONとして保存されます。
 
+## 日本語アシスタント UI
+
+既定の `http://127.0.0.1:3948/` は、assistant-ui のスレッド／コンポーザー部品を使った日本語画面です。既存の `/api/sessions`、`/api/session`、`/api/turn`、実行状態、AgentEvent の進捗、承認 API を表示用に接続し、一覧・読み取り・検索・新規作成・ファイルを開くという5つの依頼例をそのまま選べます。進捗は利用者向けの短い日本語に変換され、内部namespace、プロンプト、JSON、raw logは表示しません。
+
+この画面は presentation-only です。assistant-ui の `ExternalStoreRuntime` は会話の表示と入力送信だけに使い、クライアント側のツール実行・承認コールバックは登録しません。実行時の検証、before hook、権限、既存の承認 API と再確認、`ToolDef.run` のワークスペース／safeCommandOnly ガードは従来どおりサーバーだけが担当します。許可カードの「許可」「拒否」は既存 `/api/approvals/resolve` へ送られます。
+
+変更前の画面は `/classic` から引き続き利用できます。サイドバーとヘッダーの「従来画面」リンク、JavaScript無効時の案内から移動できます。`classic.html` は旧 `index.html` の完全なコピーとして保持し、旧UIの実行確認を smoke テストで行います。
+
 ## ループv2（実験的）
 
 Vercel AI SDKを使うループv2は並行実装です。既定の `agentLoop` は引き続き `"v1"` で、v1/v2の全ゲートが同等以上になったことを確認してから切替を別途判断します。v2でも既存ホストツールの引数検証、実行前フック、承認、コマンド／ファイルガードを順番に通り、各実行上限とno-progress停止を適用します。
@@ -123,6 +131,6 @@ For the optional OpenAI-compatible wrapper and tested OpenCode setup, see `READM
 
 Operating rules: use one clear request at a time; inspect before editing; approve writes and application opens deliberately; keep requested paths inside the selected workspace; treat missing files as a question rather than a reason to guess. Allowed document-open forms are restricted to an existing, regular, non-link workspace document or media file (`Invoke-Item`, `Start-Process`, or `excel.exe` for `.xlsx`); executable/script/shortcut/URL files and reparse points are denied. Flex configuration sets `safeCommandOnly`, so other shell input and network-backed host tools are removed from the model contract and rejected again at execution. Deletion, network, registry mutation, encoded PowerShell, shell metacharacters, and workspace escape are denied.
 
-The web UI starts in the projection-friendly demo view. It shows the user request, a collapsed Japanese activity line, the final answer, and links for artifacts; internal events, raw logs, run IDs, diffs, and verification evidence remain hidden. Use the `診断ビュー` toggle when developing or troubleshooting. Failed and older sessions are collapsed under `過去の実行` by default.
+The default web UI starts in the Japanese assistant view described above. The unchanged projection-friendly classic view is available at `/classic`; it shows the user request, a collapsed Japanese activity line, the final answer, and links for artifacts. Internal events, raw logs, run IDs, diffs, and verification evidence remain hidden from the classic demo view unless its existing `診断ビュー` toggle is used. Failed and older sessions are collapsed under `過去の実行` by default.
 
 Company-PC remaining checks: first run layer 1 alone; confirm the Copilot account/session, rendered Edge send control, corporate endpoint behavior, and a real document-open approval. Only when enabling the optional insurance layer, check Release access and antivirus treatment of the downloaded single binary. If startup shows error `0xC0E90002`, check Code Integrity events 3033/3077; do not call it file corruption until the complete-file SHA-256 has also failed. Those are manual checks and are not asserted by the local smoke suite.

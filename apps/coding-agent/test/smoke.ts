@@ -2020,11 +2020,36 @@ async function testLocalResponseConverter(): Promise<void> {
 
 async function testUiContract(): Promise<void> {
   const html = fs.readFileSync(path.join(process.cwd(), 'public', 'index.html'), 'utf8')
-  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1]
-  assert.ok(script, 'UI script missing')
+  const classic = fs.readFileSync(path.join(process.cwd(), 'public', 'classic.html'), 'utf8')
+  const script = classic.match(/<script>([\s\S]*?)<\/script>/)?.[1]
+  assert.ok(script, 'classic UI script missing')
   new Function(script)
-  for (const required of ['run-plan', 'run-eyebrow', 'run-pause', 'run-resume', 'run-retry', 'run-complete', '回答完了', 'activity-details', '実際の差分を表示', '差分の続き', 'preview-frame', 'verification-list', '診断JSON', 'approval-meta', 'parentRunId', '/api/runs/', '/api/changes/', 'compositionstart', 'aria-live', 'mode-select', 'このPCで実行', 'Copilot内で観測', '@media (max-width: 720px)', 'demo-view', 'diagnostic-view', 'view-toggle', 'artifacts-panel', '過去の実行', 'friendlyToolName', '入力の反映に失敗したため、自動でやり直しています。']) assert.ok(html.includes(required), `UI contract missing: ${required}`)
-  console.log('PASS ui-contract')
+  // The complete pre-change UI remains executable at /classic. Keep these
+  // assertions unchanged so the fallback cannot silently become a placeholder.
+  for (const required of ['run-plan', 'run-eyebrow', 'run-pause', 'run-resume', 'run-retry', 'run-complete', '回答完了', 'activity-details', '実際の差分を表示', '差分の続き', 'preview-frame', 'verification-list', '診断JSON', 'approval-meta', 'parentRunId', '/api/runs/', '/api/changes/', 'compositionstart', 'aria-live', 'mode-select', 'このPCで実行', 'Copilot内で観測', '@media (max-width: 720px)', 'demo-view', 'diagnostic-view', 'view-toggle', 'artifacts-panel', '過去の実行', 'friendlyToolName', '入力の反映に失敗したため、自動でやり直しています。']) assert.ok(classic.includes(required), `classic UI contract missing: ${required}`)
+
+  const frontend = fs.readFileSync(path.join(process.cwd(), 'src', 'ui', 'main.ts'), 'utf8')
+  const styles = fs.readFileSync(path.join(process.cwd(), 'src', 'ui', 'styles.css'), 'utf8')
+  for (const required of ['lang="ja"', 'id="app"', '/assets/ui.js', '/assets/ui.css', '/classic']) assert.ok(html.includes(required), `default shell contract missing: ${required}`)
+  for (const required of ['AssistantRuntimeProvider', 'useExternalStoreRuntime', 'useAui', 'aui.composer.setText', 'ThreadPrimitive', 'ComposerPrimitive', 'MessagePrimitive', 'approval-allow', 'approval-deny', 'approval-target', 'approval.binding?.path', 'approval.binding?.command', 'approval.question', '対象パス:', '実行内容:', '確認内容:', 'progress-panel', '/api/turn', '/api/approvals/resolve', 'list', 'read', 'search', 'write', 'open', '安全上限により停止しました']) assert.ok(frontend.includes(required), `default UI contract missing: ${required}`)
+  for (const required of ['@media (max-width: 1100px)', '@media (max-width: 860px)', '@media (max-width: 640px)', 'prefers-reduced-motion', ':focus-visible']) assert.ok(styles.includes(required), `responsive/accessibility contract missing: ${required}`)
+  const desktopGrid = styles.slice(styles.indexOf('@media (max-width: 1100px)'), styles.indexOf('@media (max-width: 860px)'))
+  assert.ok(desktopGrid.includes('.task-paths { grid-template-columns: repeat(3, minmax(0, 1fr)); }'), '984px desktop task cards must use a three-column content grid')
+  const mobileGrid = styles.slice(styles.indexOf('@media (max-width: 640px)'))
+  assert.ok(mobileGrid.includes('.task-paths { grid-template-columns: repeat(2, minmax(0, 1fr)); }') && mobileGrid.includes('.task-path:last-child { grid-column: auto; }'), '640px mobile task cards must use a two-column grid without spanning')
+  assert.ok(!/\buseChat\b/u.test(frontend), 'presentation UI must not use AI SDK useChat transport')
+  assert.ok(!/\bexecute\s*:/u.test(frontend), 'presentation UI must not register an execution callback')
+  assert.ok(!/tools\s*:\s*\{[^}]*execute/u.test(frontend), 'presentation UI must not attach tool execution callbacks')
+  assert.ok(!frontend.includes('run.currentStep'), 'default RunSummary must not interpolate raw currentStep')
+  assert.ok(frontend.includes("run.status === 'paused'") && frontend.includes("onAction('resume')"), 'paused runs must expose resume')
+  assert.ok(!frontend.includes("run.status === 'failed' || run.status === 'canceled' || run.status === 'paused'"), 'paused runs must not expose retry')
+  assert.ok(!/\.value\s*=/u.test(frontend), 'suggestions must use assistant-ui composer state, not DOM value assignment')
+  assert.ok(!/dispatchEvent\(new Event\(['"]input['"]/u.test(frontend), 'suggestions must not synthesize DOM input events')
+
+  const server = fs.readFileSync(path.join(process.cwd(), 'src', 'server.ts'), 'utf8')
+  for (const required of ["url.pathname === '/classic'", "'/assets/ui.js'", "'/assets/ui.css'", 'classicHtmlPath', 'uiAssets']) assert.ok(server.includes(required), `static route contract missing: ${required}`)
+  assert.ok(server.indexOf("url.pathname === '/classic'") < server.indexOf("url.pathname === '/api/info'"), '/classic must be handled before API routes')
+  console.log('PASS ui-contract (default + classic + presentation-only)')
 }
 
 async function testOpenAICompatibleBridge(): Promise<void> {

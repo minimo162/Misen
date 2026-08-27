@@ -43839,11 +43839,32 @@ async function testLocalResponseConverter() {
 }
 async function testUiContract() {
   const html = import_node_fs3.default.readFileSync(import_node_path5.default.join(process.cwd(), "public", "index.html"), "utf8");
-  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
-  import_node_assert.default.ok(script, "UI script missing");
+  const classic = import_node_fs3.default.readFileSync(import_node_path5.default.join(process.cwd(), "public", "classic.html"), "utf8");
+  const script = classic.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+  import_node_assert.default.ok(script, "classic UI script missing");
   new Function(script);
-  for (const required2 of ["run-plan", "run-eyebrow", "run-pause", "run-resume", "run-retry", "run-complete", "\u56DE\u7B54\u5B8C\u4E86", "activity-details", "\u5B9F\u969B\u306E\u5DEE\u5206\u3092\u8868\u793A", "\u5DEE\u5206\u306E\u7D9A\u304D", "preview-frame", "verification-list", "\u8A3A\u65ADJSON", "approval-meta", "parentRunId", "/api/runs/", "/api/changes/", "compositionstart", "aria-live", "mode-select", "\u3053\u306EPC\u3067\u5B9F\u884C", "Copilot\u5185\u3067\u89B3\u6E2C", "@media (max-width: 720px)", "demo-view", "diagnostic-view", "view-toggle", "artifacts-panel", "\u904E\u53BB\u306E\u5B9F\u884C", "friendlyToolName", "\u5165\u529B\u306E\u53CD\u6620\u306B\u5931\u6557\u3057\u305F\u305F\u3081\u3001\u81EA\u52D5\u3067\u3084\u308A\u76F4\u3057\u3066\u3044\u307E\u3059\u3002"]) import_node_assert.default.ok(html.includes(required2), `UI contract missing: ${required2}`);
-  console.log("PASS ui-contract");
+  for (const required2 of ["run-plan", "run-eyebrow", "run-pause", "run-resume", "run-retry", "run-complete", "\u56DE\u7B54\u5B8C\u4E86", "activity-details", "\u5B9F\u969B\u306E\u5DEE\u5206\u3092\u8868\u793A", "\u5DEE\u5206\u306E\u7D9A\u304D", "preview-frame", "verification-list", "\u8A3A\u65ADJSON", "approval-meta", "parentRunId", "/api/runs/", "/api/changes/", "compositionstart", "aria-live", "mode-select", "\u3053\u306EPC\u3067\u5B9F\u884C", "Copilot\u5185\u3067\u89B3\u6E2C", "@media (max-width: 720px)", "demo-view", "diagnostic-view", "view-toggle", "artifacts-panel", "\u904E\u53BB\u306E\u5B9F\u884C", "friendlyToolName", "\u5165\u529B\u306E\u53CD\u6620\u306B\u5931\u6557\u3057\u305F\u305F\u3081\u3001\u81EA\u52D5\u3067\u3084\u308A\u76F4\u3057\u3066\u3044\u307E\u3059\u3002"]) import_node_assert.default.ok(classic.includes(required2), `classic UI contract missing: ${required2}`);
+  const frontend = import_node_fs3.default.readFileSync(import_node_path5.default.join(process.cwd(), "src", "ui", "main.ts"), "utf8");
+  const styles = import_node_fs3.default.readFileSync(import_node_path5.default.join(process.cwd(), "src", "ui", "styles.css"), "utf8");
+  for (const required2 of ['lang="ja"', 'id="app"', "/assets/ui.js", "/assets/ui.css", "/classic"]) import_node_assert.default.ok(html.includes(required2), `default shell contract missing: ${required2}`);
+  for (const required2 of ["AssistantRuntimeProvider", "useExternalStoreRuntime", "useAui", "aui.composer.setText", "ThreadPrimitive", "ComposerPrimitive", "MessagePrimitive", "approval-allow", "approval-deny", "approval-target", "approval.binding?.path", "approval.binding?.command", "approval.question", "\u5BFE\u8C61\u30D1\u30B9:", "\u5B9F\u884C\u5185\u5BB9:", "\u78BA\u8A8D\u5185\u5BB9:", "progress-panel", "/api/turn", "/api/approvals/resolve", "list", "read", "search", "write", "open", "\u5B89\u5168\u4E0A\u9650\u306B\u3088\u308A\u505C\u6B62\u3057\u307E\u3057\u305F"]) import_node_assert.default.ok(frontend.includes(required2), `default UI contract missing: ${required2}`);
+  for (const required2 of ["@media (max-width: 1100px)", "@media (max-width: 860px)", "@media (max-width: 640px)", "prefers-reduced-motion", ":focus-visible"]) import_node_assert.default.ok(styles.includes(required2), `responsive/accessibility contract missing: ${required2}`);
+  const desktopGrid = styles.slice(styles.indexOf("@media (max-width: 1100px)"), styles.indexOf("@media (max-width: 860px)"));
+  import_node_assert.default.ok(desktopGrid.includes(".task-paths { grid-template-columns: repeat(3, minmax(0, 1fr)); }"), "984px desktop task cards must use a three-column content grid");
+  const mobileGrid = styles.slice(styles.indexOf("@media (max-width: 640px)"));
+  import_node_assert.default.ok(mobileGrid.includes(".task-paths { grid-template-columns: repeat(2, minmax(0, 1fr)); }") && mobileGrid.includes(".task-path:last-child { grid-column: auto; }"), "640px mobile task cards must use a two-column grid without spanning");
+  import_node_assert.default.ok(!/\buseChat\b/u.test(frontend), "presentation UI must not use AI SDK useChat transport");
+  import_node_assert.default.ok(!/\bexecute\s*:/u.test(frontend), "presentation UI must not register an execution callback");
+  import_node_assert.default.ok(!/tools\s*:\s*\{[^}]*execute/u.test(frontend), "presentation UI must not attach tool execution callbacks");
+  import_node_assert.default.ok(!frontend.includes("run.currentStep"), "default RunSummary must not interpolate raw currentStep");
+  import_node_assert.default.ok(frontend.includes("run.status === 'paused'") && frontend.includes("onAction('resume')"), "paused runs must expose resume");
+  import_node_assert.default.ok(!frontend.includes("run.status === 'failed' || run.status === 'canceled' || run.status === 'paused'"), "paused runs must not expose retry");
+  import_node_assert.default.ok(!/\.value\s*=/u.test(frontend), "suggestions must use assistant-ui composer state, not DOM value assignment");
+  import_node_assert.default.ok(!/dispatchEvent\(new Event\(['"]input['"]/u.test(frontend), "suggestions must not synthesize DOM input events");
+  const server = import_node_fs3.default.readFileSync(import_node_path5.default.join(process.cwd(), "src", "server.ts"), "utf8");
+  for (const required2 of ["url.pathname === '/classic'", "'/assets/ui.js'", "'/assets/ui.css'", "classicHtmlPath", "uiAssets"]) import_node_assert.default.ok(server.includes(required2), `static route contract missing: ${required2}`);
+  import_node_assert.default.ok(server.indexOf("url.pathname === '/classic'") < server.indexOf("url.pathname === '/api/info'"), "/classic must be handled before API routes");
+  console.log("PASS ui-contract (default + classic + presentation-only)");
 }
 async function testOpenAICompatibleBridge() {
   const token = "bridge-smoke-token-1234";
