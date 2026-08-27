@@ -88,7 +88,7 @@ Update-Ledger の一行目は少なくとも次のキーを含む JSON です。
 1. **ローカル起動** — PowerShell の通常ターミナルで、リポジトリの実ファイルを直接起動します。
 
    ```powershell
-   Set-Location C:\Users\yuuki\company-apps-share\apps\coding-agent
+   Set-Location C:\Users\yuuki\Misen\apps\coding-agent
    node dist/server.js --config ..\..\demo\renketsu-demo\config.demo.json --workspace ..\..\demo\renketsu-demo\workspace
    ```
 
@@ -97,18 +97,18 @@ Update-Ledger の一行目は少なくとも次のキーを含む JSON です。
 2. **xlsx の確認** — workspace ルートで、対象ファイルごとに次を実行し、出力を人が読みます。
 
    ```powershell
-   Set-Location C:\Users\yuuki\company-apps-share\demo\renketsu-demo\workspace
+   Set-Location C:\Users\yuuki\Misen\demo\renketsu-demo\workspace
    powershell.exe -NoProfile -File tools\Read-Xlsx.ps1 -Path reports\<報告ファイル>.xlsx
    ```
 
 3. **OSキャプチャが使えない場合の手動録画待ち** — 録画ソフト側で次の保存先を指定して待機し、別の通常PowerShellから実行します。スクリプトはfresh sessionを作成し、copilot-edgeが所有する正確なEdge PIDへ表示を切り替え、画面DOMのセッション識別子と入力欄を検証します。`MANUAL CAPTURE READY session=<ID> edgePid=<PID>`が表示されるまでは録画を始めません。表示後に録画を開始してEnter、最後の停止案内で録画を停止してEnterを押します。実行中に表示回答要素が1件も増えなければテイクは失敗します。
 
    ```powershell
-   Set-Location C:\Users\yuuki\company-apps-share
+   Set-Location C:\Users\yuuki\Misen
    powershell.exe -NoProfile -File demo\renketsu-demo\Record-Demo.ps1 `
      -NoCapture `
      -OutputPath demo\renketsu-demo\recordings\manual-take.mp4 `
-     -RepoRoot C:\Users\yuuki\company-apps-share
+     -RepoRoot C:\Users\yuuki\Misen
    ```
 
    `ok:true`は、表示セッション一致、表示回答要素の増加、指定動画の存在・非空、抽出値の真値一致、Update-Ledgerの合計・件数一致をすべて確認できた場合だけ返します。JSONの `visibleSessionVerified:true`、`visibleActivityVerified:true`、`sessionId`、`displayEdgePid` も保存します。
@@ -127,7 +127,7 @@ Update-Ledger の一行目は少なくとも次のキーを含む JSON です。
 4. **抽出 fixture の緊急コピー** — Copilot の初回拒否または接続断で、かつ人が fixture の出所・日付を確認できる場合だけ、次のように workspace 内へコピーします。これは scripted insurance であり、LLM が抽出した結果とは表示しません。
 
    ```powershell
-   Set-Location C:\Users\yuuki\company-apps-share\demo\renketsu-demo\workspace
+   Set-Location C:\Users\yuuki\Misen\demo\renketsu-demo\workspace
    New-Item -ItemType Directory -Force work | Out-Null
    Copy-Item ..\validation\extracted.correct.json work\extracted.json
    Get-Content work\extracted.json -Raw | ConvertFrom-Json | Out-Null

@@ -6,24 +6,24 @@
 
 ```cmd
 cd C:\任意の作業フォルダー
-git clone https://github.com/minimo162/company-apps-share.git
-cd company-apps-share
+git clone https://github.com/minimo162/Misen.git
+cd Misen
 ```
 
-2. 共有フォルダーへ公開します。clone先の `scripts\prepare-company-apps.cmd` を実行してください。依存関係の構築、型チェック、ビルド、スモークテスト、Node.jsランタイム準備、公開をまとめて行います。`-Version` を省略すると `apps\coding-agent\manifest.json` の版数を使います。
+2. 共有フォルダーへ公開します。clone先の `scripts\prepare-misen.cmd` を実行してください。依存関係の構築、型チェック、ビルド、スモークテスト、Node.jsランタイム準備、公開をまとめて行います。`-Version` を省略すると `apps\coding-agent\manifest.json` の版数を使います。
 
 コマンドプロンプトから実行する場合:
 
 ```cmd
-scripts\prepare-company-apps.cmd "\\fileserver\CompanyApps\company-apps-share" -CleanDestination
+scripts\prepare-misen.cmd "\\fileserver\CompanyApps\Misen" -CleanDestination
 ```
 
-エクスプローラーから `scripts\prepare-company-apps.cmd` をダブルクリックすることもできます。共有フォルダーのUNCパスを入力してEnterを押してください。ダブルクリック時は `-CleanDestination` が自動で付くため、古い配布物を削除してから公開します。
+エクスプローラーから `scripts\prepare-misen.cmd` をダブルクリックすることもできます。共有フォルダーのUNCパスを入力してEnterを押してください。ダブルクリック時は `-CleanDestination` が自動で付くため、古い配布物を削除してから公開します。
 
 版数を明示する場合は、コマンドプロンプトから次のように指定できます。
 
 ```cmd
-scripts\prepare-company-apps.cmd "\\fileserver\CompanyApps\company-apps-share" -Version 0.10.8 -CleanDestination
+scripts\prepare-misen.cmd "\\fileserver\CompanyApps\Misen" -Version 0.10.8 -CleanDestination
 ```
 
 共有先には、`launcher`、`apps\coding-agent`、`runtime\node-v...\node.exe`、`start-coding-agent.cmd` だけが配置されます。利用者には共有フォルダーの読み取り権限だけを付与してください。
@@ -33,14 +33,14 @@ scripts\prepare-company-apps.cmd "\\fileserver\CompanyApps\company-apps-share" -
 clone済みの同じフォルダーで、次の操作を行います。
 
 ```cmd
-cd C:\任意の作業フォルダー\company-apps-share
+cd C:\任意の作業フォルダー\Misen
 git pull
 ```
 
-その後、`scripts\prepare-company-apps.cmd` をダブルクリックし、同じ共有フォルダーのUNCパスを入力します。コマンドプロンプトからなら次の1行です。
+その後、`scripts\prepare-misen.cmd` をダブルクリックし、同じ共有フォルダーのUNCパスを入力します。コマンドプロンプトからなら次の1行です。
 
 ```cmd
-scripts\prepare-company-apps.cmd "\\fileserver\CompanyApps\company-apps-share" -CleanDestination
+scripts\prepare-misen.cmd "\\fileserver\CompanyApps\Misen" -CleanDestination
 ```
 
 `manifest.json` の版数が共有先へ反映されるため、利用者は初回と同じ `start-coding-agent.cmd` をダブルクリックするだけで更新を取得します。
@@ -50,7 +50,7 @@ scripts\prepare-company-apps.cmd "\\fileserver\CompanyApps\company-apps-share" -
 利用者が使うファイルは、初回も更新後も同じ `start-coding-agent.cmd` です。
 
 ```text
-\\fileserver\CompanyApps\company-apps-share\start-coding-agent.cmd
+\\fileserver\CompanyApps\Misen\start-coding-agent.cmd
 ```
 
 このファイルをダブルクリックすると、毎回次の処理を行います。
@@ -75,7 +75,7 @@ coding-agentは通常、空きポートと専用Edgeプロファイルを自動�
 天気・気温の質問は、地域を設定した `weather.defaultLocation`（例: `広島市`）を使ってOpen-Meteoから取得します。既定地域を使わない場合は質問に市区町村名を含めてください。
 ## 更新
 
-管理者が新しい版を公開するときは、`manifest.json` の版数を上げてから、管理者側の `scripts\prepare-company-apps.cmd` をもう一度実行してください。同じ版数のままだと利用者は更新を取得しません。利用者は同じ `start-coding-agent.cmd` を使い続けます。
+管理者が新しい版を公開するときは、`manifest.json` の版数を上げてから、管理者側の `scripts\prepare-misen.cmd` をもう一度実行してください。同じ版数のままだと利用者は更新を取得しません。利用者は同じ `start-coding-agent.cmd` を使い続けます。
 
 ## 前提
 

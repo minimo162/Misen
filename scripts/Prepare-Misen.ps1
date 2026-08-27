@@ -79,7 +79,7 @@ if (-not (Test-Path -LiteralPath $runtimeExe -PathType Leaf)) {
 }
 if (-not (Test-Path -LiteralPath $runtimeExe -PathType Leaf)) { Fail "Node.jsランタイムを用意できません: $runtimeExe" }
 
-$publish = Join-Path $source 'scripts\New-CompanyAppsShare.ps1'
+$publish = Join-Path $source 'scripts\New-Misen.ps1'
 if (-not (Test-Path -LiteralPath $publish -PathType Leaf)) { Fail "公開スクリプトが見つかりません: $publish" }
 $publishArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $publish, '-Destination', $Destination, '-SourceRoot', $source, '-AppName', $AppName, '-Version', $Version)
 if ($CleanDestination) { $publishArgs += '-CleanDestination' }

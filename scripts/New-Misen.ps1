@@ -45,7 +45,7 @@ if ($destinationComparable.StartsWith($sourceComparable, [System.StringCompariso
     Fail '配布先をソースルートの中に置くことはできません。'
 }
 
-$stageRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('company-apps-share-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+$stageRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('misen-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 $stageApp = Join-Path $stageRoot "apps\$AppName"
 New-Item -ItemType Directory -Force -Path $stageApp -WhatIf:$false | Out-Null
 

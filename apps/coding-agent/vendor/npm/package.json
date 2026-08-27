@@ -1,5 +1,5 @@
 {
-  "name": "company-apps-share-vendored-npm",
+  "name": "misen-vendored-npm",
   "private": true,
   "dependencies": {
     "iconv-lite": "0.6.3",
