@@ -5659,6 +5659,12 @@ var import_node_path7 = __toESM(require("node:path"));
 // src/config.ts
 var import_node_fs = __toESM(require("node:fs"));
 var import_node_path = __toESM(require("node:path"));
+var SYNTHETIC_WORKSPACE_MARKER = ".company-apps-synthetic.json";
+var SYNTHETIC_WORKSPACE_MARKER_EXPECTED = Object.freeze({
+  schema: "company-apps.synthetic-workspace/v1",
+  classification: "synthetic",
+  purpose: "external-provider-validation"
+});
 var DEFAULT_CONFIG = {
   agentLoop: "v1",
   baseURL: "",
@@ -5686,7 +5692,7 @@ function isLoopbackHostname(hostname3) {
   return Number(octets[0]) === 127;
 }
 function validateProviderConfig(provider, raw, found) {
-  if (provider !== "openai" && provider !== "copilot-edge" && provider !== "ollama") {
+  if (provider !== "openai" && provider !== "copilot-edge" && provider !== "ollama" && provider !== "external-openai") {
     throw new Error(`\u30B5\u30DD\u30FC\u30C8\u3055\u308C\u3066\u3044\u306A\u3044 provider \u3067\u3059: ${String(provider)}: ${found}`);
   }
   if (provider === "openai" && (!raw.baseURL || !raw.model)) {
@@ -5702,6 +5708,29 @@ function validateProviderConfig(provider, raw, found) {
     }
     if (!["http:", "https:"].includes(parsed.protocol) || !isLoopbackHostname(parsed.hostname)) {
       throw new Error(`provider=ollama \u306E baseURL \u306F loopback URL \u3067\u306A\u3051\u308C\u3070\u306A\u308A\u307E\u305B\u3093: ${found}`);
+    }
+  }
+  if (provider === "external-openai") {
+    if (raw.agentLoop !== "v2") throw new Error(`provider=external-openai \u306B\u306F agentLoop=v2 \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
+    if (!raw.baseURL || !raw.model) throw new Error(`provider=external-openai \u306B\u306F baseURL / model \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
+    if (Object.prototype.hasOwnProperty.call(raw, "apiKey")) throw new Error(`provider=external-openai \u306F plaintext apiKey \u3092\u53D7\u3051\u4ED8\u3051\u307E\u305B\u3093: ${found}`);
+    if (raw.restrictToWorkspace === false) throw new Error(`provider=external-openai \u3067\u306F restrictToWorkspace=false \u3092\u6307\u5B9A\u3067\u304D\u307E\u305B\u3093: ${found}`);
+    if (raw.safeCommandOnly === false) throw new Error(`provider=external-openai \u3067\u306F safeCommandOnly=false \u3092\u6307\u5B9A\u3067\u304D\u307E\u305B\u3093: ${found}`);
+    if (typeof raw.apiKeyEnv !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(raw.apiKeyEnv)) throw new Error(`provider=external-openai \u306B\u306F apiKeyEnv \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
+    const external = raw.externalProvider;
+    if (!external || external.enabled !== true) throw new Error(`provider=external-openai \u306B\u306F externalProvider.enabled=true \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
+    if (typeof external.syntheticWorkspace !== "string" || !external.syntheticWorkspace.trim()) throw new Error(`provider=external-openai \u306B\u306F externalProvider.syntheticWorkspace \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
+    let parsed;
+    try {
+      parsed = new URL(raw.baseURL);
+    } catch {
+      throw new Error(`provider=external-openai \u306E baseURL \u304C\u4E0D\u6B63\u3067\u3059: ${found}`);
+    }
+    if (parsed.username || parsed.password) throw new Error(`provider=external-openai \u306E baseURL \u306B URL credentials \u306F\u6307\u5B9A\u3067\u304D\u307E\u305B\u3093: ${found}`);
+    if (parsed.protocol === "https:") {
+    } else if (parsed.protocol === "http:" && isLoopbackHostname(parsed.hostname)) {
+    } else {
+      throw new Error(`provider=external-openai \u306E baseURL \u306F HTTPS\u3001\u307E\u305F\u306F loopback HTTP \u3067\u306A\u3051\u308C\u3070\u306A\u308A\u307E\u305B\u3093: ${found}`);
     }
   }
   if (raw.reasoningEffort !== void 0 && !["high", "medium", "low", "none"].includes(raw.reasoningEffort)) {
@@ -5737,10 +5766,12 @@ function parseConfig(found) {
     ...DEFAULT_CONFIG,
     ...raw,
     provider,
+    ...provider === "external-openai" ? { restrictToWorkspace: true, safeCommandOnly: true } : {},
     permissions: permissions ?? DEFAULT_CONFIG.permissions,
     autoApprove: { ...DEFAULT_CONFIG.autoApprove, ...raw.autoApprove ?? {} },
     copilot: { ...DEFAULT_CONFIG.copilot, ...raw.copilot ?? {} },
-    localResponseConverter: { ...DEFAULT_CONFIG.localResponseConverter, ...raw.localResponseConverter ?? {} }
+    localResponseConverter: { ...DEFAULT_CONFIG.localResponseConverter, ...raw.localResponseConverter ?? {} },
+    configPath: import_node_path.default.resolve(found)
   };
 }
 function capabilityPolicy(cfg, mode = cfg.turnMode ?? "work") {
@@ -5777,6 +5808,62 @@ function loadConfig(explicitPath) {
 function resolveApiKey(cfg) {
   if (cfg.apiKey) return cfg.apiKey;
   return process.env[cfg.apiKeyEnv ?? "COMPANY_LLM_API_KEY"];
+}
+function resolveSyntheticWorkspace(cfg) {
+  const configured = cfg.externalProvider?.syntheticWorkspace;
+  if (!configured || !configured.trim()) throw new Error("externalProvider.syntheticWorkspace \u304C\u8A2D\u5B9A\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
+  const base = cfg.configPath ? import_node_path.default.dirname(import_node_path.default.resolve(cfg.configPath)) : process.cwd();
+  return import_node_path.default.resolve(base, configured);
+}
+function assertSyntheticWorkspaceBoundary(cfg, currentWorkspace) {
+  if (cfg.provider !== "external-openai") return;
+  if (cfg.externalProvider?.enabled !== true) throw new Error("\u5916\u90E8AI\u306F\u660E\u793A\u7684\u306B\u6709\u52B9\u5316\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
+  const configured = resolveSyntheticWorkspace(cfg);
+  let configuredReal;
+  let currentReal;
+  try {
+    configuredReal = import_node_fs.default.realpathSync.native(configured);
+  } catch {
+    throw new Error("\u5916\u90E8AI\u7528\u306E\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
+  }
+  try {
+    currentReal = import_node_fs.default.realpathSync.native(import_node_path.default.resolve(currentWorkspace));
+  } catch {
+    throw new Error("\u73FE\u5728\u306E\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u3092\u78BA\u8A8D\u3067\u304D\u306A\u3044\u305F\u3081\u3001\u5916\u90E8AI\u3092\u505C\u6B62\u3057\u307E\u3057\u305F");
+  }
+  if (configuredReal !== currentReal) throw new Error("\u5916\u90E8AI\u306F\u8A2D\u5B9A\u6E08\u307F\u306E\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u3067\u306E\u307F\u5229\u7528\u3067\u304D\u307E\u3059");
+  let configuredStat;
+  let currentStat;
+  try {
+    configuredStat = import_node_fs.default.lstatSync(configured);
+    currentStat = import_node_fs.default.lstatSync(import_node_path.default.resolve(currentWorkspace));
+  } catch {
+    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u3092\u5B89\u5168\u306B\u78BA\u8A8D\u3067\u304D\u306A\u3044\u305F\u3081\u3001\u5916\u90E8AI\u3092\u505C\u6B62\u3057\u307E\u3057\u305F");
+  }
+  if (!configuredStat.isDirectory() || configuredStat.isSymbolicLink() || !currentStat.isDirectory() || currentStat.isSymbolicLink()) {
+    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u30C7\u30A3\u30EC\u30AF\u30C8\u30EA junction\uFF0F\u30B7\u30F3\u30DC\u30EA\u30C3\u30AF\u30EA\u30F3\u30AF\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093");
+  }
+  const marker24 = import_node_path.default.join(configuredReal, SYNTHETIC_WORKSPACE_MARKER);
+  let markerStat;
+  try {
+    markerStat = import_node_fs.default.lstatSync(marker24);
+  } catch {
+    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u304C\u3042\u308A\u307E\u305B\u3093");
+  }
+  if (!markerStat.isFile() || markerStat.isSymbolicLink()) throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u304C\u4E0D\u6B63\u3067\u3059");
+  let parsed;
+  try {
+    parsed = JSON.parse(import_node_fs.default.readFileSync(marker24, "utf8"));
+  } catch {
+    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u3092\u8AAD\u3081\u307E\u305B\u3093");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u304C\u4E0D\u6B63\u3067\u3059");
+  const record2 = parsed;
+  const expectedKeys = Object.keys(SYNTHETIC_WORKSPACE_MARKER_EXPECTED);
+  const keys = Object.keys(record2);
+  if (keys.length !== expectedKeys.length || expectedKeys.some((key) => !Object.prototype.hasOwnProperty.call(record2, key) || record2[key] !== SYNTHETIC_WORKSPACE_MARKER_EXPECTED[key])) {
+    throw new Error("\u5408\u6210\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u78BA\u8A8D\u30DE\u30FC\u30AB\u30FC\u304C\u4E0D\u6B63\u3067\u3059");
+  }
 }
 
 // src/repl.ts
@@ -7775,6 +7862,14 @@ var END_MARKER = "AGENT_END";
 function shouldCancel(io) {
   return io.signal?.aborted === true || io.isCanceled?.() === true;
 }
+function modelEventOrigin(cfg) {
+  if (cfg.provider === "external-openai") return "external";
+  if (cfg.provider === "ollama") return "ollama";
+  return "copilot";
+}
+function emitModelWait(io, cfg) {
+  io.event?.({ type: "model.wait", summary: "AI\u304C\u6B21\u306E\u4F5C\u696D\u3092\u8003\u3048\u3066\u3044\u307E\u3059", origin: modelEventOrigin(cfg), namespace: "none", authority: "derived" });
+}
 function buildProtocolRules(mode = "work", allowArbitraryCommands = false, autoApproveCommand = false, safeCommandOnly = false) {
   const toolDocs = toolDefsForContract({ allowArbitraryCommands, safeCommandOnly }).map((t) => {
     const req = t.parameters.required ?? [];
@@ -7935,6 +8030,7 @@ async function runCopilotTurn(opts) {
     const modePrompt = buildProtocolRules(mode);
     const prompt = [cfg.systemPrompt, modePrompt, opts.userInput].filter((s) => s && s.trim()).join("\n\n");
     try {
+      emitModelWait(io, cfg);
       const text2 = (await backend.complete(prompt, io.signal)).trim();
       io.event?.({ type: "model.decision", summary: "Copilot\u306E\u56DE\u7B54\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: "copilot", namespace: "native", authority: "claimed" });
       io.event?.({ type: "plan.created", summary: mode === "research" ? "Copilot\u8ABF\u67FB\u30E2\u30FC\u30C9\u3092\u958B\u59CB\u3057\u307E\u3057\u305F" : "\u901A\u5E38\u56DE\u7B54\u30E2\u30FC\u30C9\u3092\u958B\u59CB\u3057\u307E\u3057\u305F", origin: "orchestrator", namespace: "none", authority: "derived" });
@@ -7985,6 +8081,7 @@ async function runCopilotTurn(opts) {
     let raw;
     const backendStartedAt = Date.now();
     try {
+      emitModelWait(io, cfg);
       raw = await backend.complete(composeCopilotPrompt("work", opts.userInput, steps, cfg.copilot?.maxPromptChars ?? 12e4, history, policy.allowArbitraryCommands, policy.autoApproveCommand, systemInstructions, ctx.safeCommandOnly === true), io.signal);
       raw = raw.replace(/＜/g, "<").replace(/＞/g, ">").replace(/｀/g, String.fromCharCode(96));
     } catch (err) {
@@ -8169,6 +8266,7 @@ ${summary}`, approvalBinding);
   return stopWithWarning("\u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F");
 }
 async function runAgentTurn(opts) {
+  if (opts.cfg.provider === "external-openai") throw new Error("provider=external-openai \u306F agentLoop=v2 \u5C02\u7528\u3067\u3059");
   if (opts.backend || opts.cfg.provider === "copilot-edge") {
     const backend = opts.backend;
     if (!backend) throw new Error("provider=copilot-edge \u306B\u306F backend \u304C\u5FC5\u8981\u3067\u3059");
@@ -8184,6 +8282,7 @@ async function runPlainOpenAITurn(opts) {
 \u8ABF\u67FB\u30E2\u30FC\u30C9\u3067\u3059\u3002\u5FC5\u8981\u306A\u3089\u691C\u7D22\u3092\u4F7F\u3044\u3001\u51FA\u5178URL\u3068\u53D6\u5F97\u6642\u523B\u3092\u6DFB\u3048\u3066\u304F\u3060\u3055\u3044\u3002\u30ED\u30FC\u30AB\u30EB\u30D5\u30A1\u30A4\u30EB\u5909\u66F4\u3084\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u884C\u3044\u307E\u305B\u3093\u3002` : opts.userInput;
   const messages = [...opts.messages, { role: "user", content: prompt }];
   try {
+    emitModelWait(opts.io, opts.cfg);
     const assistant = await chat(opts.cfg, messages, [], opts.io.signal);
     const reply = assistant.content ?? "";
     opts.io.event?.({ type: "model.decision", summary: "\u30E2\u30C7\u30EB\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: "copilot", namespace: "none", authority: "claimed" });
@@ -8234,6 +8333,7 @@ async function runOpenAITurn(opts) {
     if (io.isPaused?.()) return { reply: "", messages, aborted: true, paused: true };
     let assistant;
     try {
+      emitModelWait(io, cfg);
       assistant = await chat(cfg, messages, openAITools({ allowArbitraryCommands: policy.allowArbitraryCommands, safeCommandOnly: ctx.safeCommandOnly }), io.signal);
     } catch (err) {
       const msg = err.message;
@@ -40230,9 +40330,6 @@ function providerOptionsFor(cfg) {
   if (cfg.provider !== "ollama" || cfg.reasoningEffort === void 0) return void 0;
   return { ollama: { reasoningEffort: cfg.reasoningEffort } };
 }
-function modelEventOrigin(cfg) {
-  return cfg.provider === "ollama" ? "ollama" : "copilot";
-}
 function toModelMessages(messages) {
   const converted = [];
   for (const message of messages) {
@@ -40287,14 +40384,27 @@ function aiTools(cfg, ctx) {
 function configuredModel(cfg) {
   if (!cfg.baseURL || !cfg.model) throw new Error("agentLoop=v2 \u306B\u306F bridge \u306E baseURL / model \u304C\u5FC5\u8981\u3067\u3059");
   const isOllama = cfg.provider === "ollama";
-  const apiKey = isOllama ? void 0 : resolveApiKey(cfg);
+  const isExternal = cfg.provider === "external-openai";
+  if (isExternal && Object.prototype.hasOwnProperty.call(cfg, "apiKey")) throw new Error("provider=external-openai \u306F plaintext apiKey \u3092\u53D7\u3051\u4ED8\u3051\u307E\u305B\u3093");
+  const apiKey = isOllama ? void 0 : isExternal ? cfg.apiKeyEnv ? process.env[cfg.apiKeyEnv] : void 0 : resolveApiKey(cfg);
   if (!isOllama && !apiKey) throw new Error("agentLoop=v2 \u306B\u306F bridge \u306E apiKey \u307E\u305F\u306F apiKeyEnv \u304C\u5FC5\u8981\u3067\u3059");
   return createOpenAICompatible({
-    name: isOllama ? "ollama" : "copilot-openai-bridge",
+    name: isOllama ? "ollama" : isExternal ? "external-openai" : "copilot-openai-bridge",
     baseURL: cfg.baseURL.replace(/\/+$/u, ""),
     ...apiKey ? { apiKey } : {},
     ...isOllama ? { fetch: createOllamaFetch() } : {}
   }).chatModel(cfg.model);
+}
+function enforceExternalProviderSafety(cfg, suppliedCtx) {
+  if (cfg.provider !== "external-openai") return suppliedCtx;
+  if (cfg.restrictToWorkspace === false) throw new Error("provider=external-openai \u3067\u306F\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5236\u9650\u3092\u89E3\u9664\u3067\u304D\u307E\u305B\u3093");
+  if (cfg.safeCommandOnly === false) throw new Error("provider=external-openai \u3067\u306F\u5B89\u5168\u306A\u30B3\u30DE\u30F3\u30C9\u5236\u9650\u3092\u89E3\u9664\u3067\u304D\u307E\u305B\u3093");
+  if (suppliedCtx.restrictToWorkspace === false) throw new Error("provider=external-openai \u306E ToolContext \u306F\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5236\u9650\u304C\u5FC5\u9808\u3067\u3059");
+  if (suppliedCtx.safeCommandOnly === false) throw new Error("provider=external-openai \u306E ToolContext \u306F\u5B89\u5168\u306A\u30B3\u30DE\u30F3\u30C9\u5236\u9650\u304C\u5FC5\u9808\u3067\u3059");
+  return { ...suppliedCtx, restrictToWorkspace: true, safeCommandOnly: true };
+}
+function assertExternalBoundaryBeforeRequest(cfg, ctx) {
+  if (cfg.provider === "external-openai") assertSyntheticWorkspaceBoundary(cfg, ctx.workspace);
 }
 async function executeV2ToolCall(call, def, cfg, ctx, io, beforeHooks) {
   if (!call.input || typeof call.input !== "object" || Array.isArray(call.input)) {
@@ -40419,7 +40529,13 @@ ${effectiveSummary}`, binding);
   }
 }
 async function runAgentTurnV2(opts) {
-  const { cfg, ctx, io } = opts;
+  const { cfg, io } = opts;
+  const ctx = enforceExternalProviderSafety(cfg, opts.ctx);
+  assertSyntheticWorkspaceBoundary(cfg, ctx.workspace);
+  if (cfg.provider === "external-openai") {
+    if (Object.prototype.hasOwnProperty.call(cfg, "apiKey")) throw new Error("provider=external-openai \u306F plaintext apiKey \u3092\u53D7\u3051\u4ED8\u3051\u307E\u305B\u3093");
+    if (!cfg.apiKeyEnv || !process.env[cfg.apiKeyEnv]) throw new Error("provider=external-openai \u306E\u79D8\u5BC6\u60C5\u5831\u304C\u74B0\u5883\u5909\u6570\u306B\u3042\u308A\u307E\u305B\u3093");
+  }
   const mode = cfg.turnMode ?? "work";
   const policy = capabilityPolicy(cfg, mode);
   const model = opts.model ?? configuredModel(cfg);
@@ -40434,6 +40550,8 @@ async function runAgentTurnV2(opts) {
   io.event?.({ type: "plan.created", summary: mode === "work" ? "Run\u306E\u8A08\u753B\u3068\u691C\u8A3C\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F" : mode === "research" ? "\u8ABF\u67FB\u30E2\u30FC\u30C9\u3092\u958B\u59CB\u3057\u307E\u3057\u305F" : "\u901A\u5E38\u56DE\u7B54\u30E2\u30FC\u30C9\u3092\u958B\u59CB\u3057\u307E\u3057\u305F", origin: "orchestrator", namespace: "none", authority: "derived" });
   if (mode !== "work") {
     try {
+      emitModelWait(io, cfg);
+      assertExternalBoundaryBeforeRequest(cfg, ctx);
       const result = await generateText({
         model,
         messages: modelMessages,
@@ -40470,6 +40588,8 @@ async function runAgentTurnV2(opts) {
     if (io.isPaused?.()) return { reply: "", messages, aborted: true, paused: true };
     let result;
     try {
+      emitModelWait(io, cfg);
+      assertExternalBoundaryBeforeRequest(cfg, ctx);
       result = await generateText({
         model,
         messages: modelMessages,
@@ -41749,7 +41869,8 @@ async function startRepl(cfg, ctx) {
   };
   let messages = [{ role: "system", content: cfg.systemPrompt ?? DEFAULT_SYSTEM_PROMPT }];
   let copilotBackend = null;
-  console.log(`coding-agent (${cfg.model || (cfg.provider ?? "openai")}) \u2014 \u958B\u59CB\u3002/help \u3067\u30B3\u30DE\u30F3\u30C9\u3001\u7A7AEnter\u3067\u7D42\u4E86`);
+  const providerLabel = cfg.provider === "external-openai" ? "external-openai\uFF08\u5408\u6210\u30C7\u30FC\u30BF\u5C02\u7528\uFF09" : cfg.model || (cfg.provider ?? "openai");
+  console.log(`coding-agent (${providerLabel}) \u2014 \u958B\u59CB\u3002/help \u3067\u30B3\u30DE\u30F3\u30C9\u3001\u7A7AEnter\u3067\u7D42\u4E86`);
   for (; ; ) {
     const input = await nextLine("> ");
     if (input === "") break;

@@ -29,9 +29,24 @@ export interface CapabilityPolicy {
   allowArbitraryCommands: boolean
 }
 
-export type LlmProvider = 'openai' | 'copilot-edge' | 'ollama'
+export type LlmProvider = 'openai' | 'copilot-edge' | 'ollama' | 'external-openai'
 export type AgentLoop = 'v1' | 'v2'
 export type ReasoningEffort = 'high' | 'medium' | 'low' | 'none'
+
+/** Settings for the explicitly opt-in, generic external OpenAI-compatible path. */
+export interface ExternalProviderSettings {
+  enabled?: boolean
+  /** Workspace containing only invented synthetic data for external model calls. */
+  syntheticWorkspace?: string
+}
+
+/** Marker contract used at the synthetic-workspace boundary. */
+export const SYNTHETIC_WORKSPACE_MARKER = '.company-apps-synthetic.json'
+export const SYNTHETIC_WORKSPACE_MARKER_EXPECTED = Object.freeze({
+  schema: 'company-apps.synthetic-workspace/v1',
+  classification: 'synthetic',
+  purpose: 'external-provider-validation'
+})
 
 export interface CopilotSettingsPartial {
   url?: string
@@ -87,6 +102,8 @@ export interface AgentConfig {
   restrictToWorkspace?: boolean
   systemPrompt?: string
   provider?: LlmProvider
+  /** Generic external OpenAI-compatible provider; never enabled implicitly. */
+  externalProvider?: ExternalProviderSettings
   /** Optional provider-specific reasoning budget. Ollama sends this as reasoning_effort. */
   reasoningEffort?: ReasoningEffort
   copilot?: CopilotSettingsPartial
@@ -97,6 +114,8 @@ export interface AgentConfig {
   turnMode?: TurnMode
   /** Optional append-only audit directory. It must resolve outside the workspace. */
   auditLogDir?: string
+  /** Internal source config path used to resolve relative external boundaries. */
+  configPath?: string
 }
 
 const DEFAULT_CONFIG: AgentConfig = {
@@ -130,7 +149,7 @@ function isLoopbackHostname(hostname: string): boolean {
 }
 
 function validateProviderConfig(provider: unknown, raw: AgentConfig, found: string): LlmProvider {
-  if (provider !== 'openai' && provider !== 'copilot-edge' && provider !== 'ollama') {
+  if (provider !== 'openai' && provider !== 'copilot-edge' && provider !== 'ollama' && provider !== 'external-openai') {
     throw new Error(`サポートされていない provider です: ${String(provider)}: ${found}`)
   }
   if (provider === 'openai' && (!raw.baseURL || !raw.model)) {
@@ -142,6 +161,27 @@ function validateProviderConfig(provider: unknown, raw: AgentConfig, found: stri
     try { parsed = new URL(raw.baseURL) } catch { throw new Error(`provider=ollama の baseURL が不正です: ${found}`) }
     if (!['http:', 'https:'].includes(parsed.protocol) || !isLoopbackHostname(parsed.hostname)) {
       throw new Error(`provider=ollama の baseURL は loopback URL でなければなりません: ${found}`)
+    }
+  }
+  if (provider === 'external-openai') {
+    if (raw.agentLoop !== 'v2') throw new Error(`provider=external-openai には agentLoop=v2 が必要です: ${found}`)
+    if (!raw.baseURL || !raw.model) throw new Error(`provider=external-openai には baseURL / model が必要です: ${found}`)
+    if (Object.prototype.hasOwnProperty.call(raw, 'apiKey')) throw new Error(`provider=external-openai は plaintext apiKey を受け付けません: ${found}`)
+    if (raw.restrictToWorkspace === false) throw new Error(`provider=external-openai では restrictToWorkspace=false を指定できません: ${found}`)
+    if (raw.safeCommandOnly === false) throw new Error(`provider=external-openai では safeCommandOnly=false を指定できません: ${found}`)
+    if (typeof raw.apiKeyEnv !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(raw.apiKeyEnv)) throw new Error(`provider=external-openai には apiKeyEnv が必要です: ${found}`)
+    const external = raw.externalProvider
+    if (!external || external.enabled !== true) throw new Error(`provider=external-openai には externalProvider.enabled=true が必要です: ${found}`)
+    if (typeof external.syntheticWorkspace !== 'string' || !external.syntheticWorkspace.trim()) throw new Error(`provider=external-openai には externalProvider.syntheticWorkspace が必要です: ${found}`)
+    let parsed: URL
+    try { parsed = new URL(raw.baseURL) } catch { throw new Error(`provider=external-openai の baseURL が不正です: ${found}`) }
+    if (parsed.username || parsed.password) throw new Error(`provider=external-openai の baseURL に URL credentials は指定できません: ${found}`)
+    if (parsed.protocol === 'https:') {
+      // HTTPS endpoints may be remote or loopback.
+    } else if (parsed.protocol === 'http:' && isLoopbackHostname(parsed.hostname)) {
+      // Loopback HTTP is retained for deterministic local tests only.
+    } else {
+      throw new Error(`provider=external-openai の baseURL は HTTPS、または loopback HTTP でなければなりません: ${found}`)
     }
   }
   if (raw.reasoningEffort !== undefined && !['high', 'medium', 'low', 'none'].includes(raw.reasoningEffort)) {
@@ -180,10 +220,12 @@ function parseConfig(found: string): AgentConfig {
     ...DEFAULT_CONFIG,
     ...raw,
     provider,
+    ...(provider === 'external-openai' ? { restrictToWorkspace: true, safeCommandOnly: true } : {}),
     permissions: permissions ?? DEFAULT_CONFIG.permissions,
     autoApprove: { ...DEFAULT_CONFIG.autoApprove, ...(raw.autoApprove ?? {}) },
     copilot: { ...DEFAULT_CONFIG.copilot, ...(raw.copilot ?? {}) },
-    localResponseConverter: { ...DEFAULT_CONFIG.localResponseConverter, ...(raw.localResponseConverter ?? {}) }
+    localResponseConverter: { ...DEFAULT_CONFIG.localResponseConverter, ...(raw.localResponseConverter ?? {}) },
+    configPath: path.resolve(found)
   }
 }
 
@@ -223,4 +265,65 @@ export function loadConfig(explicitPath?: string): AgentConfig {
 export function resolveApiKey(cfg: AgentConfig): string | undefined {
   if (cfg.apiKey) return cfg.apiKey
   return process.env[cfg.apiKeyEnv ?? 'COMPANY_LLM_API_KEY']
+}
+
+/** Resolve the configured synthetic workspace against the source config file. */
+export function resolveSyntheticWorkspace(cfg: AgentConfig): string {
+  const configured = cfg.externalProvider?.syntheticWorkspace
+  if (!configured || !configured.trim()) throw new Error('externalProvider.syntheticWorkspace が設定されていません')
+  const base = cfg.configPath ? path.dirname(path.resolve(cfg.configPath)) : process.cwd()
+  return path.resolve(base, configured)
+}
+
+/**
+ * Fail closed before an external model request unless the caller is exactly in
+ * the configured synthetic workspace and its marker has the expected contract.
+ */
+export function assertSyntheticWorkspaceBoundary(cfg: AgentConfig, currentWorkspace: string): void {
+  if (cfg.provider !== 'external-openai') return
+  if (cfg.externalProvider?.enabled !== true) throw new Error('外部AIは明示的に有効化されていません')
+  const configured = resolveSyntheticWorkspace(cfg)
+  let configuredReal: string
+  let currentReal: string
+  try {
+    configuredReal = fs.realpathSync.native(configured)
+  } catch {
+    throw new Error('外部AI用の合成ワークスペースが見つかりません')
+  }
+  try {
+    currentReal = fs.realpathSync.native(path.resolve(currentWorkspace))
+  } catch {
+    throw new Error('現在のワークスペースを確認できないため、外部AIを停止しました')
+  }
+  if (configuredReal !== currentReal) throw new Error('外部AIは設定済みの合成ワークスペースでのみ利用できます')
+
+  // A directory junction/symlink can make the configured path resolve to a
+  // different tree while keeping configuredReal === currentReal. Reject the
+  // reparse point itself so replacing the workspace between model calls cannot
+  // redirect a later request to a newly mounted tree.
+  let configuredStat: fs.Stats
+  let currentStat: fs.Stats
+  try {
+    configuredStat = fs.lstatSync(configured)
+    currentStat = fs.lstatSync(path.resolve(currentWorkspace))
+  } catch {
+    throw new Error('合成ワークスペースを安全に確認できないため、外部AIを停止しました')
+  }
+  if (!configuredStat.isDirectory() || configuredStat.isSymbolicLink() || !currentStat.isDirectory() || currentStat.isSymbolicLink()) {
+    throw new Error('合成ワークスペースのディレクトリ junction／シンボリックリンクは利用できません')
+  }
+
+  const marker = path.join(configuredReal, SYNTHETIC_WORKSPACE_MARKER)
+  let markerStat: fs.Stats
+  try { markerStat = fs.lstatSync(marker) } catch { throw new Error('合成ワークスペースの確認マーカーがありません') }
+  if (!markerStat.isFile() || markerStat.isSymbolicLink()) throw new Error('合成ワークスペースの確認マーカーが不正です')
+  let parsed: unknown
+  try { parsed = JSON.parse(fs.readFileSync(marker, 'utf8')) as unknown } catch { throw new Error('合成ワークスペースの確認マーカーを読めません') }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('合成ワークスペースの確認マーカーが不正です')
+  const record = parsed as Record<string, unknown>
+  const expectedKeys = Object.keys(SYNTHETIC_WORKSPACE_MARKER_EXPECTED)
+  const keys = Object.keys(record)
+  if (keys.length !== expectedKeys.length || expectedKeys.some((key) => !Object.prototype.hasOwnProperty.call(record, key) || record[key] !== SYNTHETIC_WORKSPACE_MARKER_EXPECTED[key as keyof typeof SYNTHETIC_WORKSPACE_MARKER_EXPECTED])) {
+    throw new Error('合成ワークスペースの確認マーカーが不正です')
+  }
 }

@@ -870,6 +870,11 @@ var require_cjs = __commonJS({
 // src/config.ts
 var import_node_fs = __toESM(require("node:fs"));
 var import_node_path = __toESM(require("node:path"));
+var SYNTHETIC_WORKSPACE_MARKER_EXPECTED = Object.freeze({
+  schema: "company-apps.synthetic-workspace/v1",
+  classification: "synthetic",
+  purpose: "external-provider-validation"
+});
 var DEFAULT_CONFIG = {
   agentLoop: "v1",
   baseURL: "",
@@ -897,7 +902,7 @@ function isLoopbackHostname(hostname) {
   return Number(octets[0]) === 127;
 }
 function validateProviderConfig(provider, raw, found) {
-  if (provider !== "openai" && provider !== "copilot-edge" && provider !== "ollama") {
+  if (provider !== "openai" && provider !== "copilot-edge" && provider !== "ollama" && provider !== "external-openai") {
     throw new Error(`\u30B5\u30DD\u30FC\u30C8\u3055\u308C\u3066\u3044\u306A\u3044 provider \u3067\u3059: ${String(provider)}: ${found}`);
   }
   if (provider === "openai" && (!raw.baseURL || !raw.model)) {
@@ -913,6 +918,29 @@ function validateProviderConfig(provider, raw, found) {
     }
     if (!["http:", "https:"].includes(parsed.protocol) || !isLoopbackHostname(parsed.hostname)) {
       throw new Error(`provider=ollama \u306E baseURL \u306F loopback URL \u3067\u306A\u3051\u308C\u3070\u306A\u308A\u307E\u305B\u3093: ${found}`);
+    }
+  }
+  if (provider === "external-openai") {
+    if (raw.agentLoop !== "v2") throw new Error(`provider=external-openai \u306B\u306F agentLoop=v2 \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
+    if (!raw.baseURL || !raw.model) throw new Error(`provider=external-openai \u306B\u306F baseURL / model \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
+    if (Object.prototype.hasOwnProperty.call(raw, "apiKey")) throw new Error(`provider=external-openai \u306F plaintext apiKey \u3092\u53D7\u3051\u4ED8\u3051\u307E\u305B\u3093: ${found}`);
+    if (raw.restrictToWorkspace === false) throw new Error(`provider=external-openai \u3067\u306F restrictToWorkspace=false \u3092\u6307\u5B9A\u3067\u304D\u307E\u305B\u3093: ${found}`);
+    if (raw.safeCommandOnly === false) throw new Error(`provider=external-openai \u3067\u306F safeCommandOnly=false \u3092\u6307\u5B9A\u3067\u304D\u307E\u305B\u3093: ${found}`);
+    if (typeof raw.apiKeyEnv !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(raw.apiKeyEnv)) throw new Error(`provider=external-openai \u306B\u306F apiKeyEnv \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
+    const external = raw.externalProvider;
+    if (!external || external.enabled !== true) throw new Error(`provider=external-openai \u306B\u306F externalProvider.enabled=true \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
+    if (typeof external.syntheticWorkspace !== "string" || !external.syntheticWorkspace.trim()) throw new Error(`provider=external-openai \u306B\u306F externalProvider.syntheticWorkspace \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
+    let parsed;
+    try {
+      parsed = new URL(raw.baseURL);
+    } catch {
+      throw new Error(`provider=external-openai \u306E baseURL \u304C\u4E0D\u6B63\u3067\u3059: ${found}`);
+    }
+    if (parsed.username || parsed.password) throw new Error(`provider=external-openai \u306E baseURL \u306B URL credentials \u306F\u6307\u5B9A\u3067\u304D\u307E\u305B\u3093: ${found}`);
+    if (parsed.protocol === "https:") {
+    } else if (parsed.protocol === "http:" && isLoopbackHostname(parsed.hostname)) {
+    } else {
+      throw new Error(`provider=external-openai \u306E baseURL \u306F HTTPS\u3001\u307E\u305F\u306F loopback HTTP \u3067\u306A\u3051\u308C\u3070\u306A\u308A\u307E\u305B\u3093: ${found}`);
     }
   }
   if (raw.reasoningEffort !== void 0 && !["high", "medium", "low", "none"].includes(raw.reasoningEffort)) {
@@ -948,10 +976,12 @@ function parseConfig(found) {
     ...DEFAULT_CONFIG,
     ...raw,
     provider,
+    ...provider === "external-openai" ? { restrictToWorkspace: true, safeCommandOnly: true } : {},
     permissions: permissions ?? DEFAULT_CONFIG.permissions,
     autoApprove: { ...DEFAULT_CONFIG.autoApprove, ...raw.autoApprove ?? {} },
     copilot: { ...DEFAULT_CONFIG.copilot, ...raw.copilot ?? {} },
-    localResponseConverter: { ...DEFAULT_CONFIG.localResponseConverter, ...raw.localResponseConverter ?? {} }
+    localResponseConverter: { ...DEFAULT_CONFIG.localResponseConverter, ...raw.localResponseConverter ?? {} },
+    configPath: import_node_path.default.resolve(found)
   };
 }
 function loadConfig(explicitPath) {

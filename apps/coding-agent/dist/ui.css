@@ -413,6 +413,77 @@ summary:focus-visible {
   cursor: default;
   opacity: .45;
 }
+.external-banner {
+  width: min(840px, calc(100% - 52px));
+  margin: 10px auto 0;
+  border: 1px solid #d9e4f2;
+  border-radius: 9px;
+  background: #f4f8fd;
+  color: #345777;
+  padding: 8px 11px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.ai-work-card {
+  width: min(840px, calc(100% - 52px));
+  margin: 10px auto 0;
+  border: 1px solid #dce8df;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px 12px;
+}
+.ai-work-card.pending {
+  background: #fbfcfb;
+}
+.ai-work-card.in-progress {
+  border-color: #cfe2d5;
+  background: #fbfefc;
+}
+.ai-work-card.completed {
+  background: #f7fbf8;
+}
+.ai-work-card.stopped {
+  border-color: #ead8c6;
+  background: #fffaf5;
+}
+.ai-work-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #345a45;
+  font-size: 11px;
+  font-weight: 700;
+}
+.ai-work-state {
+  border-radius: 999px;
+  background: #eef2ef;
+  color: #6a7c70;
+  padding: 3px 8px;
+  font-size: 10px;
+}
+.ai-work-card.in-progress .ai-work-state {
+  background: #e7f3ea;
+  color: #2e7b50;
+}
+.ai-work-card.completed .ai-work-state {
+  background: #e5f3e9;
+  color: #2d7b50;
+}
+.ai-work-card.stopped .ai-work-state {
+  background: #f6e9dc;
+  color: #8a5734;
+}
+.ai-work-detail {
+  margin: 6px 0 0;
+  color: #6b7d72;
+  font-size: 10px;
+}
+.external-only-note {
+  margin: 5px 0 0;
+  color: #547394;
+  font-size: 10px;
+}
 .progress-panel {
   max-width: 840px;
   margin: 6px auto 15px;
@@ -706,7 +777,9 @@ summary:focus-visible {
   }
   .run-summary,
   .composer-dock,
-  .notice {
+  .notice,
+  .external-banner,
+  .ai-work-card {
     width: calc(100% - 26px);
   }
   .run-summary {

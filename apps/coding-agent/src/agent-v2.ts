@@ -9,13 +9,15 @@ import {
   formatHostResult,
   buildToolAuditMetadata,
   normalizeForKey,
+  emitModelWait,
+  modelEventOrigin,
   shouldCancel,
   summarize,
   toolRequestKey,
   type AgentIO,
   type AgentTurnResult
 } from './agent'
-import { capabilityPolicy, resolveApiKey, type AgentConfig } from './config'
+import { assertSyntheticWorkspaceBoundary, capabilityPolicy, resolveApiKey, type AgentConfig } from './config'
 import { runToolExecuteBeforeHooks, type ToolExecuteBeforeHook } from './hooks'
 import { createPermissionHook, type PermissionDecision } from './permission-hook'
 import type { ChatMessage, ToolCall } from './llm'
@@ -75,10 +77,6 @@ function providerOptionsFor(cfg: AgentConfig): { ollama: { reasoningEffort: stri
   // @ai-sdk/openai-compatible resolves this provider key and emits the
   // snake_case HTTP field `reasoning_effort`.
   return { ollama: { reasoningEffort: cfg.reasoningEffort } }
-}
-
-function modelEventOrigin(cfg: AgentConfig): 'copilot' | 'ollama' {
-  return cfg.provider === 'ollama' ? 'ollama' : 'copilot'
 }
 
 export interface AgentV2Options {
@@ -153,14 +151,37 @@ function aiTools(cfg: AgentConfig, ctx: ToolContext): ToolSet {
 function configuredModel(cfg: AgentConfig): LanguageModel {
   if (!cfg.baseURL || !cfg.model) throw new Error('agentLoop=v2 には bridge の baseURL / model が必要です')
   const isOllama = cfg.provider === 'ollama'
-  const apiKey = isOllama ? undefined : resolveApiKey(cfg)
+  const isExternal = cfg.provider === 'external-openai'
+  if (isExternal && Object.prototype.hasOwnProperty.call(cfg, 'apiKey')) throw new Error('provider=external-openai は plaintext apiKey を受け付けません')
+  const apiKey = isOllama ? undefined : (isExternal ? (cfg.apiKeyEnv ? process.env[cfg.apiKeyEnv] : undefined) : resolveApiKey(cfg))
   if (!isOllama && !apiKey) throw new Error('agentLoop=v2 には bridge の apiKey または apiKeyEnv が必要です')
   return createOpenAICompatible({
-    name: isOllama ? 'ollama' : 'copilot-openai-bridge',
+    name: isOllama ? 'ollama' : isExternal ? 'external-openai' : 'copilot-openai-bridge',
     baseURL: cfg.baseURL.replace(/\/+$/u, ''),
     ...(apiKey ? { apiKey } : {}),
     ...(isOllama ? { fetch: createOllamaFetch() } : {})
   }).chatModel(cfg.model)
+}
+
+/**
+ * External providers are permanently confined to the synthetic workspace and
+ * safe-command profile.  Config files are validated before startup, but v2 is
+ * also callable directly in tests and by embedders, so do not trust either a
+ * hand-built AgentConfig or a caller-supplied ToolContext here.
+ */
+function enforceExternalProviderSafety(cfg: AgentConfig, suppliedCtx: ToolContext): ToolContext {
+  if (cfg.provider !== 'external-openai') return suppliedCtx
+  if (cfg.restrictToWorkspace === false) throw new Error('provider=external-openai ではワークスペース制限を解除できません')
+  if (cfg.safeCommandOnly === false) throw new Error('provider=external-openai では安全なコマンド制限を解除できません')
+  if (suppliedCtx.restrictToWorkspace === false) throw new Error('provider=external-openai の ToolContext はワークスペース制限が必須です')
+  if (suppliedCtx.safeCommandOnly === false) throw new Error('provider=external-openai の ToolContext は安全なコマンド制限が必須です')
+  // Missing optional flags are repaired to the safe value.  Explicit false is
+  // rejected above so a caller cannot use a stale context to bypass the guard.
+  return { ...suppliedCtx, restrictToWorkspace: true, safeCommandOnly: true }
+}
+
+function assertExternalBoundaryBeforeRequest(cfg: AgentConfig, ctx: ToolContext): void {
+  if (cfg.provider === 'external-openai') assertSyntheticWorkspaceBoundary(cfg, ctx.workspace)
 }
 
 export async function executeV2ToolCall(
@@ -301,7 +322,13 @@ export async function executeV2ToolCall(
 }
 
 export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnResult> {
-  const { cfg, ctx, io } = opts
+  const { cfg, io } = opts
+  const ctx = enforceExternalProviderSafety(cfg, opts.ctx)
+  assertSyntheticWorkspaceBoundary(cfg, ctx.workspace)
+  if (cfg.provider === 'external-openai') {
+    if (Object.prototype.hasOwnProperty.call(cfg, 'apiKey')) throw new Error('provider=external-openai は plaintext apiKey を受け付けません')
+    if (!cfg.apiKeyEnv || !process.env[cfg.apiKeyEnv]) throw new Error('provider=external-openai の秘密情報が環境変数にありません')
+  }
   const mode = cfg.turnMode ?? 'work'
   const policy = capabilityPolicy(cfg, mode)
   const model = opts.model ?? configuredModel(cfg)
@@ -318,6 +345,8 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
 
   if (mode !== 'work') {
     try {
+      emitModelWait(io, cfg)
+      assertExternalBoundaryBeforeRequest(cfg, ctx)
       const result = await generateText({
         model,
         messages: modelMessages,
@@ -356,6 +385,8 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
     if (io.isPaused?.()) return { reply: '', messages, aborted: true, paused: true }
     let result: Awaited<ReturnType<typeof generateText>>
     try {
+      emitModelWait(io, cfg)
+      assertExternalBoundaryBeforeRequest(cfg, ctx)
       result = await generateText({
         model,
         messages: modelMessages,
