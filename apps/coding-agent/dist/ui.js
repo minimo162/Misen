@@ -30760,9 +30760,15 @@ ${config.system}`;
     ViewportProvider: () => ThreadPrimitiveViewportProvider
   });
 
+  // src/ui/session-guard.ts
+  function isCurrentSessionRun(run, requestedSessionId, currentSessionId) {
+    return Boolean(run?.sessionId && requestedSessionId && requestedSessionId === currentSessionId && run.sessionId === currentSessionId);
+  }
+
   // src/ui/main.ts
   var h = import_react28.default.createElement;
   var TERMINAL = /* @__PURE__ */ new Set(["verified", "rolled_back", "failed", "canceled", "paused", "waiting_user", "applied_unverified"]);
+  var STOPPED = /* @__PURE__ */ new Set(["failed", "canceled", "paused"]);
   var STATUS_LABEL = {
     queued: "\u958B\u59CB\u5F85\u3061",
     planning: "\u8A08\u753B\u4E2D",
@@ -30815,17 +30821,41 @@ ${config.system}`;
   }
   function friendlyEvent(event) {
     const tool = bareTool(event.tool);
-    if (event.type === "tool.started" || event.type === "step.started") return { text: friendlyTool(tool), state: "running" };
-    if (event.type === "tool.succeeded" || event.type === "step.completed") return { text: `${friendlyTool(tool)}\u3057\u307E\u3057\u305F`, state: "success" };
+    if (event.type === "model.wait") return { text: "AI\u304C\u6B21\u306E\u4F5C\u696D\u3092\u8003\u3048\u3066\u3044\u307E\u3059", state: "running" };
+    if (event.type === "model.decision") return { text: "AI\u306E\u6B21\u306E\u4F5C\u696D\u3092\u78BA\u8A8D\u3057\u307E\u3057\u305F", state: "success" };
+    if (event.type === "tool.requested") return { text: `${friendlyTool(tool)}\u3092\u6E96\u5099\u3057\u3066\u3044\u307E\u3059`, state: "neutral" };
+    if (event.type === "tool.started" || event.type === "step.started" && !event.callId) return { text: `${friendlyTool(tool)}\u3092\u9032\u3081\u3066\u3044\u307E\u3059`, state: "running" };
+    if (event.type === "tool.succeeded" || event.type === "step.completed" && !event.callId) return { text: `${friendlyTool(tool)}\u3057\u307E\u3057\u305F`, state: "success" };
     if (event.type === "tool.failed" || event.type === "step.failed") return { text: `${friendlyTool(tool)}\u3092\u78BA\u8A8D\u4E2D`, state: "warning" };
     if (event.type === "approval.requested") return { text: "\u8A31\u53EF\u3092\u78BA\u8A8D\u3057\u3066\u3044\u307E\u3059", state: "warning" };
     if (event.type === "approval.resolved") return { text: event.approved ? "\u8A31\u53EF\u3092\u53D7\u3051\u53D6\u308A\u307E\u3057\u305F" : "\u62D2\u5426\u3092\u53D7\u3051\u53D6\u308A\u307E\u3057\u305F", state: event.approved ? "success" : "warning" };
     if (event.type === "plan.created") return { text: "\u4F5C\u696D\u306E\u6BB5\u53D6\u308A\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F", state: "neutral" };
+    if (event.type === "run.created") return { text: "\u4F9D\u983C\u3092\u53D7\u3051\u4ED8\u3051\u307E\u3057\u305F", state: "neutral" };
+    if (event.type === "run.completed") return { text: "\u4F5C\u696D\u306E\u8A18\u9332\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F", state: "success" };
+    if (event.type === "run.applied_unverified") return { text: "\u5909\u66F4\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F\u3002\u691C\u8A3C\u3092\u5F85\u3063\u3066\u3044\u307E\u3059", state: "running" };
+    if (event.type === "run.failed" || event.type === "run.canceled") return { text: "\u4F5C\u696D\u3092\u7D42\u4E86\u3057\u307E\u3057\u305F", state: "warning" };
     if (event.type === "run.warning") return { text: "\u5B89\u5168\u4E0A\u9650\u306B\u3088\u308A\u505C\u6B62\u3057\u307E\u3057\u305F", state: "warning" };
     if (event.type === "verification.started") return { text: "\u5909\u66F4\u5F8C\u306E\u72B6\u614B\u3092\u691C\u8A3C\u3057\u3066\u3044\u307E\u3059", state: "running" };
     if (event.type === "verification.completed") return { text: "\u691C\u8A3C\u7D50\u679C\u3092\u307E\u3068\u3081\u307E\u3057\u305F", state: "success" };
-    if (event.type === "run.created") return { text: "\u4F9D\u983C\u3092\u53D7\u3051\u4ED8\u3051\u307E\u3057\u305F", state: "neutral" };
     return null;
+  }
+  function aiWorkState(run) {
+    if (!run || run.status === "queued" || run.status === "planning") return "pending";
+    if (run.status === "verified" || run.status === "rolled_back") return "completed";
+    if (STOPPED.has(run.status)) return "stopped";
+    return "in-progress";
+  }
+  function AiWorkCard({ run, external }) {
+    const state = aiWorkState(run);
+    const label = state === "pending" ? "\u958B\u59CB\u5F85\u3061" : state === "in-progress" ? "\u9032\u884C\u4E2D" : state === "completed" ? "\u5B8C\u4E86" : "\u505C\u6B62";
+    const detail = state === "pending" ? "\u4F5C\u696D\u306E\u6E96\u5099\u3092\u3057\u3066\u3044\u307E\u3059" : state === "in-progress" ? "AI\u304C\u4F5C\u696D\u306E\u9806\u5E8F\u3092\u78BA\u8A8D\u3057\u3066\u3044\u307E\u3059" : state === "completed" ? "\u4F5C\u696D\u306E\u8A18\u9332\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F" : "\u4F5C\u696D\u3092\u505C\u6B62\u3057\u307E\u3057\u305F\u3002\u8A18\u9332\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044";
+    return h(
+      "section",
+      { className: `ai-work-card ${state}`, "aria-live": "polite", "aria-label": "AI\u306E\u4F5C\u696D\u72B6\u6CC1" },
+      h("div", { className: "ai-work-heading" }, h("span", null, "AI\u306E\u4F5C\u696D"), h("span", { className: "ai-work-state" }, label)),
+      h("p", { className: "ai-work-detail" }, detail),
+      external ? h("p", { className: "external-only-note" }, "\u5916\u90E8AI\u3092\u4F7F\u7528\u4E2D\u30FB\u5408\u6210\u30C7\u30FC\u30BF\u306E\u307F") : null
+    );
   }
   function safeApprovalText(value) {
     if (typeof value !== "string") return "";
@@ -30913,7 +30943,15 @@ ${config.system}`;
     );
   }
   function ProgressPanel({ run }) {
-    const events = (run?.events ?? []).map(friendlyEvent).filter((item) => Boolean(item));
+    const source = run?.events ?? [];
+    const seenOperations = /* @__PURE__ */ new Set();
+    const events = source.filter((event) => {
+      if (event.callId && (event.type === "step.started" || event.type === "step.completed")) return false;
+      const operation = event.callId && (event.type === "tool.requested" || event.type === "tool.started" || event.type === "tool.succeeded" || event.type === "tool.failed" || event.type === "tool.denied") ? `${event.callId}:${event.type}` : "";
+      if (operation && seenOperations.has(operation)) return false;
+      if (operation) seenOperations.add(operation);
+      return true;
+    }).map(friendlyEvent).filter((item) => Boolean(item));
     const recent = events.slice(-12);
     if (!run || recent.length === 0) return null;
     return h(
@@ -30996,12 +31034,12 @@ ${config.system}`;
       )
     );
   }
-  function Sidebar({ sessions, activeId, onNew, onSelect }) {
+  function Sidebar({ sessions, activeId, isRunning, onNew, onSelect }) {
     return h(
       "aside",
       { className: "sidebar", "aria-label": "\u30BB\u30C3\u30B7\u30E7\u30F3" },
       h("div", { className: "brand" }, h("span", { className: "brand-mark", "aria-hidden": "true" }, "\u25CE"), h("span", null, "\u793E\u5185\u30A2\u30B7\u30B9\u30BF\u30F3\u30C8")),
-      h("button", { type: "button", className: "new-session", onClick: onNew }, "\uFF0B \u65B0\u3057\u3044\u30C1\u30E3\u30C3\u30C8"),
+      h("button", { type: "button", className: "new-session", onClick: onNew, disabled: isRunning }, "\uFF0B \u65B0\u3057\u3044\u30C1\u30E3\u30C3\u30C8"),
       h("div", { className: "sidebar-heading" }, "\u6700\u8FD1\u306E\u30C1\u30E3\u30C3\u30C8"),
       h(
         "nav",
@@ -31010,7 +31048,8 @@ ${config.system}`;
           type: "button",
           key: session.id,
           className: `session-item ${session.id === activeId ? "active" : ""}`,
-          onClick: () => onSelect(session.id)
+          onClick: () => onSelect(session.id),
+          disabled: isRunning
         }, h("span", { className: "session-title" }, session.title || "\u65B0\u3057\u3044\u30BB\u30C3\u30B7\u30E7\u30F3"), h("span", { className: "session-status" }, session.latestRun ? STATUS_LABEL[session.latestRun.status] ?? "\u8A18\u9332\u3042\u308A" : "\u5F85\u6A5F\u4E2D")))
       ),
       h("div", { className: "sidebar-foot" }, h("a", { href: "/classic" }, "\u5F93\u6765\u753B\u9762\uFF08classic\uFF09"), h("span", null, "\u5B89\u5168\u306A\u64CD\u4F5C\u78BA\u8A8D\u306F\u5225\u67A0\u3067\u8868\u793A\u3057\u307E\u3059"))
@@ -31053,17 +31092,24 @@ ${config.system}`;
     const [mode, setMode] = (0, import_react28.useState)("work");
     const [isRunning, setIsRunning] = (0, import_react28.useState)(false);
     const [notice, setNotice] = (0, import_react28.useState)("");
+    const [runtimeInfo, setRuntimeInfo] = (0, import_react28.useState)({});
+    const activeIdRef = (0, import_react28.useRef)("");
+    const sessionRequestRef = (0, import_react28.useRef)(0);
+    const externalActive = runtimeInfo.externalProvider?.enabled === true || runtimeInfo.syntheticOnly === true || runtimeInfo.provider === "external-openai";
     const loadSessions = (0, import_react28.useCallback)(async () => {
       const response = await getJson("/api/sessions");
       const list = Array.isArray(response.sessions) ? response.sessions : [];
       setSessions(list);
       const nextId2 = response.active || list[0]?.id || "";
       if (nextId2 && nextId2 !== activeId) await loadSession(nextId2);
-      if (response.activeRun) setRun(response.activeRun);
+      if (isCurrentSessionRun(response.activeRun, nextId2, activeIdRef.current)) setRun(response.activeRun);
     }, [activeId]);
     const loadSession = (0, import_react28.useCallback)(async (id) => {
+      const requestVersion = ++sessionRequestRef.current;
       const response = await getJson(`/api/session?id=${encodeURIComponent(id)}`);
+      if (requestVersion !== sessionRequestRef.current) return;
       const nextMessages = (response.messages ?? []).map((message, index3) => messageFromServer(message.role, message.content, id, index3)).filter((message) => Boolean(message));
+      activeIdRef.current = id;
       setActiveId(id);
       setMessages(nextMessages);
       const nextRun = response.activeRun ?? response.runs?.[0] ?? null;
@@ -31091,8 +31137,9 @@ ${config.system}`;
     (0, import_react28.useEffect)(() => {
       const refresh = async () => {
         try {
+          const requestedSessionId = activeIdRef.current;
           const response = await getJson("/api/active-run");
-          if (response.run && (!activeId || response.run.sessionId === activeId)) setRun(response.run);
+          if (isCurrentSessionRun(response.run, requestedSessionId, activeIdRef.current)) setRun(response.run);
         } catch {
         }
       };
@@ -31112,7 +31159,18 @@ ${config.system}`;
       const timer = window.setInterval(refresh, 900);
       return () => window.clearInterval(timer);
     }, []);
+    (0, import_react28.useEffect)(() => {
+      let alive = true;
+      void getJson("/api/info").then((info) => {
+        if (alive) setRuntimeInfo(info);
+      }).catch(() => {
+      });
+      return () => {
+        alive = false;
+      };
+    }, []);
     const onNew = (0, import_react28.useCallback)(async () => {
+      if (isRunning) return;
       try {
         const response = await postJson("/api/sessions");
         const id = response.id;
@@ -31121,7 +31179,7 @@ ${config.system}`;
       } catch {
         setNotice("\u65B0\u3057\u3044\u30C1\u30E3\u30C3\u30C8\u3092\u958B\u59CB\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002");
       }
-    }, [loadSession]);
+    }, [isRunning, loadSession]);
     const onSelect = (0, import_react28.useCallback)(async (id) => {
       if (isRunning) return;
       try {
@@ -31141,9 +31199,10 @@ ${config.system}`;
     }, []);
     const onAction = (0, import_react28.useCallback)(async (action) => {
       if (!run) return;
+      const requestedSessionId = activeIdRef.current;
       try {
         const response = await postJson(`/api/runs/${encodeURIComponent(run.id)}/${action}`, action === "retry" || action === "resume" ? { message: run.request } : action === "verify" ? { profile: "auto" } : void 0);
-        if (response.run) setRun(response.run);
+        if (isCurrentSessionRun(response.run, requestedSessionId, activeIdRef.current)) setRun(response.run);
         setNotice(action === "confirm" ? "\u5229\u7528\u8005\u78BA\u8A8D\u3092\u8A18\u9332\u3057\u307E\u3057\u305F\u3002" : action === "verify" ? "\u691C\u8A3C\u7D50\u679C\u3092\u53D6\u5F97\u3057\u307E\u3057\u305F\u3002" : "\u64CD\u4F5C\u3092\u53D7\u3051\u4ED8\u3051\u307E\u3057\u305F\u3002");
         void loadSessions();
       } catch (error) {
@@ -31153,6 +31212,7 @@ ${config.system}`;
     const onNewMessage = (0, import_react28.useCallback)(async (append) => {
       const text = messageText(append);
       if (!text || !activeId || isRunning) return;
+      const requestedSessionId = activeId;
       const userMessage = { id: `local-${Date.now().toString(36)}`, role: "user", content: text, createdAt: Date.now() };
       setMessages((current) => [...current, userMessage]);
       setIsRunning(true);
@@ -31160,13 +31220,16 @@ ${config.system}`;
       const parentRunId = run && TERMINAL.has(run.status) ? run.id : void 0;
       try {
         const response = await postJson("/api/turn", { message: text, mode, sessionId: activeId, ...parentRunId ? { parentRunId } : {} });
-        if (response.run) setRun(response.run);
+        if (!isCurrentSessionRun(response.run, requestedSessionId, activeIdRef.current)) return;
+        setRun(response.run);
         const reply = response.reply || (response.aborted ? "\u51E6\u7406\u3092\u4E2D\u65AD\u3057\u307E\u3057\u305F\u3002\u5C65\u6B74\u306F\u4FDD\u6301\u3055\u308C\u3066\u3044\u307E\u3059\u3002" : "\u5FDC\u7B54\u3092\u53D7\u3051\u53D6\u308A\u307E\u3057\u305F\u3002");
         setMessages((current) => [...current, { id: `assistant-${Date.now().toString(36)}`, role: "assistant", content: reply, createdAt: Date.now() }]);
         void loadSessions();
       } catch (error) {
-        setMessages((current) => [...current, { id: `assistant-error-${Date.now().toString(36)}`, role: "assistant", content: "\u51E6\u7406\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002\u5185\u5BB9\u3092\u78BA\u8A8D\u3057\u3066\u3001\u3082\u3046\u4E00\u5EA6\u304A\u8A66\u3057\u304F\u3060\u3055\u3044\u3002", createdAt: Date.now() }]);
-        setNotice(error instanceof Error ? error.message : "\u51E6\u7406\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002");
+        if (requestedSessionId === activeIdRef.current) {
+          setMessages((current) => [...current, { id: `assistant-error-${Date.now().toString(36)}`, role: "assistant", content: "\u51E6\u7406\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002\u5185\u5BB9\u3092\u78BA\u8A8D\u3057\u3066\u3001\u3082\u3046\u4E00\u5EA6\u304A\u8A66\u3057\u304F\u3060\u3055\u3044\u3002", createdAt: Date.now() }]);
+          setNotice(error instanceof Error ? error.message : "\u51E6\u7406\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002");
+        }
       } finally {
         setIsRunning(false);
       }
@@ -31185,11 +31248,13 @@ ${config.system}`;
       h(
         "div",
         { className: "app-shell" },
-        h(Sidebar, { sessions, activeId, onNew, onSelect }),
+        h(Sidebar, { sessions, activeId, isRunning, onNew, onSelect }),
         h(
           "main",
           { className: "main-panel" },
           h("header", { className: "topbar" }, h("div", null, h("span", { className: "topbar-kicker" }, "\u5B89\u5168\u306B\u78BA\u8A8D\u3057\u306A\u304C\u3089\u9032\u3081\u307E\u3059"), h("strong", null, "\u30B3\u30FC\u30C7\u30A3\u30F3\u30B0\u30A2\u30B7\u30B9\u30BF\u30F3\u30C8")), h("a", { className: "classic-link", href: "/classic" }, "\u5F93\u6765\u753B\u9762")),
+          externalActive ? h("div", { className: "external-banner", role: "status" }, "\u5916\u90E8AI: \u6709\u52B9\uFF08\u5408\u6210\u30C7\u30FC\u30BF\u306E\u307F\uFF09") : null,
+          h(AiWorkCard, { run, external: externalActive }),
           h(RunSummary, { run, onAction }),
           h(
             "div",

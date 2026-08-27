@@ -5,7 +5,7 @@
 // This file uses assistant-ui's external-store runtime only to render messages
 // and compose the next user request; it does not register client-side tools.
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import {
   AssistantRuntimeProvider,
@@ -18,6 +18,7 @@ import {
 import type { AppendMessage, ExternalStoreAdapter, ThreadMessageLike } from '@assistant-ui/react'
 
 import './styles.css'
+import { isCurrentSessionRun } from './session-guard'
 
 const h = React.createElement
 
@@ -37,6 +38,8 @@ type RunEvent = {
   approved?: boolean
   durationMs?: number
   metadata?: Record<string, unknown> | null
+  callId?: string
+  origin?: 'host' | 'orchestrator' | 'copilot' | 'ollama' | 'external'
 }
 type RunSnapshot = {
   id: string
@@ -70,7 +73,15 @@ type Approval = {
   binding?: { path?: string; command?: string }
 }
 
+type RuntimeInfo = {
+  provider?: string
+  model?: string
+  externalProvider?: { enabled?: boolean; syntheticOnly?: boolean }
+  syntheticOnly?: boolean
+}
+
 const TERMINAL = new Set(['verified', 'rolled_back', 'failed', 'canceled', 'paused', 'waiting_user', 'applied_unverified'])
+const STOPPED = new Set(['failed', 'canceled', 'paused'])
 const STATUS_LABEL: Record<string, string> = {
   queued: '開始待ち', planning: '計画中', running: '実行中', waiting_approval: '確認待ち',
   waiting_user: '利用者の確認待ち', paused: '一時停止', canceling: 'キャンセル中',
@@ -110,17 +121,41 @@ function friendlyTool(value: unknown): string {
 
 function friendlyEvent(event: RunEvent): { text: string; state: 'running' | 'success' | 'warning' | 'neutral' } | null {
   const tool = bareTool(event.tool)
-  if (event.type === 'tool.started' || event.type === 'step.started') return { text: friendlyTool(tool), state: 'running' }
-  if (event.type === 'tool.succeeded' || event.type === 'step.completed') return { text: `${friendlyTool(tool)}しました`, state: 'success' }
+  if (event.type === 'model.wait') return { text: 'AIが次の作業を考えています', state: 'running' }
+  if (event.type === 'model.decision') return { text: 'AIの次の作業を確認しました', state: 'success' }
+  if (event.type === 'tool.requested') return { text: `${friendlyTool(tool)}を準備しています`, state: 'neutral' }
+  if (event.type === 'tool.started' || (event.type === 'step.started' && !event.callId)) return { text: `${friendlyTool(tool)}を進めています`, state: 'running' }
+  if (event.type === 'tool.succeeded' || (event.type === 'step.completed' && !event.callId)) return { text: `${friendlyTool(tool)}しました`, state: 'success' }
   if (event.type === 'tool.failed' || event.type === 'step.failed') return { text: `${friendlyTool(tool)}を確認中`, state: 'warning' }
   if (event.type === 'approval.requested') return { text: '許可を確認しています', state: 'warning' }
   if (event.type === 'approval.resolved') return { text: event.approved ? '許可を受け取りました' : '拒否を受け取りました', state: event.approved ? 'success' : 'warning' }
   if (event.type === 'plan.created') return { text: '作業の段取りを作成しました', state: 'neutral' }
+  if (event.type === 'run.created') return { text: '依頼を受け付けました', state: 'neutral' }
+  if (event.type === 'run.completed') return { text: '作業の記録を保存しました', state: 'success' }
+  if (event.type === 'run.applied_unverified') return { text: '変更を保存しました。検証を待っています', state: 'running' }
+  if (event.type === 'run.failed' || event.type === 'run.canceled') return { text: '作業を終了しました', state: 'warning' }
   if (event.type === 'run.warning') return { text: '安全上限により停止しました', state: 'warning' }
   if (event.type === 'verification.started') return { text: '変更後の状態を検証しています', state: 'running' }
   if (event.type === 'verification.completed') return { text: '検証結果をまとめました', state: 'success' }
-  if (event.type === 'run.created') return { text: '依頼を受け付けました', state: 'neutral' }
   return null
+}
+
+function aiWorkState(run: RunSnapshot | null): 'pending' | 'in-progress' | 'completed' | 'stopped' {
+  if (!run || run.status === 'queued' || run.status === 'planning') return 'pending'
+  if (run.status === 'verified' || run.status === 'rolled_back') return 'completed'
+  if (STOPPED.has(run.status)) return 'stopped'
+  return 'in-progress'
+}
+
+function AiWorkCard({ run, external }: { run: RunSnapshot | null; external: boolean }): React.ReactElement {
+  const state = aiWorkState(run)
+  const label = state === 'pending' ? '開始待ち' : state === 'in-progress' ? '進行中' : state === 'completed' ? '完了' : '停止'
+  const detail = state === 'pending' ? '作業の準備をしています' : state === 'in-progress' ? 'AIが作業の順序を確認しています' : state === 'completed' ? '作業の記録を保存しました' : '作業を停止しました。記録を確認してください'
+  return h('section', { className: `ai-work-card ${state}`, 'aria-live': 'polite', 'aria-label': 'AIの作業状況' },
+    h('div', { className: 'ai-work-heading' }, h('span', null, 'AIの作業'), h('span', { className: 'ai-work-state' }, label)),
+    h('p', { className: 'ai-work-detail' }, detail),
+    external ? h('p', { className: 'external-only-note' }, '外部AIを使用中・合成データのみ') : null
+  )
 }
 
 function safeApprovalText(value: unknown): string {
@@ -225,7 +260,18 @@ function Welcome(): React.ReactElement {
 }
 
 function ProgressPanel({ run }: { run: RunSnapshot | null }): React.ReactElement | null {
-  const events = (run?.events ?? []).map(friendlyEvent).filter((item): item is NonNullable<ReturnType<typeof friendlyEvent>> => Boolean(item))
+  const source = run?.events ?? []
+  const seenOperations = new Set<string>()
+  const events = source.filter((event) => {
+    // step.* and tool.* carry the same callId for one host operation. Keep the
+    // tool row; a step-only event remains visible for compatibility.
+    if (event.callId && (event.type === 'step.started' || event.type === 'step.completed')) return false
+    const operation = event.callId && (event.type === 'tool.requested' || event.type === 'tool.started' || event.type === 'tool.succeeded' || event.type === 'tool.failed' || event.type === 'tool.denied')
+      ? `${event.callId}:${event.type}` : ''
+    if (operation && seenOperations.has(operation)) return false
+    if (operation) seenOperations.add(operation)
+    return true
+  }).map(friendlyEvent).filter((item): item is NonNullable<ReturnType<typeof friendlyEvent>> => Boolean(item))
   const recent = events.slice(-12)
   if (!run || recent.length === 0) return null
   return h('details', { className: 'progress-panel', open: run.status === 'running' || run.status === 'waiting_approval' },
@@ -287,15 +333,15 @@ function RunSummary({ run, onAction }: { run: RunSnapshot | null; onAction: (act
   )
 }
 
-function Sidebar({ sessions, activeId, onNew, onSelect }: { sessions: SessionSummary[]; activeId: string; onNew: () => void; onSelect: (id: string) => void }): React.ReactElement {
+function Sidebar({ sessions, activeId, isRunning, onNew, onSelect }: { sessions: SessionSummary[]; activeId: string; isRunning: boolean; onNew: () => void; onSelect: (id: string) => void }): React.ReactElement {
   return h('aside', { className: 'sidebar', 'aria-label': 'セッション' },
     h('div', { className: 'brand' }, h('span', { className: 'brand-mark', 'aria-hidden': 'true' }, '◎'), h('span', null, '社内アシスタント')),
-    h('button', { type: 'button', className: 'new-session', onClick: onNew }, '＋ 新しいチャット'),
+    h('button', { type: 'button', className: 'new-session', onClick: onNew, disabled: isRunning }, '＋ 新しいチャット'),
     h('div', { className: 'sidebar-heading' }, '最近のチャット'),
     h('nav', { className: 'session-list', 'aria-label': 'チャット一覧' },
       sessions.map((session) => h('button', {
         type: 'button', key: session.id, className: `session-item ${session.id === activeId ? 'active' : ''}`,
-        onClick: () => onSelect(session.id)
+        onClick: () => onSelect(session.id), disabled: isRunning
       }, h('span', { className: 'session-title' }, session.title || '新しいセッション'), h('span', { className: 'session-status' }, session.latestRun ? (STATUS_LABEL[session.latestRun.status] ?? '記録あり') : '待機中')))
     ),
     h('div', { className: 'sidebar-foot' }, h('a', { href: '/classic' }, '従来画面（classic）'), h('span', null, '安全な操作確認は別枠で表示します'))
@@ -332,6 +378,10 @@ function App(): React.ReactElement {
   const [mode, setMode] = useState<'work' | 'research' | 'chat'>('work')
   const [isRunning, setIsRunning] = useState(false)
   const [notice, setNotice] = useState('')
+  const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo>({})
+  const activeIdRef = useRef('')
+  const sessionRequestRef = useRef(0)
+  const externalActive = runtimeInfo.externalProvider?.enabled === true || runtimeInfo.syntheticOnly === true || runtimeInfo.provider === 'external-openai'
 
   const loadSessions = useCallback(async () => {
     const response = await getJson<{ active?: string; sessions?: SessionSummary[]; activeRun?: RunSnapshot | null }>('/api/sessions')
@@ -339,12 +389,15 @@ function App(): React.ReactElement {
     setSessions(list)
     const nextId = response.active || list[0]?.id || ''
     if (nextId && nextId !== activeId) await loadSession(nextId)
-    if (response.activeRun) setRun(response.activeRun)
+    if (isCurrentSessionRun(response.activeRun, nextId, activeIdRef.current)) setRun(response.activeRun!)
   }, [activeId])
 
   const loadSession = useCallback(async (id: string) => {
+    const requestVersion = ++sessionRequestRef.current
     const response = await getJson<{ id: string; messages?: Array<{ role: string; content: string }>; runs?: RunSnapshot[]; activeRun?: RunSnapshot | null }>(`/api/session?id=${encodeURIComponent(id)}`)
+    if (requestVersion !== sessionRequestRef.current) return
     const nextMessages = (response.messages ?? []).map((message, index) => messageFromServer(message.role, message.content, id, index)).filter((message): message is UiMessage => Boolean(message))
+    activeIdRef.current = id
     setActiveId(id)
     setMessages(nextMessages)
     const nextRun = response.activeRun ?? response.runs?.[0] ?? null
@@ -372,8 +425,9 @@ function App(): React.ReactElement {
   useEffect(() => {
     const refresh = async () => {
       try {
+        const requestedSessionId = activeIdRef.current
         const response = await getJson<{ run?: RunSnapshot | null }>('/api/active-run')
-        if (response.run && (!activeId || response.run.sessionId === activeId)) setRun(response.run)
+        if (isCurrentSessionRun(response.run, requestedSessionId, activeIdRef.current)) setRun(response.run!)
       } catch {}
     }
     void refresh()
@@ -393,14 +447,21 @@ function App(): React.ReactElement {
     return () => window.clearInterval(timer)
   }, [])
 
+  useEffect(() => {
+    let alive = true
+    void getJson<RuntimeInfo>('/api/info').then((info) => { if (alive) setRuntimeInfo(info) }).catch(() => {})
+    return () => { alive = false }
+  }, [])
+
   const onNew = useCallback(async () => {
+    if (isRunning) return
     try {
       const response = await postJson<{ id?: string }>('/api/sessions')
       const id = response.id
       if (id) await loadSession(id)
       setNotice('新しいチャットを開始しました。')
     } catch { setNotice('新しいチャットを開始できませんでした。') }
-  }, [loadSession])
+  }, [isRunning, loadSession])
 
   const onSelect = useCallback(async (id: string) => {
     if (isRunning) return
@@ -417,9 +478,10 @@ function App(): React.ReactElement {
 
   const onAction = useCallback(async (action: string) => {
     if (!run) return
+    const requestedSessionId = activeIdRef.current
     try {
       const response = await postJson<{ run?: RunSnapshot }>(`/api/runs/${encodeURIComponent(run.id)}/${action}`, action === 'retry' || action === 'resume' ? { message: run.request } : action === 'verify' ? { profile: 'auto' } : undefined)
-      if (response.run) setRun(response.run)
+      if (isCurrentSessionRun(response.run, requestedSessionId, activeIdRef.current)) setRun(response.run!)
       setNotice(action === 'confirm' ? '利用者確認を記録しました。' : action === 'verify' ? '検証結果を取得しました。' : '操作を受け付けました。')
       void loadSessions()
     } catch (error) { setNotice(error instanceof Error ? error.message : '操作に失敗しました。') }
@@ -428,6 +490,7 @@ function App(): React.ReactElement {
   const onNewMessage = useCallback(async (append: { content?: unknown }) => {
     const text = messageText(append)
     if (!text || !activeId || isRunning) return
+    const requestedSessionId = activeId
     const userMessage: UiMessage = { id: `local-${Date.now().toString(36)}`, role: 'user', content: text, createdAt: Date.now() }
     setMessages((current) => [...current, userMessage])
     setIsRunning(true)
@@ -435,13 +498,16 @@ function App(): React.ReactElement {
     const parentRunId = run && TERMINAL.has(run.status) ? run.id : undefined
     try {
       const response = await postJson<{ reply?: string; run?: RunSnapshot; aborted?: boolean }>('/api/turn', { message: text, mode, sessionId: activeId, ...(parentRunId ? { parentRunId } : {}) })
-      if (response.run) setRun(response.run)
+      if (!isCurrentSessionRun(response.run, requestedSessionId, activeIdRef.current)) return
+      setRun(response.run!)
       const reply = response.reply || (response.aborted ? '処理を中断しました。履歴は保持されています。' : '応答を受け取りました。')
       setMessages((current) => [...current, { id: `assistant-${Date.now().toString(36)}`, role: 'assistant', content: reply, createdAt: Date.now() }])
       void loadSessions()
     } catch (error) {
-      setMessages((current) => [...current, { id: `assistant-error-${Date.now().toString(36)}`, role: 'assistant', content: '処理に失敗しました。内容を確認して、もう一度お試しください。', createdAt: Date.now() }])
-      setNotice(error instanceof Error ? error.message : '処理に失敗しました。')
+      if (requestedSessionId === activeIdRef.current) {
+        setMessages((current) => [...current, { id: `assistant-error-${Date.now().toString(36)}`, role: 'assistant', content: '処理に失敗しました。内容を確認して、もう一度お試しください。', createdAt: Date.now() }])
+        setNotice(error instanceof Error ? error.message : '処理に失敗しました。')
+      }
     } finally {
       setIsRunning(false)
     }
@@ -458,9 +524,11 @@ function App(): React.ReactElement {
 
   return h(AssistantRuntimeProvider, { runtime },
     h('div', { className: 'app-shell' },
-      h(Sidebar, { sessions, activeId, onNew, onSelect }),
+      h(Sidebar, { sessions, activeId, isRunning, onNew, onSelect }),
       h('main', { className: 'main-panel' },
         h('header', { className: 'topbar' }, h('div', null, h('span', { className: 'topbar-kicker' }, '安全に確認しながら進めます'), h('strong', null, 'コーディングアシスタント')), h('a', { className: 'classic-link', href: '/classic' }, '従来画面')),
+        externalActive ? h('div', { className: 'external-banner', role: 'status' }, '外部AI: 有効（合成データのみ）') : null,
+        h(AiWorkCard, { run, external: externalActive }),
         h(RunSummary, { run, onAction }),
         h('div', { className: 'thread-region' },
           h(ThreadPrimitive.Root, { className: 'aui-thread' },

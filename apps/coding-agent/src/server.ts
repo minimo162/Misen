@@ -45,7 +45,13 @@ const uiAssets: Record<string, { path: string; contentType: string }> = {
   '/assets/ui.css': { path: path.join(here, 'ui.css'), contentType: 'text/css; charset=utf-8' }
 }
 const distributionStatePath = path.join(process.env.LOCALAPPDATA ?? path.dirname(here), 'CompanyApps', 'state', 'coding-agent.json')
-const persistencePath = path.join(process.env.APPDATA ?? process.env.LOCALAPPDATA ?? path.dirname(here), 'CompanyApps', 'coding-agent', 'state.json')
+const persistenceRoot = path.join(process.env.APPDATA ?? process.env.LOCALAPPDATA ?? path.dirname(here), 'CompanyApps', 'coding-agent')
+// External model turns must never consume the provider-independent state that
+// may contain Copilot/Ollama messages. Keep the external synthetic state in a
+// fixed, mode-only file so the path cannot encode a URL, model, or secret.
+const persistencePath = cfg.provider === 'external-openai'
+  ? path.join(persistenceRoot, 'external-synthetic-state.json')
+  : path.join(persistenceRoot, 'state.json')
 let auditLog: AuditLog | null = null
 let auditInitError: string | null = null
 try {
@@ -172,7 +178,7 @@ interface RunEvent {
   approved?: boolean
   durationMs?: number
   metadata?: Record<string, unknown> | null
-  origin?: 'host' | 'orchestrator' | 'copilot' | 'ollama'
+  origin?: 'host' | 'orchestrator' | 'copilot' | 'ollama' | 'external'
   namespace?: 'app' | 'native' | 'none'
   authority?: 'authoritative' | 'observed' | 'claimed' | 'derived'
   callId?: string
@@ -432,6 +438,16 @@ function updateRunFromEvent(run: RunData, event: AgentEvent): void {
   }
   const summary = event.summary ?? event.tool ?? ''
   switch (event.type) {
+    case 'model.wait':
+      run.status = 'running'
+      run.currentStep = 'AIが次の作業を考えています'
+      run.nextAction = 'AIの応答を待っています'
+      break
+    case 'model.decision':
+      run.status = 'running'
+      run.currentStep = 'AIの次の作業を確認しました'
+      run.nextAction = '次のステップを選んでいます'
+      break
     case 'plan.created':
       run.status = 'planning'
       run.phase = 'plan'
@@ -869,7 +885,18 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/info') {
-    json(res, 200, { model: cfg.model || (cfg.provider ?? ''), provider: cfg.provider ?? 'openai', workspace, project: path.basename(workspace), version: '0.10.8', distribution: readDistributionState() })
+    const external = cfg.provider === 'external-openai'
+    json(res, 200, {
+      model: cfg.model || (cfg.provider ?? ''),
+      provider: cfg.provider ?? 'openai',
+      workspace,
+      project: path.basename(workspace),
+      version: '0.10.8',
+      distribution: readDistributionState(),
+      // Fixed status only: never return apiKey, apiKeyEnv, or raw provider config.
+      externalProvider: { enabled: external, syntheticOnly: external },
+      syntheticOnly: external
+    })
     return
   }
 
@@ -1274,12 +1301,13 @@ const server = http.createServer(async (req, res) => {
     const s = sessions.get(url.searchParams.get('id') ?? '')
     if (!s) { json(res, 404, { error: 'session not found' }); return }
     activeId = s.id
+    const visibleRun = activeRunId ? runs.get(activeRunId) : (recoveredRunId ? runs.get(recoveredRunId) : undefined)
     json(res, 200, {
       id: s.id,
       title: s.title,
       messages: s.messages.filter((m) => m.role === 'user' || m.role === 'assistant').map((m) => ({ role: m.role, content: m.content ?? '' })),
       runs: s.runs.map((id) => runs.get(id)).filter((run): run is RunData => Boolean(run)).map(runSnapshot),
-      activeRun: (activeRunId ? runs.get(activeRunId) : (recoveredRunId ? runs.get(recoveredRunId) : undefined)) ? runSnapshot((activeRunId ? runs.get(activeRunId) : runs.get(recoveredRunId!))!) : null
+      activeRun: visibleRun?.sessionId === s.id ? runSnapshot(visibleRun) : null
     })
     return
   }

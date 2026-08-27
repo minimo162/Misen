@@ -62,7 +62,8 @@ export async function startRepl(cfg: AgentConfig, ctx: ToolContext): Promise<voi
 
   let messages: ChatMessage[] = [{ role: 'system', content: cfg.systemPrompt ?? DEFAULT_SYSTEM_PROMPT }]
   let copilotBackend: TextBackend | null = null
-  console.log(`coding-agent (${cfg.model || (cfg.provider ?? 'openai')}) — 開始。/help でコマンド、空Enterで終了`)
+  const providerLabel = cfg.provider === 'external-openai' ? 'external-openai（合成データ専用）' : (cfg.model || (cfg.provider ?? 'openai'))
+  console.log(`coding-agent (${providerLabel}) — 開始。/help でコマンド、空Enterで終了`)
   for (;;) {
     const input = await nextLine('> ')
     if (input === '') break

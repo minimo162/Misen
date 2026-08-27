@@ -167,7 +167,7 @@ import { chat, type ChatMessage, type ToolCall } from './llm'
 import { bareToolName, findHostTool, getFilePrecondition, openAITools, parseToolResultMeta, qualifiedToolName, toolDefsForContract, validateToolArgs, type ToolContext } from './tools'
 
 export type AgentEvent = {
-  type: 'model.decision' | 'copilot.native.observed' | 'plan.created' | 'step.started' | 'step.completed' | 'step.failed' | 'tool.requested' | 'tool.approved' | 'tool.started' | 'tool.succeeded' | 'tool.failed' | 'tool.denied' | 'approval.requested' | 'approval.resolved' | 'artifact.created' | 'preview.ready' | 'run.warning'
+  type: 'model.wait' | 'model.decision' | 'copilot.native.observed' | 'plan.created' | 'step.started' | 'step.completed' | 'step.failed' | 'tool.requested' | 'tool.approved' | 'tool.started' | 'tool.succeeded' | 'tool.failed' | 'tool.denied' | 'approval.requested' | 'approval.resolved' | 'artifact.created' | 'preview.ready' | 'run.warning'
   tool?: string
   summary?: string
   output?: string
@@ -175,7 +175,7 @@ export type AgentEvent = {
   approved?: boolean
   durationMs?: number
   metadata?: Record<string, unknown> | null
-  origin?: 'host' | 'orchestrator' | 'copilot' | 'ollama'
+  origin?: 'host' | 'orchestrator' | 'copilot' | 'ollama' | 'external'
   namespace?: 'app' | 'native' | 'none'
   authority?: 'authoritative' | 'observed' | 'claimed' | 'derived'
   callId?: string
@@ -256,6 +256,20 @@ const END_MARKER = 'AGENT_END'
 
 export function shouldCancel(io: AgentIO): boolean {
   return io.signal?.aborted === true || io.isCanceled?.() === true
+}
+
+export type ModelEventOrigin = 'copilot' | 'ollama' | 'external'
+
+/** Keep model provenance explicit without exposing provider credentials or text. */
+export function modelEventOrigin(cfg: AgentConfig): ModelEventOrigin {
+  if (cfg.provider === 'external-openai') return 'external'
+  if (cfg.provider === 'ollama') return 'ollama'
+  return 'copilot'
+}
+
+/** Emit the fixed, user-safe status shown while a backend/model call is pending. */
+export function emitModelWait(io: AgentIO, cfg: AgentConfig): void {
+  io.event?.({ type: 'model.wait', summary: 'AIが次の作業を考えています', origin: modelEventOrigin(cfg), namespace: 'none', authority: 'derived' })
 }
 
 function pausedResult(messages: ChatMessage[], userInput: string, steps: string[]): AgentTurnResult {
@@ -472,6 +486,7 @@ async function runCopilotTurn(opts: {
     const modePrompt = buildProtocolRules(mode)
     const prompt = [cfg.systemPrompt, modePrompt, opts.userInput].filter((s) => s && s.trim()).join('\n\n')
     try {
+      emitModelWait(io, cfg)
       const text = (await backend.complete(prompt, io.signal)).trim()
       io.event?.({ type: 'model.decision', summary: 'Copilotの回答を受信しました', origin: 'copilot', namespace: 'native', authority: 'claimed' })
       io.event?.({ type: 'plan.created', summary: mode === 'research' ? 'Copilot調査モードを開始しました' : '通常回答モードを開始しました', origin: 'orchestrator', namespace: 'none', authority: 'derived' })
@@ -525,6 +540,7 @@ async function runCopilotTurn(opts: {
     let raw: string
     const backendStartedAt = Date.now()
     try {
+      emitModelWait(io, cfg)
       raw = await backend.complete(composeCopilotPrompt('work', opts.userInput, steps, cfg.copilot?.maxPromptChars ?? 120000, history, policy.allowArbitraryCommands, policy.autoApproveCommand, systemInstructions, ctx.safeCommandOnly === true), io.signal)
       raw = raw.replace(/＜/g, '<').replace(/＞/g, '>').replace(/｀/g, String.fromCharCode(96))
     } catch (err) {
@@ -718,6 +734,7 @@ export async function runAgentTurn(opts: {
   io: AgentIO
   backend?: TextBackend
 }): Promise<AgentTurnResult> {
+  if (opts.cfg.provider === 'external-openai') throw new Error('provider=external-openai は agentLoop=v2 専用です')
   if (opts.backend || opts.cfg.provider === 'copilot-edge') {
     const backend = opts.backend
     if (!backend) throw new Error('provider=copilot-edge には backend が必要です')
@@ -740,6 +757,7 @@ async function runPlainOpenAITurn(opts: {
     : opts.userInput
   const messages: ChatMessage[] = [...opts.messages, { role: 'user', content: prompt }]
   try {
+    emitModelWait(opts.io, opts.cfg)
     const assistant = await chat(opts.cfg, messages, [], opts.io.signal)
     const reply = assistant.content ?? ''
     opts.io.event?.({ type: 'model.decision', summary: 'モデルの次の1手を受信しました', origin: 'copilot', namespace: 'none', authority: 'claimed' })
@@ -797,6 +815,7 @@ async function runOpenAITurn(opts: {
     if (io.isPaused?.()) return { reply: '', messages, aborted: true, paused: true }
     let assistant: ChatMessage
     try {
+      emitModelWait(io, cfg)
       assistant = await chat(cfg, messages, openAITools({ allowArbitraryCommands: policy.allowArbitraryCommands, safeCommandOnly: ctx.safeCommandOnly }), io.signal)
     } catch (err) {
       const msg = (err as Error).message

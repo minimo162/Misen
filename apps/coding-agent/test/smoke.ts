@@ -1,6 +1,7 @@
 import assert from 'node:assert'
 import http from 'node:http'
 import net from 'node:net'
+import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -8,8 +9,9 @@ import { extractJsonReply, runAgentTurn, type AgentEvent, type AgentIO, type Tex
 import { createOllamaFetch, executeV2ToolCall, runAgentTurnV2 } from '../src/agent-v2'
 import { runConfiguredAgentTurn } from '../src/agent-loop'
 import { clearToolExecuteBeforeHooks, registerToolExecuteBeforeHook } from '../src/hooks'
-import { capabilityPolicy, loadConfig, type AgentConfig } from '../src/config'
+import { assertSyntheticWorkspaceBoundary, capabilityPolicy, loadConfig, resolveSyntheticWorkspace, SYNTHETIC_WORKSPACE_MARKER, SYNTHETIC_WORKSPACE_MARKER_EXPECTED, type AgentConfig } from '../src/config'
 import { commandPermissionTarget, createPermissionHook, evaluateToolPermission } from '../src/permission-hook'
+import { isCurrentSessionRun } from '../src/ui/session-guard'
 import type { ChatMessage } from '../src/llm'
 import {
   COPILOT_CLICK_SEND_JS,
@@ -814,6 +816,277 @@ async function testOllamaProvider(): Promise<void> {
     fs.rmSync(multiWorkspace, { recursive: true, force: true })
   }
   console.log('PASS ollama-provider')
+}
+
+async function testModelWaitAndExternalProvider(): Promise<void> {
+  // Every v1 backend wait is paired with a safe model.wait event. The event
+  // intentionally has no output/error/metadata fields that could leak model
+  // text or raw provider details.
+  const v1Events: AgentEvent[] = []
+  await runAgentTurn({
+    cfg: { baseURL: '', model: '', provider: 'copilot-edge', copilot: { agentMode: false }, turnMode: 'chat' },
+    messages: [], userInput: 'こんにちは', ctx: makeCtx(os.tmpdir(), false), io: { ...ioStub(true), event: (event) => v1Events.push(event) },
+    backend: new FakeBackend(['{"answer":"応答"}\nAGENT_END'])
+  })
+  const waitIndex = v1Events.findIndex((event) => event.type === 'model.wait')
+  const decisionIndex = v1Events.findIndex((event) => event.type === 'model.decision')
+  assert.ok(waitIndex >= 0 && waitIndex < decisionIndex, 'v1 model.wait must precede model.decision')
+  const waitEvent = v1Events[waitIndex]
+  assert.deepStrictEqual(Object.keys(waitEvent).sort(), ['authority', 'namespace', 'origin', 'summary', 'type'].sort())
+  assert.strictEqual(waitEvent.summary, 'AIが次の作業を考えています')
+
+  const fixture = path.resolve(process.cwd(), '..', '..', 'demo', 'external-provider-synthetic', 'workspace')
+  assertSyntheticWorkspaceBoundary({ provider: 'external-openai', agentLoop: 'v2', baseURL: 'https://api.example.test/v1', model: 'synthetic-model', apiKeyEnv: 'EXTERNAL_SMOKE_KEY', externalProvider: { enabled: true, syntheticWorkspace: fixture } }, fixture)
+
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-external-config-'))
+  const configPath = path.join(configDir, 'external.json')
+  const writeConfig = (name: string, value: Record<string, unknown>): string => {
+    const file = path.join(configDir, name)
+    fs.writeFileSync(file, JSON.stringify(value), 'utf8')
+    return file
+  }
+  const baseConfig: AgentConfig = {
+    agentLoop: 'v2', provider: 'external-openai', baseURL: 'https://api.example.test/v1', model: 'synthetic-model', apiKeyEnv: 'EXTERNAL_SMOKE_KEY',
+    externalProvider: { enabled: true, syntheticWorkspace: fixture }
+  }
+  try {
+    const loaded = loadConfig(writeConfig('valid.json', baseConfig as unknown as Record<string, unknown>))
+    assert.strictEqual(loaded.provider, 'external-openai')
+    assert.strictEqual(loaded.agentLoop, 'v2')
+    assert.strictEqual(loaded.configPath, path.resolve(configDir, 'valid.json'))
+    assert.strictEqual(loaded.restrictToWorkspace, true, 'external provider config must force workspace restriction')
+    assert.strictEqual(loaded.safeCommandOnly, true, 'external provider config must force safe command mode')
+    assert.strictEqual(resolveSyntheticWorkspace(loaded), fixture)
+    assert.throws(() => loadConfig(writeConfig('plaintext.json', { ...baseConfig, apiKey: 'never-store' })), /plaintext apiKey/u)
+    assert.throws(() => loadConfig(writeConfig('disabled.json', { ...baseConfig, externalProvider: { ...baseConfig.externalProvider, enabled: false } })), /enabled=true/u)
+    assert.throws(() => loadConfig(writeConfig('workspace-unrestricted.json', { ...baseConfig, restrictToWorkspace: false })), /restrictToWorkspace=false/u)
+    assert.throws(() => loadConfig(writeConfig('commands-unrestricted.json', { ...baseConfig, safeCommandOnly: false })), /safeCommandOnly=false/u)
+    assert.throws(() => loadConfig(writeConfig('no-env.json', { ...baseConfig, apiKeyEnv: '' })), /apiKeyEnv/u)
+    assert.throws(() => loadConfig(writeConfig('bad-scheme.json', { ...baseConfig, baseURL: 'ftp://example.test/v1' })), /HTTPS/u)
+    assert.throws(() => loadConfig(writeConfig('credentials.json', { ...baseConfig, baseURL: 'https://user:pass@example.test/v1' })), /credentials/u)
+    assert.throws(() => loadConfig(writeConfig('v1.json', { ...baseConfig, agentLoop: 'v1' })), /agentLoop=v2/u)
+  } finally {
+    fs.rmSync(configDir, { recursive: true, force: true })
+  }
+
+  const previousKey = process.env.EXTERNAL_SMOKE_KEY
+  process.env.EXTERNAL_SMOKE_KEY = 'external-smoke-secret'
+  const mock = await listenOllamaMock((_body, requestNumber) => {
+    const message = requestNumber === 1
+      ? { role: 'assistant', content: '', tool_calls: [{ id: 'external-call-1', type: 'function', function: { name: 'write_file', arguments: JSON.stringify({ path: 'reports/result.txt', content: 'synthetic-ok' }) } }] }
+      : { role: 'assistant', content: '合成データの作業が完了しました' }
+    return { body: JSON.stringify({ id: `external-${requestNumber}`, object: 'chat.completion', created: 0, model: 'synthetic-model', choices: [{ index: 0, message, finish_reason: requestNumber === 1 ? 'tool_calls' : 'stop' }] }) }
+  })
+  try {
+    const events: AgentEvent[] = []
+    const result = await runAgentTurnV2({
+      cfg: { ...baseConfig, baseURL: mock.url, autoApprove: { write: false }, configPath: path.join(process.cwd(), 'config.external.example.json') },
+      messages: [], userInput: '架空の報告を保存して', ctx: makeCtx(fixture), io: { ...ioStub(true), event: (event) => events.push(event) }
+    })
+    assert.strictEqual(result.aborted, false)
+    assert.strictEqual(result.reply, '合成データの作業が完了しました')
+    assert.strictEqual(fs.readFileSync(path.join(fixture, 'reports', 'result.txt'), 'utf8'), 'synthetic-ok')
+    assert.strictEqual(mock.requests[0].authorization, 'Bearer external-smoke-secret', 'external key must be sent only as Authorization')
+    const wire = JSON.stringify(mock.requests.map((request) => request.body))
+    assert.ok(!wire.includes('external-smoke-secret'), 'external secret must not be in request body')
+    assert.ok(!JSON.stringify(events).includes('external-smoke-secret'), 'external secret must not be in events')
+    const modelEvents = events.filter((event) => event.type === 'model.decision' || event.type === 'model.wait')
+    assert.ok(modelEvents.some((event) => event.type === 'model.wait') && modelEvents.some((event) => event.type === 'model.decision'))
+    assert.ok(modelEvents.every((event) => event.origin === 'external'), 'external provenance must remain distinct')
+    const firstDecision = events.findIndex((event) => event.type === 'model.decision')
+    assert.ok(events.findIndex((event) => event.type === 'model.wait') < firstDecision)
+  } finally {
+    await new Promise<void>((resolve) => mock.server.close(() => resolve()))
+    try { fs.rmSync(path.join(fixture, 'reports', 'result.txt'), { force: true }) } catch {}
+    if (previousKey === undefined) delete process.env.EXTERNAL_SMOKE_KEY
+    else process.env.EXTERNAL_SMOKE_KEY = previousKey
+  }
+
+  // Re-check the boundary immediately before every external request. If the
+  // marker is replaced after the first response, the tool may finish locally,
+  // but the next generateText call must be blocked without a second request.
+  const revalidationRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-external-revalidation-'))
+  fs.mkdirSync(path.join(revalidationRoot, 'reports'), { recursive: true })
+  const replacementMarker = path.join(revalidationRoot, SYNTHETIC_WORKSPACE_MARKER)
+  fs.writeFileSync(replacementMarker, JSON.stringify(SYNTHETIC_WORKSPACE_MARKER_EXPECTED), 'utf8')
+  const revalidationPreviousKey = process.env.EXTERNAL_SMOKE_KEY
+  process.env.EXTERNAL_SMOKE_KEY = 'external-revalidation-secret'
+  const revalidationMock = await listenOllamaMock((_body, requestNumber) => {
+    if (requestNumber === 1) {
+      fs.writeFileSync(replacementMarker, JSON.stringify({ ...SYNTHETIC_WORKSPACE_MARKER_EXPECTED, purpose: 'replaced-after-first-request' }), 'utf8')
+    }
+    const message = requestNumber === 1
+      ? { role: 'assistant', content: '', tool_calls: [{ id: 'external-revalidate-call-1', type: 'function', function: { name: 'write_file', arguments: JSON.stringify({ path: 'reports/revalidate.txt', content: 'first-request-only' }) } }] }
+      : { role: 'assistant', content: 'must not be requested' }
+    return { body: JSON.stringify({ id: `external-revalidate-${requestNumber}`, object: 'chat.completion', created: 0, model: 'synthetic-model', choices: [{ index: 0, message, finish_reason: requestNumber === 1 ? 'tool_calls' : 'stop' }] }) }
+  })
+  try {
+    const result = await runAgentTurnV2({
+      cfg: { ...baseConfig, baseURL: revalidationMock.url, autoApprove: { write: true }, externalProvider: { enabled: true, syntheticWorkspace: revalidationRoot } },
+      messages: [], userInput: '境界を再確認して', ctx: makeCtx(revalidationRoot), io: ioStub(true)
+    })
+    assert.strictEqual(result.aborted, true, 'marker replacement must abort the external v2 loop')
+    assert.strictEqual(revalidationMock.requests.length, 1, 'marker replacement after first request must not send a second request')
+  } finally {
+    await new Promise<void>((resolve) => revalidationMock.server.close(() => resolve()))
+    fs.rmSync(revalidationRoot, { recursive: true, force: true })
+    if (revalidationPreviousKey === undefined) delete process.env.EXTERNAL_SMOKE_KEY
+    else process.env.EXTERNAL_SMOKE_KEY = revalidationPreviousKey
+  }
+
+  // Boundary failures happen before generateText/network. Exercise mismatch,
+  // missing marker, malformed marker, and symlink marker with a zero-request
+  // loopback server.
+  const boundaryMock = await listenOllamaMock(() => ({ body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'must not run' } }] }) }))
+  const boundaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-external-boundary-'))
+  const boundaryCfg = (root: string): AgentConfig => ({ ...baseConfig, baseURL: boundaryMock.url, configPath: path.join(boundaryRoot, 'external.json'), externalProvider: { enabled: true, syntheticWorkspace: root } })
+  try {
+    await assert.rejects(() => runAgentTurnV2({ cfg: { ...boundaryCfg(fixture), restrictToWorkspace: false }, messages: [], userInput: 'no', ctx: makeCtx(fixture), io: ioStub(true) }), /ワークスペース制限/u)
+    await assert.rejects(() => runAgentTurnV2({ cfg: { ...boundaryCfg(fixture), safeCommandOnly: false }, messages: [], userInput: 'no', ctx: makeCtx(fixture), io: ioStub(true) }), /安全なコマンド制限/u)
+    await assert.rejects(() => runAgentTurnV2({ cfg: boundaryCfg(fixture), messages: [], userInput: 'no', ctx: { ...makeCtx(fixture), restrictToWorkspace: false }, io: ioStub(true) }), /ToolContext.*ワークスペース制限/u)
+    await assert.rejects(() => runAgentTurnV2({ cfg: boundaryCfg(fixture), messages: [], userInput: 'no', ctx: { ...makeCtx(fixture), safeCommandOnly: false }, io: ioStub(true) }), /ToolContext.*安全なコマンド制限/u)
+    await assert.rejects(() => runAgentTurnV2({ cfg: boundaryCfg(fixture), messages: [], userInput: 'no', ctx: makeCtx(boundaryRoot), io: ioStub(true) }), /合成ワークスペース/u)
+    const missing = path.join(boundaryRoot, 'missing')
+    fs.mkdirSync(missing, { recursive: true })
+    await assert.rejects(() => runAgentTurnV2({ cfg: boundaryCfg(missing), messages: [], userInput: 'no', ctx: makeCtx(missing), io: ioStub(true) }), /マーカー/u)
+    fs.writeFileSync(path.join(missing, SYNTHETIC_WORKSPACE_MARKER), JSON.stringify({ ...SYNTHETIC_WORKSPACE_MARKER_EXPECTED, purpose: 'wrong' }), 'utf8')
+    await assert.rejects(() => runAgentTurnV2({ cfg: boundaryCfg(missing), messages: [], userInput: 'no', ctx: makeCtx(missing), io: ioStub(true) }), /マーカー/u)
+    try {
+      fs.symlinkSync(path.join(fixture, SYNTHETIC_WORKSPACE_MARKER), path.join(missing, 'symlink-marker'), 'file')
+      fs.rmSync(path.join(missing, SYNTHETIC_WORKSPACE_MARKER), { force: true })
+      fs.renameSync(path.join(missing, 'symlink-marker'), path.join(missing, SYNTHETIC_WORKSPACE_MARKER))
+      await assert.rejects(() => runAgentTurnV2({ cfg: boundaryCfg(missing), messages: [], userInput: 'no', ctx: makeCtx(missing), io: ioStub(true) }), /マーカー/u)
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code !== 'EPERM' && code !== 'EACCES') throw error
+    }
+    assert.strictEqual(boundaryMock.requests.length, 0, 'boundary failures must send zero external requests')
+  } finally {
+    await new Promise<void>((resolve) => boundaryMock.server.close(() => resolve()))
+    fs.rmSync(boundaryRoot, { recursive: true, force: true })
+  }
+
+  const ui = fs.readFileSync(path.join(process.cwd(), 'src', 'ui', 'main.ts'), 'utf8')
+  const classic = fs.readFileSync(path.join(process.cwd(), 'public', 'classic.html'), 'utf8')
+  for (const source of [ui, classic]) {
+    for (const required of ['model.wait', 'AIが次の作業を考えています', 'pending', 'in-progress', 'completed', '外部AI: 有効（合成データのみ）']) assert.ok(source.includes(required), `safe progress UI contract missing: ${required}`)
+    assert.ok(!/event\.output[^\n]*textContent/u.test(source), 'AI-work UI must not render event.output')
+    assert.ok(!/event\.metadata[^\n]*textContent/u.test(source), 'AI-work UI must not render event.metadata')
+  }
+  console.log('PASS model-wait-and-external-provider')
+}
+
+async function testExternalStateIsolation(): Promise<void> {
+  const fixture = path.resolve(process.cwd(), '..', '..', 'demo', 'external-provider-synthetic', 'workspace')
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-external-state-'))
+  const appData = path.join(tempRoot, 'appdata')
+  const localAppData = path.join(tempRoot, 'localappdata')
+  const configPath = path.join(tempRoot, 'external.json')
+  const sharedStatePath = path.join(appData, 'CompanyApps', 'coding-agent', 'state.json')
+  const externalStatePath = path.join(appData, 'CompanyApps', 'coding-agent', 'external-synthetic-state.json')
+  const legacySecret = 'legacy-copilot-ollama-session-must-not-cross-provider'
+  const legacyState = {
+    activeId: 'legacy-session',
+    activeRunId: null,
+    recoveredRunId: null,
+    sessions: [{
+      id: 'legacy-session',
+      title: '旧プロバイダーのセッション',
+      messages: [
+        { role: 'system', content: 'legacy system' },
+        { role: 'user', content: legacySecret },
+        { role: 'assistant', content: 'legacy response' }
+      ],
+      created: 1,
+      runs: []
+    }],
+    runs: []
+  }
+  fs.mkdirSync(path.dirname(sharedStatePath), { recursive: true })
+  fs.writeFileSync(sharedStatePath, JSON.stringify(legacyState), 'utf8')
+  fs.writeFileSync(configPath, JSON.stringify({
+    agentLoop: 'v2',
+    provider: 'external-openai',
+    baseURL: 'http://127.0.0.1:1/v1',
+    model: 'external-test-model',
+    apiKeyEnv: 'EXTERNAL_SMOKE_KEY',
+    externalProvider: { enabled: true, syntheticWorkspace: fixture },
+    restrictToWorkspace: true,
+    safeCommandOnly: true
+  }), 'utf8')
+
+  const probe = http.createServer()
+  await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve))
+  const port = (probe.address() as net.AddressInfo).port
+  await new Promise<void>((resolve) => probe.close(() => resolve()))
+
+  let child: ReturnType<typeof spawn> | undefined
+  const childOutput: string[] = []
+  const stopChild = async (): Promise<void> => {
+    const processChild = child
+    if (!processChild || processChild.exitCode !== null) return
+    await new Promise<void>((resolve) => {
+      let settled = false
+      const finish = () => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve()
+      }
+      const timer = setTimeout(() => {
+        try { processChild.kill('SIGKILL') } catch {}
+        finish()
+      }, 5000)
+      processChild.once('close', finish)
+      try { processChild.kill('SIGTERM') } catch { finish() }
+    })
+  }
+  const baseURL = `http://127.0.0.1:${port}`
+  const requestJson = async (pathname: string, init?: RequestInit): Promise<Record<string, unknown>> => {
+    const response = await fetch(`${baseURL}${pathname}`, init)
+    const text = await response.text()
+    if (!response.ok) throw new Error(`state isolation request failed (${response.status}): ${text}`)
+    return JSON.parse(text) as Record<string, unknown>
+  }
+  try {
+    child = spawn(process.execPath, [path.join(process.cwd(), 'dist', 'server.js'), '--config', configPath, '--workspace', fixture], {
+      cwd: process.cwd(),
+      env: { ...process.env, PORT: String(port), APPDATA: appData, LOCALAPPDATA: localAppData, EXTERNAL_SMOKE_KEY: 'state-isolation-key', CODING_AGENT_NO_BROWSER: '1', NO_COLOR: '1' },
+      shell: false,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe']
+    })
+    child.stdout?.on('data', (chunk) => { childOutput.push(String(chunk)) })
+    child.stderr?.on('data', (chunk) => { childOutput.push(String(chunk)) })
+
+    let sessions: Record<string, unknown> | undefined
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if (child.exitCode !== null) throw new Error(`external state isolation server exited (${child.exitCode}): ${childOutput.join('').slice(-2000)}`)
+      try {
+        sessions = await requestJson('/api/sessions')
+        break
+      } catch {
+        await new Promise<void>((resolve) => setTimeout(resolve, 100))
+      }
+    }
+    assert.ok(sessions, `external state isolation server did not become ready: ${childOutput.join('').slice(-2000)}`)
+    assert.ok(!JSON.stringify(sessions).includes(legacySecret), 'external startup must not expose shared provider state')
+    const activeId = typeof sessions.active === 'string' ? sessions.active : ''
+    assert.ok(activeId, 'external startup must create a fresh session when dedicated state is absent')
+    const session = await requestJson(`/api/session?id=${encodeURIComponent(activeId)}`)
+    assert.ok(!JSON.stringify(session).includes(legacySecret), 'external session API must not disclose shared provider messages')
+    assert.ok(!fs.existsSync(externalStatePath), 'external state must not be created by a read-only startup check')
+    assert.strictEqual(JSON.parse(fs.readFileSync(sharedStatePath, 'utf8')).sessions[0].messages[1].content, legacySecret, 'shared provider state must remain untouched')
+
+    await requestJson('/api/sessions', { method: 'POST' })
+    assert.ok(fs.existsSync(externalStatePath), 'external mode must persist only to its dedicated state path')
+    const externalState = fs.readFileSync(externalStatePath, 'utf8')
+    assert.ok(!externalState.includes(legacySecret), 'dedicated external state must not contain legacy provider messages')
+    console.log('PASS external-state-isolation')
+  } finally {
+    await stopChild()
+    fs.rmSync(tempRoot, { recursive: true, force: true })
+  }
 }
 
 async function testAgentLoop(): Promise<void> {
@@ -2393,10 +2666,24 @@ async function testUiContract(): Promise<void> {
   assert.ok(!frontend.includes("run.status === 'failed' || run.status === 'canceled' || run.status === 'paused'"), 'paused runs must not expose retry')
   assert.ok(!/\.value\s*=/u.test(frontend), 'suggestions must use assistant-ui composer state, not DOM value assignment')
   assert.ok(!/dispatchEvent\(new Event\(['"]input['"]/u.test(frontend), 'suggestions must not synthesize DOM input events')
+  let currentSession = 'session-a'
+  const requestedSession = currentSession
+  const staleResponse = await Promise.resolve({ sessionId: 'session-a' })
+  currentSession = 'session-b'
+  assert.strictEqual(isCurrentSessionRun(staleResponse, requestedSession, currentSession), false, 'an in-flight response must be rejected after a session switch')
+  assert.strictEqual(isCurrentSessionRun({ sessionId: 'session-b' }, currentSession, currentSession), true, 'the current session run must remain eligible')
+  assert.ok(frontend.includes('isCurrentSessionRun(response.activeRun, nextId, activeIdRef.current)'), 'session refresh must not display another session\'s active or recovered run')
+  assert.ok(frontend.includes('isCurrentSessionRun(response.run, requestedSessionId, activeIdRef.current)'), 'active-run polling must reject a response that resolves after a session switch')
+  assert.ok((frontend.match(/isCurrentSessionRun\(response\.run, requestedSessionId, activeIdRef\.current\)/gu) ?? []).length >= 3, 'default UI polling, actions, and turns must share the session response guard')
+  assert.ok(frontend.includes("className: 'new-session', onClick: onNew, disabled: isRunning") && frontend.includes('onClick: () => onSelect(session.id), disabled: isRunning'), 'default UI must disable session changes during an active turn')
+  assert.ok(classic.includes('isCurrentSessionRun(r&&r.run,requested,activeId)') && classic.includes('version!==sessionRequestVersion||activeId!==id'), 'classic UI must reject stale polling and session-load responses')
+  assert.ok((classic.match(/isCurrentSessionRun\(r&&r\.(?:run|activeRun),requested,activeId\)/gu) ?? []).length >= 7, 'classic polling, turn, action, verify, cancel, and rollback responses must share the session guard')
+  assert.ok(classic.includes("const created=await jpost('/api/sessions');if(!created||!created.id)return;await selectSession(created.id)") && classic.includes('message:text,mode,sessionId:requested'), 'classic new chat must adopt the created session id and send it explicitly with the turn')
 
   const server = fs.readFileSync(path.join(process.cwd(), 'src', 'server.ts'), 'utf8')
   for (const required of ["url.pathname === '/classic'", "'/assets/ui.js'", "'/assets/ui.css'", 'classicHtmlPath', 'uiAssets']) assert.ok(server.includes(required), `static route contract missing: ${required}`)
   assert.ok(server.indexOf("url.pathname === '/classic'") < server.indexOf("url.pathname === '/api/info'"), '/classic must be handled before API routes')
+  assert.ok(server.includes('visibleRun?.sessionId === s.id ? runSnapshot(visibleRun) : null'), 'session API must not return another session\'s active or recovered run')
   console.log('PASS ui-contract (default + classic + presentation-only)')
 }
 
@@ -2593,6 +2880,8 @@ async function testDemoRecordingContract(): Promise<void> {
   await testV2PermissionEmptyCompatibility()
   await testV2LimitsAndNoProgress()
   await testOllamaProvider()
+  await testModelWaitAndExternalProvider()
+  await testExternalStateIsolation()
   await testDenial()
   await testProtocolParsing()
   await testCopilotChoosesFirstAction()

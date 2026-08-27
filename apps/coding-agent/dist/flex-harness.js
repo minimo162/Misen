@@ -4901,6 +4901,13 @@ async function convertCopilotResponse(settings, rawResponse, tools, signal) {
   });
 }
 
+// src/config.ts
+var SYNTHETIC_WORKSPACE_MARKER_EXPECTED = Object.freeze({
+  schema: "company-apps.synthetic-workspace/v1",
+  classification: "synthetic",
+  purpose: "external-provider-validation"
+});
+
 // src/tools.ts
 var import_node_fs = __toESM(require("node:fs"));
 var import_node_child_process2 = require("node:child_process");
