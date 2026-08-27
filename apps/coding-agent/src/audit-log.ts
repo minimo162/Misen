@@ -463,6 +463,12 @@ export class AuditLog {
   csv(limit = DEFAULT_MAX_RECORDS, filters: AuditFilters = {}): string {
     return auditRecordsToCsv(this.records(limit, filters))
   }
+
+  close(): void {
+    if (this.appendHandle !== null) fs.closeSync(this.appendHandle)
+    this.appendHandle = null
+    this.initialized = false
+  }
 }
 
 export function createAuditLog(options: AuditLogOptions): AuditLog {

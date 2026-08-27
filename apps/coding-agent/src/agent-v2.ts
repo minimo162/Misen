@@ -79,6 +79,24 @@ function providerOptionsFor(cfg: AgentConfig): { ollama: { reasoningEffort: stri
   return { ollama: { reasoningEffort: cfg.reasoningEffort } }
 }
 
+function modelUsageMetadata(usage: {
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
+  inputTokenDetails?: { cacheReadTokens?: number }
+  outputTokenDetails?: { reasoningTokens?: number }
+}): Record<string, unknown> {
+  return {
+    usage: {
+      inputTokens: typeof usage.inputTokens === 'number' ? usage.inputTokens : null,
+      outputTokens: typeof usage.outputTokens === 'number' ? usage.outputTokens : null,
+      totalTokens: typeof usage.totalTokens === 'number' ? usage.totalTokens : null,
+      reasoningTokens: typeof usage.outputTokenDetails?.reasoningTokens === 'number' ? usage.outputTokenDetails.reasoningTokens : null,
+      cachedInputTokens: typeof usage.inputTokenDetails?.cacheReadTokens === 'number' ? usage.inputTokenDetails.cacheReadTokens : null
+    }
+  }
+}
+
 export interface AgentV2Options {
   cfg: AgentConfig
   messages: ChatMessage[]
@@ -180,8 +198,22 @@ function enforceExternalProviderSafety(cfg: AgentConfig, suppliedCtx: ToolContex
   return { ...suppliedCtx, restrictToWorkspace: true, safeCommandOnly: true }
 }
 
-function assertExternalBoundaryBeforeRequest(cfg: AgentConfig, ctx: ToolContext): void {
-  if (cfg.provider === 'external-openai') assertSyntheticWorkspaceBoundary(cfg, ctx.workspace)
+function assertExternalBoundaryBeforeRequest(cfg: AgentConfig, ctx: ToolContext, io: AgentIO): void {
+  if (cfg.provider !== 'external-openai') return
+  try {
+    assertSyntheticWorkspaceBoundary(cfg, ctx.workspace)
+  } catch (error) {
+    const message = (error as Error).message || String(error)
+    io.event?.({
+      type: 'run.warning',
+      error: message,
+      metadata: { safetyBoundary: 'external-synthetic-workspace' },
+      origin: 'orchestrator',
+      namespace: 'none',
+      authority: 'authoritative'
+    })
+    throw error
+  }
 }
 
 export async function executeV2ToolCall(
@@ -324,7 +356,7 @@ export async function executeV2ToolCall(
 export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnResult> {
   const { cfg, io } = opts
   const ctx = enforceExternalProviderSafety(cfg, opts.ctx)
-  assertSyntheticWorkspaceBoundary(cfg, ctx.workspace)
+  assertExternalBoundaryBeforeRequest(cfg, ctx, io)
   if (cfg.provider === 'external-openai') {
     if (Object.prototype.hasOwnProperty.call(cfg, 'apiKey')) throw new Error('provider=external-openai は plaintext apiKey を受け付けません')
     if (!cfg.apiKeyEnv || !process.env[cfg.apiKeyEnv]) throw new Error('provider=external-openai の秘密情報が環境変数にありません')
@@ -346,7 +378,7 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
   if (mode !== 'work') {
     try {
       emitModelWait(io, cfg)
-      assertExternalBoundaryBeforeRequest(cfg, ctx)
+      assertExternalBoundaryBeforeRequest(cfg, ctx, io)
       const result = await generateText({
         model,
         messages: modelMessages,
@@ -356,7 +388,7 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
         maxRetries: 0,
         abortSignal: io.signal
       })
-      io.event?.({ type: 'model.decision', summary: 'モデルの次の1手を受信しました', origin: modelEventOrigin(cfg), namespace: 'none', authority: 'claimed' })
+      io.event?.({ type: 'model.decision', summary: 'モデルの次の1手を受信しました', metadata: modelUsageMetadata(result.usage), origin: modelEventOrigin(cfg), namespace: 'none', authority: 'claimed' })
       messages.push({ role: 'assistant', content: result.text })
       if (mode === 'research') {
         const research = buildResearchBundle(opts.userInput, result.text)
@@ -386,7 +418,7 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
     let result: Awaited<ReturnType<typeof generateText>>
     try {
       emitModelWait(io, cfg)
-      assertExternalBoundaryBeforeRequest(cfg, ctx)
+      assertExternalBoundaryBeforeRequest(cfg, ctx, io)
       result = await generateText({
         model,
         messages: modelMessages,
@@ -401,7 +433,7 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
       io.print(`[error] ${(err as Error).message}`)
       return { reply: '', messages, aborted: true }
     }
-    io.event?.({ type: 'model.decision', summary: 'モデルの次の1手を受信しました', origin: modelEventOrigin(cfg), namespace: 'none', authority: 'claimed' })
+    io.event?.({ type: 'model.decision', summary: 'モデルの次の1手を受信しました', metadata: modelUsageMetadata(result.usage), origin: modelEventOrigin(cfg), namespace: 'none', authority: 'claimed' })
     modelMessages.push(...result.response.messages as V2ModelMessage[])
     const calls = result.toolCalls
     const legacyCalls: ToolCall[] = calls.map((call) => ({ id: call.toolCallId, type: 'function', function: { name: qualifiedToolName(call.toolName), arguments: JSON.stringify(call.input) } }))
