@@ -5,10 +5,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { extractJsonReply, runAgentTurn, type AgentEvent, type AgentIO, type TextBackend } from '../src/agent'
-import { executeV2ToolCall, runAgentTurnV2 } from '../src/agent-v2'
+import { createOllamaFetch, executeV2ToolCall, runAgentTurnV2 } from '../src/agent-v2'
 import { runConfiguredAgentTurn } from '../src/agent-loop'
 import { clearToolExecuteBeforeHooks, registerToolExecuteBeforeHook } from '../src/hooks'
-import { capabilityPolicy, type AgentConfig } from '../src/config'
+import { capabilityPolicy, loadConfig, type AgentConfig } from '../src/config'
 import { commandPermissionTarget, createPermissionHook, evaluateToolPermission } from '../src/permission-hook'
 import type { ChatMessage } from '../src/llm'
 import {
@@ -659,6 +659,161 @@ async function withCopilotBridge(
     server.abortAll()
     await new Promise<void>((resolve) => server.close(() => resolve()))
   }
+}
+
+async function listenOllamaMock(
+  responder: (requestBody: Record<string, unknown>, requestNumber: number) => { status?: number; contentType?: string; body: Uint8Array | string }
+): Promise<{ server: http.Server; url: string; requests: Array<{ body: Record<string, unknown>; authorization: string | null; contentType: string | null }> }> {
+  const requests: Array<{ body: Record<string, unknown>; authorization: string | null; contentType: string | null }> = []
+  let requestNumber = 0
+  const server = http.createServer((req, res) => {
+    const chunks: Buffer[] = []
+    req.on('data', (chunk: Buffer) => chunks.push(chunk))
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8')
+      const body = JSON.parse(raw) as Record<string, unknown>
+      requests.push({ body, authorization: req.headers.authorization ?? null, contentType: req.headers['content-type'] ?? null })
+      const response = responder(body, ++requestNumber)
+      res.statusCode = response.status ?? 200
+      res.setHeader('content-type', response.contentType ?? 'application/json')
+      res.end(typeof response.body === 'string' ? response.body : Buffer.from(response.body))
+    })
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = (server.address() as net.AddressInfo).port
+  return { server, url: `http://127.0.0.1:${port}/v1`, requests }
+}
+
+async function testOllamaProvider(): Promise<void> {
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-ollama-config-'))
+  const writeConfig = (name: string, value: Record<string, unknown>): string => {
+    const file = path.join(configDir, name)
+    fs.writeFileSync(file, JSON.stringify(value), 'utf8')
+    return file
+  }
+  try {
+    const loaded = loadConfig(writeConfig('valid.json', {
+      provider: 'ollama', baseURL: 'http://127.0.0.1:11434/v1', model: 'ornith-1.5:9b'
+    }))
+    assert.strictEqual(loaded.provider, 'ollama')
+    assert.strictEqual(loaded.agentLoop, 'v1')
+    assert.throws(() => loadConfig(writeConfig('unsupported.json', { provider: 'unsupported', baseURL: 'http://127.0.0.1:1/v1', model: 'x' })), /サポートされていない provider/u)
+    assert.throws(() => loadConfig(writeConfig('missing.json', { provider: 'ollama', baseURL: 'http://127.0.0.1:11434/v1' })), /baseURL \/ model/u)
+    assert.throws(() => loadConfig(writeConfig('remote.json', { provider: 'ollama', baseURL: 'https://example.com/v1', model: 'x' })), /loopback/u)
+    assert.throws(() => loadConfig(writeConfig('bad-reasoning.json', { provider: 'ollama', baseURL: 'http://127.0.0.1:11434/v1', model: 'x', reasoningEffort: 'max' })), /reasoningEffort/u)
+  } finally {
+    fs.rmSync(configDir, { recursive: true, force: true })
+  }
+
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-ollama-workspace-'))
+  const previousKey = process.env.COMPANY_LLM_API_KEY
+  process.env.COMPANY_LLM_API_KEY = 'must-not-be-sent-to-ollama'
+  const ollamaEvents: AgentEvent[] = []
+  const mock = await listenOllamaMock((_body, requestNumber) => {
+    if (requestNumber === 1) {
+      return {
+        contentType: 'application/json; charset=utf-8',
+        body: Buffer.from(JSON.stringify({
+          id: 'ollama-smoke-1', object: 'chat.completion', created: 0, model: 'mock',
+          choices: [{ index: 0, message: { role: 'assistant', content: '', tool_calls: [{ id: 'ollama-call-1', type: 'function', function: { name: 'write_file', arguments: JSON.stringify({ path: 'メモ.txt', content: '確認' }) } }] }, finish_reason: 'tool_calls' }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+        }), 'utf8')
+      }
+    }
+    return {
+      body: Buffer.from(JSON.stringify({
+        id: 'ollama-smoke-2', object: 'chat.completion', created: 0, model: 'mock',
+        choices: [{ index: 0, message: { role: 'assistant', content: 'Ollama UTF-8 完了' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+      }), 'utf8')
+    }
+  })
+  try {
+    const result = await runAgentTurnV2({
+      cfg: {
+        provider: 'ollama', agentLoop: 'v2', baseURL: mock.url, model: 'mock', reasoningEffort: 'high',
+        autoApprove: { write: true }, maxToolIterations: 3
+      },
+      messages: [], userInput: '日本語ファイルを書いて', ctx: makeCtx(workspace), io: { ...ioStub(true), event: (event) => ollamaEvents.push(event) }
+    })
+    assert.strictEqual(result.aborted, false)
+    assert.strictEqual(result.reply, 'Ollama UTF-8 完了')
+    assert.strictEqual(fs.readFileSync(path.join(workspace, 'メモ.txt'), 'utf8'), '確認')
+    assert.ok(mock.requests[0].contentType?.toLowerCase().includes('application/json') && mock.requests[0].contentType?.toLowerCase().includes('charset=utf-8'))
+    assert.strictEqual(mock.requests[0].authorization, null, 'Ollama must not receive Authorization')
+    assert.strictEqual(mock.requests[0].body.reasoning_effort, 'high')
+    const secondBody = JSON.stringify(mock.requests[1]?.body ?? {})
+    assert.ok(secondBody.includes('メモ.txt') && secondBody.includes('確認'), 'Japanese tool args must survive the UTF-8 boundary')
+    const modelEvents = ollamaEvents.filter((event) => event.type === 'model.decision')
+    assert.ok(modelEvents.length > 0, 'Ollama turn must emit a model decision event')
+    assert.ok(modelEvents.every((event) => event.origin === 'ollama'), 'Ollama model decisions must retain Ollama provenance')
+    assert.ok(!modelEvents.some((event) => event.origin === 'copilot'), 'Ollama model decisions must not claim Copilot provenance')
+  } finally {
+    await new Promise<void>((resolve) => mock.server.close(() => resolve()))
+    fs.rmSync(workspace, { recursive: true, force: true })
+    if (previousKey === undefined) delete process.env.COMPANY_LLM_API_KEY
+    else process.env.COMPANY_LLM_API_KEY = previousKey
+  }
+
+  const invalid = await listenOllamaMock(() => ({ contentType: 'application/json', body: new Uint8Array([0x7b, 0x22, 0x74, 0x22, 0x3a, 0xc3, 0x28, 0x7d]) }))
+  try {
+    const printed: string[] = []
+    const result = await runAgentTurnV2({
+      cfg: { provider: 'ollama', agentLoop: 'v2', baseURL: invalid.url, model: 'mock', turnMode: 'chat' },
+      messages: [], userInput: '壊れた応答', ctx: makeCtx(os.tmpdir(), false), io: { print: (text) => printed.push(text), askYesNo: async () => true }
+    })
+    assert.strictEqual(result.aborted, true, 'invalid UTF-8 response must fail closed')
+    assert.ok(printed.some((line) => line.startsWith('[error]')))
+    assert.ok(!printed.some((line) => line.includes('\uFFFD')))
+  } finally {
+    await new Promise<void>((resolve) => invalid.server.close(() => resolve()))
+  }
+
+  const multiWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-ollama-multi-'))
+  const multi = await listenOllamaMock(() => ({
+    body: JSON.stringify({
+      id: 'ollama-smoke-multi', object: 'chat.completion', created: 0, model: 'mock',
+      choices: [{ index: 0, message: { role: 'assistant', content: '', tool_calls: [
+        { id: 'multi-1', type: 'function', function: { name: 'write_file', arguments: JSON.stringify({ path: 'a.txt', content: 'a' }) } },
+        // Keep one call semantically malformed so this guards the fail-close
+        // boundary for mixed valid + malformed simultaneous tool_calls.
+        { id: 'multi-2', type: 'function', function: { name: 'write_file', arguments: JSON.stringify({ path: 3, content: 'b' }) } }
+      ] }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+    })
+  }))
+  try {
+    const multiEvents: AgentEvent[] = []
+    let approvals = 0
+    let toolDefRuns = 0
+    const writeDef = TOOL_DEFS.find((toolDef) => toolDef.name === 'write_file')!
+    const originalRun = writeDef.run
+    writeDef.run = async (args, ctx) => {
+      toolDefRuns++
+      return originalRun(args, ctx)
+    }
+    let result
+    try {
+      result = await runAgentTurnV2({
+        cfg: { provider: 'ollama', agentLoop: 'v2', baseURL: multi.url, model: 'mock', autoApprove: { write: true } },
+        messages: [], userInput: '複数', ctx: makeCtx(multiWorkspace),
+        io: { ...ioStub(true), askYesNo: async () => { approvals++; return true }, event: (event) => multiEvents.push(event) }
+      })
+    } finally {
+      writeDef.run = originalRun
+    }
+    assert.strictEqual(result.aborted, true)
+    assert.strictEqual(toolDefRuns, 0, 'mixed simultaneous tool calls must execute zero ToolDef.run calls')
+    assert.strictEqual(approvals, 0, 'mixed simultaneous tool calls must request zero approvals')
+    assert.ok(!fs.existsSync(path.join(multiWorkspace, 'a.txt')) && !fs.existsSync(path.join(multiWorkspace, 'b.txt')), 'multiple tool calls must execute zero tools')
+    assert.strictEqual(multiEvents.filter((event) => event.type === 'approval.requested' || event.type === 'approval.resolved').length, 0, 'mixed simultaneous tool calls must emit zero approval events')
+    const terminalEvents = multiEvents.filter((event) => ['tool.succeeded', 'tool.failed', 'tool.denied'].includes(event.type))
+    assert.strictEqual(terminalEvents.length, 0, 'mixed simultaneous tool calls must emit no terminal tool/audit event')
+    assert.ok(multiEvents.some((event) => event.type === 'run.warning'), 'mixed simultaneous tool calls must fail closed with a warning')
+  } finally {
+    await new Promise<void>((resolve) => multi.server.close(() => resolve()))
+    fs.rmSync(multiWorkspace, { recursive: true, force: true })
+  }
+  console.log('PASS ollama-provider')
 }
 
 async function testAgentLoop(): Promise<void> {
@@ -2437,6 +2592,7 @@ async function testDemoRecordingContract(): Promise<void> {
   await testV2PermissionHardGuardComposition()
   await testV2PermissionEmptyCompatibility()
   await testV2LimitsAndNoProgress()
+  await testOllamaProvider()
   await testDenial()
   await testProtocolParsing()
   await testCopilotChoosesFirstAction()

@@ -172,7 +172,7 @@ interface RunEvent {
   approved?: boolean
   durationMs?: number
   metadata?: Record<string, unknown> | null
-  origin?: 'host' | 'orchestrator' | 'copilot'
+  origin?: 'host' | 'orchestrator' | 'copilot' | 'ollama'
   namespace?: 'app' | 'native' | 'none'
   authority?: 'authoritative' | 'observed' | 'claimed' | 'derived'
   callId?: string
@@ -1480,6 +1480,10 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 server.listen(PORT, '127.0.0.1', () => {
   const url = `http://127.0.0.1:${PORT}`
   console.log(`coding-agent web UI: ${url}  (workspace=${workspace})`)
+  if (process.env.CODING_AGENT_NO_BROWSER === '1') {
+    console.log('ブラウザ自動起動を無効化しました (CODING_AGENT_NO_BROWSER=1)')
+    return
+  }
   // Opening is convenience-only. Arguments are fixed and no shell is used.
   const open = process.platform === 'win32'
     ? spawn('explorer.exe', [url], { detached: true, stdio: 'ignore', windowsHide: true })

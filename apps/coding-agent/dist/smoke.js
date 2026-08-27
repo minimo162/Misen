@@ -4701,8 +4701,8 @@ var require_auth_config = __commonJS({
       writeAuthConfig: () => writeAuthConfig
     });
     module2.exports = __toCommonJS(auth_config_exports);
-    var fs5 = __toESM2(require("fs"));
-    var path7 = __toESM2(require("path"));
+    var fs6 = __toESM2(require("fs"));
+    var path8 = __toESM2(require("path"));
     var import_token_util = require_token_util();
     function getAuthConfigPath() {
       const dataDir = (0, import_token_util.getVercelDataDir)();
@@ -4711,15 +4711,15 @@ var require_auth_config = __commonJS({
           `Unable to find Vercel CLI data directory. Your platform: ${process.platform}. Supported: darwin, linux, win32.`
         );
       }
-      return path7.join(dataDir, "auth.json");
+      return path8.join(dataDir, "auth.json");
     }
     function readAuthConfig() {
       try {
         const authPath = getAuthConfigPath();
-        if (!fs5.existsSync(authPath)) {
+        if (!fs6.existsSync(authPath)) {
           return null;
         }
-        const content = fs5.readFileSync(authPath, "utf8");
+        const content = fs6.readFileSync(authPath, "utf8");
         if (!content) {
           return null;
         }
@@ -4730,11 +4730,11 @@ var require_auth_config = __commonJS({
     }
     function writeAuthConfig(config2) {
       const authPath = getAuthConfigPath();
-      const authDir = path7.dirname(authPath);
-      if (!fs5.existsSync(authDir)) {
-        fs5.mkdirSync(authDir, { mode: 504, recursive: true });
+      const authDir = path8.dirname(authPath);
+      if (!fs6.existsSync(authDir)) {
+        fs6.mkdirSync(authDir, { mode: 504, recursive: true });
       }
-      fs5.writeFileSync(authPath, JSON.stringify(config2, null, 2), { mode: 384 });
+      fs6.writeFileSync(authPath, JSON.stringify(config2, null, 2), { mode: 384 });
     }
     function isValidAccessToken(authConfig, expirationBufferMs = 0) {
       if (!authConfig.token)
@@ -4925,8 +4925,8 @@ var require_token_util = __commonJS({
       saveToken: () => saveToken
     });
     module2.exports = __toCommonJS(token_util_exports);
-    var path7 = __toESM2(require("path"));
-    var fs5 = __toESM2(require("fs"));
+    var path8 = __toESM2(require("path"));
+    var fs6 = __toESM2(require("fs"));
     var import_token_error = require_token_error();
     var import_token_io = require_token_io();
     var import_auth_config = require_auth_config();
@@ -4938,7 +4938,7 @@ var require_token_util = __commonJS({
       if (!dataDir) {
         return null;
       }
-      return path7.join(dataDir, vercelFolder);
+      return path8.join(dataDir, vercelFolder);
     }
     async function getVercelToken2(options) {
       const authConfig = (0, import_auth_config.readAuthConfig)();
@@ -5014,13 +5014,13 @@ var require_token_util = __commonJS({
           "Unable to find project root directory. Have you linked your project with `vc link?`"
         );
       }
-      const prjPath = path7.join(dir, ".vercel", "project.json");
-      if (!fs5.existsSync(prjPath)) {
+      const prjPath = path8.join(dir, ".vercel", "project.json");
+      if (!fs6.existsSync(prjPath)) {
         throw new import_token_error.VercelOidcTokenError(
           "project.json not found, have you linked your project with `vc link?`"
         );
       }
-      const prj = JSON.parse(fs5.readFileSync(prjPath, "utf8"));
+      const prj = JSON.parse(fs6.readFileSync(prjPath, "utf8"));
       if (typeof prj.projectId !== "string" && typeof prj.orgId !== "string") {
         throw new TypeError(
           "Expected a string-valued projectId property. Try running `vc link` to re-link your project."
@@ -5035,11 +5035,11 @@ var require_token_util = __commonJS({
           "Unable to find user data directory. Please reach out to Vercel support."
         );
       }
-      const tokenPath = path7.join(dir, "com.vercel.token", `${projectId}.json`);
+      const tokenPath = path8.join(dir, "com.vercel.token", `${projectId}.json`);
       const tokenJson = JSON.stringify(token);
-      fs5.mkdirSync(path7.dirname(tokenPath), { mode: 504, recursive: true });
-      fs5.writeFileSync(tokenPath, tokenJson);
-      fs5.chmodSync(tokenPath, 432);
+      fs6.mkdirSync(path8.dirname(tokenPath), { mode: 504, recursive: true });
+      fs6.writeFileSync(tokenPath, tokenJson);
+      fs6.chmodSync(tokenPath, 432);
       return;
     }
     function loadToken(projectId) {
@@ -5049,11 +5049,11 @@ var require_token_util = __commonJS({
           "Unable to find user data directory. Please reach out to Vercel support."
         );
       }
-      const tokenPath = path7.join(dir, "com.vercel.token", `${projectId}.json`);
-      if (!fs5.existsSync(tokenPath)) {
+      const tokenPath = path8.join(dir, "com.vercel.token", `${projectId}.json`);
+      if (!fs6.existsSync(tokenPath)) {
         return null;
       }
-      const token = JSON.parse(fs5.readFileSync(tokenPath, "utf8"));
+      const token = JSON.parse(fs6.readFileSync(tokenPath, "utf8"));
       assertVercelOidcTokenResponse(token);
       return token;
     }
@@ -5656,13 +5656,13 @@ var require_shell_quote = __commonJS({
 // test/smoke.ts
 var import_node_assert = __toESM(require("node:assert"));
 var import_node_http4 = __toESM(require("node:http"));
-var import_node_fs4 = __toESM(require("node:fs"));
+var import_node_fs5 = __toESM(require("node:fs"));
 var import_node_os2 = __toESM(require("node:os"));
-var import_node_path6 = __toESM(require("node:path"));
+var import_node_path7 = __toESM(require("node:path"));
 
 // src/agent.ts
 var import_node_crypto3 = __toESM(require("node:crypto"));
-var import_node_path3 = __toESM(require("node:path"));
+var import_node_path4 = __toESM(require("node:path"));
 var import_jsonrepair2 = __toESM(require_cjs());
 
 // src/converter.ts
@@ -6366,6 +6366,92 @@ function makeAuditRecord(input) {
 }
 
 // src/config.ts
+var import_node_fs2 = __toESM(require("node:fs"));
+var import_node_path2 = __toESM(require("node:path"));
+var DEFAULT_CONFIG = {
+  agentLoop: "v1",
+  baseURL: "",
+  model: "",
+  provider: "copilot-edge",
+  maxToolIterations: 10,
+  maxToolExecutions: 8,
+  maxWriteExecutions: 3,
+  maxCommandExecutions: 2,
+  maxNoProgress: 2,
+  allowArbitraryCommands: false,
+  permissions: [],
+  autoApprove: { write: false, command: false },
+  copilot: { displayMode: "foreground", agentMode: true },
+  localResponseConverter: { enabled: false, baseURL: "http://127.0.0.1:8080/v1", model: "Qwen3.5-4B-Q4_K_M.gguf", timeoutMs: 3e4, apiKey: "company-apps-flex-local" }
+};
+function appDataConfigPath() {
+  return import_node_path2.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent", "config.json");
+}
+function isLoopbackHostname(hostname3) {
+  const normalized = hostname3.toLowerCase().replace(/^\[|\]$/gu, "");
+  if (normalized === "localhost" || normalized === "::1" || normalized === "0:0:0:0:0:0:0:1") return true;
+  const octets = normalized.split(".");
+  if (octets.length !== 4 || octets.some((octet) => !/^\d{1,3}$/u.test(octet) || Number(octet) > 255)) return false;
+  return Number(octets[0]) === 127;
+}
+function validateProviderConfig(provider, raw, found) {
+  if (provider !== "openai" && provider !== "copilot-edge" && provider !== "ollama") {
+    throw new Error(`\u30B5\u30DD\u30FC\u30C8\u3055\u308C\u3066\u3044\u306A\u3044 provider \u3067\u3059: ${String(provider)}: ${found}`);
+  }
+  if (provider === "openai" && (!raw.baseURL || !raw.model)) {
+    throw new Error(`provider=openai \u306B\u306F baseURL / model \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
+  }
+  if (provider === "ollama") {
+    if (!raw.baseURL || !raw.model) throw new Error(`provider=ollama \u306B\u306F baseURL / model \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
+    let parsed;
+    try {
+      parsed = new URL(raw.baseURL);
+    } catch {
+      throw new Error(`provider=ollama \u306E baseURL \u304C\u4E0D\u6B63\u3067\u3059: ${found}`);
+    }
+    if (!["http:", "https:"].includes(parsed.protocol) || !isLoopbackHostname(parsed.hostname)) {
+      throw new Error(`provider=ollama \u306E baseURL \u306F loopback URL \u3067\u306A\u3051\u308C\u3070\u306A\u308A\u307E\u305B\u3093: ${found}`);
+    }
+  }
+  if (raw.reasoningEffort !== void 0 && !["high", "medium", "low", "none"].includes(raw.reasoningEffort)) {
+    throw new Error(`reasoningEffort \u306F high / medium / low / none \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+  }
+  return provider;
+}
+function parseConfig(found) {
+  const raw = JSON.parse(import_node_fs2.default.readFileSync(found, "utf8"));
+  if (raw.agentLoop !== void 0 && raw.agentLoop !== "v1" && raw.agentLoop !== "v2") {
+    throw new Error(`agentLoop \u306F v1 \u307E\u305F\u306F v2 \u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+  }
+  const provider = validateProviderConfig(raw.provider ?? "openai", raw, found);
+  const configuredPermissions = raw.permissions;
+  let permissions;
+  if (configuredPermissions !== void 0) {
+    if (!Array.isArray(configuredPermissions)) throw new Error(`permissions \u306F\u914D\u5217\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+    permissions = configuredPermissions.map((candidate, index) => {
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+        throw new Error(`permissions[${index}] \u306F permission / pattern / action \u3092\u6301\u3064\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+      }
+      const rule = candidate;
+      if (typeof rule.permission !== "string" || typeof rule.pattern !== "string") {
+        throw new Error(`permissions[${index}] \u306E permission / pattern \u306F\u6587\u5B57\u5217\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+      }
+      if (rule.action !== "allow" && rule.action !== "ask" && rule.action !== "deny") {
+        throw new Error(`permissions[${index}].action \u306F allow / ask / deny \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+      }
+      return { permission: rule.permission, pattern: rule.pattern, action: rule.action };
+    });
+  }
+  return {
+    ...DEFAULT_CONFIG,
+    ...raw,
+    provider,
+    permissions: permissions ?? DEFAULT_CONFIG.permissions,
+    autoApprove: { ...DEFAULT_CONFIG.autoApprove, ...raw.autoApprove ?? {} },
+    copilot: { ...DEFAULT_CONFIG.copilot, ...raw.copilot ?? {} },
+    localResponseConverter: { ...DEFAULT_CONFIG.localResponseConverter, ...raw.localResponseConverter ?? {} }
+  };
+}
 function capabilityPolicy(cfg, mode = cfg.turnMode ?? "work") {
   return {
     mode,
@@ -6381,6 +6467,21 @@ function capabilityPolicy(cfg, mode = cfg.turnMode ?? "work") {
     autoApproveCommand: cfg.autoApprove?.command === true,
     allowArbitraryCommands: cfg.allowArbitraryCommands === true
   };
+}
+function loadConfig(explicitPath) {
+  if (explicitPath) {
+    if (!import_node_fs2.default.existsSync(explicitPath)) throw new Error(`\u6307\u5B9A\u3055\u308C\u305F config \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${explicitPath}`);
+    return parseConfig(explicitPath);
+  }
+  const appDataPath = appDataConfigPath();
+  const candidates = [import_node_path2.default.join(process.cwd(), "config.json"), appDataPath];
+  const found = candidates.find((p) => import_node_fs2.default.existsSync(p));
+  if (found) return parseConfig(found);
+  const dir = import_node_path2.default.dirname(appDataPath);
+  import_node_fs2.default.mkdirSync(dir, { recursive: true });
+  import_node_fs2.default.writeFileSync(appDataPath, JSON.stringify(DEFAULT_CONFIG, null, 2) + "\n", "utf8");
+  console.log(`\u65E2\u5B9A\u306E\u8A2D\u5B9A\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F: ${appDataPath}`);
+  return DEFAULT_CONFIG;
 }
 function resolveApiKey(cfg) {
   if (cfg.apiKey) return cfg.apiKey;
@@ -6447,11 +6548,11 @@ async function chat(cfg, messages, tools, signal) {
 }
 
 // src/tools.ts
-var import_node_fs2 = __toESM(require("node:fs"));
+var import_node_fs3 = __toESM(require("node:fs"));
 var import_node_child_process2 = require("node:child_process");
 var import_node_crypto2 = __toESM(require("node:crypto"));
 var import_promises = __toESM(require("node:fs/promises"));
-var import_node_path2 = __toESM(require("node:path"));
+var import_node_path3 = __toESM(require("node:path"));
 var import_node_util = __toESM(require("node:util"));
 var import_iconv_lite = __toESM(require_lib());
 
@@ -6850,17 +6951,17 @@ function normalizeRunCommand(command) {
       throw new Error(`Read-Xlsx \u306F ${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
     }
     const normalized = pathWords.map((word) => word.replaceAll("/", "\\"));
-    const reportPaths = normalized.length > 1 ? normalized.filter((word) => !(import_node_path2.default.win32.dirname(word) === "." && import_node_path2.default.win32.basename(word).toLowerCase() === "\u96C6\u8A08\u53F0\u5E33.xlsx")) : normalized;
+    const reportPaths = normalized.length > 1 ? normalized.filter((word) => !(import_node_path3.default.win32.dirname(word) === "." && import_node_path3.default.win32.basename(word).toLowerCase() === "\u96C6\u8A08\u53F0\u5E33.xlsx")) : normalized;
     if (reportPaths.length === 0) throw new Error(`Read-Xlsx \u306F ${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
     let normalizedPath;
     if (reportPaths.length === 1) {
       normalizedPath = reportPaths[0];
     } else {
-      const directories = new Set(reportPaths.map((word) => import_node_path2.default.win32.dirname(word).toLowerCase()));
-      if (directories.size !== 1 || reportPaths.some((word) => import_node_path2.default.win32.extname(word).toLowerCase() !== ".xlsx")) {
+      const directories = new Set(reportPaths.map((word) => import_node_path3.default.win32.dirname(word).toLowerCase()));
+      if (directories.size !== 1 || reportPaths.some((word) => import_node_path3.default.win32.extname(word).toLowerCase() !== ".xlsx")) {
         throw new Error(`Read-Xlsx \u306E\u8907\u6570\u30D5\u30A1\u30A4\u30EB\u306F\u540C\u3058\u30D5\u30A9\u30EB\u30C0\u30FC\u306E *.xlsx \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\u3002${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
       }
-      normalizedPath = import_node_path2.default.win32.join(import_node_path2.default.win32.dirname(reportPaths[0]), "*.xlsx");
+      normalizedPath = import_node_path3.default.win32.join(import_node_path3.default.win32.dirname(reportPaths[0]), "*.xlsx");
     }
     return `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path ${quoteCommandWord(normalizedPath)}`;
   }
@@ -6914,8 +7015,8 @@ function normalizeWorkspaceOpenCommand(command, ctx) {
   } catch {
     throw new Error(`run_command\u62D2\u5426: \u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u3078\u306E\u30A2\u30AF\u30BB\u30B9\u306F\u7981\u6B62\u3067\u3059: ${candidate}`);
   }
-  if (!import_node_fs2.default.existsSync(absolute)) throw new Error(`run_command\u62D2\u5426: \u958B\u304F\u5BFE\u8C61\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${candidate}`);
-  const stat = import_node_fs2.default.lstatSync(absolute);
+  if (!import_node_fs3.default.existsSync(absolute)) throw new Error(`run_command\u62D2\u5426: \u958B\u304F\u5BFE\u8C61\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${candidate}`);
+  const stat = import_node_fs3.default.lstatSync(absolute);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`run_command\u62D2\u5426: \u901A\u5E38\u30D5\u30A1\u30A4\u30EB\u4EE5\u5916\u306F\u958B\u3051\u307E\u305B\u3093: ${candidate}`);
   const allowedExtensions = /* @__PURE__ */ new Set([
     ".txt",
@@ -6953,7 +7054,7 @@ function normalizeWorkspaceOpenCommand(command, ctx) {
     ".wav",
     ".m4a"
   ]);
-  const extension = import_node_path2.default.extname(absolute).toLowerCase();
+  const extension = import_node_path3.default.extname(absolute).toLowerCase();
   if (!allowedExtensions.has(extension)) throw new Error(`run_command\u62D2\u5426: \u5B89\u5168\u306B\u958B\u3051\u308B\u901A\u5E38\u6587\u66F8\u30FB\u30E1\u30C7\u30A3\u30A2\u5F62\u5F0F\u3067\u306F\u3042\u308A\u307E\u305B\u3093: ${candidate}`);
   if (absolute.includes("'")) throw new Error("run_command\u62D2\u5426: \u958B\u304F\u5BFE\u8C61\u306E\u30D1\u30B9\u306B\u5F15\u7528\u7B26\u306F\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093");
   return `powershell.exe -NoProfile -Command "Invoke-Item -LiteralPath '${absolute}'"`;
@@ -7266,7 +7367,7 @@ function workspaceGlobToRegExp(pattern) {
 function normalizeWorkspaceGlob(pattern) {
   const normalized = pattern.trim().replaceAll("\\", "/").replace(/^\.\//, "");
   if (!normalized) throw new Error("pattern \u304C\u7A7A\u3067\u3059");
-  if (import_node_path2.default.isAbsolute(normalized) || /^[A-Za-z]:/.test(normalized) || normalized.split("/").includes("..")) {
+  if (import_node_path3.default.isAbsolute(normalized) || /^[A-Za-z]:/.test(normalized) || normalized.split("/").includes("..")) {
     throw new Error(`\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u3092\u6307\u3059pattern\u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093: ${pattern}`);
   }
   return normalized.endsWith("/") ? `${normalized}*` : normalized;
@@ -7284,23 +7385,23 @@ function decodeWorkspaceText(bytes) {
 function realPathWithMissingTail2(abs) {
   let cursor = abs;
   const tail = [];
-  while (!import_node_fs2.default.existsSync(cursor)) {
-    const parent = import_node_path2.default.dirname(cursor);
+  while (!import_node_fs3.default.existsSync(cursor)) {
+    const parent = import_node_path3.default.dirname(cursor);
     if (parent === cursor) return abs;
-    tail.unshift(import_node_path2.default.basename(cursor));
+    tail.unshift(import_node_path3.default.basename(cursor));
     cursor = parent;
   }
-  const real = import_node_fs2.default.realpathSync.native(cursor);
-  return import_node_path2.default.resolve(real, ...tail);
+  const real = import_node_fs3.default.realpathSync.native(cursor);
+  return import_node_path3.default.resolve(real, ...tail);
 }
 function isWithin(root, candidate) {
-  const relative = import_node_path2.default.relative(root, candidate);
-  return relative === "" || !relative.startsWith("..") && !import_node_path2.default.isAbsolute(relative);
+  const relative = import_node_path3.default.relative(root, candidate);
+  return relative === "" || !relative.startsWith("..") && !import_node_path3.default.isAbsolute(relative);
 }
 function resolveInWorkspace(p, ctx) {
   if (!p) throw new Error("\u30D1\u30B9\u304C\u7A7A\u3067\u3059");
-  const workspaceAbs = import_node_path2.default.resolve(ctx.workspace);
-  const abs = import_node_path2.default.isAbsolute(p) ? import_node_path2.default.normalize(p) : import_node_path2.default.resolve(workspaceAbs, p);
+  const workspaceAbs = import_node_path3.default.resolve(ctx.workspace);
+  const abs = import_node_path3.default.isAbsolute(p) ? import_node_path3.default.normalize(p) : import_node_path3.default.resolve(workspaceAbs, p);
   if (ctx.restrictToWorkspace) {
     const rootReal = realPathWithMissingTail2(workspaceAbs);
     const candidateReal = realPathWithMissingTail2(abs);
@@ -7320,7 +7421,7 @@ async function walk(dir, cb, depth = 0) {
   }
   for (const e of entries) {
     if (IGNORED_DIRS.has(e.name)) continue;
-    const full = import_node_path2.default.join(dir, e.name);
+    const full = import_node_path3.default.join(dir, e.name);
     if (e.isDirectory()) await walk(full, cb, depth + 1);
     else if (e.isFile()) cb(full);
   }
@@ -7411,14 +7512,14 @@ var TOOL_DEFS = [
         for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name, "ja"))) {
           if (out.length >= MAX_LIST) break;
           if (!re2 || re2.test(entry.name)) {
-            const relative = import_node_path2.default.relative(ctx.workspace, import_node_path2.default.join(base, entry.name)).replaceAll("\\", "/");
+            const relative = import_node_path3.default.relative(ctx.workspace, import_node_path3.default.join(base, entry.name)).replaceAll("\\", "/");
             out.push(entry.isDirectory() ? `${relative}/` : relative);
           }
         }
       } else {
         await walk(base, (f) => {
           if (out.length >= MAX_LIST) return;
-          if (!re2 || re2.test(import_node_path2.default.basename(f))) out.push(import_node_path2.default.relative(ctx.workspace, f).replaceAll("\\", "/"));
+          if (!re2 || re2.test(import_node_path3.default.basename(f))) out.push(import_node_path3.default.relative(ctx.workspace, f).replaceAll("\\", "/"));
         });
       }
       return out.length === 0 ? "(\u8A72\u5F53\u306A\u3057)" : truncate(out.join("\n"));
@@ -7483,14 +7584,14 @@ var TOOL_DEFS = [
       const selected = /* @__PURE__ */ new Map();
       const addFile = (abs, displayPath) => {
         const checked = resolveInWorkspace(abs, ctx);
-        const relative = (displayPath ?? import_node_path2.default.relative(ctx.workspace, checked)).replaceAll("\\", "/");
+        const relative = (displayPath ?? import_node_path3.default.relative(ctx.workspace, checked)).replaceAll("\\", "/");
         selected.set(checked.toLowerCase(), { abs: checked, relative });
       };
       for (const requested of requestedPaths) addFile(resolveInWorkspace(requested, ctx), requested.replaceAll("\\", "/"));
       if (patterns.length > 0) {
         const matchers = patterns.map(workspaceGlobToRegExp);
         await walk(ctx.workspace, (file2) => {
-          const relative = import_node_path2.default.relative(ctx.workspace, file2).replaceAll("\\", "/");
+          const relative = import_node_path3.default.relative(ctx.workspace, file2).replaceAll("\\", "/");
           if (matchers.some((matcher) => matcher.test(relative))) addFile(file2, relative);
         });
       }
@@ -7521,7 +7622,7 @@ var TOOL_DEFS = [
         const heading = `===== ${file2.relative} =====
 `;
         const xlsxHint = `run_command\u3067 tools/Read-Xlsx.ps1 ${file2.relative} \u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044`;
-        if (import_node_path2.default.extname(file2.relative).toLowerCase() === ".xlsx") {
+        if (import_node_path3.default.extname(file2.relative).toLowerCase() === ".xlsx") {
           const section = `${heading}${xlsxHint}
 `;
           if (used + section.length <= bodyBudget) {
@@ -7576,12 +7677,12 @@ var TOOL_DEFS = [
     async run(args, ctx) {
       const requested = String(args.path ?? "");
       const abs = resolveInWorkspace(requested, ctx);
-      if (import_node_path2.default.extname(abs).toLowerCase() !== ".xlsx") throw new Error("read_xlsx \u306F .xlsx \u30D5\u30A1\u30A4\u30EB\u3060\u3051\u3092\u8AAD\u307F\u53D6\u308C\u307E\u3059");
+      if (import_node_path3.default.extname(abs).toLowerCase() !== ".xlsx") throw new Error("read_xlsx \u306F .xlsx \u30D5\u30A1\u30A4\u30EB\u3060\u3051\u3092\u8AAD\u307F\u53D6\u308C\u307E\u3059");
       const stat = await import_promises.default.stat(abs).catch(() => null);
       if (!stat?.isFile()) throw new Error(`xlsx\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${requested}`);
-      const appRoot = import_node_path2.default.resolve(__dirname, "..");
-      const helper = import_node_path2.default.join(appRoot, "tools", "Read-Xlsx.ps1");
-      if (!import_node_fs2.default.existsSync(helper)) throw new Error(`xlsx\u8AAD\u307F\u53D6\u308A\u30D8\u30EB\u30D1\u30FC\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${helper}`);
+      const appRoot = import_node_path3.default.resolve(__dirname, "..");
+      const helper = import_node_path3.default.join(appRoot, "tools", "Read-Xlsx.ps1");
+      if (!import_node_fs3.default.existsSync(helper)) throw new Error(`xlsx\u8AAD\u307F\u53D6\u308A\u30D8\u30EB\u30D1\u30FC\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${helper}`);
       const { stdout, stderr } = await execFileAsync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", helper, "-Path", abs], {
         cwd: ctx.workspace,
         windowsHide: true,
@@ -7619,11 +7720,11 @@ var TOOL_DEFS = [
         if (e.code !== "ENOENT") throw err;
         existedBefore = false;
       }
-      await import_promises.default.mkdir(import_node_path2.default.dirname(abs), { recursive: true });
+      await import_promises.default.mkdir(import_node_path3.default.dirname(abs), { recursive: true });
       await import_promises.default.writeFile(abs, content, "utf8");
       const readBack = await import_promises.default.readFile(abs, "utf8");
       recordFileSnapshot(abs, ctx, before, existedBefore, readBack);
-      const result = formatFileChangeResult("\u66F8\u304D\u8FBC\u307F", import_node_path2.default.relative(ctx.workspace, abs), before, readBack, 1, existedBefore);
+      const result = formatFileChangeResult("\u66F8\u304D\u8FBC\u307F", import_node_path3.default.relative(ctx.workspace, abs), before, readBack, 1, existedBefore);
       return `${result}
 \u30B5\u30A4\u30BA: ${Buffer.byteLength(readBack)} bytes`;
     }
@@ -7656,13 +7757,13 @@ var TOOL_DEFS = [
       const next = replaceAll ? src.split(oldStr).join(newStr) : src.replace(oldStr, newStr);
       if (next === src) {
         recordFileSnapshot(abs, ctx, src, true, src);
-        return formatFileChangeResult("\u7DE8\u96C6", import_node_path2.default.relative(ctx.workspace, abs), src, src, count, true);
+        return formatFileChangeResult("\u7DE8\u96C6", import_node_path3.default.relative(ctx.workspace, abs), src, src, count, true);
       }
       await import_promises.default.writeFile(abs, next, "utf8");
       const readBack = await import_promises.default.readFile(abs, "utf8");
       if (readBack !== next) throw new Error("\u7DE8\u96C6\u5F8C\u306E\u518D\u8AAD\u8FBC\u5185\u5BB9\u304C\u4E00\u81F4\u3057\u307E\u305B\u3093");
       recordFileSnapshot(abs, ctx, src, true, readBack);
-      return formatFileChangeResult("\u7DE8\u96C6", import_node_path2.default.relative(ctx.workspace, abs), src, readBack, count, true);
+      return formatFileChangeResult("\u7DE8\u96C6", import_node_path3.default.relative(ctx.workspace, abs), src, readBack, count, true);
     }
   },
   {
@@ -7713,7 +7814,7 @@ var TOOL_DEFS = [
         for (let i = 0; i < lines.length; i++) {
           if (results.length >= MAX_SEARCH_RESULTS) break;
           if (re2.test(lines[i])) {
-            results.push(`${import_node_path2.default.relative(ctx.workspace, f).replaceAll("\\", "/")}:${i + 1}: ${truncate(lines[i], 300)}`);
+            results.push(`${import_node_path3.default.relative(ctx.workspace, f).replaceAll("\\", "/")}:${i + 1}: ${truncate(lines[i], 300)}`);
           }
         }
       }
@@ -8041,7 +8142,7 @@ function toolRequestKey(name24, args) {
   if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) return `${name24}:${JSON.stringify(normalized)}`;
   const copy = { ...normalized };
   const bare = bareToolName(name24);
-  if (typeof copy.path === "string") copy.path = import_node_path3.default.normalize(copy.path).replaceAll("\\", "/");
+  if (typeof copy.path === "string") copy.path = import_node_path4.default.normalize(copy.path).replaceAll("\\", "/");
   if (bare === "list_files") {
     if (copy.path === "" || copy.path === ".") delete copy.path;
     if (copy.glob === "*" || copy.glob === "**" || copy.glob === "**/*") delete copy.glob;
@@ -9711,10 +9812,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path7) {
-  if (!path7)
+function getElementAtPath(obj, path8) {
+  if (!path8)
     return obj;
-  return path7.reduce((acc, key) => acc?.[key], obj);
+  return path8.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -10123,11 +10224,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path7, issues) {
+function prefixIssues(path8, issues) {
   return issues.map((iss) => {
     var _a24;
     (_a24 = iss).path ?? (_a24.path = []);
-    iss.path.unshift(path7);
+    iss.path.unshift(path8);
     return iss;
   });
 }
@@ -10274,16 +10375,16 @@ function flattenError(error51, mapper = (issue2) => issue2.message) {
 }
 function formatError(error51, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error52, path7 = []) => {
+  const processError = (error52, path8 = []) => {
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else {
-        const fullpath = [...path7, ...issue2.path];
+        const fullpath = [...path8, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -10310,17 +10411,17 @@ function formatError(error51, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error51, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error52, path7 = []) => {
+  const processError = (error52, path8 = []) => {
     var _a24, _b17;
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else {
-        const fullpath = [...path7, ...issue2.path];
+        const fullpath = [...path8, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -10352,8 +10453,8 @@ function treeifyError(error51, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path7 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path7) {
+  const path8 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path8) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -23045,13 +23146,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path7 = ref.slice(1).split("/").filter(Boolean);
-  if (path7.length === 0) {
+  const path8 = ref.slice(1).split("/").filter(Boolean);
+  if (path8.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path7[0] === defsKey) {
-    const key = path7[1];
+  if (path8[0] === defsKey) {
+    const key = path8[1];
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -23818,8 +23919,8 @@ function getErrorMap2() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path7, errorMaps, issueData } = params;
-  const fullPath = [...path7, ...issueData.path || []];
+  const { data, path: path8, errorMaps, issueData } = params;
+  const fullPath = [...path8, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -23934,11 +24035,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path7, key) {
+  constructor(parent, value, path8, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path7;
+    this._path = path8;
     this._key = key;
   }
   get path() {
@@ -31662,8 +31763,8 @@ function createOpenAICompatible(options) {
   const getHeaders = () => withUserAgentSuffix(headers, `ai-sdk/openai-compatible/${VERSION2}`);
   const getCommonModelConfig = (modelType) => ({
     provider: `${providerName}.${modelType}`,
-    url: ({ path: path7 }) => {
-      const url2 = new URL(`${baseURL}${path7}`);
+    url: ({ path: path8 }) => {
+      const url2 = new URL(`${baseURL}${path8}`);
       if (options.queryParams) {
         url2.search = new URLSearchParams(options.queryParams).toString();
       }
@@ -39995,7 +40096,7 @@ async function runToolExecuteBeforeHooks(input, perRunHooks = []) {
 }
 
 // src/permission-hook.ts
-var import_node_path4 = __toESM(require("node:path"));
+var import_node_path5 = __toESM(require("node:path"));
 var import_shell_quote = __toESM(require_shell_quote());
 
 // src/vendor/opencode-permission/wildcard.ts
@@ -40304,16 +40405,16 @@ var ARITY = {
 function normalizeWorkspacePattern(value, ctx) {
   const source = value.trim().replaceAll("\\", "/");
   if (!source) return "";
-  const workspace = import_node_path4.default.resolve(ctx.workspace);
-  const absolute = import_node_path4.default.resolve(workspace, source);
-  return import_node_path4.default.relative(workspace, absolute).replaceAll("\\", "/") || ".";
+  const workspace = import_node_path5.default.resolve(ctx.workspace);
+  const absolute = import_node_path5.default.resolve(workspace, source);
+  return import_node_path5.default.relative(workspace, absolute).replaceAll("\\", "/") || ".";
 }
 function joinPathAndGlob(pathValue, globValue) {
   const base = pathValue.trim();
   const glob = globValue.trim();
   if (!base || base === ".") return glob;
   if (!glob) return base;
-  if (import_node_path4.default.isAbsolute(glob) || /^[A-Za-z]:[\\/]/u.test(glob)) return glob;
+  if (import_node_path5.default.isAbsolute(glob) || /^[A-Za-z]:[\\/]/u.test(glob)) return glob;
   return `${base.replace(/[\\/]+$/u, "")}/${glob.replace(/^[\\/]+/u, "")}`;
 }
 function commandPermissionTarget(command) {
@@ -40429,6 +40530,39 @@ function createPermissionHook(rules) {
 }
 
 // src/agent-v2.ts
+function createOllamaFetch(baseFetch = fetch) {
+  return async (input, init) => {
+    const headers = new Headers(typeof input === "object" && input !== null && "headers" in input ? input.headers : void 0);
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
+    const body = init?.body;
+    const contentType = headers.get("content-type");
+    if (body !== void 0 && body !== null) {
+      if (contentType && /^application\/json(?:\s*;|$)/iu.test(contentType) && !/\bcharset\s*=/iu.test(contentType)) {
+        headers.set("content-type", `${contentType}; charset=utf-8`);
+      } else if (!contentType && typeof body === "string") {
+        headers.set("content-type", "application/json; charset=utf-8");
+      }
+    }
+    const response = await baseFetch(input, { ...init, headers });
+    const responseType = response.headers.get("content-type") ?? "";
+    if (!/^application\/json(?:\s*;|$)/iu.test(responseType)) return response;
+    const decoded = new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(await response.arrayBuffer()));
+    const responseHeaders = new Headers(response.headers);
+    responseHeaders.set("content-type", "application/json; charset=utf-8");
+    return new Response(new TextEncoder().encode(decoded), {
+      status: response.status,
+      statusText: response.statusText,
+      headers: responseHeaders
+    });
+  };
+}
+function providerOptionsFor(cfg) {
+  if (cfg.provider !== "ollama" || cfg.reasoningEffort === void 0) return void 0;
+  return { ollama: { reasoningEffort: cfg.reasoningEffort } };
+}
+function modelEventOrigin(cfg) {
+  return cfg.provider === "ollama" ? "ollama" : "copilot";
+}
 function toModelMessages(messages) {
   const converted = [];
   for (const message of messages) {
@@ -40482,12 +40616,14 @@ function aiTools(cfg, ctx) {
 }
 function configuredModel(cfg) {
   if (!cfg.baseURL || !cfg.model) throw new Error("agentLoop=v2 \u306B\u306F bridge \u306E baseURL / model \u304C\u5FC5\u8981\u3067\u3059");
-  const apiKey = resolveApiKey(cfg);
-  if (!apiKey) throw new Error("agentLoop=v2 \u306B\u306F bridge \u306E apiKey \u307E\u305F\u306F apiKeyEnv \u304C\u5FC5\u8981\u3067\u3059");
+  const isOllama = cfg.provider === "ollama";
+  const apiKey = isOllama ? void 0 : resolveApiKey(cfg);
+  if (!isOllama && !apiKey) throw new Error("agentLoop=v2 \u306B\u306F bridge \u306E apiKey \u307E\u305F\u306F apiKeyEnv \u304C\u5FC5\u8981\u3067\u3059");
   return createOpenAICompatible({
-    name: "copilot-openai-bridge",
+    name: isOllama ? "ollama" : "copilot-openai-bridge",
     baseURL: cfg.baseURL.replace(/\/+$/u, ""),
-    apiKey
+    ...apiKey ? { apiKey } : {},
+    ...isOllama ? { fetch: createOllamaFetch() } : {}
   }).chatModel(cfg.model);
 }
 async function executeV2ToolCall(call, def, cfg, ctx, io, beforeHooks) {
@@ -40633,15 +40769,16 @@ async function runAgentTurnV2(opts) {
         messages: modelMessages,
         system: systemFor(mode),
         temperature: cfg.temperature ?? 0.2,
+        providerOptions: providerOptionsFor(cfg),
         maxRetries: 0,
         abortSignal: io.signal
       });
-      io.event?.({ type: "model.decision", summary: "\u30E2\u30C7\u30EB\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: "copilot", namespace: "none", authority: "claimed" });
+      io.event?.({ type: "model.decision", summary: "\u30E2\u30C7\u30EB\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: modelEventOrigin(cfg), namespace: "none", authority: "claimed" });
       messages.push({ role: "assistant", content: result.text });
       if (mode === "research") {
         const research = buildResearchBundle(opts.userInput, result.text);
         if (research.sources.length === 0) return warningResult("\u8ABF\u67FB\u7D50\u679C\u3092\u78BA\u5B9A\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u51FA\u5178URL\u4ED8\u304D\u3067\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044\u3002", messages, io);
-        io.event?.({ type: "step.completed", summary: `\u8ABF\u67FB\u7D50\u679C\u3092\u53D7\u3051\u53D6\u308A\u307E\u3057\u305F\uFF08\u51FA\u5178${research.sources.length}\u4EF6\uFF09`, origin: "copilot", namespace: "native", authority: "claimed" });
+        io.event?.({ type: "step.completed", summary: `\u8ABF\u67FB\u7D50\u679C\u3092\u53D7\u3051\u53D6\u308A\u307E\u3057\u305F\uFF08\u51FA\u5178${research.sources.length}\u4EF6\uFF09`, origin: modelEventOrigin(cfg), namespace: "native", authority: "claimed" });
         return { reply: result.text, messages, aborted: false, research };
       }
       io.event?.({ type: "step.completed", summary: "\u56DE\u7B54\u3092\u53D7\u3051\u53D6\u308A\u307E\u3057\u305F", origin: "orchestrator", namespace: "none", authority: "derived" });
@@ -40669,6 +40806,7 @@ async function runAgentTurnV2(opts) {
         system: systemFor("work"),
         tools,
         temperature: cfg.temperature ?? 0.2,
+        providerOptions: providerOptionsFor(cfg),
         maxRetries: 0,
         abortSignal: io.signal
       });
@@ -40676,7 +40814,7 @@ async function runAgentTurnV2(opts) {
       io.print(`[error] ${err.message}`);
       return { reply: "", messages, aborted: true };
     }
-    io.event?.({ type: "model.decision", summary: "\u30E2\u30C7\u30EB\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: "copilot", namespace: "none", authority: "claimed" });
+    io.event?.({ type: "model.decision", summary: "\u30E2\u30C7\u30EB\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: modelEventOrigin(cfg), namespace: "none", authority: "claimed" });
     modelMessages.push(...result.response.messages);
     const calls = result.toolCalls;
     const legacyCalls = calls.map((call2) => ({ id: call2.toolCallId, type: "function", function: { name: qualifiedToolName(call2.toolName), arguments: JSON.stringify(call2.input) } }));
@@ -40726,8 +40864,8 @@ function runConfiguredAgentTurn(opts) {
 // src/copilot.ts
 var import_node_child_process3 = require("node:child_process");
 var import_node_net = __toESM(require("node:net"));
-var import_node_fs3 = __toESM(require("node:fs"));
-var import_node_path5 = __toESM(require("node:path"));
+var import_node_fs4 = __toESM(require("node:fs"));
+var import_node_path6 = __toESM(require("node:path"));
 function normalizeCopilotEditorText(value) {
   return value.replace(/[\u200B\u200C]/gu, "");
 }
@@ -41159,10 +41297,10 @@ async function findFreePort() {
   });
 }
 function profileIsInUse(profileDir) {
-  if (["SingletonLock", "SingletonCookie", "SingletonSocket"].some((name24) => import_node_fs3.default.existsSync(import_node_path5.default.join(profileDir, name24)))) return true;
+  if (["SingletonLock", "SingletonCookie", "SingletonSocket"].some((name24) => import_node_fs4.default.existsSync(import_node_path6.default.join(profileDir, name24)))) return true;
   if (process.platform !== "win32") return false;
   try {
-    const needle = import_node_path5.default.resolve(profileDir).replace(/[\\/]+$/, "").toLowerCase();
+    const needle = import_node_path6.default.resolve(profileDir).replace(/[\\/]+$/, "").toLowerCase();
     const marker24 = `--user-data-dir=${needle}`;
     const output = (0, import_node_child_process3.execFileSync)("powershell.exe", [
       "-NoProfile",
@@ -41182,8 +41320,8 @@ function profileIsInUse(profileDir) {
 function findEdgePath() {
   const roots = [process.env["ProgramFiles(x86)"], process.env.ProgramFiles, process.env.LOCALAPPDATA].filter(Boolean);
   for (const root of roots) {
-    const p = import_node_path5.default.join(root, "Microsoft", "Edge", "Application", "msedge.exe");
-    if (import_node_fs3.default.existsSync(p)) return p;
+    const p = import_node_path6.default.join(root, "Microsoft", "Edge", "Application", "msedge.exe");
+    if (import_node_fs4.default.existsSync(p)) return p;
   }
   throw new Error("Microsoft Edge \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3002Edge \u3092\u30A4\u30F3\u30B9\u30C8\u30FC\u30EB\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
 }
@@ -41336,24 +41474,24 @@ var CopilotEdgeClient = class {
   }
   hardenPreferences(profileDir) {
     try {
-      const prefPath = import_node_path5.default.join(profileDir, "Default", "Preferences");
-      if (!import_node_fs3.default.existsSync(prefPath)) return;
-      const j = JSON.parse(import_node_fs3.default.readFileSync(prefPath, "utf8"));
+      const prefPath = import_node_path6.default.join(profileDir, "Default", "Preferences");
+      if (!import_node_fs4.default.existsSync(prefPath)) return;
+      const j = JSON.parse(import_node_fs4.default.readFileSync(prefPath, "utf8"));
       if (!j.session) j.session = {};
       j.session.restore_on_startup = 4;
       j.session.startup_urls = [];
       if (j.profile) j.profile.exit_type = "Normal";
-      import_node_fs3.default.writeFileSync(prefPath, JSON.stringify(j), "utf8");
+      import_node_fs4.default.writeFileSync(prefPath, JSON.stringify(j), "utf8");
     } catch {
     }
   }
   chooseEdgeProfile() {
-    const root = import_node_path5.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent");
-    import_node_fs3.default.mkdirSync(root, { recursive: true });
+    const root = import_node_path6.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent");
+    import_node_fs4.default.mkdirSync(root, { recursive: true });
     const suffix = (this.s.profileName ?? "default").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "default";
-    const stable = import_node_path5.default.join(root, suffix === "default" ? "edge-profile" : "edge-profile-" + suffix);
+    const stable = import_node_path6.default.join(root, suffix === "default" ? "edge-profile" : "edge-profile-" + suffix);
     if (!profileIsInUse(stable)) return stable;
-    return import_node_fs3.default.mkdtempSync(import_node_path5.default.join(root, "edge-profile-" + suffix + "-session-"));
+    return import_node_fs4.default.mkdtempSync(import_node_path6.default.join(root, "edge-profile-" + suffix + "-session-"));
   }
   async ensureEdge() {
     if (this.s.reuseExistingEdge) {
@@ -42307,8 +42445,8 @@ function ioStub(approve) {
   };
 }
 async function testAuditLog() {
-  const workspace = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-audit-workspace-"));
-  const directory = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-audit-dir-"));
+  const workspace = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-audit-workspace-"));
+  const directory = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-audit-dir-"));
   const log = new AuditLog({ workspace, directory });
   log.initialize();
   const record2 = makeAuditRecord({
@@ -42327,7 +42465,7 @@ async function testAuditLog() {
   log.append(record2);
   const denied = { ...record2, event_id: "run-audit-event-2", call_id: "call-denied", permission: { decision: "deny" }, approval: { required: false, outcome: "not_required", actor: "policy", automatic: true }, result: { outcome: "refused", duration_ms: null, error: "permission denied" } };
   log.append(denied);
-  const lines = import_node_fs4.default.readFileSync(log.filePath, "utf8").trimEnd().split(/\r?\n/u);
+  const lines = import_node_fs5.default.readFileSync(log.filePath, "utf8").trimEnd().split(/\r?\n/u);
   import_node_assert.default.strictEqual(lines.length, 2);
   for (const line of lines) import_node_assert.default.doesNotThrow(() => JSON.parse(line));
   import_node_assert.default.strictEqual(log.records(1)[0].event_id, "run-audit-event-2", "records must return newest first");
@@ -42388,9 +42526,9 @@ async function testAuditLog() {
     import_node_assert.default.deepStrictEqual(policyAudit.approval, { required: true, outcome: "denied", actor: "policy", automatic: true }, `policy reason must win: ${policyReason}`);
     import_node_assert.default.strictEqual(policyAudit.call_id, policyCallId);
   }
-  import_node_assert.default.throws(() => new AuditLog({ workspace, directory: import_node_path6.default.join(workspace, "audit") }), /ワークスペース外/);
+  import_node_assert.default.throws(() => new AuditLog({ workspace, directory: import_node_path7.default.join(workspace, "audit") }), /ワークスペース外/);
   import_node_assert.default.throws(() => new AuditLog({ workspace, directory: workspace }), /ワークスペース外/);
-  const brokenLog = new AuditLog({ workspace, directory: import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-audit-broken-")) });
+  const brokenLog = new AuditLog({ workspace, directory: import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-audit-broken-")) });
   brokenLog.initialize();
   brokenLog.appendHandle = null;
   import_node_assert.default.throws(() => brokenLog.append(record2), /監査ログ追記に失敗しました/);
@@ -42399,18 +42537,18 @@ async function testAuditLog() {
   import_node_assert.default.strictEqual(auditAvailability(log, null).available, true);
   import_node_assert.default.deepStrictEqual(auditAvailability(log, "\u8D77\u52D5\u6642\u969C\u5BB3"), { available: false, detail: "\u8D77\u52D5\u6642\u969C\u5BB3" });
   import_node_assert.default.throws(() => brokenLog.append(record2), /unhealthy/);
-  const symlinkDirectory = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-audit-symlink-"));
-  const symlinkPath = import_node_path6.default.join(symlinkDirectory, "audit.jsonl");
+  const symlinkDirectory = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-audit-symlink-"));
+  const symlinkPath = import_node_path7.default.join(symlinkDirectory, "audit.jsonl");
   try {
-    import_node_fs4.default.symlinkSync(log.filePath, symlinkPath, "file");
+    import_node_fs5.default.symlinkSync(log.filePath, symlinkPath, "file");
     import_node_assert.default.throws(() => new AuditLog({ workspace, directory: symlinkDirectory }).initialize(), /シンボリックリンク／再解析点/);
   } catch (err) {
     const code = err.code;
     if (code !== "EPERM" && code !== "EACCES") throw err;
     console.log("SKIP audit-symlink (symlink creation is restricted on this host)");
   }
-  const eventRoot = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-audit-events-"));
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(eventRoot, "read.txt"), "readable");
+  const eventRoot = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-audit-events-"));
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(eventRoot, "read.txt"), "readable");
   const events = [];
   const eventIo = {
     print: () => {
@@ -42438,7 +42576,7 @@ async function testAuditLog() {
   const deniedOutcome = deniedEvents.find((event) => event.type === "tool.denied");
   import_node_assert.default.strictEqual(deniedOutcome?.audit?.permission.decision, "deny");
   import_node_assert.default.strictEqual(deniedOutcome?.audit?.approval.outcome, "not_required");
-  const terminalLog = new AuditLog({ workspace: eventRoot, directory: import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-audit-terminal-")) });
+  const terminalLog = new AuditLog({ workspace: eventRoot, directory: import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-audit-terminal-")) });
   terminalLog.initialize();
   const terminalCfg = { ...eventCfg, autoApprove: { write: false, command: false } };
   const terminalCalls = [
@@ -42536,13 +42674,13 @@ async function testApprovals() {
   console.log("PASS approvals");
 }
 async function testTools() {
-  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
+  const root = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
   const ctx = makeCtx(root);
   const get = (n) => TOOL_DEFS.find((t) => t.name === n);
-  import_node_fs4.default.mkdirSync(import_node_path6.default.join(root, "tools"), { recursive: true });
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "tools", "Read-Xlsx.ps1"), "param([string]$Path)\nWrite-Output ('READ_OK:' + $Path)\n");
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "tools", "Update-Ledger.ps1"), "param([string]$Extracted,[string]$Rates,[string]$Ledger)\nWrite-Output ('UPDATE_OK:' + $Ledger)\n");
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "safe-read.txt"), "safe-read-ok");
+  import_node_fs5.default.mkdirSync(import_node_path7.default.join(root, "tools"), { recursive: true });
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(root, "tools", "Read-Xlsx.ps1"), "param([string]$Path)\nWrite-Output ('READ_OK:' + $Path)\n");
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(root, "tools", "Update-Ledger.ps1"), "param([string]$Extracted,[string]$Rates,[string]$Ledger)\nWrite-Output ('UPDATE_OK:' + $Ledger)\n");
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(root, "safe-read.txt"), "safe-read-ok");
   await get("write_file").run({ path: "a/hello.txt", content: "line1\nline2 unique\n" }, ctx);
   const read = await get("read_file").run({ path: "a/hello.txt" }, ctx);
   import_node_assert.default.ok(read.includes("unique"));
@@ -42560,16 +42698,16 @@ async function testTools() {
   import_node_assert.default.ok(search.includes("hello.txt"));
   const list = await get("list_files").run({ glob: "*.txt" }, ctx);
   import_node_assert.default.ok(list.includes("hello.txt"));
-  import_node_fs4.default.mkdirSync(import_node_path6.default.join(root, "batch"), { recursive: true });
-  import_node_fs4.default.mkdirSync(import_node_path6.default.join(root, "other"), { recursive: true });
+  import_node_fs5.default.mkdirSync(import_node_path7.default.join(root, "batch"), { recursive: true });
+  import_node_fs5.default.mkdirSync(import_node_path7.default.join(root, "other"), { recursive: true });
   const directOnly = await get("list_files").run({ path: ".", recursive: false }, ctx);
   import_node_assert.default.ok(directOnly.includes("batch/") && directOnly.includes("other/") && !directOnly.includes("batch/utf8.txt"), "recursive=false must return only immediate entries");
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "batch", "utf8.txt"), "UTF-8\u672C\u6587");
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "batch", "bom.txt"), Buffer.concat([Buffer.from([239, 187, 191]), Buffer.from("BOM\u672C\u6587")]));
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "batch", "cp932.txt"), Buffer.from([67, 80, 57, 51, 50, 58, 147, 250, 150, 123]));
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "batch", "empty.txt"), Buffer.alloc(0));
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "batch", "ledger.xlsx"), Buffer.from("not-read-as-text"));
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "other", "note.md"), "\u5225glob");
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(root, "batch", "utf8.txt"), "UTF-8\u672C\u6587");
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(root, "batch", "bom.txt"), Buffer.concat([Buffer.from([239, 187, 191]), Buffer.from("BOM\u672C\u6587")]));
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(root, "batch", "cp932.txt"), Buffer.from([67, 80, 57, 51, 50, 58, 147, 250, 150, 123]));
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(root, "batch", "empty.txt"), Buffer.alloc(0));
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(root, "batch", "ledger.xlsx"), Buffer.from("not-read-as-text"));
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(root, "other", "note.md"), "\u5225glob");
   const batch = await get("read_files").run({ patterns: ["batch/*.txt", "other/*.md"] }, ctx);
   import_node_assert.default.ok(batch.includes("UTF-8\u672C\u6587") && batch.includes("BOM\u672C\u6587") && batch.includes("CP932:\u65E5\u672C") && batch.includes("\u5225glob"));
   const directoryPatterns = await get("read_files").run({ patterns: ["batch/", "other/"] }, ctx);
@@ -42579,8 +42717,8 @@ async function testTools() {
   const xlsx = await get("read_files").run({ paths: ["batch/ledger.xlsx", "batch/utf8.txt", "batch/utf8.txt"] }, ctx);
   import_node_assert.default.ok(xlsx.includes("run_command\u3067 tools/Read-Xlsx.ps1 batch/ledger.xlsx \u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044"));
   import_node_assert.default.strictEqual((xlsx.match(/===== batch\/utf8\.txt =====/g) ?? []).length, 1, "duplicate paths must be removed");
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "batch", "large-a.txt"), "A".repeat(9e4));
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "batch", "large-b.txt"), "B".repeat(100));
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(root, "batch", "large-a.txt"), "A".repeat(9e4));
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(root, "batch", "large-b.txt"), "B".repeat(100));
   const limited = await get("read_files").run({ paths: ["batch/large-a.txt", "batch/large-b.txt"] }, ctx);
   import_node_assert.default.ok(limited.includes("\u9014\u4E2D\u6253\u5207\u308A") && limited.includes("batch/large-b.txt: \u6587\u5B57\u6570\u4E88\u7B97\u3092\u4F7F\u3044\u5207\u3063\u305F\u305F\u3081\u672A\u8AAD"));
   import_node_assert.default.ok(limited.length <= 8e4, "read_files complete result must stay within the character budget");
@@ -42592,8 +42730,8 @@ async function testTools() {
     readFilesOutsideThrew = true;
   }
   import_node_assert.default.ok(readFilesOutsideThrew, "read_files must reject workspace escape");
-  const bundledWorkbook = import_node_path6.default.resolve(__dirname, "..", "..", "..", "demo", "renketsu-demo", "workspace", "\u96C6\u8A08\u53F0\u5E33.xlsx");
-  import_node_fs4.default.copyFileSync(bundledWorkbook, import_node_path6.default.join(root, "batch", "real.xlsx"));
+  const bundledWorkbook = import_node_path7.default.resolve(__dirname, "..", "..", "..", "demo", "renketsu-demo", "workspace", "\u96C6\u8A08\u53F0\u5E33.xlsx");
+  import_node_fs5.default.copyFileSync(bundledWorkbook, import_node_path7.default.join(root, "batch", "real.xlsx"));
   const workbookRead = await get("read_xlsx").run({ path: "batch/real.xlsx" }, ctx);
   import_node_assert.default.ok(workbookRead.includes('"ok":true') && workbookRead.includes("sheets"), "read_xlsx must read an arbitrary workspace workbook through the bundled helper");
   import_node_assert.default.ok(workbookRead.includes("\u9023\u7D50\u53F0\u5E33") && workbookRead.includes("\u78BA\u8A8D\u4E8B\u9805"), "read_xlsx must preserve Japanese sheet names across Windows PowerShell stdout");
@@ -42663,14 +42801,14 @@ async function testTools() {
   await get("run_command").run({
     command: 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-Content -LiteralPath safe-write.txt -Value inside-ok"'
   }, ctx);
-  import_node_assert.default.ok(import_node_fs4.default.readFileSync(import_node_path6.default.join(root, "safe-write.txt"), "utf8").includes("inside-ok"), "workspace-local writes must remain allowed");
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "open-me.txt"), "open safely");
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "ledger-open.xlsx"), "not a real workbook");
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "blocked.cmd"), "@echo should-not-run");
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "blocked.ps1"), 'throw "should-not-run"');
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "blocked.exe"), "not-an-executable");
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "blocked.lnk"), "not-a-shortcut");
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "blocked.url"), "[InternetShortcut]\nURL=https://example.com");
+  import_node_assert.default.ok(import_node_fs5.default.readFileSync(import_node_path7.default.join(root, "safe-write.txt"), "utf8").includes("inside-ok"), "workspace-local writes must remain allowed");
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(root, "open-me.txt"), "open safely");
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(root, "ledger-open.xlsx"), "not a real workbook");
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(root, "blocked.cmd"), "@echo should-not-run");
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(root, "blocked.ps1"), 'throw "should-not-run"');
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(root, "blocked.exe"), "not-an-executable");
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(root, "blocked.lnk"), "not-a-shortcut");
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(root, "blocked.url"), "[InternetShortcut]\nURL=https://example.com");
   for (const openCommand of ["open-me.txt", "Invoke-Item open-me.txt", "Start-Process -FilePath open-me.txt", 'start " open-me.txt"', "open open-me.txt", "excel.exe ledger-open.xlsx"]) {
     const normalizedOpen = normalizeWorkspaceOpenCommand(openCommand, ctx);
     import_node_assert.default.ok(normalizedOpen?.includes("Invoke-Item -LiteralPath"), `safe workspace open must normalize: ${openCommand}`);
@@ -42678,11 +42816,11 @@ async function testTools() {
   for (const blockedOpen of ["blocked.cmd", "blocked.ps1", "blocked.exe", "blocked.lnk", "blocked.url"]) {
     import_node_assert.default.throws(() => normalizeWorkspaceOpenCommand(`Invoke-Item ${blockedOpen}`, ctx), /安全に開ける/u, `executable/link open must be rejected: ${blockedOpen}`);
   }
-  import_node_fs4.default.mkdirSync(import_node_path6.default.join(root, "blocked-directory"));
+  import_node_fs5.default.mkdirSync(import_node_path7.default.join(root, "blocked-directory"));
   import_node_assert.default.throws(() => normalizeWorkspaceOpenCommand("Invoke-Item blocked-directory", ctx), /通常ファイル以外/u);
-  const linked = import_node_path6.default.join(root, "linked.txt");
+  const linked = import_node_path7.default.join(root, "linked.txt");
   try {
-    import_node_fs4.default.symlinkSync(import_node_path6.default.join(root, "open-me.txt"), linked, "file");
+    import_node_fs5.default.symlinkSync(import_node_path7.default.join(root, "open-me.txt"), linked, "file");
     import_node_assert.default.throws(() => normalizeWorkspaceOpenCommand("Invoke-Item linked.txt", ctx), /通常ファイル以外/u, "reparse/symlink open must be rejected");
   } catch (err) {
     if (err.code !== "EPERM") throw err;
@@ -42747,14 +42885,14 @@ async function testTools() {
     }, ctx),
     /ワークスペース外への書き込みは禁止/u
   );
-  import_node_assert.default.ok(!import_node_fs4.default.existsSync(import_node_path6.default.resolve(root, "..", outsideName)), "outside write rejection must happen before execution");
+  import_node_assert.default.ok(!import_node_fs5.default.existsSync(import_node_path7.default.resolve(root, "..", outsideName)), "outside write rejection must happen before execution");
   await import_node_assert.default.rejects(
     () => get("run_command").run({
       command: `cmd.exe /c "echo blocked > ..\\${outsideName}"`
     }, ctx),
     /ワークスペース外への書き込みは禁止/u
   );
-  import_node_assert.default.ok(!import_node_fs4.default.existsSync(import_node_path6.default.resolve(root, "..", outsideName)), "outside redirection must be rejected before execution");
+  import_node_assert.default.ok(!import_node_fs5.default.existsSync(import_node_path7.default.resolve(root, "..", outsideName)), "outside redirection must be rejected before execution");
   let wttrBlocked = false;
   try {
     await get("run_command").run({ command: "curl https://wttr.in/?format=3" }, ctx);
@@ -42807,9 +42945,9 @@ async function testTools() {
   const editedTwiceMeta = parseToolResultMeta(editedTwice);
   import_node_assert.default.ok(editedTwiceMeta && editedTwiceMeta.afterHash);
   await rollbackFileChange({ path: "journal/new.txt", afterHash: editedTwiceMeta.afterHash, existedBefore: false, beforeContent: "" }, journalCtx);
-  import_node_assert.default.ok(!import_node_fs4.default.existsSync(import_node_path6.default.join(root, "journal", "new.txt")), "new files must be deleted on rollback");
+  import_node_assert.default.ok(!import_node_fs5.default.existsSync(import_node_path7.default.join(root, "journal", "new.txt")), "new files must be deleted on rollback");
   import_node_assert.default.strictEqual(validateToolArgs(get("edit_file"), { path: "a/hello.txt", old_string: "x", new_string: "y", replace_all: "false" }), "replace_all \u306E\u578B\u304C\u4E0D\u6B63\u3067\u3059\uFF08\u671F\u5F85: boolean\uFF09");
-  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
+  import_node_fs5.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS tools");
 }
 function mockServer(steps) {
@@ -42880,8 +43018,184 @@ async function withCopilotBridge(responses, fn) {
     await new Promise((resolve2) => server.close(() => resolve2()));
   }
 }
+async function listenOllamaMock(responder) {
+  const requests = [];
+  let requestNumber = 0;
+  const server = import_node_http4.default.createServer((req, res) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      const raw = Buffer.concat(chunks).toString("utf8");
+      const body = JSON.parse(raw);
+      requests.push({ body, authorization: req.headers.authorization ?? null, contentType: req.headers["content-type"] ?? null });
+      const response = responder(body, ++requestNumber);
+      res.statusCode = response.status ?? 200;
+      res.setHeader("content-type", response.contentType ?? "application/json");
+      res.end(typeof response.body === "string" ? response.body : Buffer.from(response.body));
+    });
+  });
+  await new Promise((resolve2) => server.listen(0, "127.0.0.1", resolve2));
+  const port = server.address().port;
+  return { server, url: `http://127.0.0.1:${port}/v1`, requests };
+}
+async function testOllamaProvider() {
+  const configDir = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-ollama-config-"));
+  const writeConfig = (name24, value) => {
+    const file2 = import_node_path7.default.join(configDir, name24);
+    import_node_fs5.default.writeFileSync(file2, JSON.stringify(value), "utf8");
+    return file2;
+  };
+  try {
+    const loaded = loadConfig(writeConfig("valid.json", {
+      provider: "ollama",
+      baseURL: "http://127.0.0.1:11434/v1",
+      model: "ornith-1.5:9b"
+    }));
+    import_node_assert.default.strictEqual(loaded.provider, "ollama");
+    import_node_assert.default.strictEqual(loaded.agentLoop, "v1");
+    import_node_assert.default.throws(() => loadConfig(writeConfig("unsupported.json", { provider: "unsupported", baseURL: "http://127.0.0.1:1/v1", model: "x" })), /サポートされていない provider/u);
+    import_node_assert.default.throws(() => loadConfig(writeConfig("missing.json", { provider: "ollama", baseURL: "http://127.0.0.1:11434/v1" })), /baseURL \/ model/u);
+    import_node_assert.default.throws(() => loadConfig(writeConfig("remote.json", { provider: "ollama", baseURL: "https://example.com/v1", model: "x" })), /loopback/u);
+    import_node_assert.default.throws(() => loadConfig(writeConfig("bad-reasoning.json", { provider: "ollama", baseURL: "http://127.0.0.1:11434/v1", model: "x", reasoningEffort: "max" })), /reasoningEffort/u);
+  } finally {
+    import_node_fs5.default.rmSync(configDir, { recursive: true, force: true });
+  }
+  const workspace = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-ollama-workspace-"));
+  const previousKey = process.env.COMPANY_LLM_API_KEY;
+  process.env.COMPANY_LLM_API_KEY = "must-not-be-sent-to-ollama";
+  const ollamaEvents = [];
+  const mock = await listenOllamaMock((_body, requestNumber) => {
+    if (requestNumber === 1) {
+      return {
+        contentType: "application/json; charset=utf-8",
+        body: Buffer.from(JSON.stringify({
+          id: "ollama-smoke-1",
+          object: "chat.completion",
+          created: 0,
+          model: "mock",
+          choices: [{ index: 0, message: { role: "assistant", content: "", tool_calls: [{ id: "ollama-call-1", type: "function", function: { name: "write_file", arguments: JSON.stringify({ path: "\u30E1\u30E2.txt", content: "\u78BA\u8A8D" }) } }] }, finish_reason: "tool_calls" }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+        }), "utf8")
+      };
+    }
+    return {
+      body: Buffer.from(JSON.stringify({
+        id: "ollama-smoke-2",
+        object: "chat.completion",
+        created: 0,
+        model: "mock",
+        choices: [{ index: 0, message: { role: "assistant", content: "Ollama UTF-8 \u5B8C\u4E86" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+      }), "utf8")
+    };
+  });
+  try {
+    const result = await runAgentTurnV2({
+      cfg: {
+        provider: "ollama",
+        agentLoop: "v2",
+        baseURL: mock.url,
+        model: "mock",
+        reasoningEffort: "high",
+        autoApprove: { write: true },
+        maxToolIterations: 3
+      },
+      messages: [],
+      userInput: "\u65E5\u672C\u8A9E\u30D5\u30A1\u30A4\u30EB\u3092\u66F8\u3044\u3066",
+      ctx: makeCtx(workspace),
+      io: { ...ioStub(true), event: (event) => ollamaEvents.push(event) }
+    });
+    import_node_assert.default.strictEqual(result.aborted, false);
+    import_node_assert.default.strictEqual(result.reply, "Ollama UTF-8 \u5B8C\u4E86");
+    import_node_assert.default.strictEqual(import_node_fs5.default.readFileSync(import_node_path7.default.join(workspace, "\u30E1\u30E2.txt"), "utf8"), "\u78BA\u8A8D");
+    import_node_assert.default.ok(mock.requests[0].contentType?.toLowerCase().includes("application/json") && mock.requests[0].contentType?.toLowerCase().includes("charset=utf-8"));
+    import_node_assert.default.strictEqual(mock.requests[0].authorization, null, "Ollama must not receive Authorization");
+    import_node_assert.default.strictEqual(mock.requests[0].body.reasoning_effort, "high");
+    const secondBody = JSON.stringify(mock.requests[1]?.body ?? {});
+    import_node_assert.default.ok(secondBody.includes("\u30E1\u30E2.txt") && secondBody.includes("\u78BA\u8A8D"), "Japanese tool args must survive the UTF-8 boundary");
+    const modelEvents = ollamaEvents.filter((event) => event.type === "model.decision");
+    import_node_assert.default.ok(modelEvents.length > 0, "Ollama turn must emit a model decision event");
+    import_node_assert.default.ok(modelEvents.every((event) => event.origin === "ollama"), "Ollama model decisions must retain Ollama provenance");
+    import_node_assert.default.ok(!modelEvents.some((event) => event.origin === "copilot"), "Ollama model decisions must not claim Copilot provenance");
+  } finally {
+    await new Promise((resolve2) => mock.server.close(() => resolve2()));
+    import_node_fs5.default.rmSync(workspace, { recursive: true, force: true });
+    if (previousKey === void 0) delete process.env.COMPANY_LLM_API_KEY;
+    else process.env.COMPANY_LLM_API_KEY = previousKey;
+  }
+  const invalid = await listenOllamaMock(() => ({ contentType: "application/json", body: new Uint8Array([123, 34, 116, 34, 58, 195, 40, 125]) }));
+  try {
+    const printed = [];
+    const result = await runAgentTurnV2({
+      cfg: { provider: "ollama", agentLoop: "v2", baseURL: invalid.url, model: "mock", turnMode: "chat" },
+      messages: [],
+      userInput: "\u58CA\u308C\u305F\u5FDC\u7B54",
+      ctx: makeCtx(import_node_os2.default.tmpdir(), false),
+      io: { print: (text2) => printed.push(text2), askYesNo: async () => true }
+    });
+    import_node_assert.default.strictEqual(result.aborted, true, "invalid UTF-8 response must fail closed");
+    import_node_assert.default.ok(printed.some((line) => line.startsWith("[error]")));
+    import_node_assert.default.ok(!printed.some((line) => line.includes("\uFFFD")));
+  } finally {
+    await new Promise((resolve2) => invalid.server.close(() => resolve2()));
+  }
+  const multiWorkspace = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-ollama-multi-"));
+  const multi = await listenOllamaMock(() => ({
+    body: JSON.stringify({
+      id: "ollama-smoke-multi",
+      object: "chat.completion",
+      created: 0,
+      model: "mock",
+      choices: [{ index: 0, message: { role: "assistant", content: "", tool_calls: [
+        { id: "multi-1", type: "function", function: { name: "write_file", arguments: JSON.stringify({ path: "a.txt", content: "a" }) } },
+        // Keep one call semantically malformed so this guards the fail-close
+        // boundary for mixed valid + malformed simultaneous tool_calls.
+        { id: "multi-2", type: "function", function: { name: "write_file", arguments: JSON.stringify({ path: 3, content: "b" }) } }
+      ] }, finish_reason: "tool_calls" }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+    })
+  }));
+  try {
+    const multiEvents = [];
+    let approvals = 0;
+    let toolDefRuns = 0;
+    const writeDef = TOOL_DEFS.find((toolDef) => toolDef.name === "write_file");
+    const originalRun = writeDef.run;
+    writeDef.run = async (args, ctx) => {
+      toolDefRuns++;
+      return originalRun(args, ctx);
+    };
+    let result;
+    try {
+      result = await runAgentTurnV2({
+        cfg: { provider: "ollama", agentLoop: "v2", baseURL: multi.url, model: "mock", autoApprove: { write: true } },
+        messages: [],
+        userInput: "\u8907\u6570",
+        ctx: makeCtx(multiWorkspace),
+        io: { ...ioStub(true), askYesNo: async () => {
+          approvals++;
+          return true;
+        }, event: (event) => multiEvents.push(event) }
+      });
+    } finally {
+      writeDef.run = originalRun;
+    }
+    import_node_assert.default.strictEqual(result.aborted, true);
+    import_node_assert.default.strictEqual(toolDefRuns, 0, "mixed simultaneous tool calls must execute zero ToolDef.run calls");
+    import_node_assert.default.strictEqual(approvals, 0, "mixed simultaneous tool calls must request zero approvals");
+    import_node_assert.default.ok(!import_node_fs5.default.existsSync(import_node_path7.default.join(multiWorkspace, "a.txt")) && !import_node_fs5.default.existsSync(import_node_path7.default.join(multiWorkspace, "b.txt")), "multiple tool calls must execute zero tools");
+    import_node_assert.default.strictEqual(multiEvents.filter((event) => event.type === "approval.requested" || event.type === "approval.resolved").length, 0, "mixed simultaneous tool calls must emit zero approval events");
+    const terminalEvents = multiEvents.filter((event) => ["tool.succeeded", "tool.failed", "tool.denied"].includes(event.type));
+    import_node_assert.default.strictEqual(terminalEvents.length, 0, "mixed simultaneous tool calls must emit no terminal tool/audit event");
+    import_node_assert.default.ok(multiEvents.some((event) => event.type === "run.warning"), "mixed simultaneous tool calls must fail closed with a warning");
+  } finally {
+    await new Promise((resolve2) => multi.server.close(() => resolve2()));
+    import_node_fs5.default.rmSync(multiWorkspace, { recursive: true, force: true });
+  }
+  console.log("PASS ollama-provider");
+}
 async function testAgentLoop() {
-  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
+  const root = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
   await withServer(
     [
       { tool_call: { name: "host.write_file", args: { path: "hello.txt", content: "hi from mock" } } },
@@ -42899,14 +43213,14 @@ async function testAgentLoop() {
       import_node_assert.default.strictEqual(result.aborted, false);
       const toolMsg = result.messages.find((m) => m.role === "tool");
       import_node_assert.default.ok(toolMsg && toolMsg.content && toolMsg.content.includes("\u66F8\u304D\u8FBC\u307F\u5B8C\u4E86"));
-      import_node_assert.default.ok(import_node_fs4.default.readFileSync(import_node_path6.default.join(root, "hello.txt"), "utf8").includes("hi from mock"));
+      import_node_assert.default.ok(import_node_fs5.default.readFileSync(import_node_path7.default.join(root, "hello.txt"), "utf8").includes("hi from mock"));
     }
   );
-  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
+  import_node_fs5.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS agent-loop");
 }
 async function testV2SafeExecutionOrder() {
-  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-order-"));
+  const root = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-order-"));
   const def = TOOL_DEFS.find((toolDef) => toolDef.name === "write_file");
   const order = [];
   const events = [];
@@ -42947,14 +43261,14 @@ async function testV2SafeExecutionOrder() {
     io,
     [({ args }) => {
       import_node_assert.default.deepStrictEqual(args, { path: "ordered.txt", content: "ordered" });
-      import_node_assert.default.ok(!import_node_fs4.default.existsSync(import_node_path6.default.join(root, "ordered.txt")), "hook must run before the host guard/execution");
+      import_node_assert.default.ok(!import_node_fs5.default.existsSync(import_node_path7.default.join(root, "ordered.txt")), "hook must run before the host guard/execution");
       order.push("hook");
     }]
   );
   import_node_assert.default.strictEqual(executed.status, "succeeded");
   import_node_assert.default.deepStrictEqual(order, ["hook-1", "hook-2", "hook", "approval"]);
   clearToolExecuteBeforeHooks();
-  import_node_assert.default.strictEqual(import_node_fs4.default.readFileSync(import_node_path6.default.join(root, "ordered.txt"), "utf8"), "ordered");
+  import_node_assert.default.strictEqual(import_node_fs5.default.readFileSync(import_node_path7.default.join(root, "ordered.txt"), "utf8"), "ordered");
   const eventTypes = events.map((event) => event.type);
   import_node_assert.default.ok(eventTypes.indexOf("tool.requested") < eventTypes.indexOf("approval.requested"));
   import_node_assert.default.ok(eventTypes.indexOf("tool.approved") < eventTypes.indexOf("tool.started"));
@@ -42962,11 +43276,11 @@ async function testV2SafeExecutionOrder() {
     import_node_assert.default.deepStrictEqual({ origin: event.origin, namespace: event.namespace, authority: event.authority }, { origin: "host", namespace: "app", authority: "authoritative" });
     import_node_assert.default.ok(event.callId);
   }
-  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
+  import_node_fs5.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS v2-safe-execution-order");
 }
 async function testV2ToolLoopAndEventContract() {
-  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-loop-"));
+  const root = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-loop-"));
   await withCopilotBridge([
     '{"tool":"host.write_file","args":{"path":"v2.txt","content":"from v2"}}',
     '{"answer":"v2\u3067\u66F8\u304D\u8FBC\u307F\u307E\u3057\u305F"}'
@@ -42982,19 +43296,19 @@ async function testV2ToolLoopAndEventContract() {
     });
     import_node_assert.default.strictEqual(result.reply, "v2\u3067\u66F8\u304D\u8FBC\u307F\u307E\u3057\u305F", JSON.stringify({ messages: result.messages, logs, events }));
     import_node_assert.default.strictEqual(result.aborted, false);
-    import_node_assert.default.strictEqual(import_node_fs4.default.readFileSync(import_node_path6.default.join(root, "v2.txt"), "utf8"), "from v2");
+    import_node_assert.default.strictEqual(import_node_fs5.default.readFileSync(import_node_path7.default.join(root, "v2.txt"), "utf8"), "from v2");
     import_node_assert.default.strictEqual(prompts.length, 2);
     import_node_assert.default.ok(prompts[1].includes("BEGIN_UNTRUSTED_HOST_RESULT"));
     import_node_assert.default.ok(events.some((event) => event.type === "model.decision" && event.origin === "copilot" && event.namespace === "none" && event.authority === "claimed"));
     import_node_assert.default.ok(events.some((event) => event.type === "plan.created" && event.origin === "orchestrator" && event.namespace === "none" && event.authority === "derived"));
     import_node_assert.default.ok(events.some((event) => event.type === "tool.succeeded" && event.origin === "host" && event.namespace === "app" && event.authority === "authoritative" && event.callId));
   });
-  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
+  import_node_fs5.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS v2-tool-loop");
   console.log("PASS v2-event-contract");
 }
 async function testV2HookDenialPropagation() {
-  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-hook-"));
+  const root = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-hook-"));
   let approvals = 0;
   await withServer([
     { tool_call: { name: "write_file", args: { path: "denied.txt", content: "never" } } },
@@ -43021,15 +43335,15 @@ async function testV2HookDenialPropagation() {
     });
     import_node_assert.default.strictEqual(result.reply, "\u30D5\u30C3\u30AF\u62D2\u5426\u3092\u78BA\u8A8D\u3057\u307E\u3057\u305F");
     import_node_assert.default.strictEqual(approvals, 0, "hook rejection must happen before approval");
-    import_node_assert.default.ok(!import_node_fs4.default.existsSync(import_node_path6.default.join(root, "denied.txt")));
+    import_node_assert.default.ok(!import_node_fs5.default.existsSync(import_node_path7.default.join(root, "denied.txt")));
     import_node_assert.default.ok(requestBodies[1].includes("phase2-policy-denied"), "hook rejection reason must be returned to the model");
     import_node_assert.default.ok(events.includes("tool.denied") && events.includes("step.failed"));
   });
-  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
+  import_node_fs5.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS v2-hook-denial-propagation");
 }
 async function testV2PermissionActionsLastWins() {
-  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-permission-actions-"));
+  const root = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-permission-actions-"));
   const ctx = makeCtx(root);
   const rules = [
     { permission: "write_file", pattern: "*", action: "ask" },
@@ -43080,7 +43394,7 @@ async function testV2PermissionActionsLastWins() {
   );
   import_node_assert.default.strictEqual(denied.status, "denied");
   import_node_assert.default.ok(denied.output.includes("permission denied"));
-  import_node_assert.default.ok(!import_node_fs4.default.existsSync(import_node_path6.default.join(root, "notes/private.txt")));
+  import_node_assert.default.ok(!import_node_fs5.default.existsSync(import_node_path7.default.join(root, "notes/private.txt")));
   import_node_assert.default.strictEqual(approvals, 0, "deny happens before the existing approval flow");
   const readDef = TOOL_DEFS.find((toolDef) => toolDef.name === "read_file");
   const asked = await executeV2ToolCall(
@@ -43106,12 +43420,12 @@ async function testV2PermissionActionsLastWins() {
     }]
   );
   import_node_assert.default.strictEqual(deniedAfterHookMutation.status, "denied", "permission evaluation must bind after other before-hooks");
-  import_node_assert.default.ok(!import_node_fs4.default.existsSync(import_node_path6.default.join(root, "notes/private.txt")));
-  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
+  import_node_assert.default.ok(!import_node_fs5.default.existsSync(import_node_path7.default.join(root, "notes/private.txt")));
+  import_node_fs5.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS v2-permission-actions-last-wins");
 }
 async function testV2PermissionNewVsOverwrite() {
-  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-permission-overwrite-"));
+  const root = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-permission-overwrite-"));
   const ctx = makeCtx(root);
   const writeDef = TOOL_DEFS.find((toolDef) => toolDef.name === "write_file");
   const rules = [
@@ -43150,16 +43464,16 @@ async function testV2PermissionNewVsOverwrite() {
     import_node_assert.default.strictEqual(second.status, "succeeded");
     import_node_assert.default.strictEqual(second.executed, true);
     import_node_assert.default.strictEqual(approvals, 1, "existing writes must use write_file.overwrite and ask");
-    import_node_assert.default.strictEqual(import_node_fs4.default.readFileSync(import_node_path6.default.join(root, "same.txt"), "utf8"), "second");
+    import_node_assert.default.strictEqual(import_node_fs5.default.readFileSync(import_node_path7.default.join(root, "same.txt"), "utf8"), "second");
   } finally {
-    import_node_fs4.default.rmSync(root, { recursive: true, force: true });
+    import_node_fs5.default.rmSync(root, { recursive: true, force: true });
   }
   console.log("PASS v2-permission-new-vs-overwrite");
 }
 async function testV2PermissionOverwriteLastWins() {
-  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-permission-overwrite-order-"));
+  const root = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-permission-overwrite-order-"));
   const ctx = makeCtx(root);
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "existing.txt"), "before", "utf8");
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(root, "existing.txt"), "before", "utf8");
   const args = { path: "existing.txt", content: "after" };
   try {
     const askThenDeny = [
@@ -43173,15 +43487,15 @@ async function testV2PermissionOverwriteLastWins() {
     import_node_assert.default.strictEqual(await evaluateToolPermission("host.write_file", args, ctx, askThenDeny), "deny");
     import_node_assert.default.strictEqual(await evaluateToolPermission("host.write_file", args, ctx, denyThenAsk), "ask");
   } finally {
-    import_node_fs4.default.rmSync(root, { recursive: true, force: true });
+    import_node_fs5.default.rmSync(root, { recursive: true, force: true });
   }
   console.log("PASS v2-permission-overwrite-last-wins");
 }
 async function testV2PermissionOverwritePrecondition() {
-  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-permission-overwrite-precondition-"));
+  const root = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-permission-overwrite-precondition-"));
   const ctx = makeCtx(root);
-  const target = import_node_path6.default.join(root, "existing.txt");
-  import_node_fs4.default.writeFileSync(target, "before", "utf8");
+  const target = import_node_path7.default.join(root, "existing.txt");
+  import_node_fs5.default.writeFileSync(target, "before", "utf8");
   const originalWriteDef = TOOL_DEFS.find((toolDef) => toolDef.name === "write_file");
   let runs = 0;
   const writeDef = {
@@ -43197,7 +43511,7 @@ async function testV2PermissionOverwritePrecondition() {
     },
     askYesNo: async () => {
       approvals++;
-      import_node_fs4.default.writeFileSync(target, "external-change", "utf8");
+      import_node_fs5.default.writeFileSync(target, "external-change", "utf8");
       return true;
     }
   };
@@ -43221,18 +43535,18 @@ async function testV2PermissionOverwritePrecondition() {
     import_node_assert.default.strictEqual(result.executed, false);
     import_node_assert.default.strictEqual(runs, 0, "approval precondition denial must happen before ToolDef.run");
     import_node_assert.default.strictEqual(approvals, 1);
-    import_node_assert.default.strictEqual(import_node_fs4.default.readFileSync(target, "utf8"), "external-change", "external content must be preserved");
+    import_node_assert.default.strictEqual(import_node_fs5.default.readFileSync(target, "utf8"), "external-change", "external content must be preserved");
   } finally {
-    import_node_fs4.default.rmSync(root, { recursive: true, force: true });
+    import_node_fs5.default.rmSync(root, { recursive: true, force: true });
   }
   console.log("PASS v2-permission-overwrite-precondition");
 }
 async function testV2MinAskProfileZeroApprovals() {
-  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-min-ask-profile-"));
-  const profilePath = import_node_path6.default.join(process.cwd(), "config.flex.json");
-  const profile = JSON.parse(import_node_fs4.default.readFileSync(profilePath, "utf8"));
-  const exampleProfilePath = import_node_path6.default.join(process.cwd(), "config.example.json");
-  const exampleProfile = JSON.parse(import_node_fs4.default.readFileSync(exampleProfilePath, "utf8"));
+  const root = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-min-ask-profile-"));
+  const profilePath = import_node_path7.default.join(process.cwd(), "config.flex.json");
+  const profile = JSON.parse(import_node_fs5.default.readFileSync(profilePath, "utf8"));
+  const exampleProfilePath = import_node_path7.default.join(process.cwd(), "config.example.json");
+  const exampleProfile = JSON.parse(import_node_fs5.default.readFileSync(exampleProfilePath, "utf8"));
   import_node_assert.default.strictEqual(profile.agentLoop, "v1", "shipped flex profile must retain the v1 default");
   import_node_assert.default.strictEqual(profile.safeCommandOnly, true);
   import_node_assert.default.strictEqual(exampleProfile.safeCommandOnly, true, "shipped example profile must retain the safe command hard guard");
@@ -43248,8 +43562,8 @@ async function testV2MinAskProfileZeroApprovals() {
     { permission: "start_process", pattern: "*", action: "allow" },
     { permission: "run_command", pattern: "*", action: "ask" }
   ]);
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "read.txt"), "needle in fixture", "utf8");
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "open.txt"), "open fixture", "utf8");
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(root, "read.txt"), "needle in fixture", "utf8");
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(root, "open.txt"), "open fixture", "utf8");
   const scenarios = [
     { userInput: "\u4E00\u89A7", tool_call: { name: "list_files", args: { path: ".", recursive: false } } },
     { userInput: "\u8AAD\u3080", tool_call: { name: "read_file", args: { path: "read.txt" } } },
@@ -43296,10 +43610,10 @@ async function testV2MinAskProfileZeroApprovals() {
       import_node_assert.default.strictEqual(requestBodies.length, scenarios.length * 2);
     });
     import_node_assert.default.strictEqual(approvals, 0, "ask-minimal profile must complete all five turns with zero approvals");
-    import_node_assert.default.strictEqual(import_node_fs4.default.readFileSync(import_node_path6.default.join(root, "new.txt"), "utf8"), "new fixture");
+    import_node_assert.default.strictEqual(import_node_fs5.default.readFileSync(import_node_path7.default.join(root, "new.txt"), "utf8"), "new fixture");
   } finally {
     startProcessDef.run = originalStartProcessRun;
-    import_node_fs4.default.rmSync(root, { recursive: true, force: true });
+    import_node_fs5.default.rmSync(root, { recursive: true, force: true });
   }
   console.log("PASS v2-min-ask-profile-zero-approvals");
 }
@@ -43326,7 +43640,7 @@ async function testV2PermissionCommandConservative() {
   console.log("PASS v2-permission-command-conservative");
 }
 async function testV2PermissionHardGuardComposition() {
-  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-permission-hard-"));
+  const root = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-permission-hard-"));
   const io = { print: () => {
   }, askYesNo: async () => {
     throw new Error("permission allow must not ask");
@@ -43353,12 +43667,12 @@ async function testV2PermissionHardGuardComposition() {
   );
   import_node_assert.default.notStrictEqual(dangerous.status, "succeeded");
   import_node_assert.default.ok(dangerous.output.includes("\u7834\u58CA\u7684"));
-  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
+  import_node_fs5.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS v2-permission-hard-guard-composition");
 }
 async function testV2PermissionEmptyCompatibility() {
-  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-permission-empty-"));
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "same.txt"), "same", "utf8");
+  const root = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-permission-empty-"));
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(root, "same.txt"), "same", "utf8");
   const def = TOOL_DEFS.find((toolDef) => toolDef.name === "read_file");
   let missingApprovals = 0;
   let emptyApprovals = 0;
@@ -43391,12 +43705,12 @@ async function testV2PermissionEmptyCompatibility() {
   import_node_assert.default.strictEqual(empty.output, missing.output);
   import_node_assert.default.strictEqual(missingApprovals, 0);
   import_node_assert.default.strictEqual(emptyApprovals, 0);
-  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
+  import_node_fs5.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS v2-permission-empty-compatibility");
 }
 async function testV2LimitsAndNoProgress() {
   async function expectWarning(label, steps, overrides, expected, prepare) {
-    const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), `ca-smoke-v2-${label}-`));
+    const root = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), `ca-smoke-v2-${label}-`));
     prepare?.(root);
     await withServer(steps, async (baseCfg) => {
       const warnings = [];
@@ -43412,15 +43726,15 @@ async function testV2LimitsAndNoProgress() {
       import_node_assert.default.strictEqual(result.aborted, true, label);
       import_node_assert.default.ok(warnings.some((warning) => warning.includes(expected)), `${label}: ${warnings.join(" | ")}`);
     });
-    import_node_fs4.default.rmSync(root, { recursive: true, force: true });
+    import_node_fs5.default.rmSync(root, { recursive: true, force: true });
   }
   await expectWarning("iteration", [{ tool_call: { name: "list_files", args: {} } }], { maxToolIterations: 1 }, "\u6700\u5927\u53CD\u5FA9\u56DE\u6570");
   await expectWarning("host", [
     { tool_call: { name: "list_files", args: { path: "a" } } },
     { tool_call: { name: "list_files", args: { path: "b" } } }
   ], { maxToolExecutions: 1 }, "host\u30C4\u30FC\u30EB\u5B9F\u884C\u4E0A\u9650", (root) => {
-    import_node_fs4.default.mkdirSync(import_node_path6.default.join(root, "a"));
-    import_node_fs4.default.mkdirSync(import_node_path6.default.join(root, "b"));
+    import_node_fs5.default.mkdirSync(import_node_path7.default.join(root, "a"));
+    import_node_fs5.default.mkdirSync(import_node_path7.default.join(root, "b"));
   });
   await expectWarning("write", [{ tool_call: { name: "write_file", args: { path: "x.txt", content: "x" } } }], { maxWriteExecutions: 0 }, "\u66F8\u304D\u8FBC\u307F\u5B9F\u884C\u4E0A\u9650");
   await expectWarning("command", [{ tool_call: { name: "run_command", args: { command: "echo never" } } }], { allowArbitraryCommands: true, maxCommandExecutions: 0 }, "\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u4E0A\u9650");
@@ -43428,8 +43742,8 @@ async function testV2LimitsAndNoProgress() {
     { tool_call: { name: "list_files", args: { path: "a" } } },
     { tool_call: { name: "list_files", args: { path: "b" } } }
   ], { maxNoProgress: 1 }, "\u9032\u5C55\u304C\u306A\u3044", (root) => {
-    import_node_fs4.default.mkdirSync(import_node_path6.default.join(root, "a"));
-    import_node_fs4.default.mkdirSync(import_node_path6.default.join(root, "b"));
+    import_node_fs5.default.mkdirSync(import_node_path7.default.join(root, "a"));
+    import_node_fs5.default.mkdirSync(import_node_path7.default.join(root, "b"));
   });
   const backend = new FakeBackend(['{"answer":"v1 default"}\nAGENT_END']);
   const v1 = await runConfiguredAgentTurn({
@@ -43465,8 +43779,8 @@ async function testDenial() {
   console.log("PASS denial");
 }
 async function testCopilotChoosesFirstAction() {
-  const answerRoot = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(answerRoot, "evidence.txt"), "bootstrap evidence");
+  const answerRoot = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(answerRoot, "evidence.txt"), "bootstrap evidence");
   const answerBackend = new FakeBackend(['{"answer":"\u3053\u3093\u306B\u3061\u306F\uFF01"}\nAGENT_END']);
   const answerEvents = [];
   const cfg = { baseURL: "", model: "", provider: "copilot-edge", systemPrompt: "WORK_SYSTEM_PROMPT_SENTINEL", copilot: { agentMode: true } };
@@ -43489,9 +43803,9 @@ async function testCopilotChoosesFirstAction() {
   import_node_assert.default.ok(answerBackend.prompts[0].includes("BEGIN_UNTRUSTED_HOST_RESULT"));
   import_node_assert.default.ok(answerBackend.prompts[0].includes("evidence.txt"));
   import_node_assert.default.ok(answerBackend.prompts[0].includes("host.get_weather") && !answerBackend.prompts[0].includes("host.run_command(command)"));
-  import_node_assert.default.deepStrictEqual(import_node_fs4.default.readdirSync(answerRoot), ["evidence.txt"]);
-  import_node_fs4.default.rmSync(answerRoot, { recursive: true, force: true });
-  const safeRoot = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-safe-"));
+  import_node_assert.default.deepStrictEqual(import_node_fs5.default.readdirSync(answerRoot), ["evidence.txt"]);
+  import_node_fs5.default.rmSync(answerRoot, { recursive: true, force: true });
+  const safeRoot = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-safe-"));
   const safeBackend = new FakeBackend(['{"answer":"\u5916\u90E8\u60C5\u5831\u306F\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093"}\nAGENT_END']);
   const safeCtx = { ...makeCtx(safeRoot), safeCommandOnly: true };
   const safeAnswer = await runAgentTurn({ cfg, messages: [], userInput: "\u5929\u6C17\u3092\u6559\u3048\u3066", ctx: safeCtx, io: ioStub(true), backend: safeBackend });
@@ -43508,8 +43822,8 @@ async function testCopilotChoosesFirstAction() {
   const deniedWeather = await runAgentTurn({ cfg, messages: [], userInput: "\u5929\u6C17\u3092\u6559\u3048\u3066", ctx: safeCtx, io: ioStub(true), backend: new FakeBackend(['{"tool":"host.get_weather","args":{"location":"\u5E83\u5CF6\u5E02"}}\nAGENT_END']) });
   import_node_assert.default.strictEqual(deniedWeather.aborted, true);
   import_node_assert.default.ok(deniedWeather.messages.at(-1)?.content?.includes("\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u901A\u4FE1"));
-  import_node_fs4.default.rmSync(safeRoot, { recursive: true, force: true });
-  const toolRoot = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
+  import_node_fs5.default.rmSync(safeRoot, { recursive: true, force: true });
+  const toolRoot = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
   const toolBackend = new FakeBackend([
     '{"tool":"host.list_files","args":{}}\nAGENT_END',
     '{"answer":"\u8ABF\u67FB\u3057\u307E\u3057\u305F"}\nAGENT_END'
@@ -43531,8 +43845,8 @@ async function testCopilotChoosesFirstAction() {
   import_node_assert.default.ok(toolEvents.includes("tool.requested"));
   import_node_assert.default.ok(toolBackend.prompts[0].includes("TOOL_RESULT (\u7B2C0\u30BF\u30FC\u30F3\u81EA\u52D5\u5B9F\u884C"));
   import_node_assert.default.ok(toolBackend.prompts[1].includes("BEGIN_UNTRUSTED_HOST_RESULT"));
-  import_node_fs4.default.rmSync(toolRoot, { recursive: true, force: true });
-  const repeatRoot = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
+  import_node_fs5.default.rmSync(toolRoot, { recursive: true, force: true });
+  const repeatRoot = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
   const repeatBackend = new FakeBackend([
     '{"tool":"host.list_files","args":{}}\nAGENT_END',
     '{"tool":"host.list_files","args":{"path":".","glob":"**/*"}}\nAGENT_END',
@@ -43553,7 +43867,7 @@ async function testCopilotChoosesFirstAction() {
   import_node_assert.default.ok(repeat.messages.some((message) => String(message.content).includes("\u540C\u3058host\u64CD\u4F5C")));
   import_node_assert.default.strictEqual(repeatBackend.calls, 3);
   import_node_assert.default.strictEqual(repeatEvents.filter((type) => type === "tool.requested").length, 2);
-  import_node_fs4.default.rmSync(repeatRoot, { recursive: true, force: true });
+  import_node_fs5.default.rmSync(repeatRoot, { recursive: true, force: true });
   console.log("PASS copilot-tool-choice");
 }
 async function testModeBoundaries() {
@@ -43630,7 +43944,7 @@ async function testModeBoundaries() {
   import_node_assert.default.strictEqual(commandDisabled.aborted, true);
   import_node_assert.default.strictEqual(commandDisabledBackend.calls, 1);
   import_node_assert.default.ok(commandDisabled.messages.at(-1)?.content?.includes("\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9"));
-  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
+  const root = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
   const approvalBackend = new FakeBackend([
     '{"tool":"host.write_file","args":{"path":"denied.txt","content":"x"}}\nAGENT_END',
     '{"answer":"\u5909\u66F4\u3057\u307E\u305B\u3093\u3067\u3057\u305F"}\nAGENT_END'
@@ -43646,8 +43960,8 @@ async function testModeBoundaries() {
   });
   import_node_assert.default.strictEqual(approval.reply, "\u5909\u66F4\u3057\u307E\u305B\u3093\u3067\u3057\u305F");
   import_node_assert.default.ok(approvalEvents.includes("tool.denied"));
-  import_node_assert.default.ok(!import_node_fs4.default.existsSync(import_node_path6.default.join(root, "denied.txt")));
-  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
+  import_node_assert.default.ok(!import_node_fs5.default.existsSync(import_node_path7.default.join(root, "denied.txt")));
+  import_node_fs5.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS mode-boundaries");
 }
 async function testProtocolParsing() {
@@ -43976,7 +44290,7 @@ async function testCopilotResponseCompletion() {
     import_node_assert.default.ok(COPILOT_CLICK_SEND_JS.includes(required2), `send-button detector missing ${required2}`);
     if (required2 !== "exclude.test(identity)" && required2 !== "diagnosticButtons") import_node_assert.default.ok(COPILOT_SEND_READY_JS.includes(required2), `send-button readiness detector missing ${required2}`);
   }
-  import_node_assert.default.ok(import_node_fs4.default.readFileSync(import_node_path6.default.join(process.cwd(), "src", "copilot.ts"), "utf8").includes("this.cdpMethod('Input.dispatchMouseEvent', { type: 'mousePressed'"), "send path must retain native CDP mouse fallback");
+  import_node_assert.default.ok(import_node_fs5.default.readFileSync(import_node_path7.default.join(process.cwd(), "src", "copilot.ts"), "utf8").includes("this.cdpMethod('Input.dispatchMouseEvent', { type: 'mousePressed'"), "send path must retain native CDP mouse fallback");
   import_node_assert.default.ok(COPILOT_CLICK_COPY_JS.includes("scope=latest"));
   import_node_assert.default.ok(COPILOT_CLICK_COPY_JS.includes("others.length>0"));
   for (const required2 of ["CopyButtonTestId", "CopyButtonContainerTestId", "pre,code", "copy\\s*(?:response|answer)"]) {
@@ -44259,7 +44573,7 @@ async function testCopilotChunkFallback() {
   console.log("PASS copilot-chunk-fallback");
 }
 async function testCopilotLoop() {
-  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
+  const root = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
   const extractedJson = '{"companies":[{"id":"JP01","values":{"revenue":123}}]}';
   const backend = new FakeBackend([
     `{"tool":"write_file","path":"work/extracted.json","content":"${extractedJson}","AGENT_END":true}`,
@@ -44276,18 +44590,18 @@ async function testCopilotLoop() {
   });
   import_node_assert.default.strictEqual(result.reply, "\u5B8C\u4E86\u3057\u307E\u3057\u305F");
   import_node_assert.default.strictEqual(result.aborted, false);
-  import_node_assert.default.strictEqual(import_node_fs4.default.readFileSync(import_node_path6.default.join(root, "work", "extracted.json"), "utf8"), extractedJson);
+  import_node_assert.default.strictEqual(import_node_fs5.default.readFileSync(import_node_path7.default.join(root, "work", "extracted.json"), "utf8"), extractedJson);
   import_node_assert.default.strictEqual(backend.calls, 2);
   import_node_assert.default.ok(backend.prompts[1].includes("BEGIN_UNTRUSTED_HOST_RESULT"));
   import_node_assert.default.ok(backend.prompts[0].includes("AGENT_END"));
-  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
+  import_node_fs5.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS copilot-loop");
 }
 async function testCopilotToolResultBudgets() {
-  const readRoot = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(readRoot, "a-long.txt"), `${"x".repeat(3500)}
+  const readRoot = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(readRoot, "a-long.txt"), `${"x".repeat(3500)}
 LATE_TEXT_MARKER`);
-  import_node_fs4.default.writeFileSync(import_node_path6.default.join(readRoot, "z-final.xlsx"), Buffer.from("xlsx-placeholder"));
+  import_node_fs5.default.writeFileSync(import_node_path7.default.join(readRoot, "z-final.xlsx"), Buffer.from("xlsx-placeholder"));
   const readBackend = new FakeBackend([
     '{"tool":"host.read_files","args":{"patterns":["a-long.txt","z-final.xlsx"]}}\nAGENT_END',
     '{"answer":"read complete"}\nAGENT_END'
@@ -44304,10 +44618,10 @@ LATE_TEXT_MARKER`);
   import_node_assert.default.ok(readBackend.prompts[1].includes("LATE_TEXT_MARKER"), "read_files late text must reach the next prompt");
   import_node_assert.default.ok(readBackend.prompts[1].includes("z-final.xlsx"), "final xlsx entry must reach the next prompt");
   import_node_assert.default.ok(readBackend.prompts[1].includes("tools/Read-Xlsx.ps1"), "xlsx guidance must reach the next prompt");
-  import_node_fs4.default.rmSync(readRoot, { recursive: true, force: true });
-  const commandRoot = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
-  const emitterPath = import_node_path6.default.join(commandRoot, "emit-long.cjs");
-  import_node_fs4.default.writeFileSync(emitterPath, "process.stdout.write('A'.repeat(3500) + '\\nlast.xlsx FINAL_WORKBOOK_MARKER')");
+  import_node_fs5.default.rmSync(readRoot, { recursive: true, force: true });
+  const commandRoot = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
+  const emitterPath = import_node_path7.default.join(commandRoot, "emit-long.cjs");
+  import_node_fs5.default.writeFileSync(emitterPath, "process.stdout.write('A'.repeat(3500) + '\\nlast.xlsx FINAL_WORKBOOK_MARKER')");
   const command = `"${process.execPath}" "${emitterPath}"`;
   const commandBackend = new FakeBackend([
     JSON.stringify({ tool: "host.run_command", args: { command } }) + "\nAGENT_END",
@@ -44332,18 +44646,18 @@ LATE_TEXT_MARKER`);
   import_node_assert.default.ok(commandBackend.prompts[0].includes("\u4EFB\u610F\u306Ehost\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u81EA\u52D5\u627F\u8A8D\u6E08\u307F\u3067\u3059"), "auto-approved command prompt must state that approval is already granted");
   import_node_assert.default.ok(!commandBackend.prompts[0].includes("\u5B9F\u884C\u524D\u306B\u627F\u8A8D\u3092\u53D6\u5F97\u3057\u3066\u304F\u3060\u3055\u3044"), "auto-approved command prompt must not ask the model to request approval");
   import_node_assert.default.ok(commandBackend.prompts[1].includes("last.xlsx FINAL_WORKBOOK_MARKER"), "final command workbook must reach the next prompt");
-  import_node_fs4.default.rmSync(commandRoot, { recursive: true, force: true });
+  import_node_fs5.default.rmSync(commandRoot, { recursive: true, force: true });
   console.log("PASS copilot-tool-result-budgets");
 }
 async function testMaxIterationHistory() {
-  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
+  const root = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
   const backend = new FakeBackend(['{"tool":"host.list_files","args":{}}']);
   const cfg = { baseURL: "", model: "", provider: "copilot-edge", maxToolIterations: 1, copilot: { agentMode: true } };
   const result = await runAgentTurn({ cfg, messages: [], userInput: "\u5C65\u6B74\u3092\u6B8B\u3057\u3066", ctx: makeCtx(root), io: ioStub(true), backend });
   import_node_assert.default.strictEqual(result.aborted, true);
   import_node_assert.default.ok(result.messages.some((message) => message.role === "user" && message.content === "\u5C65\u6B74\u3092\u6B8B\u3057\u3066"));
   import_node_assert.default.ok(result.messages.some((message) => message.role === "assistant" && String(message.content).includes("\u6700\u5927\u53CD\u5FA9\u56DE\u6570")));
-  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
+  import_node_fs5.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS max-iteration-history");
 }
 async function testCopilotPlainMode() {
@@ -44363,7 +44677,7 @@ async function testCopilotPlainMode() {
   console.log("PASS copilot-plain");
 }
 async function testCopilotFenceMode() {
-  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
+  const root = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
   const backend = new FakeBackend([
     '{"tool":"host.write_file","args":{"path":"fence.html"}}\n```html\n<p>fence ok</p>\n```\nAGENT_END',
     '{"answer":"\u30D5\u30A7\u30F3\u30B9\u5B8C\u4E86"}\nAGENT_END'
@@ -44378,8 +44692,8 @@ async function testCopilotFenceMode() {
     backend
   });
   import_node_assert.default.strictEqual(result.reply, "\u30D5\u30A7\u30F3\u30B9\u5B8C\u4E86");
-  import_node_assert.default.ok(import_node_fs4.default.readFileSync(import_node_path6.default.join(root, "fence.html"), "utf8").includes("<p>fence ok</p>"));
-  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
+  import_node_assert.default.ok(import_node_fs5.default.readFileSync(import_node_path7.default.join(root, "fence.html"), "utf8").includes("<p>fence ok</p>"));
+  import_node_fs5.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS copilot-fence");
 }
 async function testLocalResponseConverter() {
@@ -44430,14 +44744,14 @@ async function testLocalResponseConverter() {
     ]);
     const converterInput = JSON.parse(lastUserContent);
     import_node_assert.default.deepStrictEqual(converterInput.host_tools?.map((tool2) => tool2.name), ["host.search_files"]);
-    const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "converter-smoke-"));
+    const root = import_node_fs5.default.mkdtempSync(import_node_path7.default.join(import_node_os2.default.tmpdir(), "converter-smoke-"));
     const converted = await runAgentTurn({ cfg: { baseURL: "", model: "", provider: "copilot-edge", copilot: { agentMode: true }, localResponseConverter: settings }, messages: [], userInput: "\u7B54\u3048\u3066", ctx: makeCtx(root), io: ioStub(true), backend: new FakeBackend(["write_file \u306E\u5224\u65AD\u60C5\u5831\u304C\u4E0D\u8DB3"]) });
     import_node_assert.default.strictEqual(converted.reply, "\u5909\u63DB\u6E08\u307F");
     responseContent = '{"tool":"host.write_file","args":{"unexpected":true}}';
     const rejected = await runAgentTurn({ cfg: { baseURL: "", model: "", provider: "copilot-edge", copilot: { agentMode: true }, localResponseConverter: settings }, messages: [], userInput: "\u66F8\u3044\u3066", ctx: makeCtx(root), io: ioStub(true), backend: new FakeBackend(["write_file \u306E\u5224\u65AD\u60C5\u5831\u304C\u4E0D\u8DB3", '{"answer":"schema rejected"}\nAGENT_END']) });
     import_node_assert.default.strictEqual(rejected.reply, "schema rejected");
-    import_node_assert.default.ok(!import_node_fs4.default.existsSync(import_node_path6.default.join(root, "unexpected")), "schema-invalid converter args must not execute");
-    import_node_fs4.default.rmSync(root, { recursive: true, force: true });
+    import_node_assert.default.ok(!import_node_fs5.default.existsSync(import_node_path7.default.join(root, "unexpected")), "schema-invalid converter args must not execute");
+    import_node_fs5.default.rmSync(root, { recursive: true, force: true });
     responseContent = "invalid converter content";
     const fallback = await runAgentTurn({ cfg: { baseURL: "", model: "", provider: "copilot-edge", copilot: { agentMode: true }, localResponseConverter: settings }, messages: [], userInput: "\u7B54\u3048\u3066", ctx: makeCtx(import_node_os2.default.tmpdir(), false), io: ioStub(true), backend: new FakeBackend(["write_file \u306E\u5224\u65AD\u60C5\u5831\u304C\u4E0D\u8DB3", '{"answer":"fallback raw"}\nAGENT_END']) });
     import_node_assert.default.strictEqual(fallback.reply, "fallback raw");
@@ -44455,14 +44769,14 @@ async function testLocalResponseConverter() {
   console.log("PASS local-response-converter");
 }
 async function testUiContract() {
-  const html = import_node_fs4.default.readFileSync(import_node_path6.default.join(process.cwd(), "public", "index.html"), "utf8");
-  const classic = import_node_fs4.default.readFileSync(import_node_path6.default.join(process.cwd(), "public", "classic.html"), "utf8");
+  const html = import_node_fs5.default.readFileSync(import_node_path7.default.join(process.cwd(), "public", "index.html"), "utf8");
+  const classic = import_node_fs5.default.readFileSync(import_node_path7.default.join(process.cwd(), "public", "classic.html"), "utf8");
   const script = classic.match(/<script>([\s\S]*?)<\/script>/)?.[1];
   import_node_assert.default.ok(script, "classic UI script missing");
   new Function(script);
   for (const required2 of ["run-plan", "run-eyebrow", "run-pause", "run-resume", "run-retry", "run-complete", "\u56DE\u7B54\u5B8C\u4E86", "activity-details", "\u5B9F\u969B\u306E\u5DEE\u5206\u3092\u8868\u793A", "\u5DEE\u5206\u306E\u7D9A\u304D", "preview-frame", "verification-list", "\u8A3A\u65ADJSON", "approval-meta", "parentRunId", "/api/runs/", "/api/changes/", "compositionstart", "aria-live", "mode-select", "\u3053\u306EPC\u3067\u5B9F\u884C", "Copilot\u5185\u3067\u89B3\u6E2C", "@media (max-width: 720px)", "demo-view", "diagnostic-view", "view-toggle", "artifacts-panel", "\u904E\u53BB\u306E\u5B9F\u884C", "friendlyToolName", "\u5165\u529B\u306E\u53CD\u6620\u306B\u5931\u6557\u3057\u305F\u305F\u3081\u3001\u81EA\u52D5\u3067\u3084\u308A\u76F4\u3057\u3066\u3044\u307E\u3059\u3002"]) import_node_assert.default.ok(classic.includes(required2), `classic UI contract missing: ${required2}`);
-  const frontend = import_node_fs4.default.readFileSync(import_node_path6.default.join(process.cwd(), "src", "ui", "main.ts"), "utf8");
-  const styles = import_node_fs4.default.readFileSync(import_node_path6.default.join(process.cwd(), "src", "ui", "styles.css"), "utf8");
+  const frontend = import_node_fs5.default.readFileSync(import_node_path7.default.join(process.cwd(), "src", "ui", "main.ts"), "utf8");
+  const styles = import_node_fs5.default.readFileSync(import_node_path7.default.join(process.cwd(), "src", "ui", "styles.css"), "utf8");
   for (const required2 of ['lang="ja"', 'id="app"', "/assets/ui.js", "/assets/ui.css", "/classic"]) import_node_assert.default.ok(html.includes(required2), `default shell contract missing: ${required2}`);
   for (const required2 of ["AssistantRuntimeProvider", "useExternalStoreRuntime", "useAui", "aui.composer.setText", "ThreadPrimitive", "ComposerPrimitive", "MessagePrimitive", "approval-allow", "approval-deny", "approval-target", "approval.binding?.path", "approval.binding?.command", "approval.question", "\u5BFE\u8C61\u30D1\u30B9:", "\u5B9F\u884C\u5185\u5BB9:", "\u78BA\u8A8D\u5185\u5BB9:", "progress-panel", "/api/turn", "/api/approvals/resolve", "list", "read", "search", "write", "open", "\u5B89\u5168\u4E0A\u9650\u306B\u3088\u308A\u505C\u6B62\u3057\u307E\u3057\u305F"]) import_node_assert.default.ok(frontend.includes(required2), `default UI contract missing: ${required2}`);
   for (const required2 of ["@media (max-width: 1100px)", "@media (max-width: 860px)", "@media (max-width: 640px)", "prefers-reduced-motion", ":focus-visible"]) import_node_assert.default.ok(styles.includes(required2), `responsive/accessibility contract missing: ${required2}`);
@@ -44478,7 +44792,7 @@ async function testUiContract() {
   import_node_assert.default.ok(!frontend.includes("run.status === 'failed' || run.status === 'canceled' || run.status === 'paused'"), "paused runs must not expose retry");
   import_node_assert.default.ok(!/\.value\s*=/u.test(frontend), "suggestions must use assistant-ui composer state, not DOM value assignment");
   import_node_assert.default.ok(!/dispatchEvent\(new Event\(['"]input['"]/u.test(frontend), "suggestions must not synthesize DOM input events");
-  const server = import_node_fs4.default.readFileSync(import_node_path6.default.join(process.cwd(), "src", "server.ts"), "utf8");
+  const server = import_node_fs5.default.readFileSync(import_node_path7.default.join(process.cwd(), "src", "server.ts"), "utf8");
   for (const required2 of ["url.pathname === '/classic'", "'/assets/ui.js'", "'/assets/ui.css'", "classicHtmlPath", "uiAssets"]) import_node_assert.default.ok(server.includes(required2), `static route contract missing: ${required2}`);
   import_node_assert.default.ok(server.indexOf("url.pathname === '/classic'") < server.indexOf("url.pathname === '/api/info'"), "/classic must be handled before API routes");
   console.log("PASS ui-contract (default + classic + presentation-only)");
@@ -44627,15 +44941,15 @@ async function testOpenAICompatibleBridge() {
   cancellationServer.abortAll();
   await new Promise((resolve2) => cancellationServer.close(() => resolve2()));
   for (const relative of ["vendor/opencode/Get-OpenCode.ps1", "vendor/opencode/manifest.json", "vendor/opencode/LICENSE-OpenCode.txt"]) {
-    const bytes = import_node_fs4.default.readFileSync(import_node_path6.default.join(process.cwd(), relative));
+    const bytes = import_node_fs5.default.readFileSync(import_node_path7.default.join(process.cwd(), relative));
     import_node_assert.default.deepStrictEqual([...bytes.subarray(0, 3)], [239, 187, 191], `${relative} must use UTF-8 BOM`);
     import_node_assert.default.ok(!/(?<!\r)\n/u.test(bytes.subarray(3).toString("utf8")), `${relative} must use CRLF`);
   }
   console.log("PASS openai-compatible-bridge");
 }
 async function testDemoRecordingContract() {
-  const repoRoot = import_node_path6.default.resolve(process.cwd(), "..", "..");
-  const recorder = import_node_fs4.default.readFileSync(import_node_path6.default.join(repoRoot, "demo", "renketsu-demo", "Record-Demo.ps1"), "utf8");
+  const repoRoot = import_node_path7.default.resolve(process.cwd(), "..", "..");
+  const recorder = import_node_fs5.default.readFileSync(import_node_path7.default.join(repoRoot, "demo", "renketsu-demo", "Record-Demo.ps1"), "utf8");
   for (const required2 of [
     "/api/copilot/visible-session",
     "sessionId = $TargetSessionId",
@@ -44647,7 +44961,7 @@ async function testDemoRecordingContract() {
     import_node_assert.default.ok(recorder.includes(required2), `Record-Demo visibility contract missing: ${required2}`);
   }
   import_node_assert.default.ok(!recorder.includes("Sort-Object StartTime -Descending"), "Record-Demo must not choose an unrelated newest Edge window");
-  const motionGate = import_node_fs4.default.readFileSync(import_node_path6.default.join(repoRoot, "demo", "video", "qa", "Test-VideoMotion.ps1"), "utf8");
+  const motionGate = import_node_fs5.default.readFileSync(import_node_path7.default.join(repoRoot, "demo", "video", "qa", "Test-VideoMotion.ps1"), "utf8");
   for (const required2 of ["SampleIntervalSec = 2", "tblend=all_mode=difference", "signalstats", "MinimumMovingPairs", "MinimumMovingRatio", "MaximumStaticSec", "crop=430:900:260:85"]) {
     import_node_assert.default.ok(motionGate.includes(required2), `video motion gate missing: ${required2}`);
   }
@@ -44672,6 +44986,7 @@ async function testDemoRecordingContract() {
   await testV2PermissionHardGuardComposition();
   await testV2PermissionEmptyCompatibility();
   await testV2LimitsAndNoProgress();
+  await testOllamaProvider();
   await testDenial();
   await testProtocolParsing();
   await testCopilotChoosesFirstAction();

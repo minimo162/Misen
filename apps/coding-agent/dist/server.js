@@ -5683,15 +5683,43 @@ var DEFAULT_CONFIG = {
 function appDataConfigPath() {
   return import_node_path.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent", "config.json");
 }
+function isLoopbackHostname(hostname3) {
+  const normalized = hostname3.toLowerCase().replace(/^\[|\]$/gu, "");
+  if (normalized === "localhost" || normalized === "::1" || normalized === "0:0:0:0:0:0:0:1") return true;
+  const octets = normalized.split(".");
+  if (octets.length !== 4 || octets.some((octet) => !/^\d{1,3}$/u.test(octet) || Number(octet) > 255)) return false;
+  return Number(octets[0]) === 127;
+}
+function validateProviderConfig(provider, raw, found) {
+  if (provider !== "openai" && provider !== "copilot-edge" && provider !== "ollama") {
+    throw new Error(`\u30B5\u30DD\u30FC\u30C8\u3055\u308C\u3066\u3044\u306A\u3044 provider \u3067\u3059: ${String(provider)}: ${found}`);
+  }
+  if (provider === "openai" && (!raw.baseURL || !raw.model)) {
+    throw new Error(`provider=openai \u306B\u306F baseURL / model \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
+  }
+  if (provider === "ollama") {
+    if (!raw.baseURL || !raw.model) throw new Error(`provider=ollama \u306B\u306F baseURL / model \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
+    let parsed;
+    try {
+      parsed = new URL(raw.baseURL);
+    } catch {
+      throw new Error(`provider=ollama \u306E baseURL \u304C\u4E0D\u6B63\u3067\u3059: ${found}`);
+    }
+    if (!["http:", "https:"].includes(parsed.protocol) || !isLoopbackHostname(parsed.hostname)) {
+      throw new Error(`provider=ollama \u306E baseURL \u306F loopback URL \u3067\u306A\u3051\u308C\u3070\u306A\u308A\u307E\u305B\u3093: ${found}`);
+    }
+  }
+  if (raw.reasoningEffort !== void 0 && !["high", "medium", "low", "none"].includes(raw.reasoningEffort)) {
+    throw new Error(`reasoningEffort \u306F high / medium / low / none \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+  }
+  return provider;
+}
 function parseConfig(found) {
   const raw = JSON.parse(import_node_fs.default.readFileSync(found, "utf8"));
   if (raw.agentLoop !== void 0 && raw.agentLoop !== "v1" && raw.agentLoop !== "v2") {
     throw new Error(`agentLoop \u306F v1 \u307E\u305F\u306F v2 \u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
   }
-  const provider = raw.provider ?? "openai";
-  if (provider === "openai" && (!raw.baseURL || !raw.model)) {
-    throw new Error(`provider=openai \u306B\u306F baseURL / model \u304C\u5FC5\u8981\u3067\u3059: ${found}`);
-  }
+  const provider = validateProviderConfig(raw.provider ?? "openai", raw, found);
   const configuredPermissions = raw.permissions;
   let permissions;
   if (configuredPermissions !== void 0) {
@@ -40512,6 +40540,39 @@ function createPermissionHook(rules) {
 }
 
 // src/agent-v2.ts
+function createOllamaFetch(baseFetch = fetch) {
+  return async (input, init) => {
+    const headers = new Headers(typeof input === "object" && input !== null && "headers" in input ? input.headers : void 0);
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
+    const body = init?.body;
+    const contentType = headers.get("content-type");
+    if (body !== void 0 && body !== null) {
+      if (contentType && /^application\/json(?:\s*;|$)/iu.test(contentType) && !/\bcharset\s*=/iu.test(contentType)) {
+        headers.set("content-type", `${contentType}; charset=utf-8`);
+      } else if (!contentType && typeof body === "string") {
+        headers.set("content-type", "application/json; charset=utf-8");
+      }
+    }
+    const response = await baseFetch(input, { ...init, headers });
+    const responseType = response.headers.get("content-type") ?? "";
+    if (!/^application\/json(?:\s*;|$)/iu.test(responseType)) return response;
+    const decoded = new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(await response.arrayBuffer()));
+    const responseHeaders = new Headers(response.headers);
+    responseHeaders.set("content-type", "application/json; charset=utf-8");
+    return new Response(new TextEncoder().encode(decoded), {
+      status: response.status,
+      statusText: response.statusText,
+      headers: responseHeaders
+    });
+  };
+}
+function providerOptionsFor(cfg2) {
+  if (cfg2.provider !== "ollama" || cfg2.reasoningEffort === void 0) return void 0;
+  return { ollama: { reasoningEffort: cfg2.reasoningEffort } };
+}
+function modelEventOrigin(cfg2) {
+  return cfg2.provider === "ollama" ? "ollama" : "copilot";
+}
 function toModelMessages(messages) {
   const converted = [];
   for (const message of messages) {
@@ -40565,12 +40626,14 @@ function aiTools(cfg2, ctx2) {
 }
 function configuredModel(cfg2) {
   if (!cfg2.baseURL || !cfg2.model) throw new Error("agentLoop=v2 \u306B\u306F bridge \u306E baseURL / model \u304C\u5FC5\u8981\u3067\u3059");
-  const apiKey = resolveApiKey(cfg2);
-  if (!apiKey) throw new Error("agentLoop=v2 \u306B\u306F bridge \u306E apiKey \u307E\u305F\u306F apiKeyEnv \u304C\u5FC5\u8981\u3067\u3059");
+  const isOllama = cfg2.provider === "ollama";
+  const apiKey = isOllama ? void 0 : resolveApiKey(cfg2);
+  if (!isOllama && !apiKey) throw new Error("agentLoop=v2 \u306B\u306F bridge \u306E apiKey \u307E\u305F\u306F apiKeyEnv \u304C\u5FC5\u8981\u3067\u3059");
   return createOpenAICompatible({
-    name: "copilot-openai-bridge",
+    name: isOllama ? "ollama" : "copilot-openai-bridge",
     baseURL: cfg2.baseURL.replace(/\/+$/u, ""),
-    apiKey
+    ...apiKey ? { apiKey } : {},
+    ...isOllama ? { fetch: createOllamaFetch() } : {}
   }).chatModel(cfg2.model);
 }
 async function executeV2ToolCall(call, def, cfg2, ctx2, io, beforeHooks) {
@@ -40716,15 +40779,16 @@ async function runAgentTurnV2(opts) {
         messages: modelMessages,
         system: systemFor(mode),
         temperature: cfg2.temperature ?? 0.2,
+        providerOptions: providerOptionsFor(cfg2),
         maxRetries: 0,
         abortSignal: io.signal
       });
-      io.event?.({ type: "model.decision", summary: "\u30E2\u30C7\u30EB\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: "copilot", namespace: "none", authority: "claimed" });
+      io.event?.({ type: "model.decision", summary: "\u30E2\u30C7\u30EB\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: modelEventOrigin(cfg2), namespace: "none", authority: "claimed" });
       messages.push({ role: "assistant", content: result.text });
       if (mode === "research") {
         const research = buildResearchBundle(opts.userInput, result.text);
         if (research.sources.length === 0) return warningResult("\u8ABF\u67FB\u7D50\u679C\u3092\u78BA\u5B9A\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u51FA\u5178URL\u4ED8\u304D\u3067\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044\u3002", messages, io);
-        io.event?.({ type: "step.completed", summary: `\u8ABF\u67FB\u7D50\u679C\u3092\u53D7\u3051\u53D6\u308A\u307E\u3057\u305F\uFF08\u51FA\u5178${research.sources.length}\u4EF6\uFF09`, origin: "copilot", namespace: "native", authority: "claimed" });
+        io.event?.({ type: "step.completed", summary: `\u8ABF\u67FB\u7D50\u679C\u3092\u53D7\u3051\u53D6\u308A\u307E\u3057\u305F\uFF08\u51FA\u5178${research.sources.length}\u4EF6\uFF09`, origin: modelEventOrigin(cfg2), namespace: "native", authority: "claimed" });
         return { reply: result.text, messages, aborted: false, research };
       }
       io.event?.({ type: "step.completed", summary: "\u56DE\u7B54\u3092\u53D7\u3051\u53D6\u308A\u307E\u3057\u305F", origin: "orchestrator", namespace: "none", authority: "derived" });
@@ -40752,6 +40816,7 @@ async function runAgentTurnV2(opts) {
         system: systemFor("work"),
         tools,
         temperature: cfg2.temperature ?? 0.2,
+        providerOptions: providerOptionsFor(cfg2),
         maxRetries: 0,
         abortSignal: io.signal
       });
@@ -40759,7 +40824,7 @@ async function runAgentTurnV2(opts) {
       io.print(`[error] ${err.message}`);
       return { reply: "", messages, aborted: true };
     }
-    io.event?.({ type: "model.decision", summary: "\u30E2\u30C7\u30EB\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: "copilot", namespace: "none", authority: "claimed" });
+    io.event?.({ type: "model.decision", summary: "\u30E2\u30C7\u30EB\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", origin: modelEventOrigin(cfg2), namespace: "none", authority: "claimed" });
     modelMessages.push(...result.response.messages);
     const calls = result.toolCalls;
     const legacyCalls = calls.map((call2) => ({ id: call2.toolCallId, type: "function", function: { name: qualifiedToolName(call2.toolName), arguments: JSON.stringify(call2.input) } }));
@@ -43370,6 +43435,10 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 server.listen(PORT, "127.0.0.1", () => {
   const url2 = `http://127.0.0.1:${PORT}`;
   console.log(`coding-agent web UI: ${url2}  (workspace=${workspace})`);
+  if (process.env.CODING_AGENT_NO_BROWSER === "1") {
+    console.log("\u30D6\u30E9\u30A6\u30B6\u81EA\u52D5\u8D77\u52D5\u3092\u7121\u52B9\u5316\u3057\u307E\u3057\u305F (CODING_AGENT_NO_BROWSER=1)");
+    return;
+  }
   const open = process.platform === "win32" ? (0, import_node_child_process4.spawn)("explorer.exe", [url2], { detached: true, stdio: "ignore", windowsHide: true }) : process.platform === "darwin" ? (0, import_node_child_process4.spawn)("open", [url2], { detached: true, stdio: "ignore" }) : (0, import_node_child_process4.spawn)("xdg-open", [url2], { detached: true, stdio: "ignore" });
   open.once("error", (err) => console.warn(`[warn] \u30D6\u30E9\u30A6\u30B6\u3092\u958B\u3051\u307E\u305B\u3093\u3067\u3057\u305F\u3002${url2} \u3092\u958B\u3044\u3066\u304F\u3060\u3055\u3044: ${err.message}`));
   open.unref();
