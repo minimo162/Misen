@@ -245,7 +245,7 @@ function useComposerSuggestion(): (text: string) => void {
 function Welcome(): React.ReactElement {
   const onTask = useComposerSuggestion()
   return h('section', { className: 'welcome', 'aria-labelledby': 'welcome-title' },
-    h('p', { className: 'welcome-kicker' }, '社内コーディング支援'),
+    h('p', { className: 'welcome-kicker' }, 'Misen / 社内コーディング支援'),
     h('h1', { id: 'welcome-title' }, '今日は何をしますか？'),
     h('p', { className: 'welcome-copy' }, 'ファイルの確認、検索、作成、ファイルを開く操作を日本語で依頼できます。'),
     h('div', { className: 'task-paths', 'aria-label': 'よく使う依頼' },
@@ -335,7 +335,7 @@ function RunSummary({ run, onAction }: { run: RunSnapshot | null; onAction: (act
 
 function Sidebar({ sessions, activeId, isRunning, onNew, onSelect }: { sessions: SessionSummary[]; activeId: string; isRunning: boolean; onNew: () => void; onSelect: (id: string) => void }): React.ReactElement {
   return h('aside', { className: 'sidebar', 'aria-label': 'セッション' },
-    h('div', { className: 'brand' }, h('span', { className: 'brand-mark', 'aria-hidden': 'true' }, '◎'), h('span', null, '社内アシスタント')),
+    h('div', { className: 'brand' }, h('span', { className: 'brand-mark', 'aria-hidden': 'true' }, '◎'), h('span', null, 'Misen')),
     h('button', { type: 'button', className: 'new-session', onClick: onNew, disabled: isRunning }, '＋ 新しいチャット'),
     h('div', { className: 'sidebar-heading' }, '最近のチャット'),
     h('nav', { className: 'session-list', 'aria-label': 'チャット一覧' },
@@ -526,7 +526,7 @@ function App(): React.ReactElement {
     h('div', { className: 'app-shell' },
       h(Sidebar, { sessions, activeId, isRunning, onNew, onSelect }),
       h('main', { className: 'main-panel' },
-        h('header', { className: 'topbar' }, h('div', null, h('span', { className: 'topbar-kicker' }, '安全に確認しながら進めます'), h('strong', null, 'コーディングアシスタント')), h('a', { className: 'classic-link', href: '/classic' }, '従来画面')),
+        h('header', { className: 'topbar' }, h('div', null, h('span', { className: 'topbar-kicker' }, '安全に確認しながら進めます'), h('strong', null, 'Misen')), h('a', { className: 'classic-link', href: '/classic' }, '従来画面')),
         externalActive ? h('div', { className: 'external-banner', role: 'status' }, '外部AI: 有効（合成データのみ）') : null,
         h(AiWorkCard, { run, external: externalActive }),
         h(RunSummary, { run, onAction }),

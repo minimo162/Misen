@@ -3,9 +3,9 @@ rem 管理者用: clone済みリポジトリを構築して共有フォルダー
 chcp 65001 >nul
 setlocal EnableExtensions DisableDelayedExpansion
 set "HERE=%~dp0"
-set "PS1=%HERE%Prepare-CompanyAppsShare.ps1"
+set "PS1=%HERE%Prepare-Misen.ps1"
 if not exist "%PS1%" (
-  echo Prepare-CompanyAppsShare.ps1 が見つかりません。
+  echo Prepare-Misen.ps1 が見つかりません。
   pause
   exit /b 1
 )

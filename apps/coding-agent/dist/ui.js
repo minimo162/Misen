@@ -30927,7 +30927,7 @@ ${config.system}`;
     return h(
       "section",
       { className: "welcome", "aria-labelledby": "welcome-title" },
-      h("p", { className: "welcome-kicker" }, "\u793E\u5185\u30B3\u30FC\u30C7\u30A3\u30F3\u30B0\u652F\u63F4"),
+      h("p", { className: "welcome-kicker" }, "Misen / \u793E\u5185\u30B3\u30FC\u30C7\u30A3\u30F3\u30B0\u652F\u63F4"),
       h("h1", { id: "welcome-title" }, "\u4ECA\u65E5\u306F\u4F55\u3092\u3057\u307E\u3059\u304B\uFF1F"),
       h("p", { className: "welcome-copy" }, "\u30D5\u30A1\u30A4\u30EB\u306E\u78BA\u8A8D\u3001\u691C\u7D22\u3001\u4F5C\u6210\u3001\u30D5\u30A1\u30A4\u30EB\u3092\u958B\u304F\u64CD\u4F5C\u3092\u65E5\u672C\u8A9E\u3067\u4F9D\u983C\u3067\u304D\u307E\u3059\u3002"),
       h(
@@ -31038,7 +31038,7 @@ ${config.system}`;
     return h(
       "aside",
       { className: "sidebar", "aria-label": "\u30BB\u30C3\u30B7\u30E7\u30F3" },
-      h("div", { className: "brand" }, h("span", { className: "brand-mark", "aria-hidden": "true" }, "\u25CE"), h("span", null, "\u793E\u5185\u30A2\u30B7\u30B9\u30BF\u30F3\u30C8")),
+      h("div", { className: "brand" }, h("span", { className: "brand-mark", "aria-hidden": "true" }, "\u25CE"), h("span", null, "Misen")),
       h("button", { type: "button", className: "new-session", onClick: onNew, disabled: isRunning }, "\uFF0B \u65B0\u3057\u3044\u30C1\u30E3\u30C3\u30C8"),
       h("div", { className: "sidebar-heading" }, "\u6700\u8FD1\u306E\u30C1\u30E3\u30C3\u30C8"),
       h(
@@ -31252,7 +31252,7 @@ ${config.system}`;
         h(
           "main",
           { className: "main-panel" },
-          h("header", { className: "topbar" }, h("div", null, h("span", { className: "topbar-kicker" }, "\u5B89\u5168\u306B\u78BA\u8A8D\u3057\u306A\u304C\u3089\u9032\u3081\u307E\u3059"), h("strong", null, "\u30B3\u30FC\u30C7\u30A3\u30F3\u30B0\u30A2\u30B7\u30B9\u30BF\u30F3\u30C8")), h("a", { className: "classic-link", href: "/classic" }, "\u5F93\u6765\u753B\u9762")),
+          h("header", { className: "topbar" }, h("div", null, h("span", { className: "topbar-kicker" }, "\u5B89\u5168\u306B\u78BA\u8A8D\u3057\u306A\u304C\u3089\u9032\u3081\u307E\u3059"), h("strong", null, "Misen")), h("a", { className: "classic-link", href: "/classic" }, "\u5F93\u6765\u753B\u9762")),
           externalActive ? h("div", { className: "external-banner", role: "status" }, "\u5916\u90E8AI: \u6709\u52B9\uFF08\u5408\u6210\u30C7\u30FC\u30BF\u306E\u307F\uFF09") : null,
           h(AiWorkCard, { run, external: externalActive }),
           h(RunSummary, { run, onAction }),

@@ -1,7 +1,7 @@
 ﻿[CmdletBinding()]
 param(
-  [string]$ReleaseBase = 'https://github.com/minimo162/company-apps-share/releases/download/flex-runtime-v1',
-  [string]$Repository = 'minimo162/company-apps-share',
+  [string]$ReleaseBase = 'https://github.com/minimo162/Misen/releases/download/flex-runtime-v1',
+  [string]$Repository = 'minimo162/Misen',
   [string]$ReleaseTag = 'flex-runtime-v1',
   [string]$Kind = '',
   [switch]$ForceDownload,

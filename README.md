@@ -1,4 +1,6 @@
-# company-apps-share
+# Misen
+
+広島・宮島の弥山（みせん）に由来する、社内向けAIエージェントプロジェクトです。
 
 ## coding-agent の起動
 
