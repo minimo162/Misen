@@ -4701,8 +4701,8 @@ var require_auth_config = __commonJS({
       writeAuthConfig: () => writeAuthConfig
     });
     module2.exports = __toCommonJS(auth_config_exports);
-    var fs4 = __toESM2(require("fs"));
-    var path6 = __toESM2(require("path"));
+    var fs5 = __toESM2(require("fs"));
+    var path7 = __toESM2(require("path"));
     var import_token_util = require_token_util();
     function getAuthConfigPath() {
       const dataDir = (0, import_token_util.getVercelDataDir)();
@@ -4711,15 +4711,15 @@ var require_auth_config = __commonJS({
           `Unable to find Vercel CLI data directory. Your platform: ${process.platform}. Supported: darwin, linux, win32.`
         );
       }
-      return path6.join(dataDir, "auth.json");
+      return path7.join(dataDir, "auth.json");
     }
     function readAuthConfig() {
       try {
         const authPath = getAuthConfigPath();
-        if (!fs4.existsSync(authPath)) {
+        if (!fs5.existsSync(authPath)) {
           return null;
         }
-        const content = fs4.readFileSync(authPath, "utf8");
+        const content = fs5.readFileSync(authPath, "utf8");
         if (!content) {
           return null;
         }
@@ -4730,11 +4730,11 @@ var require_auth_config = __commonJS({
     }
     function writeAuthConfig(config2) {
       const authPath = getAuthConfigPath();
-      const authDir = path6.dirname(authPath);
-      if (!fs4.existsSync(authDir)) {
-        fs4.mkdirSync(authDir, { mode: 504, recursive: true });
+      const authDir = path7.dirname(authPath);
+      if (!fs5.existsSync(authDir)) {
+        fs5.mkdirSync(authDir, { mode: 504, recursive: true });
       }
-      fs4.writeFileSync(authPath, JSON.stringify(config2, null, 2), { mode: 384 });
+      fs5.writeFileSync(authPath, JSON.stringify(config2, null, 2), { mode: 384 });
     }
     function isValidAccessToken(authConfig, expirationBufferMs = 0) {
       if (!authConfig.token)
@@ -4925,8 +4925,8 @@ var require_token_util = __commonJS({
       saveToken: () => saveToken
     });
     module2.exports = __toCommonJS(token_util_exports);
-    var path6 = __toESM2(require("path"));
-    var fs4 = __toESM2(require("fs"));
+    var path7 = __toESM2(require("path"));
+    var fs5 = __toESM2(require("fs"));
     var import_token_error = require_token_error();
     var import_token_io = require_token_io();
     var import_auth_config = require_auth_config();
@@ -4938,7 +4938,7 @@ var require_token_util = __commonJS({
       if (!dataDir) {
         return null;
       }
-      return path6.join(dataDir, vercelFolder);
+      return path7.join(dataDir, vercelFolder);
     }
     async function getVercelToken2(options) {
       const authConfig = (0, import_auth_config.readAuthConfig)();
@@ -5014,13 +5014,13 @@ var require_token_util = __commonJS({
           "Unable to find project root directory. Have you linked your project with `vc link?`"
         );
       }
-      const prjPath = path6.join(dir, ".vercel", "project.json");
-      if (!fs4.existsSync(prjPath)) {
+      const prjPath = path7.join(dir, ".vercel", "project.json");
+      if (!fs5.existsSync(prjPath)) {
         throw new import_token_error.VercelOidcTokenError(
           "project.json not found, have you linked your project with `vc link?`"
         );
       }
-      const prj = JSON.parse(fs4.readFileSync(prjPath, "utf8"));
+      const prj = JSON.parse(fs5.readFileSync(prjPath, "utf8"));
       if (typeof prj.projectId !== "string" && typeof prj.orgId !== "string") {
         throw new TypeError(
           "Expected a string-valued projectId property. Try running `vc link` to re-link your project."
@@ -5035,11 +5035,11 @@ var require_token_util = __commonJS({
           "Unable to find user data directory. Please reach out to Vercel support."
         );
       }
-      const tokenPath = path6.join(dir, "com.vercel.token", `${projectId}.json`);
+      const tokenPath = path7.join(dir, "com.vercel.token", `${projectId}.json`);
       const tokenJson = JSON.stringify(token);
-      fs4.mkdirSync(path6.dirname(tokenPath), { mode: 504, recursive: true });
-      fs4.writeFileSync(tokenPath, tokenJson);
-      fs4.chmodSync(tokenPath, 432);
+      fs5.mkdirSync(path7.dirname(tokenPath), { mode: 504, recursive: true });
+      fs5.writeFileSync(tokenPath, tokenJson);
+      fs5.chmodSync(tokenPath, 432);
       return;
     }
     function loadToken(projectId) {
@@ -5049,11 +5049,11 @@ var require_token_util = __commonJS({
           "Unable to find user data directory. Please reach out to Vercel support."
         );
       }
-      const tokenPath = path6.join(dir, "com.vercel.token", `${projectId}.json`);
-      if (!fs4.existsSync(tokenPath)) {
+      const tokenPath = path7.join(dir, "com.vercel.token", `${projectId}.json`);
+      if (!fs5.existsSync(tokenPath)) {
         return null;
       }
-      const token = JSON.parse(fs4.readFileSync(tokenPath, "utf8"));
+      const token = JSON.parse(fs5.readFileSync(tokenPath, "utf8"));
       assertVercelOidcTokenResponse(token);
       return token;
     }
@@ -5656,13 +5656,13 @@ var require_shell_quote = __commonJS({
 // test/smoke.ts
 var import_node_assert = __toESM(require("node:assert"));
 var import_node_http4 = __toESM(require("node:http"));
-var import_node_fs3 = __toESM(require("node:fs"));
-var import_node_os = __toESM(require("node:os"));
-var import_node_path5 = __toESM(require("node:path"));
+var import_node_fs4 = __toESM(require("node:fs"));
+var import_node_os2 = __toESM(require("node:os"));
+var import_node_path6 = __toESM(require("node:path"));
 
 // src/agent.ts
-var import_node_crypto2 = __toESM(require("node:crypto"));
-var import_node_path2 = __toESM(require("node:path"));
+var import_node_crypto3 = __toESM(require("node:crypto"));
+var import_node_path3 = __toESM(require("node:path"));
 var import_jsonrepair2 = __toESM(require_cjs());
 
 // src/converter.ts
@@ -6055,6 +6055,316 @@ async function convertCopilotResponse(settings, rawResponse, tools, signal) {
   });
 }
 
+// src/audit-log.ts
+var import_node_crypto = __toESM(require("node:crypto"));
+var import_node_fs = __toESM(require("node:fs"));
+var import_node_os = __toESM(require("node:os"));
+var import_node_path = __toESM(require("node:path"));
+var DEFAULT_FILE_NAME = "audit.jsonl";
+var DEFAULT_MAX_RECORDS = 200;
+var MAX_QUERY_RECORDS = 500;
+function existingAncestor(value) {
+  let cursor = import_node_path.default.resolve(value);
+  while (!import_node_fs.default.existsSync(cursor)) {
+    const parent = import_node_path.default.dirname(cursor);
+    if (parent === cursor) return cursor;
+    cursor = parent;
+  }
+  return cursor;
+}
+function realPathWithMissingTail(value) {
+  const absolute = import_node_path.default.resolve(value);
+  const ancestor = existingAncestor(absolute);
+  const tail = import_node_path.default.relative(ancestor, absolute);
+  let realAncestor;
+  try {
+    realAncestor = import_node_fs.default.realpathSync.native(ancestor);
+  } catch {
+    realAncestor = import_node_path.default.resolve(ancestor);
+  }
+  return import_node_path.default.resolve(realAncestor, tail);
+}
+function isInside(root, candidate) {
+  const relative = import_node_path.default.relative(realPathWithMissingTail(root), realPathWithMissingTail(candidate));
+  return relative === "" || relative !== ".." && !relative.startsWith(`..${import_node_path.default.sep}`) && !import_node_path.default.isAbsolute(relative);
+}
+function assertNoReparseComponents(value) {
+  let cursor = import_node_path.default.resolve(value);
+  while (true) {
+    if (import_node_fs.default.existsSync(cursor)) {
+      const stat = import_node_fs.default.lstatSync(cursor);
+      if (stat.isSymbolicLink()) throw new Error(`\u76E3\u67FB\u30ED\u30B0\u4FDD\u5B58\u5148\u306B\u30B7\u30F3\u30DC\u30EA\u30C3\u30AF\u30EA\u30F3\u30AF\uFF0F\u518D\u89E3\u6790\u70B9\u306F\u6307\u5B9A\u3067\u304D\u307E\u305B\u3093: ${cursor}`);
+    }
+    const parent = import_node_path.default.dirname(cursor);
+    if (parent === cursor) return;
+    cursor = parent;
+  }
+}
+function fallbackDirectory(workspace) {
+  const candidates = process.platform === "win32" ? [
+    process.env.LOCALAPPDATA,
+    process.env.APPDATA,
+    import_node_os.default.homedir() ? import_node_path.default.join(import_node_os.default.homedir(), ".company-apps-share") : void 0,
+    import_node_os.default.tmpdir()
+  ] : [
+    process.env.XDG_STATE_HOME,
+    import_node_os.default.homedir() ? import_node_path.default.join(import_node_os.default.homedir(), ".local", "state") : void 0,
+    import_node_os.default.tmpdir()
+  ];
+  for (const base of candidates) {
+    if (!base) continue;
+    const candidate = process.platform === "win32" ? import_node_path.default.join(base, "CompanyAppsShare", "audit") : import_node_path.default.join(base, "company-apps-share", "audit");
+    if (!isInside(workspace, candidate)) return candidate;
+  }
+  throw new Error("\u76E3\u67FB\u30ED\u30B0\u306E\u65E2\u5B9A\u4FDD\u5B58\u5148\u3092\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u306B\u6C7A\u5B9A\u3067\u304D\u307E\u305B\u3093");
+}
+function resolveAuditDirectory(workspace, configured) {
+  const root = import_node_path.default.resolve(workspace);
+  const requested = typeof configured === "string" && configured.trim() ? import_node_path.default.resolve(configured) : fallbackDirectory(root);
+  if (isInside(root, requested)) {
+    throw new Error(`\u76E3\u67FB\u30ED\u30B0\u4FDD\u5B58\u5148\u306F\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u3067\u306A\u3051\u308C\u3070\u306A\u308A\u307E\u305B\u3093: ${requested}`);
+  }
+  return requested;
+}
+function canonicalizeAuditValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalizeAuditValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => [key, canonicalizeAuditValue(item)]));
+  }
+  return value;
+}
+function auditArgsSha256(args) {
+  const canonical = JSON.stringify(canonicalizeAuditValue(args));
+  return import_node_crypto.default.createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+function makeAuditArguments(summary, args) {
+  return { summary, sha256: auditArgsSha256(args) };
+}
+function nullAuditTarget(target) {
+  return {
+    path: typeof target?.path === "string" ? target.path : null,
+    before_sha256: typeof target?.before_sha256 === "string" ? target.before_sha256 : null,
+    after_sha256: typeof target?.after_sha256 === "string" ? target.after_sha256 : null
+  };
+}
+var READ_TOOL_NAMES = /* @__PURE__ */ new Set(["host.read_file", "host.read_files", "host.list_files", "host.search_files", "host.read_xlsx", "host.get_weather"]);
+function permissionFromEvents(event, history) {
+  if (event.audit?.permission?.decision) return event.audit.permission.decision;
+  const prior = [...history].reverse().find((candidate) => candidate.audit?.permission?.decision);
+  if (prior?.audit?.permission?.decision) return prior.audit.permission.decision;
+  return event.tool && READ_TOOL_NAMES.has(event.tool) ? "allow" : "ask";
+}
+function structuredApprovalProvenance(event) {
+  if (event.origin !== "host" || event.authority !== "authoritative") return void 0;
+  if (typeof event.metadata?.approval !== "object" || event.metadata.approval === null) return void 0;
+  const raw = event.metadata.approval.provenance;
+  if (!raw || typeof raw !== "object") return void 0;
+  const candidate = raw;
+  if (candidate.actor !== "user" && candidate.actor !== "policy" || typeof candidate.automatic !== "boolean") return void 0;
+  return { actor: candidate.actor, automatic: candidate.automatic };
+}
+function auditRecordFromOutcome(input) {
+  const { event } = input;
+  if (event.origin && event.origin !== "host") return null;
+  if (event.type !== "tool.succeeded" && event.type !== "tool.failed" && event.type !== "tool.denied") return null;
+  const history = input.history ?? [];
+  const callEvents = event.callId ? history.filter((candidate) => candidate.callId === event.callId) : [];
+  const eventAudit = event.audit;
+  const requested = [...callEvents].reverse().find((candidate) => candidate.type === "tool.requested");
+  const argumentsMeta = eventAudit?.arguments ?? requested?.audit?.arguments ?? makeAuditArguments(event.summary ?? event.tool ?? "", {});
+  const permission = permissionFromEvents(event, callEvents);
+  const approvalRequested = callEvents.some((candidate) => candidate.type === "approval.requested");
+  const resolvedEvents = callEvents.filter((candidate) => candidate.type === "approval.resolved" && typeof candidate.approved === "boolean");
+  const policyResolved = [...resolvedEvents].reverse().find((candidate) => {
+    const provenance = structuredApprovalProvenance(candidate);
+    return provenance?.actor === "policy" && provenance.automatic === true;
+  });
+  const resolved = policyResolved ?? [...resolvedEvents].reverse()[0];
+  const automatic = [...callEvents].reverse().find((candidate) => candidate.type === "tool.approved" && candidate.metadata?.automatic === true);
+  let approval = eventAudit?.approval ?? {
+    required: approvalRequested || Boolean(event.tool && !READ_TOOL_NAMES.has(event.tool)),
+    outcome: "not_required",
+    actor: "policy",
+    automatic: false
+  };
+  if (resolved) {
+    const provenance = structuredApprovalProvenance(resolved);
+    const policyResolution = provenance?.actor === "policy" && provenance.automatic === true;
+    approval = { required: true, outcome: resolved.approved ? "approved" : "denied", actor: policyResolution ? "policy" : "user", automatic: policyResolution };
+  } else if (automatic) {
+    approval = { required: true, outcome: "approved", actor: "policy", automatic: true };
+  } else if (permission === "deny") {
+    approval = { required: false, outcome: "not_required", actor: "policy", automatic: true };
+  }
+  const metadata = event.metadata;
+  const target = nullAuditTarget({
+    ...eventAudit?.target,
+    path: eventAudit?.target?.path ?? (typeof metadata?.path === "string" ? metadata.path : null),
+    before_sha256: eventAudit?.target?.before_sha256 ?? (typeof metadata?.beforeHash === "string" ? metadata.beforeHash : null),
+    after_sha256: eventAudit?.target?.after_sha256 ?? (typeof metadata?.afterHash === "string" ? metadata.afterHash : null)
+  });
+  const outcome = event.type === "tool.succeeded" ? "success" : event.type === "tool.failed" ? "failure" : "refused";
+  return makeAuditRecord({
+    event_id: event.eventId ?? `${input.runId}-audit-${event.callId ?? event.type}`,
+    timestamp: new Date(event.at ?? Date.now()).toISOString(),
+    session_id: input.sessionId,
+    run_id: input.runId,
+    call_id: event.callId ?? null,
+    tool_name: event.tool ?? "unknown",
+    arguments: argumentsMeta,
+    permission: { decision: permission },
+    approval,
+    result: {
+      outcome,
+      duration_ms: typeof event.durationMs === "number" ? event.durationMs : null,
+      error: outcome === "success" ? null : event.error ?? event.output ?? null
+    },
+    target
+  });
+}
+function clampLimit(value, fallback = DEFAULT_MAX_RECORDS) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(MAX_QUERY_RECORDS, Math.max(1, Math.trunc(value)));
+}
+function validRecord(value) {
+  if (!value || typeof value !== "object") return false;
+  const record2 = value;
+  return record2.schema_version === 1 && typeof record2.event_id === "string" && typeof record2.timestamp === "string" && typeof record2.session_id === "string" && typeof record2.run_id === "string" && (record2.call_id === null || typeof record2.call_id === "string") && typeof record2.tool_name === "string" && !!record2.arguments && typeof record2.arguments.summary === "string" && typeof record2.arguments.sha256 === "string" && !!record2.permission && (record2.permission.decision === "allow" || record2.permission.decision === "ask" || record2.permission.decision === "deny") && !!record2.approval && typeof record2.approval.required === "boolean" && (record2.approval.outcome === "not_required" || record2.approval.outcome === "approved" || record2.approval.outcome === "denied") && (record2.approval.actor === "policy" || record2.approval.actor === "user") && typeof record2.approval.automatic === "boolean" && !!record2.result && (record2.result.outcome === "success" || record2.result.outcome === "failure" || record2.result.outcome === "refused") && (record2.result.duration_ms === null || typeof record2.result.duration_ms === "number") && (record2.result.error === null || typeof record2.result.error === "string") && !!record2.target && (record2.target.path === null || typeof record2.target.path === "string") && (record2.target.before_sha256 === null || typeof record2.target.before_sha256 === "string") && (record2.target.after_sha256 === null || typeof record2.target.after_sha256 === "string");
+}
+function csvCell(value) {
+  const text2 = typeof value === "string" ? value : JSON.stringify(value);
+  const normalized = text2 ?? "";
+  return /[",\r\n]/u.test(normalized) ? `"${normalized.replaceAll('"', '""')}"` : normalized;
+}
+var AUDIT_CSV_HEADERS = [
+  "schema_version",
+  "event_id",
+  "timestamp",
+  "session_id",
+  "run_id",
+  "call_id",
+  "tool_name",
+  "arguments",
+  "permission",
+  "approval",
+  "result",
+  "target"
+];
+function auditRecordsToCsv(records2) {
+  const rows = [AUDIT_CSV_HEADERS.join(",")];
+  for (const record2 of records2) {
+    rows.push([
+      record2.schema_version,
+      record2.event_id,
+      record2.timestamp,
+      record2.session_id,
+      record2.run_id,
+      record2.call_id,
+      record2.tool_name,
+      record2.arguments,
+      record2.permission,
+      record2.approval,
+      record2.result,
+      record2.target
+    ].map(csvCell).join(","));
+  }
+  return `${rows.join("\r\n")}\r
+`;
+}
+var AuditLog = class {
+  directory;
+  filePath;
+  initialized = false;
+  appendHandle = null;
+  appendFailure = null;
+  seenOutcomeKeys = /* @__PURE__ */ new Set();
+  constructor(options) {
+    this.directory = resolveAuditDirectory(options.workspace, options.directory);
+    const fileName = options.fileName?.trim() || DEFAULT_FILE_NAME;
+    if (import_node_path.default.basename(fileName) !== fileName || fileName.includes("..")) throw new Error("\u76E3\u67FB\u30ED\u30B0\u306E\u30D5\u30A1\u30A4\u30EB\u540D\u304C\u4E0D\u6B63\u3067\u3059");
+    this.filePath = import_node_path.default.join(this.directory, fileName);
+  }
+  /** Create/open the destination in append mode and validate its boundaries. */
+  initialize() {
+    if (this.initialized) return;
+    import_node_fs.default.mkdirSync(this.directory, { recursive: true });
+    assertNoReparseComponents(this.directory);
+    assertNoReparseComponents(this.filePath);
+    if (isInside(this.directory, this.filePath) === false) throw new Error("\u76E3\u67FB\u30ED\u30B0\u30D5\u30A1\u30A4\u30EB\u304C\u4FDD\u5B58\u5148\u30C7\u30A3\u30EC\u30AF\u30C8\u30EA\u5916\u3067\u3059");
+    if (import_node_fs.default.existsSync(this.filePath)) {
+      const stat = import_node_fs.default.lstatSync(this.filePath);
+      if (stat.isSymbolicLink()) throw new Error(`\u76E3\u67FB\u30ED\u30B0\u30D5\u30A1\u30A4\u30EB\u306F\u30B7\u30F3\u30DC\u30EA\u30C3\u30AF\u30EA\u30F3\u30AF\uFF0F\u518D\u89E3\u6790\u70B9\u3092\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093: ${this.filePath}`);
+      if (!stat.isFile()) throw new Error(`\u76E3\u67FB\u30ED\u30B0\u304C\u901A\u5E38\u30D5\u30A1\u30A4\u30EB\u3067\u306F\u3042\u308A\u307E\u305B\u3093: ${this.filePath}`);
+    }
+    this.appendHandle = import_node_fs.default.openSync(this.filePath, "a");
+    this.initialized = true;
+  }
+  get ready() {
+    return this.initialized;
+  }
+  get healthy() {
+    return this.initialized && this.appendFailure === null;
+  }
+  get failureReason() {
+    return this.appendFailure;
+  }
+  /** Append one complete JSON object line; existing bytes are never replaced. */
+  append(record2, dedupeKey) {
+    if (!this.initialized) throw new Error("\u76E3\u67FB\u30ED\u30B0\u304C\u521D\u671F\u5316\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
+    if (this.appendFailure) throw new Error(`\u76E3\u67FB\u30ED\u30B0\u306Funhealthy\u3067\u3059: ${this.appendFailure}`);
+    if (!validRecord(record2)) {
+      this.appendFailure = "\u76E3\u67FB\u30ED\u30B0\u30EC\u30B3\u30FC\u30C9\u304Cschema_version 1\u306B\u9069\u5408\u3057\u307E\u305B\u3093";
+      throw new Error(`\u76E3\u67FB\u30ED\u30B0\u8FFD\u8A18\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${this.appendFailure}`);
+    }
+    if (dedupeKey && this.seenOutcomeKeys.has(dedupeKey)) return;
+    const line = `${JSON.stringify(record2)}
+`;
+    if (this.appendHandle === null) {
+      this.appendFailure = "\u76E3\u67FB\u30ED\u30B0\u306E\u8FFD\u8A18\u30CF\u30F3\u30C9\u30EB\u304C\u3042\u308A\u307E\u305B\u3093";
+      throw new Error(`\u76E3\u67FB\u30ED\u30B0\u8FFD\u8A18\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${this.appendFailure}`);
+    }
+    try {
+      import_node_fs.default.writeSync(this.appendHandle, line, void 0, "utf8");
+    } catch (err) {
+      this.appendFailure = err.message || String(err);
+      throw new Error(`\u76E3\u67FB\u30ED\u30B0\u8FFD\u8A18\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${this.appendFailure}`);
+    }
+    if (dedupeKey) this.seenOutcomeKeys.add(dedupeKey);
+  }
+  records(limit = DEFAULT_MAX_RECORDS, filters = {}) {
+    if (!this.initialized) throw new Error("\u76E3\u67FB\u30ED\u30B0\u304C\u521D\u671F\u5316\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
+    if (!import_node_fs.default.existsSync(this.filePath)) return [];
+    const text2 = import_node_fs.default.readFileSync(this.filePath, "utf8");
+    const lines = text2.split(/\r?\n/u);
+    const found = [];
+    for (let i = lines.length - 1; i >= 0 && found.length < clampLimit(limit); i--) {
+      const line = lines[i]?.trim();
+      if (!line) continue;
+      try {
+        const parsed = JSON.parse(line);
+        if (!validRecord(parsed)) continue;
+        const record2 = parsed;
+        if (filters.tool && record2.tool_name !== filters.tool) continue;
+        if (filters.result && record2.result.outcome !== filters.result) continue;
+        if (filters.permission && record2.permission.decision !== filters.permission) continue;
+        found.push(record2);
+      } catch {
+      }
+    }
+    return found;
+  }
+  csv(limit = DEFAULT_MAX_RECORDS, filters = {}) {
+    return auditRecordsToCsv(this.records(limit, filters));
+  }
+};
+function auditAvailability(log, initError) {
+  if (log?.healthy && !initError) return { available: true, detail: null };
+  return { available: false, detail: initError ?? log?.failureReason ?? "\u76E3\u67FB\u30ED\u30B0\u304C\u521D\u671F\u5316\u3055\u308C\u3066\u3044\u307E\u305B\u3093" };
+}
+function makeAuditRecord(input) {
+  return { schema_version: 1, ...input };
+}
+
 // src/config.ts
 function capabilityPolicy(cfg, mode = cfg.turnMode ?? "work") {
   return {
@@ -6137,11 +6447,11 @@ async function chat(cfg, messages, tools, signal) {
 }
 
 // src/tools.ts
-var import_node_fs = __toESM(require("node:fs"));
+var import_node_fs2 = __toESM(require("node:fs"));
 var import_node_child_process2 = require("node:child_process");
-var import_node_crypto = __toESM(require("node:crypto"));
+var import_node_crypto2 = __toESM(require("node:crypto"));
 var import_promises = __toESM(require("node:fs/promises"));
-var import_node_path = __toESM(require("node:path"));
+var import_node_path2 = __toESM(require("node:path"));
 var import_node_util = __toESM(require("node:util"));
 var import_iconv_lite = __toESM(require_lib());
 
@@ -6460,7 +6770,7 @@ var MAX_READ_FILES_CHARS = 8e4;
 var READ_XLSX_USAGE = "powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path <\u30D1\u30B9>";
 var UPDATE_LEDGER_USAGE = "powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted <\u62BD\u51FAJSON> -Rates <\u30EC\u30FC\u30C8CSV> -Ledger <\u53F0\u5E33xlsx>";
 function sha256(text2) {
-  return import_node_crypto.default.createHash("sha256").update(text2, "utf8").digest("hex");
+  return import_node_crypto2.default.createHash("sha256").update(text2, "utf8").digest("hex");
 }
 function lineDelta(before, after) {
   const beforeLines = before === "" ? [] : before.split(/\r?\n/);
@@ -6540,17 +6850,17 @@ function normalizeRunCommand(command) {
       throw new Error(`Read-Xlsx \u306F ${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
     }
     const normalized = pathWords.map((word) => word.replaceAll("/", "\\"));
-    const reportPaths = normalized.length > 1 ? normalized.filter((word) => !(import_node_path.default.win32.dirname(word) === "." && import_node_path.default.win32.basename(word).toLowerCase() === "\u96C6\u8A08\u53F0\u5E33.xlsx")) : normalized;
+    const reportPaths = normalized.length > 1 ? normalized.filter((word) => !(import_node_path2.default.win32.dirname(word) === "." && import_node_path2.default.win32.basename(word).toLowerCase() === "\u96C6\u8A08\u53F0\u5E33.xlsx")) : normalized;
     if (reportPaths.length === 0) throw new Error(`Read-Xlsx \u306F ${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
     let normalizedPath;
     if (reportPaths.length === 1) {
       normalizedPath = reportPaths[0];
     } else {
-      const directories = new Set(reportPaths.map((word) => import_node_path.default.win32.dirname(word).toLowerCase()));
-      if (directories.size !== 1 || reportPaths.some((word) => import_node_path.default.win32.extname(word).toLowerCase() !== ".xlsx")) {
+      const directories = new Set(reportPaths.map((word) => import_node_path2.default.win32.dirname(word).toLowerCase()));
+      if (directories.size !== 1 || reportPaths.some((word) => import_node_path2.default.win32.extname(word).toLowerCase() !== ".xlsx")) {
         throw new Error(`Read-Xlsx \u306E\u8907\u6570\u30D5\u30A1\u30A4\u30EB\u306F\u540C\u3058\u30D5\u30A9\u30EB\u30C0\u30FC\u306E *.xlsx \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\u3002${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
       }
-      normalizedPath = import_node_path.default.win32.join(import_node_path.default.win32.dirname(reportPaths[0]), "*.xlsx");
+      normalizedPath = import_node_path2.default.win32.join(import_node_path2.default.win32.dirname(reportPaths[0]), "*.xlsx");
     }
     return `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path ${quoteCommandWord(normalizedPath)}`;
   }
@@ -6604,8 +6914,8 @@ function normalizeWorkspaceOpenCommand(command, ctx) {
   } catch {
     throw new Error(`run_command\u62D2\u5426: \u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u3078\u306E\u30A2\u30AF\u30BB\u30B9\u306F\u7981\u6B62\u3067\u3059: ${candidate}`);
   }
-  if (!import_node_fs.default.existsSync(absolute)) throw new Error(`run_command\u62D2\u5426: \u958B\u304F\u5BFE\u8C61\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${candidate}`);
-  const stat = import_node_fs.default.lstatSync(absolute);
+  if (!import_node_fs2.default.existsSync(absolute)) throw new Error(`run_command\u62D2\u5426: \u958B\u304F\u5BFE\u8C61\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${candidate}`);
+  const stat = import_node_fs2.default.lstatSync(absolute);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`run_command\u62D2\u5426: \u901A\u5E38\u30D5\u30A1\u30A4\u30EB\u4EE5\u5916\u306F\u958B\u3051\u307E\u305B\u3093: ${candidate}`);
   const allowedExtensions = /* @__PURE__ */ new Set([
     ".txt",
@@ -6643,7 +6953,7 @@ function normalizeWorkspaceOpenCommand(command, ctx) {
     ".wav",
     ".m4a"
   ]);
-  const extension = import_node_path.default.extname(absolute).toLowerCase();
+  const extension = import_node_path2.default.extname(absolute).toLowerCase();
   if (!allowedExtensions.has(extension)) throw new Error(`run_command\u62D2\u5426: \u5B89\u5168\u306B\u958B\u3051\u308B\u901A\u5E38\u6587\u66F8\u30FB\u30E1\u30C7\u30A3\u30A2\u5F62\u5F0F\u3067\u306F\u3042\u308A\u307E\u305B\u3093: ${candidate}`);
   if (absolute.includes("'")) throw new Error("run_command\u62D2\u5426: \u958B\u304F\u5BFE\u8C61\u306E\u30D1\u30B9\u306B\u5F15\u7528\u7B26\u306F\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093");
   return `powershell.exe -NoProfile -Command "Invoke-Item -LiteralPath '${absolute}'"`;
@@ -6956,7 +7266,7 @@ function workspaceGlobToRegExp(pattern) {
 function normalizeWorkspaceGlob(pattern) {
   const normalized = pattern.trim().replaceAll("\\", "/").replace(/^\.\//, "");
   if (!normalized) throw new Error("pattern \u304C\u7A7A\u3067\u3059");
-  if (import_node_path.default.isAbsolute(normalized) || /^[A-Za-z]:/.test(normalized) || normalized.split("/").includes("..")) {
+  if (import_node_path2.default.isAbsolute(normalized) || /^[A-Za-z]:/.test(normalized) || normalized.split("/").includes("..")) {
     throw new Error(`\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u3092\u6307\u3059pattern\u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093: ${pattern}`);
   }
   return normalized.endsWith("/") ? `${normalized}*` : normalized;
@@ -6971,29 +7281,29 @@ function decodeWorkspaceText(bytes) {
     return import_iconv_lite.default.decode(bytes, "cp932");
   }
 }
-function realPathWithMissingTail(abs) {
+function realPathWithMissingTail2(abs) {
   let cursor = abs;
   const tail = [];
-  while (!import_node_fs.default.existsSync(cursor)) {
-    const parent = import_node_path.default.dirname(cursor);
+  while (!import_node_fs2.default.existsSync(cursor)) {
+    const parent = import_node_path2.default.dirname(cursor);
     if (parent === cursor) return abs;
-    tail.unshift(import_node_path.default.basename(cursor));
+    tail.unshift(import_node_path2.default.basename(cursor));
     cursor = parent;
   }
-  const real = import_node_fs.default.realpathSync.native(cursor);
-  return import_node_path.default.resolve(real, ...tail);
+  const real = import_node_fs2.default.realpathSync.native(cursor);
+  return import_node_path2.default.resolve(real, ...tail);
 }
 function isWithin(root, candidate) {
-  const relative = import_node_path.default.relative(root, candidate);
-  return relative === "" || !relative.startsWith("..") && !import_node_path.default.isAbsolute(relative);
+  const relative = import_node_path2.default.relative(root, candidate);
+  return relative === "" || !relative.startsWith("..") && !import_node_path2.default.isAbsolute(relative);
 }
 function resolveInWorkspace(p, ctx) {
   if (!p) throw new Error("\u30D1\u30B9\u304C\u7A7A\u3067\u3059");
-  const workspaceAbs = import_node_path.default.resolve(ctx.workspace);
-  const abs = import_node_path.default.isAbsolute(p) ? import_node_path.default.normalize(p) : import_node_path.default.resolve(workspaceAbs, p);
+  const workspaceAbs = import_node_path2.default.resolve(ctx.workspace);
+  const abs = import_node_path2.default.isAbsolute(p) ? import_node_path2.default.normalize(p) : import_node_path2.default.resolve(workspaceAbs, p);
   if (ctx.restrictToWorkspace) {
-    const rootReal = realPathWithMissingTail(workspaceAbs);
-    const candidateReal = realPathWithMissingTail(abs);
+    const rootReal = realPathWithMissingTail2(workspaceAbs);
+    const candidateReal = realPathWithMissingTail2(abs);
     if (!isWithin(rootReal, candidateReal)) {
       throw new Error(`\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u306E\u30D1\u30B9\u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093: ${p}`);
     }
@@ -7010,7 +7320,7 @@ async function walk(dir, cb, depth = 0) {
   }
   for (const e of entries) {
     if (IGNORED_DIRS.has(e.name)) continue;
-    const full = import_node_path.default.join(dir, e.name);
+    const full = import_node_path2.default.join(dir, e.name);
     if (e.isDirectory()) await walk(full, cb, depth + 1);
     else if (e.isFile()) cb(full);
   }
@@ -7101,14 +7411,14 @@ var TOOL_DEFS = [
         for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name, "ja"))) {
           if (out.length >= MAX_LIST) break;
           if (!re2 || re2.test(entry.name)) {
-            const relative = import_node_path.default.relative(ctx.workspace, import_node_path.default.join(base, entry.name)).replaceAll("\\", "/");
+            const relative = import_node_path2.default.relative(ctx.workspace, import_node_path2.default.join(base, entry.name)).replaceAll("\\", "/");
             out.push(entry.isDirectory() ? `${relative}/` : relative);
           }
         }
       } else {
         await walk(base, (f) => {
           if (out.length >= MAX_LIST) return;
-          if (!re2 || re2.test(import_node_path.default.basename(f))) out.push(import_node_path.default.relative(ctx.workspace, f).replaceAll("\\", "/"));
+          if (!re2 || re2.test(import_node_path2.default.basename(f))) out.push(import_node_path2.default.relative(ctx.workspace, f).replaceAll("\\", "/"));
         });
       }
       return out.length === 0 ? "(\u8A72\u5F53\u306A\u3057)" : truncate(out.join("\n"));
@@ -7173,14 +7483,14 @@ var TOOL_DEFS = [
       const selected = /* @__PURE__ */ new Map();
       const addFile = (abs, displayPath) => {
         const checked = resolveInWorkspace(abs, ctx);
-        const relative = (displayPath ?? import_node_path.default.relative(ctx.workspace, checked)).replaceAll("\\", "/");
+        const relative = (displayPath ?? import_node_path2.default.relative(ctx.workspace, checked)).replaceAll("\\", "/");
         selected.set(checked.toLowerCase(), { abs: checked, relative });
       };
       for (const requested of requestedPaths) addFile(resolveInWorkspace(requested, ctx), requested.replaceAll("\\", "/"));
       if (patterns.length > 0) {
         const matchers = patterns.map(workspaceGlobToRegExp);
         await walk(ctx.workspace, (file2) => {
-          const relative = import_node_path.default.relative(ctx.workspace, file2).replaceAll("\\", "/");
+          const relative = import_node_path2.default.relative(ctx.workspace, file2).replaceAll("\\", "/");
           if (matchers.some((matcher) => matcher.test(relative))) addFile(file2, relative);
         });
       }
@@ -7211,7 +7521,7 @@ var TOOL_DEFS = [
         const heading = `===== ${file2.relative} =====
 `;
         const xlsxHint = `run_command\u3067 tools/Read-Xlsx.ps1 ${file2.relative} \u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044`;
-        if (import_node_path.default.extname(file2.relative).toLowerCase() === ".xlsx") {
+        if (import_node_path2.default.extname(file2.relative).toLowerCase() === ".xlsx") {
           const section = `${heading}${xlsxHint}
 `;
           if (used + section.length <= bodyBudget) {
@@ -7266,12 +7576,12 @@ var TOOL_DEFS = [
     async run(args, ctx) {
       const requested = String(args.path ?? "");
       const abs = resolveInWorkspace(requested, ctx);
-      if (import_node_path.default.extname(abs).toLowerCase() !== ".xlsx") throw new Error("read_xlsx \u306F .xlsx \u30D5\u30A1\u30A4\u30EB\u3060\u3051\u3092\u8AAD\u307F\u53D6\u308C\u307E\u3059");
+      if (import_node_path2.default.extname(abs).toLowerCase() !== ".xlsx") throw new Error("read_xlsx \u306F .xlsx \u30D5\u30A1\u30A4\u30EB\u3060\u3051\u3092\u8AAD\u307F\u53D6\u308C\u307E\u3059");
       const stat = await import_promises.default.stat(abs).catch(() => null);
       if (!stat?.isFile()) throw new Error(`xlsx\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${requested}`);
-      const appRoot = import_node_path.default.resolve(__dirname, "..");
-      const helper = import_node_path.default.join(appRoot, "tools", "Read-Xlsx.ps1");
-      if (!import_node_fs.default.existsSync(helper)) throw new Error(`xlsx\u8AAD\u307F\u53D6\u308A\u30D8\u30EB\u30D1\u30FC\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${helper}`);
+      const appRoot = import_node_path2.default.resolve(__dirname, "..");
+      const helper = import_node_path2.default.join(appRoot, "tools", "Read-Xlsx.ps1");
+      if (!import_node_fs2.default.existsSync(helper)) throw new Error(`xlsx\u8AAD\u307F\u53D6\u308A\u30D8\u30EB\u30D1\u30FC\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${helper}`);
       const { stdout, stderr } = await execFileAsync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", helper, "-Path", abs], {
         cwd: ctx.workspace,
         windowsHide: true,
@@ -7309,11 +7619,11 @@ var TOOL_DEFS = [
         if (e.code !== "ENOENT") throw err;
         existedBefore = false;
       }
-      await import_promises.default.mkdir(import_node_path.default.dirname(abs), { recursive: true });
+      await import_promises.default.mkdir(import_node_path2.default.dirname(abs), { recursive: true });
       await import_promises.default.writeFile(abs, content, "utf8");
       const readBack = await import_promises.default.readFile(abs, "utf8");
       recordFileSnapshot(abs, ctx, before, existedBefore, readBack);
-      const result = formatFileChangeResult("\u66F8\u304D\u8FBC\u307F", import_node_path.default.relative(ctx.workspace, abs), before, readBack, 1, existedBefore);
+      const result = formatFileChangeResult("\u66F8\u304D\u8FBC\u307F", import_node_path2.default.relative(ctx.workspace, abs), before, readBack, 1, existedBefore);
       return `${result}
 \u30B5\u30A4\u30BA: ${Buffer.byteLength(readBack)} bytes`;
     }
@@ -7346,13 +7656,13 @@ var TOOL_DEFS = [
       const next = replaceAll ? src.split(oldStr).join(newStr) : src.replace(oldStr, newStr);
       if (next === src) {
         recordFileSnapshot(abs, ctx, src, true, src);
-        return formatFileChangeResult("\u7DE8\u96C6", import_node_path.default.relative(ctx.workspace, abs), src, src, count, true);
+        return formatFileChangeResult("\u7DE8\u96C6", import_node_path2.default.relative(ctx.workspace, abs), src, src, count, true);
       }
       await import_promises.default.writeFile(abs, next, "utf8");
       const readBack = await import_promises.default.readFile(abs, "utf8");
       if (readBack !== next) throw new Error("\u7DE8\u96C6\u5F8C\u306E\u518D\u8AAD\u8FBC\u5185\u5BB9\u304C\u4E00\u81F4\u3057\u307E\u305B\u3093");
       recordFileSnapshot(abs, ctx, src, true, readBack);
-      return formatFileChangeResult("\u7DE8\u96C6", import_node_path.default.relative(ctx.workspace, abs), src, readBack, count, true);
+      return formatFileChangeResult("\u7DE8\u96C6", import_node_path2.default.relative(ctx.workspace, abs), src, readBack, count, true);
     }
   },
   {
@@ -7403,7 +7713,7 @@ var TOOL_DEFS = [
         for (let i = 0; i < lines.length; i++) {
           if (results.length >= MAX_SEARCH_RESULTS) break;
           if (re2.test(lines[i])) {
-            results.push(`${import_node_path.default.relative(ctx.workspace, f).replaceAll("\\", "/")}:${i + 1}: ${truncate(lines[i], 300)}`);
+            results.push(`${import_node_path2.default.relative(ctx.workspace, f).replaceAll("\\", "/")}:${i + 1}: ${truncate(lines[i], 300)}`);
           }
         }
       }
@@ -7660,12 +7970,21 @@ function attachFenceContent(raw, end, parsed) {
     parsed.args = { ...parsed.args ?? {}, content: fm[1].replace(/^\r?\n/, "").trim() };
   }
 }
+function buildToolAuditMetadata(tool2, args, permission, approval, target = {}) {
+  const pathValue = typeof args.path === "string" ? args.path : null;
+  return {
+    arguments: makeAuditArguments(summarize(tool2, args), args),
+    permission: { decision: permission },
+    approval,
+    target: nullAuditTarget({ path: pathValue, ...target })
+  };
+}
 function buildResearchBundle(question, summary, retrievedAt = (/* @__PURE__ */ new Date()).toISOString()) {
   const urls = [...summary.matchAll(/https?:\/\/[^\s<>()\[\]"'（）【】、。]+/g)].map((match2) => match2[0].replace(/[.,;:!?、。]+$/, ""));
   const uniqueUrls = [...new Set(urls)];
   const sources = uniqueUrls.map((url2) => ({ url: url2, retrievedAt }));
   const claims = summary.split(/\r?\n+/).map((text2) => text2.trim()).filter(Boolean).map((text2) => ({ text: text2, citations: sources }));
-  const contentHash = import_node_crypto2.default.createHash("sha256").update(summary, "utf8").digest("hex");
+  const contentHash = import_node_crypto3.default.createHash("sha256").update(summary, "utf8").digest("hex");
   return { researchId: `research-${contentHash.slice(0, 16)}`, question, summary, claims, sources, retrievedAt, contentHash };
 }
 var END_MARKER = "AGENT_END";
@@ -7722,7 +8041,7 @@ function toolRequestKey(name24, args) {
   if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) return `${name24}:${JSON.stringify(normalized)}`;
   const copy = { ...normalized };
   const bare = bareToolName(name24);
-  if (typeof copy.path === "string") copy.path = import_node_path2.default.normalize(copy.path).replaceAll("\\", "/");
+  if (typeof copy.path === "string") copy.path = import_node_path3.default.normalize(copy.path).replaceAll("\\", "/");
   if (bare === "list_files") {
     if (copy.path === "" || copy.path === ".") delete copy.path;
     if (copy.glob === "*" || copy.glob === "**" || copy.glob === "**/*") delete copy.glob;
@@ -7767,8 +8086,9 @@ async function bootstrapWorkspaceEvidence(ctx, io) {
     return ["TOOL_RESULT (\u7B2C0\u30BF\u30FC\u30F3\u81EA\u52D5\u5B9F\u884C)", formatHostResult(tool2, "[tool error] list_files\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093", null, "failed", callId, ctx.runId)].join("\n");
   }
   const summary = "list_files: \u7B2C0\u30BF\u30FC\u30F3\u306E\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u8A3C\u62E0\u3092\u53D6\u5F97";
-  io.event?.({ type: "tool.requested", tool: tool2, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
-  io.event?.({ type: "step.started", tool: tool2, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
+  const audit = buildToolAuditMetadata(tool2, {}, "allow", { required: false, outcome: "not_required", actor: "policy", automatic: true });
+  io.event?.({ type: "tool.requested", tool: tool2, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
+  io.event?.({ type: "step.started", tool: tool2, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
   const startedAt = Date.now();
   let output;
   try {
@@ -7778,8 +8098,8 @@ async function bootstrapWorkspaceEvidence(ctx, io) {
   }
   const failed = output.startsWith("[tool error]");
   const durationMs = Date.now() - startedAt;
-  io.event?.({ type: failed ? "tool.failed" : "tool.succeeded", tool: tool2, summary, output: output.slice(0, 1200), durationMs, origin: "host", namespace: "app", authority: "authoritative", callId });
-  io.event?.({ type: failed ? "step.failed" : "step.completed", tool: tool2, summary, output: output.slice(0, 800), durationMs, origin: "host", namespace: "app", authority: "authoritative", callId });
+  io.event?.({ type: failed ? "tool.failed" : "tool.succeeded", tool: tool2, summary, output: output.slice(0, 1200), durationMs, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
+  io.event?.({ type: failed ? "step.failed" : "step.completed", tool: tool2, summary, output: output.slice(0, 800), durationMs, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
   return [
     "TOOL_RESULT (\u7B2C0\u30BF\u30FC\u30F3\u81EA\u52D5\u5B9F\u884C\u3002\u30E2\u30C7\u30EB\u5224\u65AD\u56DE\u6570\u30FBhost\u5B9F\u884C\u4E88\u7B97\u306B\u306F\u4E0D\u7B97\u5165)",
     formatHostResult(tool2, output, null, failed ? "failed" : "succeeded", callId, ctx.runId)
@@ -7982,34 +8302,61 @@ async function runCopilotTurn(opts) {
     const qualified = qualifiedToolName(def.name);
     const callId = `host-call-${executions + 1}`;
     const summary = summarize(qualified, args);
-    io.event?.({ type: "tool.requested", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
-    io.event?.({ type: "step.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
+    const permission = def.kind === "read" ? "allow" : "ask";
+    let audit = buildToolAuditMetadata(qualified, args, permission, {
+      required: def.kind !== "read",
+      outcome: def.kind === "read" ? "not_required" : "not_required",
+      actor: "policy",
+      automatic: def.kind === "read"
+    });
+    io.event?.({ type: "tool.requested", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
+    io.event?.({ type: "step.started", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
     if (def.kind !== "read") {
       const auto = def.kind === "write" ? policy.autoApproveWrite : policy.autoApproveCommand;
       const fileBinding = await captureFileBinding(def, args, ctx);
+      audit = buildToolAuditMetadata(qualified, args, permission, {
+        required: true,
+        outcome: "not_required",
+        actor: "policy",
+        automatic: false
+      }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
       const approvalBinding = { ...fileBinding, toolName: qualified, argsHash: JSON.stringify(normalizeForKey(args)), command: typeof args.command === "string" ? args.command : void 0, network: def.kind === "command", callId };
       if (!auto) {
+        io.event?.({ type: "approval.requested", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
         const ok = await io.askYesNo(`\u5B9F\u884C\u3092\u8A31\u53EF\u3057\u307E\u3059\u304B\uFF1F
 ${summary}`, approvalBinding);
-        if (ok) io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, origin: "host", namespace: "app", authority: "authoritative", callId });
+        audit = buildToolAuditMetadata(qualified, args, permission, {
+          required: true,
+          outcome: ok ? "approved" : "denied",
+          actor: "user",
+          automatic: false
+        }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
+        io.event?.({ type: "approval.resolved", tool: qualified, summary, approved: ok, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
+        if (ok) io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
         if (ok && await approvalPreconditionChanged(approvalBinding, ctx)) {
-          io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u627F\u8A8D\u3092\u7121\u52B9\u5316\u3057\u307E\u3057\u305F", origin: "host", namespace: "app", authority: "authoritative", callId });
+          io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u627F\u8A8D\u3092\u7121\u52B9\u5316\u3057\u307E\u3057\u305F", audit, origin: "host", namespace: "app", authority: "authoritative", callId });
           steps.push(formatHostResult(qualified, "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u5B9F\u884C\u3057\u307E\u305B\u3093\u3067\u3057\u305F", null, "denied", callId, ctx.runId));
           continue;
         }
         if (!ok) {
-          io.event?.({ type: "tool.denied", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
+          io.event?.({ type: "tool.denied", tool: qualified, summary, error: "\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F", audit, origin: "host", namespace: "app", authority: "authoritative", callId });
           steps.push(formatHostResult(qualified, "\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F", null, "denied", callId, ctx.runId));
           continue;
         }
       } else {
-        io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, metadata: { automatic: true }, origin: "host", namespace: "app", authority: "authoritative", callId });
+        audit = buildToolAuditMetadata(qualified, args, permission, {
+          required: true,
+          outcome: "approved",
+          actor: "policy",
+          automatic: true
+        }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
+        io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, audit, metadata: { automatic: true }, origin: "host", namespace: "app", authority: "authoritative", callId });
       }
     }
     executions++;
     if (def.kind === "write") writes++;
     if (def.kind === "command") commands++;
-    io.event?.({ type: "tool.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
+    io.event?.({ type: "tool.started", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
     io.print(`[tool] ${summary}`);
     if (stopRequested()) return canceled();
     const startedAt = Date.now();
@@ -8025,8 +8372,12 @@ ${summary}`, approvalBinding);
     const resultKey = `${qualified}:${metadata?.afterHash ?? output.slice(0, 1600)}`;
     noProgress = failed || resultKey === lastResultKey ? noProgress + 1 : 0;
     lastResultKey = resultKey;
-    io.event?.({ type: failed ? "tool.failed" : "tool.succeeded", tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId });
-    io.event?.({ type: failed ? "step.failed" : "step.completed", tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId });
+    const terminalAudit = buildToolAuditMetadata(qualified, args, permission, audit.approval, {
+      ...audit.target,
+      after_sha256: typeof metadata?.afterHash === "string" ? metadata.afterHash : null
+    });
+    io.event?.({ type: failed ? "tool.failed" : "tool.succeeded", tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId });
+    io.event?.({ type: failed ? "step.failed" : "step.completed", tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId });
     steps.push(formatHostResult(qualified, output, metadata, failed ? "failed" : "succeeded", callId, ctx.runId));
     steps.push(`SYSTEM: ${qualified} \u306F\u5B9F\u884C\u6E08\u307F\u3067\u3059\u3002\u7D50\u679C\u3092\u6839\u62E0\u306B\u6B21\u306E1\u624B\u3092\u5224\u65AD\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
     if (noProgress >= maxNoProgress) return stopWithWarning(`host\u30C4\u30FC\u30EB\u7D50\u679C\u306B\u9032\u5C55\u304C\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F\uFF08${maxNoProgress}\u56DE\u9023\u7D9A\uFF09`);
@@ -8160,43 +8511,75 @@ async function executeCall(call, cfg, ctx, io) {
   if (argError) return `[validation error] ${argError}`;
   const qualified = qualifiedToolName(def.name);
   const summary = summarize(qualified, args);
-  io.event?.({ type: "tool.requested", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
-  io.event?.({ type: "step.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+  const permission = def.kind === "read" ? "allow" : "ask";
+  let audit = buildToolAuditMetadata(qualified, args, permission, {
+    required: def.kind !== "read",
+    outcome: "not_required",
+    actor: "policy",
+    automatic: def.kind === "read"
+  });
+  io.event?.({ type: "tool.requested", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+  io.event?.({ type: "step.started", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
   if (def.kind !== "read") {
     const auto = def.kind === "write" ? policy.autoApproveWrite : policy.autoApproveCommand;
     const fileBinding = await captureFileBinding(def, args, ctx);
+    audit = buildToolAuditMetadata(qualified, args, permission, {
+      required: true,
+      outcome: "not_required",
+      actor: "policy",
+      automatic: false
+    }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
     const approvalBinding = { ...fileBinding, toolName: qualified, argsHash: JSON.stringify(normalizeForKey(args)), command: typeof args.command === "string" ? args.command : void 0, network: def.kind === "command", callId: call.id };
     if (!auto) {
+      io.event?.({ type: "approval.requested", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
       const ok = await io.askYesNo(`\u5B9F\u884C\u3092\u8A31\u53EF\u3057\u307E\u3059\u304B\uFF1F
 ${summary}`, approvalBinding);
-      if (ok) io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+      audit = buildToolAuditMetadata(qualified, args, permission, {
+        required: true,
+        outcome: ok ? "approved" : "denied",
+        actor: "user",
+        automatic: false
+      }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
+      io.event?.({ type: "approval.resolved", tool: qualified, summary, approved: ok, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+      if (ok) io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
       if (ok && await approvalPreconditionChanged(approvalBinding, ctx)) {
-        io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u627F\u8A8D\u3092\u7121\u52B9\u5316\u3057\u307E\u3057\u305F", origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+        io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u627F\u8A8D\u3092\u7121\u52B9\u5316\u3057\u307E\u3057\u305F", audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
         return "(\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)";
       }
       if (!ok) {
-        io.event?.({ type: "tool.denied", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+        io.event?.({ type: "tool.denied", tool: qualified, summary, error: "\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F", audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
         return "(\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)";
       }
     } else {
-      io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, metadata: { automatic: true }, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+      audit = buildToolAuditMetadata(qualified, args, permission, {
+        required: true,
+        outcome: "approved",
+        actor: "policy",
+        automatic: true
+      }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
+      io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, audit, metadata: { automatic: true }, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
     }
   }
-  io.event?.({ type: "tool.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+  io.event?.({ type: "tool.started", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
   io.print(`[tool] ${summary}`);
   const startedAt = Date.now();
   try {
     const output = await def.run(args, ctx);
     const durationMs = Date.now() - startedAt;
     const metadata = parseToolResultMeta(output);
-    io.event?.({ type: "tool.succeeded", tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
-    io.event?.({ type: "step.completed", tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+    const terminalAudit = buildToolAuditMetadata(qualified, args, permission, audit.approval, {
+      ...audit.target,
+      after_sha256: typeof metadata?.afterHash === "string" ? metadata.afterHash : null
+    });
+    io.event?.({ type: "tool.succeeded", tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+    io.event?.({ type: "step.completed", tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
     return output;
   } catch (err) {
     const output = `[tool error] ${err.message}`;
     const durationMs = Date.now() - startedAt;
-    io.event?.({ type: "tool.failed", tool: qualified, summary, output, error: output, durationMs, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
-    io.event?.({ type: "step.failed", tool: qualified, summary, output, error: output, durationMs, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+    const terminalAudit = buildToolAuditMetadata(qualified, args, permission, audit.approval, { ...audit.target });
+    io.event?.({ type: "tool.failed", tool: qualified, summary, output, error: output, durationMs, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+    io.event?.({ type: "step.failed", tool: qualified, summary, output, error: output, durationMs, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
     return output;
   }
 }
@@ -9328,10 +9711,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path6) {
-  if (!path6)
+function getElementAtPath(obj, path7) {
+  if (!path7)
     return obj;
-  return path6.reduce((acc, key) => acc?.[key], obj);
+  return path7.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -9740,11 +10123,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path6, issues) {
+function prefixIssues(path7, issues) {
   return issues.map((iss) => {
     var _a24;
     (_a24 = iss).path ?? (_a24.path = []);
-    iss.path.unshift(path6);
+    iss.path.unshift(path7);
     return iss;
   });
 }
@@ -9891,16 +10274,16 @@ function flattenError(error51, mapper = (issue2) => issue2.message) {
 }
 function formatError(error51, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error52, path6 = []) => {
+  const processError = (error52, path7 = []) => {
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else {
-        const fullpath = [...path6, ...issue2.path];
+        const fullpath = [...path7, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -9927,17 +10310,17 @@ function formatError(error51, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error51, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error52, path6 = []) => {
+  const processError = (error52, path7 = []) => {
     var _a24, _b17;
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else {
-        const fullpath = [...path6, ...issue2.path];
+        const fullpath = [...path7, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -9969,8 +10352,8 @@ function treeifyError(error51, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path6 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path6) {
+  const path7 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path7) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -22662,13 +23045,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path6 = ref.slice(1).split("/").filter(Boolean);
-  if (path6.length === 0) {
+  const path7 = ref.slice(1).split("/").filter(Boolean);
+  if (path7.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path6[0] === defsKey) {
-    const key = path6[1];
+  if (path7[0] === defsKey) {
+    const key = path7[1];
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -23435,8 +23818,8 @@ function getErrorMap2() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path6, errorMaps, issueData } = params;
-  const fullPath = [...path6, ...issueData.path || []];
+  const { data, path: path7, errorMaps, issueData } = params;
+  const fullPath = [...path7, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -23551,11 +23934,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path6, key) {
+  constructor(parent, value, path7, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path6;
+    this._path = path7;
     this._key = key;
   }
   get path() {
@@ -31279,8 +31662,8 @@ function createOpenAICompatible(options) {
   const getHeaders = () => withUserAgentSuffix(headers, `ai-sdk/openai-compatible/${VERSION2}`);
   const getCommonModelConfig = (modelType) => ({
     provider: `${providerName}.${modelType}`,
-    url: ({ path: path6 }) => {
-      const url2 = new URL(`${baseURL}${path6}`);
+    url: ({ path: path7 }) => {
+      const url2 = new URL(`${baseURL}${path7}`);
       if (options.queryParams) {
         url2.search = new URLSearchParams(options.queryParams).toString();
       }
@@ -39612,7 +39995,7 @@ async function runToolExecuteBeforeHooks(input, perRunHooks = []) {
 }
 
 // src/permission-hook.ts
-var import_node_path3 = __toESM(require("node:path"));
+var import_node_path4 = __toESM(require("node:path"));
 var import_shell_quote = __toESM(require_shell_quote());
 
 // src/vendor/opencode-permission/wildcard.ts
@@ -39921,16 +40304,16 @@ var ARITY = {
 function normalizeWorkspacePattern(value, ctx) {
   const source = value.trim().replaceAll("\\", "/");
   if (!source) return "";
-  const workspace = import_node_path3.default.resolve(ctx.workspace);
-  const absolute = import_node_path3.default.resolve(workspace, source);
-  return import_node_path3.default.relative(workspace, absolute).replaceAll("\\", "/") || ".";
+  const workspace = import_node_path4.default.resolve(ctx.workspace);
+  const absolute = import_node_path4.default.resolve(workspace, source);
+  return import_node_path4.default.relative(workspace, absolute).replaceAll("\\", "/") || ".";
 }
 function joinPathAndGlob(pathValue, globValue) {
   const base = pathValue.trim();
   const glob = globValue.trim();
   if (!base || base === ".") return glob;
   if (!glob) return base;
-  if (import_node_path3.default.isAbsolute(glob) || /^[A-Za-z]:[\\/]/u.test(glob)) return glob;
+  if (import_node_path4.default.isAbsolute(glob) || /^[A-Za-z]:[\\/]/u.test(glob)) return glob;
   return `${base.replace(/[\\/]+$/u, "")}/${glob.replace(/^[\\/]+/u, "")}`;
 }
 function commandPermissionTarget(command) {
@@ -40116,8 +40499,14 @@ async function executeV2ToolCall(call, def, cfg, ctx, io, beforeHooks) {
   if (argError) return { output: `[validation error] ${argError}`, status: "failed", executed: false, metadata: null };
   const qualified = qualifiedToolName(def.name);
   const summary = summarize(qualified, args);
-  io.event?.({ type: "tool.requested", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
-  io.event?.({ type: "step.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+  let audit = buildToolAuditMetadata(qualified, args, def.kind === "read" ? "allow" : "ask", {
+    required: def.kind !== "read",
+    outcome: "not_required",
+    actor: "policy",
+    automatic: def.kind === "read"
+  });
+  io.event?.({ type: "tool.requested", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+  io.event?.({ type: "step.started", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
   const permissionController = cfg.permissions && cfg.permissions.length > 0 ? createPermissionHook(cfg.permissions) : void 0;
   const effectiveBeforeHooks = permissionController ? [...beforeHooks, permissionController.hook] : beforeHooks;
   let permissionDecision;
@@ -40127,13 +40516,28 @@ async function executeV2ToolCall(call, def, cfg, ctx, io, beforeHooks) {
   } catch (err) {
     const reason = err.message || String(err);
     const output = `[hook denied] ${reason}`;
-    io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: reason, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
-    io.event?.({ type: "step.failed", tool: qualified, summary, output, error: reason, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+    const permission2 = permissionController && /^permission denied:/u.test(reason) ? "deny" : def.kind === "read" ? "allow" : "ask";
+    audit = buildToolAuditMetadata(qualified, args, permission2, {
+      required: false,
+      outcome: "not_required",
+      actor: "policy",
+      automatic: true
+    });
+    io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: reason, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+    io.event?.({ type: "step.failed", tool: qualified, summary, output, error: reason, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
     return { output, status: "denied", executed: false, metadata: null };
   }
   const policy = capabilityPolicy(cfg, "work");
   const permissionAsk = permissionDecision === "ask";
   const permissionAllow = permissionDecision === "allow";
+  const permission = permissionDecision ?? (def.kind === "read" ? "allow" : "ask");
+  const effectiveSummary = summarize(qualified, args);
+  audit = buildToolAuditMetadata(qualified, args, permission, {
+    required: def.kind !== "read",
+    outcome: def.kind === "read" ? "not_required" : "not_required",
+    actor: "policy",
+    automatic: def.kind === "read"
+  });
   if (permissionAsk || def.kind !== "read") {
     const automatic = permissionAllow || !permissionAsk && (def.kind === "write" ? policy.autoApproveWrite : policy.autoApproveCommand);
     const fileBinding = await captureFileBinding(def, args, ctx);
@@ -40145,43 +40549,66 @@ async function executeV2ToolCall(call, def, cfg, ctx, io, beforeHooks) {
       network: def.kind === "command",
       callId: call.toolCallId
     };
+    audit = buildToolAuditMetadata(qualified, args, permission, {
+      required: true,
+      outcome: "not_required",
+      actor: "policy",
+      automatic: false
+    }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
     if (!automatic) {
-      io.event?.({ type: "approval.requested", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+      io.event?.({ type: "approval.requested", tool: qualified, summary: effectiveSummary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
       const approved = await io.askYesNo(`\u5B9F\u884C\u3092\u8A31\u53EF\u3057\u307E\u3059\u304B\uFF1F
-${summary}`, binding);
-      io.event?.({ type: "approval.resolved", tool: qualified, summary, approved, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+${effectiveSummary}`, binding);
+      audit = buildToolAuditMetadata(qualified, args, permission, {
+        required: true,
+        outcome: approved ? "approved" : "denied",
+        actor: "user",
+        automatic: false
+      }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
+      io.event?.({ type: "approval.resolved", tool: qualified, summary: effectiveSummary, approved, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
       if (approved && await approvalPreconditionChanged(binding, ctx)) {
         const output = "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u5B9F\u884C\u3057\u307E\u305B\u3093\u3067\u3057\u305F";
-        io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: output, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
-        io.event?.({ type: "step.failed", tool: qualified, summary, output, error: output, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+        io.event?.({ type: "tool.denied", tool: qualified, summary: effectiveSummary, approved: false, error: output, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+        io.event?.({ type: "step.failed", tool: qualified, summary: effectiveSummary, output, error: output, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
         return { output, status: "denied", executed: false, metadata: null };
       }
       if (!approved) {
         const output = "\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F";
-        io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
-        io.event?.({ type: "step.failed", tool: qualified, summary, output, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+        io.event?.({ type: "tool.denied", tool: qualified, summary: effectiveSummary, approved: false, output, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+        io.event?.({ type: "step.failed", tool: qualified, summary: effectiveSummary, output, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
         return { output, status: "denied", executed: false, metadata: null };
       }
-      io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+      io.event?.({ type: "tool.approved", tool: qualified, summary: effectiveSummary, approved: true, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
     } else {
-      io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, metadata: { automatic: true, ...permissionAllow ? { permission: "allow" } : {} }, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+      audit = buildToolAuditMetadata(qualified, args, permission, {
+        required: true,
+        outcome: "approved",
+        actor: "policy",
+        automatic: true
+      }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
+      io.event?.({ type: "tool.approved", tool: qualified, summary: effectiveSummary, approved: true, audit, metadata: { automatic: true, ...permissionAllow ? { permission: "allow" } : {} }, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
     }
   }
-  io.event?.({ type: "tool.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
-  io.print(`[tool] ${summary}`);
+  io.event?.({ type: "tool.started", tool: qualified, summary: effectiveSummary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+  io.print(`[tool] ${effectiveSummary}`);
   const startedAt = Date.now();
   try {
     const output = await def.run(args, ctx);
     const durationMs = Date.now() - startedAt;
     const metadata = parseToolResultMeta(output);
-    io.event?.({ type: "tool.succeeded", tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
-    io.event?.({ type: "step.completed", tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+    const terminalAudit = buildToolAuditMetadata(qualified, args, permission, audit.approval, {
+      ...audit.target,
+      after_sha256: typeof metadata?.afterHash === "string" ? metadata.afterHash : null
+    });
+    io.event?.({ type: "tool.succeeded", tool: qualified, summary: effectiveSummary, output: output.slice(0, 1200), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+    io.event?.({ type: "step.completed", tool: qualified, summary: effectiveSummary, output: output.slice(0, 800), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
     return { output, status: "succeeded", executed: true, metadata };
   } catch (err) {
     const output = `[tool error] ${err.message}`;
     const durationMs = Date.now() - startedAt;
-    io.event?.({ type: "tool.failed", tool: qualified, summary, output, error: output, durationMs, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
-    io.event?.({ type: "step.failed", tool: qualified, summary, output, error: output, durationMs, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+    const terminalAudit = buildToolAuditMetadata(qualified, args, permission, audit.approval, { ...audit.target });
+    io.event?.({ type: "tool.failed", tool: qualified, summary: effectiveSummary, output, error: output, durationMs, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+    io.event?.({ type: "step.failed", tool: qualified, summary: effectiveSummary, output, error: output, durationMs, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
     return { output, status: "failed", executed: true, metadata: null };
   }
 }
@@ -40299,8 +40726,8 @@ function runConfiguredAgentTurn(opts) {
 // src/copilot.ts
 var import_node_child_process3 = require("node:child_process");
 var import_node_net = __toESM(require("node:net"));
-var import_node_fs2 = __toESM(require("node:fs"));
-var import_node_path4 = __toESM(require("node:path"));
+var import_node_fs3 = __toESM(require("node:fs"));
+var import_node_path5 = __toESM(require("node:path"));
 function normalizeCopilotEditorText(value) {
   return value.replace(/[\u200B\u200C]/gu, "");
 }
@@ -40732,10 +41159,10 @@ async function findFreePort() {
   });
 }
 function profileIsInUse(profileDir) {
-  if (["SingletonLock", "SingletonCookie", "SingletonSocket"].some((name24) => import_node_fs2.default.existsSync(import_node_path4.default.join(profileDir, name24)))) return true;
+  if (["SingletonLock", "SingletonCookie", "SingletonSocket"].some((name24) => import_node_fs3.default.existsSync(import_node_path5.default.join(profileDir, name24)))) return true;
   if (process.platform !== "win32") return false;
   try {
-    const needle = import_node_path4.default.resolve(profileDir).replace(/[\\/]+$/, "").toLowerCase();
+    const needle = import_node_path5.default.resolve(profileDir).replace(/[\\/]+$/, "").toLowerCase();
     const marker24 = `--user-data-dir=${needle}`;
     const output = (0, import_node_child_process3.execFileSync)("powershell.exe", [
       "-NoProfile",
@@ -40755,8 +41182,8 @@ function profileIsInUse(profileDir) {
 function findEdgePath() {
   const roots = [process.env["ProgramFiles(x86)"], process.env.ProgramFiles, process.env.LOCALAPPDATA].filter(Boolean);
   for (const root of roots) {
-    const p = import_node_path4.default.join(root, "Microsoft", "Edge", "Application", "msedge.exe");
-    if (import_node_fs2.default.existsSync(p)) return p;
+    const p = import_node_path5.default.join(root, "Microsoft", "Edge", "Application", "msedge.exe");
+    if (import_node_fs3.default.existsSync(p)) return p;
   }
   throw new Error("Microsoft Edge \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3002Edge \u3092\u30A4\u30F3\u30B9\u30C8\u30FC\u30EB\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
 }
@@ -40909,24 +41336,24 @@ var CopilotEdgeClient = class {
   }
   hardenPreferences(profileDir) {
     try {
-      const prefPath = import_node_path4.default.join(profileDir, "Default", "Preferences");
-      if (!import_node_fs2.default.existsSync(prefPath)) return;
-      const j = JSON.parse(import_node_fs2.default.readFileSync(prefPath, "utf8"));
+      const prefPath = import_node_path5.default.join(profileDir, "Default", "Preferences");
+      if (!import_node_fs3.default.existsSync(prefPath)) return;
+      const j = JSON.parse(import_node_fs3.default.readFileSync(prefPath, "utf8"));
       if (!j.session) j.session = {};
       j.session.restore_on_startup = 4;
       j.session.startup_urls = [];
       if (j.profile) j.profile.exit_type = "Normal";
-      import_node_fs2.default.writeFileSync(prefPath, JSON.stringify(j), "utf8");
+      import_node_fs3.default.writeFileSync(prefPath, JSON.stringify(j), "utf8");
     } catch {
     }
   }
   chooseEdgeProfile() {
-    const root = import_node_path4.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent");
-    import_node_fs2.default.mkdirSync(root, { recursive: true });
+    const root = import_node_path5.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent");
+    import_node_fs3.default.mkdirSync(root, { recursive: true });
     const suffix = (this.s.profileName ?? "default").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "default";
-    const stable = import_node_path4.default.join(root, suffix === "default" ? "edge-profile" : "edge-profile-" + suffix);
+    const stable = import_node_path5.default.join(root, suffix === "default" ? "edge-profile" : "edge-profile-" + suffix);
     if (!profileIsInUse(stable)) return stable;
-    return import_node_fs2.default.mkdtempSync(import_node_path4.default.join(root, "edge-profile-" + suffix + "-session-"));
+    return import_node_fs3.default.mkdtempSync(import_node_path5.default.join(root, "edge-profile-" + suffix + "-session-"));
   }
   async ensureEdge() {
     if (this.s.reuseExistingEdge) {
@@ -41456,6 +41883,8 @@ var CopilotEdgeClient = class {
 };
 
 // src/approvals.ts
+var USER_PROVENANCE = { actor: "user", automatic: false };
+var POLICY_PROVENANCE = { actor: "policy", automatic: true };
 var pending = /* @__PURE__ */ new Map();
 var resolutions = /* @__PURE__ */ new Map();
 var sequence2 = 0;
@@ -41477,7 +41906,7 @@ function requestApproval(request) {
       const current = pending.get(id);
       if (current !== entry) return;
       pending.delete(id);
-      const result = { id, approved: false, reason: "\u627F\u8A8D\u671F\u9650\u5207\u308C", resolvedAt: Date.now() };
+      const result = { id, approved: false, reason: "\u627F\u8A8D\u671F\u9650\u5207\u308C", resolvedAt: Date.now(), provenance: { ...POLICY_PROVENANCE } };
       resolutions.set(id, result);
       while (resolutions.size > 100) resolutions.delete(resolutions.keys().next().value);
       resolve2(false);
@@ -41487,19 +41916,24 @@ function requestApproval(request) {
 function listApprovals() {
   return [...pending.values()].sort((a, b) => a.createdAt - b.createdAt).map(({ resolve: _resolve, ...snapshot2 }) => snapshot2);
 }
-function resolveApproval(id, approved, reason = approved ? "\u5229\u7528\u8005\u304C\u8A31\u53EF\u3057\u307E\u3057\u305F" : "\u5229\u7528\u8005\u304C\u62D2\u5426\u3057\u307E\u3057\u305F") {
+function resolveApproval(id, approved, reason = approved ? "\u5229\u7528\u8005\u304C\u8A31\u53EF\u3057\u307E\u3057\u305F" : "\u5229\u7528\u8005\u304C\u62D2\u5426\u3057\u307E\u3057\u305F", provenance = USER_PROVENANCE) {
   const entry = pending.get(id);
   if (!entry) return false;
   pending.delete(id);
-  const result = { id, approved: Boolean(approved), reason, resolvedAt: Date.now() };
+  const normalizedApproved = Boolean(approved);
+  const safeReason = provenance.actor === "user" ? normalizedApproved ? "\u5229\u7528\u8005\u304C\u8A31\u53EF\u3057\u307E\u3057\u305F" : "\u5229\u7528\u8005\u304C\u62D2\u5426\u3057\u307E\u3057\u305F" : reason;
+  const result = { id, approved: normalizedApproved, reason: safeReason, resolvedAt: Date.now(), provenance: { ...provenance } };
   resolutions.set(id, result);
   while (resolutions.size > 100) resolutions.delete(resolutions.keys().next().value);
-  entry.resolve(Boolean(approved));
+  entry.resolve(normalizedApproved);
   return true;
+}
+function getApprovalResolution(id) {
+  return resolutions.get(id);
 }
 
 // src/openai-bridge.ts
-var import_node_crypto3 = __toESM(require("node:crypto"));
+var import_node_crypto4 = __toESM(require("node:crypto"));
 var import_node_http3 = __toESM(require("node:http"));
 var MAX_BODY_BYTES = 2 * 1024 * 1024;
 var MAX_PENDING_REQUESTS = 8;
@@ -41719,7 +42153,7 @@ function interpretBridgeResponse(raw, tools) {
   return {
     content: null,
     toolCalls: [{
-      id: `call_${import_node_crypto3.default.randomBytes(12).toString("hex")}`,
+      id: `call_${import_node_crypto4.default.randomBytes(12).toString("hex")}`,
       type: "function",
       function: { name: externalName, arguments: JSON.stringify(decision.args) }
     }],
@@ -41743,7 +42177,7 @@ async function completeOpenAIChat(request, options, signal) {
   const created = Math.floor((options.now?.() ?? Date.now()) / 1e3);
   const toolCalls = interpreted.toolCalls;
   return {
-    id: `chatcmpl_${import_node_crypto3.default.randomBytes(12).toString("hex")}`,
+    id: `chatcmpl_${import_node_crypto4.default.randomBytes(12).toString("hex")}`,
     object: "chat.completion",
     created,
     model: request.model ?? "copilot-edge-layer1",
@@ -41760,7 +42194,7 @@ function authorized(header, token) {
   if (!header?.startsWith(prefix2)) return false;
   const supplied = Buffer.from(header.slice(prefix2.length), "utf8");
   const expected = Buffer.from(token, "utf8");
-  return supplied.length === expected.length && import_node_crypto3.default.timingSafeEqual(supplied, expected);
+  return supplied.length === expected.length && import_node_crypto4.default.timingSafeEqual(supplied, expected);
 }
 function sendJson(response, status, value) {
   if (response.destroyed || response.writableEnded) return;
@@ -41772,7 +42206,7 @@ function sendSingleChunkSse(response, completion) {
   const choices = Array.isArray(completion.choices) ? completion.choices : [];
   const first = isObject2(choices[0]) ? choices[0] : {};
   const message = isObject2(first.message) ? first.message : {};
-  const id = String(completion.id ?? `chatcmpl_${import_node_crypto3.default.randomBytes(12).toString("hex")}`);
+  const id = String(completion.id ?? `chatcmpl_${import_node_crypto4.default.randomBytes(12).toString("hex")}`);
   const created = Number(completion.created ?? Math.floor(Date.now() / 1e3));
   const model = String(completion.model ?? "copilot-edge-layer1");
   const delta = { role: "assistant" };
@@ -41872,6 +42306,173 @@ function ioStub(approve) {
     askYesNo: async () => approve
   };
 }
+async function testAuditLog() {
+  const workspace = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-audit-workspace-"));
+  const directory = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-audit-dir-"));
+  const log = new AuditLog({ workspace, directory });
+  log.initialize();
+  const record2 = makeAuditRecord({
+    event_id: "run-audit-event-1",
+    timestamp: "2026-08-27T00:00:00.000Z",
+    session_id: "session-audit",
+    run_id: "run-audit",
+    call_id: "call-audit",
+    tool_name: "host.write_file",
+    arguments: { summary: "write_file: notes.txt", sha256: "a".repeat(64) },
+    permission: { decision: "ask" },
+    approval: { required: true, outcome: "approved", actor: "user", automatic: false },
+    result: { outcome: "success", duration_ms: 4, error: null },
+    target: { path: "notes.txt", before_sha256: "b".repeat(64), after_sha256: "c".repeat(64) }
+  });
+  log.append(record2);
+  const denied = { ...record2, event_id: "run-audit-event-2", call_id: "call-denied", permission: { decision: "deny" }, approval: { required: false, outcome: "not_required", actor: "policy", automatic: true }, result: { outcome: "refused", duration_ms: null, error: "permission denied" } };
+  log.append(denied);
+  const lines = import_node_fs4.default.readFileSync(log.filePath, "utf8").trimEnd().split(/\r?\n/u);
+  import_node_assert.default.strictEqual(lines.length, 2);
+  for (const line of lines) import_node_assert.default.doesNotThrow(() => JSON.parse(line));
+  import_node_assert.default.strictEqual(log.records(1)[0].event_id, "run-audit-event-2", "records must return newest first");
+  import_node_assert.default.strictEqual(log.records(20, { result: "success" }).length, 1);
+  import_node_assert.default.strictEqual(log.records(20, { permission: "deny" })[0].result.outcome, "refused");
+  const csv = log.csv();
+  import_node_assert.default.ok(csv.startsWith("schema_version,event_id,timestamp"));
+  import_node_assert.default.ok(csv.includes("host.write_file") && csv.includes("permission denied"));
+  import_node_assert.default.strictEqual(auditRecordsToCsv([record2]).split(/\r?\n/u).length, 3);
+  const correlatedCallId = "call-user-approval";
+  const correlatedAudit = auditRecordFromOutcome({
+    sessionId: "session-correlation",
+    runId: "run-correlation",
+    history: [
+      { type: "tool.requested", origin: "host", callId: correlatedCallId, tool: "host.write_file", audit: { arguments: record2.arguments, permission: { decision: "ask" }, approval: { required: true, outcome: "not_required", actor: "policy", automatic: false }, target: record2.target } },
+      { type: "approval.requested", origin: "host", callId: correlatedCallId },
+      { type: "approval.resolved", origin: "host", callId: correlatedCallId, approved: true, metadata: { approval: { reason: "\u5229\u7528\u8005\u304C\u8A31\u53EF\u3057\u307E\u3057\u305F" } } }
+    ],
+    event: { type: "tool.succeeded", origin: "host", eventId: "run-correlation-event-1", at: Date.parse(record2.timestamp), callId: correlatedCallId, tool: "host.write_file", summary: record2.arguments.summary, audit: { arguments: record2.arguments, permission: { decision: "ask" }, approval: { required: true, outcome: "not_required", actor: "policy", automatic: false }, target: record2.target } }
+  });
+  import_node_assert.default.ok(correlatedAudit);
+  import_node_assert.default.deepStrictEqual(correlatedAudit.approval, { required: true, outcome: "approved", actor: "user", automatic: false });
+  import_node_assert.default.strictEqual(correlatedAudit.call_id, correlatedCallId);
+  log.append(correlatedAudit);
+  const correlatedDenied = auditRecordFromOutcome({
+    sessionId: "session-correlation",
+    runId: "run-correlation",
+    // A client-controlled reason that looks like a timeout must not change
+    // the server-authenticated user provenance (there is no provenance here,
+    // so the compatibility default remains user).
+    history: [{ type: "approval.requested", origin: "host", callId: correlatedCallId + "-deny" }, { type: "approval.resolved", origin: "host", callId: correlatedCallId + "-deny", approved: false, metadata: { approval: { reason: "\u627F\u8A8D\u671F\u9650\u5207\u308C" } } }],
+    event: { type: "tool.denied", origin: "host", eventId: "run-correlation-event-2", at: Date.parse(record2.timestamp), callId: correlatedCallId + "-deny", tool: "host.write_file", summary: record2.arguments.summary, error: "\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F", audit: { arguments: record2.arguments, permission: { decision: "ask" }, approval: { required: true, outcome: "not_required", actor: "policy", automatic: false }, target: record2.target } }
+  });
+  import_node_assert.default.ok(correlatedDenied);
+  import_node_assert.default.deepStrictEqual(correlatedDenied.approval, { required: true, outcome: "denied", actor: "user", automatic: false });
+  log.append(correlatedDenied);
+  import_node_assert.default.deepStrictEqual(log.records(10, { result: "refused" })[0].approval, { required: true, outcome: "denied", actor: "user", automatic: false });
+  const duplicateUserAudit = {
+    arguments: record2.arguments,
+    permission: { decision: "ask" },
+    approval: { required: true, outcome: "denied", actor: "user", automatic: false },
+    target: record2.target
+  };
+  for (const policyReason of ["\u627F\u8A8D\u671F\u9650\u5207\u308C", "\u5B9F\u884C\u30AD\u30E3\u30F3\u30BB\u30EB\u306B\u3088\u308A\u62D2\u5426\u3055\u308C\u307E\u3057\u305F", "\u30B5\u30FC\u30D0\u30FC\u7D42\u4E86\u306B\u3088\u308A\u62D2\u5426\u3055\u308C\u307E\u3057\u305F"]) {
+    const policyCallId = `call-policy-${policyReason}`;
+    const policyAudit = auditRecordFromOutcome({
+      sessionId: "session-correlation",
+      runId: "run-correlation",
+      history: [
+        { type: "tool.requested", origin: "host", callId: policyCallId, tool: "host.write_file", audit: duplicateUserAudit },
+        { type: "approval.requested", origin: "host", callId: policyCallId },
+        { type: "approval.resolved", origin: "host", authority: "authoritative", callId: policyCallId, approved: false, metadata: { approval: { reason: policyReason, provenance: { actor: "policy", automatic: true } } } },
+        { type: "approval.resolved", origin: "host", callId: policyCallId, approved: false, audit: duplicateUserAudit }
+      ],
+      event: { type: "tool.denied", origin: "host", eventId: `${policyCallId}-terminal`, at: Date.parse(record2.timestamp), callId: policyCallId, tool: "host.write_file", summary: record2.arguments.summary, error: policyReason, audit: duplicateUserAudit }
+    });
+    import_node_assert.default.ok(policyAudit);
+    import_node_assert.default.deepStrictEqual(policyAudit.approval, { required: true, outcome: "denied", actor: "policy", automatic: true }, `policy reason must win: ${policyReason}`);
+    import_node_assert.default.strictEqual(policyAudit.call_id, policyCallId);
+  }
+  import_node_assert.default.throws(() => new AuditLog({ workspace, directory: import_node_path6.default.join(workspace, "audit") }), /ワークスペース外/);
+  import_node_assert.default.throws(() => new AuditLog({ workspace, directory: workspace }), /ワークスペース外/);
+  const brokenLog = new AuditLog({ workspace, directory: import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-audit-broken-")) });
+  brokenLog.initialize();
+  brokenLog.appendHandle = null;
+  import_node_assert.default.throws(() => brokenLog.append(record2), /監査ログ追記に失敗しました/);
+  import_node_assert.default.strictEqual(brokenLog.healthy, false);
+  import_node_assert.default.deepStrictEqual(auditAvailability(brokenLog, null), { available: false, detail: "\u76E3\u67FB\u30ED\u30B0\u306E\u8FFD\u8A18\u30CF\u30F3\u30C9\u30EB\u304C\u3042\u308A\u307E\u305B\u3093" });
+  import_node_assert.default.strictEqual(auditAvailability(log, null).available, true);
+  import_node_assert.default.deepStrictEqual(auditAvailability(log, "\u8D77\u52D5\u6642\u969C\u5BB3"), { available: false, detail: "\u8D77\u52D5\u6642\u969C\u5BB3" });
+  import_node_assert.default.throws(() => brokenLog.append(record2), /unhealthy/);
+  const symlinkDirectory = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-audit-symlink-"));
+  const symlinkPath = import_node_path6.default.join(symlinkDirectory, "audit.jsonl");
+  try {
+    import_node_fs4.default.symlinkSync(log.filePath, symlinkPath, "file");
+    import_node_assert.default.throws(() => new AuditLog({ workspace, directory: symlinkDirectory }).initialize(), /シンボリックリンク／再解析点/);
+  } catch (err) {
+    const code = err.code;
+    if (code !== "EPERM" && code !== "EACCES") throw err;
+    console.log("SKIP audit-symlink (symlink creation is restricted on this host)");
+  }
+  const eventRoot = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-audit-events-"));
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(eventRoot, "read.txt"), "readable");
+  const events = [];
+  const eventIo = {
+    print: () => {
+    },
+    askYesNo: async () => true,
+    event: (event) => events.push(event)
+  };
+  const eventCfg = { baseURL: "", model: "", provider: "openai", autoApprove: { write: false, command: false } };
+  const eventCtx = { workspace: eventRoot, restrictToWorkspace: true };
+  await executeV2ToolCall({ toolCallId: "audit-read", toolName: "read_file", input: { path: "read.txt" } }, TOOL_DEFS.find((tool2) => tool2.name === "read_file"), eventCfg, eventCtx, eventIo, []);
+  const readOutcome = events.find((event) => event.type === "tool.succeeded" && event.audit?.permission.decision === "allow");
+  import_node_assert.default.ok(readOutcome?.audit);
+  import_node_assert.default.strictEqual(readOutcome.audit.arguments.sha256, auditArgsSha256({ path: "read.txt" }));
+  import_node_assert.default.strictEqual(readOutcome.audit.approval.outcome, "not_required");
+  await executeV2ToolCall({ toolCallId: "audit-write", toolName: "write_file", input: { path: "new.txt", content: "new content" } }, TOOL_DEFS.find((tool2) => tool2.name === "write_file"), eventCfg, eventCtx, eventIo, []);
+  const writeOutcome = events.find((event) => event.type === "tool.succeeded" && event.audit?.permission.decision === "ask");
+  import_node_assert.default.ok(writeOutcome?.audit);
+  import_node_assert.default.strictEqual(writeOutcome.audit.approval.actor, "user");
+  import_node_assert.default.strictEqual(writeOutcome.audit.approval.outcome, "approved");
+  import_node_assert.default.strictEqual(writeOutcome.audit.target.before_sha256, null);
+  import_node_assert.default.ok(writeOutcome.audit.target.after_sha256);
+  const deniedEvents = [];
+  const deniedIo = { ...eventIo, event: (event) => deniedEvents.push(event) };
+  await executeV2ToolCall({ toolCallId: "audit-deny", toolName: "write_file", input: { path: "denied.txt", content: "never" } }, TOOL_DEFS.find((tool2) => tool2.name === "write_file"), { ...eventCfg, permissions: [{ permission: "write_file", pattern: "*", action: "deny" }] }, eventCtx, deniedIo, []);
+  const deniedOutcome = deniedEvents.find((event) => event.type === "tool.denied");
+  import_node_assert.default.strictEqual(deniedOutcome?.audit?.permission.decision, "deny");
+  import_node_assert.default.strictEqual(deniedOutcome?.audit?.approval.outcome, "not_required");
+  const terminalLog = new AuditLog({ workspace: eventRoot, directory: import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-audit-terminal-")) });
+  terminalLog.initialize();
+  const terminalCfg = { ...eventCfg, autoApprove: { write: false, command: false } };
+  const terminalCalls = [
+    { id: "audit-path-list", name: "list_files", input: { path: "." } },
+    { id: "audit-path-read", name: "read_file", input: { path: "read.txt" } },
+    { id: "audit-path-search", name: "search_files", input: { query: "readable" } },
+    { id: "audit-path-write", name: "write_file", input: { path: "approved.txt", content: "approved" } },
+    { id: "audit-path-open", name: "start_process", input: { command: 'node -e "process.exit(0)"' } },
+    { id: "audit-path-permission-deny", name: "write_file", input: { path: "denied-by-permission.txt", content: "never" }, cfg: { ...terminalCfg, permissions: [{ permission: "write_file", pattern: "*", action: "deny" }] } }
+  ];
+  for (const call of terminalCalls) {
+    const callEvents = [];
+    const io = {
+      print: () => {
+      },
+      askYesNo: async () => true,
+      event: (event) => callEvents.push(event)
+    };
+    const def = TOOL_DEFS.find((tool2) => tool2.name === call.name);
+    await executeV2ToolCall({ toolCallId: call.id, toolName: call.name, input: call.input }, def, call.cfg ?? terminalCfg, eventCtx, io, []);
+    const terminal = callEvents.find((entry) => entry.origin === "host" && (entry.type === "tool.succeeded" || entry.type === "tool.failed" || entry.type === "tool.denied"));
+    import_node_assert.default.ok(terminal, `terminal event missing for ${call.name}`);
+    const audit = auditRecordFromOutcome({ sessionId: "session-terminal", runId: "run-terminal", event: terminal, history: callEvents });
+    import_node_assert.default.ok(audit, `audit record missing for ${call.name}`);
+    terminalLog.append(audit, `terminal:${call.id}`);
+    terminalLog.append(audit, `terminal:${call.id}`);
+  }
+  const terminalRecords = terminalLog.records(20);
+  import_node_assert.default.strictEqual(terminalRecords.length, terminalCalls.length, "each standard host path must append exactly one record");
+  import_node_assert.default.deepStrictEqual(new Set(terminalRecords.map((entry) => entry.call_id)).size, terminalCalls.length);
+  import_node_assert.default.ok(terminalRecords.some((entry) => entry.tool_name === "host.write_file" && entry.approval.actor === "user" && entry.approval.outcome === "approved"));
+  import_node_assert.default.ok(terminalRecords.some((entry) => entry.tool_name === "host.write_file" && entry.permission.decision === "deny" && entry.result.outcome === "refused"));
+  console.log("PASS audit-log");
+}
 async function testWeather() {
   import_node_assert.default.strictEqual(weatherCodeLabel(0).emoji, "\u2600\uFE0F");
   import_node_assert.default.strictEqual(weatherCodeLabel(2).emoji, "\u26C5");
@@ -41916,16 +42517,32 @@ async function testApprovals() {
   import_node_assert.default.strictEqual(await pending2, true);
   import_node_assert.default.strictEqual(listApprovals().length, 0);
   import_node_assert.default.strictEqual(resolveApproval("missing-approval", false), false);
+  const clientReasonPending = requestApproval("client reason is not provenance");
+  const clientReasonApproval = listApprovals()[0];
+  import_node_assert.default.strictEqual(resolveApproval(clientReasonApproval.id, false, "\u627F\u8A8D\u671F\u9650\u5207\u308C"), true);
+  import_node_assert.default.strictEqual(await clientReasonPending, false);
+  const clientReasonResolution = getApprovalResolution(clientReasonApproval.id);
+  import_node_assert.default.deepStrictEqual(clientReasonResolution?.provenance, { actor: "user", automatic: false });
+  import_node_assert.default.strictEqual(clientReasonResolution?.reason, "\u5229\u7528\u8005\u304C\u62D2\u5426\u3057\u307E\u3057\u305F");
+  const policyPending = requestApproval("policy provenance");
+  const policyApproval = listApprovals()[0];
+  import_node_assert.default.strictEqual(resolveApproval(policyApproval.id, false, "\u4EFB\u610F\u306E\u5185\u90E8\u7406\u7531", { actor: "policy", automatic: true }), true);
+  import_node_assert.default.strictEqual(await policyPending, false);
+  import_node_assert.default.deepStrictEqual(getApprovalResolution(policyApproval.id)?.provenance, { actor: "policy", automatic: true });
+  const timeoutPending = requestApproval({ question: "timeout provenance", expiresAt: Date.now() });
+  const timeoutApproval = listApprovals()[0];
+  import_node_assert.default.strictEqual(await timeoutPending, false);
+  import_node_assert.default.deepStrictEqual(getApprovalResolution(timeoutApproval.id)?.provenance, { actor: "policy", automatic: true });
   console.log("PASS approvals");
 }
 async function testTools() {
-  const root = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
+  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
   const ctx = makeCtx(root);
   const get = (n) => TOOL_DEFS.find((t) => t.name === n);
-  import_node_fs3.default.mkdirSync(import_node_path5.default.join(root, "tools"), { recursive: true });
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "tools", "Read-Xlsx.ps1"), "param([string]$Path)\nWrite-Output ('READ_OK:' + $Path)\n");
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "tools", "Update-Ledger.ps1"), "param([string]$Extracted,[string]$Rates,[string]$Ledger)\nWrite-Output ('UPDATE_OK:' + $Ledger)\n");
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "safe-read.txt"), "safe-read-ok");
+  import_node_fs4.default.mkdirSync(import_node_path6.default.join(root, "tools"), { recursive: true });
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "tools", "Read-Xlsx.ps1"), "param([string]$Path)\nWrite-Output ('READ_OK:' + $Path)\n");
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "tools", "Update-Ledger.ps1"), "param([string]$Extracted,[string]$Rates,[string]$Ledger)\nWrite-Output ('UPDATE_OK:' + $Ledger)\n");
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "safe-read.txt"), "safe-read-ok");
   await get("write_file").run({ path: "a/hello.txt", content: "line1\nline2 unique\n" }, ctx);
   const read = await get("read_file").run({ path: "a/hello.txt" }, ctx);
   import_node_assert.default.ok(read.includes("unique"));
@@ -41943,16 +42560,16 @@ async function testTools() {
   import_node_assert.default.ok(search.includes("hello.txt"));
   const list = await get("list_files").run({ glob: "*.txt" }, ctx);
   import_node_assert.default.ok(list.includes("hello.txt"));
-  import_node_fs3.default.mkdirSync(import_node_path5.default.join(root, "batch"), { recursive: true });
-  import_node_fs3.default.mkdirSync(import_node_path5.default.join(root, "other"), { recursive: true });
+  import_node_fs4.default.mkdirSync(import_node_path6.default.join(root, "batch"), { recursive: true });
+  import_node_fs4.default.mkdirSync(import_node_path6.default.join(root, "other"), { recursive: true });
   const directOnly = await get("list_files").run({ path: ".", recursive: false }, ctx);
   import_node_assert.default.ok(directOnly.includes("batch/") && directOnly.includes("other/") && !directOnly.includes("batch/utf8.txt"), "recursive=false must return only immediate entries");
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "batch", "utf8.txt"), "UTF-8\u672C\u6587");
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "batch", "bom.txt"), Buffer.concat([Buffer.from([239, 187, 191]), Buffer.from("BOM\u672C\u6587")]));
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "batch", "cp932.txt"), Buffer.from([67, 80, 57, 51, 50, 58, 147, 250, 150, 123]));
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "batch", "empty.txt"), Buffer.alloc(0));
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "batch", "ledger.xlsx"), Buffer.from("not-read-as-text"));
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "other", "note.md"), "\u5225glob");
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "batch", "utf8.txt"), "UTF-8\u672C\u6587");
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "batch", "bom.txt"), Buffer.concat([Buffer.from([239, 187, 191]), Buffer.from("BOM\u672C\u6587")]));
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "batch", "cp932.txt"), Buffer.from([67, 80, 57, 51, 50, 58, 147, 250, 150, 123]));
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "batch", "empty.txt"), Buffer.alloc(0));
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "batch", "ledger.xlsx"), Buffer.from("not-read-as-text"));
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "other", "note.md"), "\u5225glob");
   const batch = await get("read_files").run({ patterns: ["batch/*.txt", "other/*.md"] }, ctx);
   import_node_assert.default.ok(batch.includes("UTF-8\u672C\u6587") && batch.includes("BOM\u672C\u6587") && batch.includes("CP932:\u65E5\u672C") && batch.includes("\u5225glob"));
   const directoryPatterns = await get("read_files").run({ patterns: ["batch/", "other/"] }, ctx);
@@ -41962,8 +42579,8 @@ async function testTools() {
   const xlsx = await get("read_files").run({ paths: ["batch/ledger.xlsx", "batch/utf8.txt", "batch/utf8.txt"] }, ctx);
   import_node_assert.default.ok(xlsx.includes("run_command\u3067 tools/Read-Xlsx.ps1 batch/ledger.xlsx \u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044"));
   import_node_assert.default.strictEqual((xlsx.match(/===== batch\/utf8\.txt =====/g) ?? []).length, 1, "duplicate paths must be removed");
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "batch", "large-a.txt"), "A".repeat(9e4));
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "batch", "large-b.txt"), "B".repeat(100));
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "batch", "large-a.txt"), "A".repeat(9e4));
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "batch", "large-b.txt"), "B".repeat(100));
   const limited = await get("read_files").run({ paths: ["batch/large-a.txt", "batch/large-b.txt"] }, ctx);
   import_node_assert.default.ok(limited.includes("\u9014\u4E2D\u6253\u5207\u308A") && limited.includes("batch/large-b.txt: \u6587\u5B57\u6570\u4E88\u7B97\u3092\u4F7F\u3044\u5207\u3063\u305F\u305F\u3081\u672A\u8AAD"));
   import_node_assert.default.ok(limited.length <= 8e4, "read_files complete result must stay within the character budget");
@@ -41975,8 +42592,8 @@ async function testTools() {
     readFilesOutsideThrew = true;
   }
   import_node_assert.default.ok(readFilesOutsideThrew, "read_files must reject workspace escape");
-  const bundledWorkbook = import_node_path5.default.resolve(__dirname, "..", "..", "..", "demo", "renketsu-demo", "workspace", "\u96C6\u8A08\u53F0\u5E33.xlsx");
-  import_node_fs3.default.copyFileSync(bundledWorkbook, import_node_path5.default.join(root, "batch", "real.xlsx"));
+  const bundledWorkbook = import_node_path6.default.resolve(__dirname, "..", "..", "..", "demo", "renketsu-demo", "workspace", "\u96C6\u8A08\u53F0\u5E33.xlsx");
+  import_node_fs4.default.copyFileSync(bundledWorkbook, import_node_path6.default.join(root, "batch", "real.xlsx"));
   const workbookRead = await get("read_xlsx").run({ path: "batch/real.xlsx" }, ctx);
   import_node_assert.default.ok(workbookRead.includes('"ok":true') && workbookRead.includes("sheets"), "read_xlsx must read an arbitrary workspace workbook through the bundled helper");
   import_node_assert.default.ok(workbookRead.includes("\u9023\u7D50\u53F0\u5E33") && workbookRead.includes("\u78BA\u8A8D\u4E8B\u9805"), "read_xlsx must preserve Japanese sheet names across Windows PowerShell stdout");
@@ -42046,14 +42663,14 @@ async function testTools() {
   await get("run_command").run({
     command: 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-Content -LiteralPath safe-write.txt -Value inside-ok"'
   }, ctx);
-  import_node_assert.default.ok(import_node_fs3.default.readFileSync(import_node_path5.default.join(root, "safe-write.txt"), "utf8").includes("inside-ok"), "workspace-local writes must remain allowed");
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "open-me.txt"), "open safely");
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "ledger-open.xlsx"), "not a real workbook");
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "blocked.cmd"), "@echo should-not-run");
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "blocked.ps1"), 'throw "should-not-run"');
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "blocked.exe"), "not-an-executable");
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "blocked.lnk"), "not-a-shortcut");
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "blocked.url"), "[InternetShortcut]\nURL=https://example.com");
+  import_node_assert.default.ok(import_node_fs4.default.readFileSync(import_node_path6.default.join(root, "safe-write.txt"), "utf8").includes("inside-ok"), "workspace-local writes must remain allowed");
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "open-me.txt"), "open safely");
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "ledger-open.xlsx"), "not a real workbook");
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "blocked.cmd"), "@echo should-not-run");
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "blocked.ps1"), 'throw "should-not-run"');
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "blocked.exe"), "not-an-executable");
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "blocked.lnk"), "not-a-shortcut");
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "blocked.url"), "[InternetShortcut]\nURL=https://example.com");
   for (const openCommand of ["open-me.txt", "Invoke-Item open-me.txt", "Start-Process -FilePath open-me.txt", 'start " open-me.txt"', "open open-me.txt", "excel.exe ledger-open.xlsx"]) {
     const normalizedOpen = normalizeWorkspaceOpenCommand(openCommand, ctx);
     import_node_assert.default.ok(normalizedOpen?.includes("Invoke-Item -LiteralPath"), `safe workspace open must normalize: ${openCommand}`);
@@ -42061,11 +42678,11 @@ async function testTools() {
   for (const blockedOpen of ["blocked.cmd", "blocked.ps1", "blocked.exe", "blocked.lnk", "blocked.url"]) {
     import_node_assert.default.throws(() => normalizeWorkspaceOpenCommand(`Invoke-Item ${blockedOpen}`, ctx), /安全に開ける/u, `executable/link open must be rejected: ${blockedOpen}`);
   }
-  import_node_fs3.default.mkdirSync(import_node_path5.default.join(root, "blocked-directory"));
+  import_node_fs4.default.mkdirSync(import_node_path6.default.join(root, "blocked-directory"));
   import_node_assert.default.throws(() => normalizeWorkspaceOpenCommand("Invoke-Item blocked-directory", ctx), /通常ファイル以外/u);
-  const linked = import_node_path5.default.join(root, "linked.txt");
+  const linked = import_node_path6.default.join(root, "linked.txt");
   try {
-    import_node_fs3.default.symlinkSync(import_node_path5.default.join(root, "open-me.txt"), linked, "file");
+    import_node_fs4.default.symlinkSync(import_node_path6.default.join(root, "open-me.txt"), linked, "file");
     import_node_assert.default.throws(() => normalizeWorkspaceOpenCommand("Invoke-Item linked.txt", ctx), /通常ファイル以外/u, "reparse/symlink open must be rejected");
   } catch (err) {
     if (err.code !== "EPERM") throw err;
@@ -42130,14 +42747,14 @@ async function testTools() {
     }, ctx),
     /ワークスペース外への書き込みは禁止/u
   );
-  import_node_assert.default.ok(!import_node_fs3.default.existsSync(import_node_path5.default.resolve(root, "..", outsideName)), "outside write rejection must happen before execution");
+  import_node_assert.default.ok(!import_node_fs4.default.existsSync(import_node_path6.default.resolve(root, "..", outsideName)), "outside write rejection must happen before execution");
   await import_node_assert.default.rejects(
     () => get("run_command").run({
       command: `cmd.exe /c "echo blocked > ..\\${outsideName}"`
     }, ctx),
     /ワークスペース外への書き込みは禁止/u
   );
-  import_node_assert.default.ok(!import_node_fs3.default.existsSync(import_node_path5.default.resolve(root, "..", outsideName)), "outside redirection must be rejected before execution");
+  import_node_assert.default.ok(!import_node_fs4.default.existsSync(import_node_path6.default.resolve(root, "..", outsideName)), "outside redirection must be rejected before execution");
   let wttrBlocked = false;
   try {
     await get("run_command").run({ command: "curl https://wttr.in/?format=3" }, ctx);
@@ -42190,9 +42807,9 @@ async function testTools() {
   const editedTwiceMeta = parseToolResultMeta(editedTwice);
   import_node_assert.default.ok(editedTwiceMeta && editedTwiceMeta.afterHash);
   await rollbackFileChange({ path: "journal/new.txt", afterHash: editedTwiceMeta.afterHash, existedBefore: false, beforeContent: "" }, journalCtx);
-  import_node_assert.default.ok(!import_node_fs3.default.existsSync(import_node_path5.default.join(root, "journal", "new.txt")), "new files must be deleted on rollback");
+  import_node_assert.default.ok(!import_node_fs4.default.existsSync(import_node_path6.default.join(root, "journal", "new.txt")), "new files must be deleted on rollback");
   import_node_assert.default.strictEqual(validateToolArgs(get("edit_file"), { path: "a/hello.txt", old_string: "x", new_string: "y", replace_all: "false" }), "replace_all \u306E\u578B\u304C\u4E0D\u6B63\u3067\u3059\uFF08\u671F\u5F85: boolean\uFF09");
-  import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS tools");
 }
 function mockServer(steps) {
@@ -42264,7 +42881,7 @@ async function withCopilotBridge(responses, fn) {
   }
 }
 async function testAgentLoop() {
-  const root = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
+  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
   await withServer(
     [
       { tool_call: { name: "host.write_file", args: { path: "hello.txt", content: "hi from mock" } } },
@@ -42282,14 +42899,14 @@ async function testAgentLoop() {
       import_node_assert.default.strictEqual(result.aborted, false);
       const toolMsg = result.messages.find((m) => m.role === "tool");
       import_node_assert.default.ok(toolMsg && toolMsg.content && toolMsg.content.includes("\u66F8\u304D\u8FBC\u307F\u5B8C\u4E86"));
-      import_node_assert.default.ok(import_node_fs3.default.readFileSync(import_node_path5.default.join(root, "hello.txt"), "utf8").includes("hi from mock"));
+      import_node_assert.default.ok(import_node_fs4.default.readFileSync(import_node_path6.default.join(root, "hello.txt"), "utf8").includes("hi from mock"));
     }
   );
-  import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS agent-loop");
 }
 async function testV2SafeExecutionOrder() {
-  const root = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-v2-order-"));
+  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-order-"));
   const def = TOOL_DEFS.find((toolDef) => toolDef.name === "write_file");
   const order = [];
   const events = [];
@@ -42330,14 +42947,14 @@ async function testV2SafeExecutionOrder() {
     io,
     [({ args }) => {
       import_node_assert.default.deepStrictEqual(args, { path: "ordered.txt", content: "ordered" });
-      import_node_assert.default.ok(!import_node_fs3.default.existsSync(import_node_path5.default.join(root, "ordered.txt")), "hook must run before the host guard/execution");
+      import_node_assert.default.ok(!import_node_fs4.default.existsSync(import_node_path6.default.join(root, "ordered.txt")), "hook must run before the host guard/execution");
       order.push("hook");
     }]
   );
   import_node_assert.default.strictEqual(executed.status, "succeeded");
   import_node_assert.default.deepStrictEqual(order, ["hook-1", "hook-2", "hook", "approval"]);
   clearToolExecuteBeforeHooks();
-  import_node_assert.default.strictEqual(import_node_fs3.default.readFileSync(import_node_path5.default.join(root, "ordered.txt"), "utf8"), "ordered");
+  import_node_assert.default.strictEqual(import_node_fs4.default.readFileSync(import_node_path6.default.join(root, "ordered.txt"), "utf8"), "ordered");
   const eventTypes = events.map((event) => event.type);
   import_node_assert.default.ok(eventTypes.indexOf("tool.requested") < eventTypes.indexOf("approval.requested"));
   import_node_assert.default.ok(eventTypes.indexOf("tool.approved") < eventTypes.indexOf("tool.started"));
@@ -42345,11 +42962,11 @@ async function testV2SafeExecutionOrder() {
     import_node_assert.default.deepStrictEqual({ origin: event.origin, namespace: event.namespace, authority: event.authority }, { origin: "host", namespace: "app", authority: "authoritative" });
     import_node_assert.default.ok(event.callId);
   }
-  import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS v2-safe-execution-order");
 }
 async function testV2ToolLoopAndEventContract() {
-  const root = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-v2-loop-"));
+  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-loop-"));
   await withCopilotBridge([
     '{"tool":"host.write_file","args":{"path":"v2.txt","content":"from v2"}}',
     '{"answer":"v2\u3067\u66F8\u304D\u8FBC\u307F\u307E\u3057\u305F"}'
@@ -42365,19 +42982,19 @@ async function testV2ToolLoopAndEventContract() {
     });
     import_node_assert.default.strictEqual(result.reply, "v2\u3067\u66F8\u304D\u8FBC\u307F\u307E\u3057\u305F", JSON.stringify({ messages: result.messages, logs, events }));
     import_node_assert.default.strictEqual(result.aborted, false);
-    import_node_assert.default.strictEqual(import_node_fs3.default.readFileSync(import_node_path5.default.join(root, "v2.txt"), "utf8"), "from v2");
+    import_node_assert.default.strictEqual(import_node_fs4.default.readFileSync(import_node_path6.default.join(root, "v2.txt"), "utf8"), "from v2");
     import_node_assert.default.strictEqual(prompts.length, 2);
     import_node_assert.default.ok(prompts[1].includes("BEGIN_UNTRUSTED_HOST_RESULT"));
     import_node_assert.default.ok(events.some((event) => event.type === "model.decision" && event.origin === "copilot" && event.namespace === "none" && event.authority === "claimed"));
     import_node_assert.default.ok(events.some((event) => event.type === "plan.created" && event.origin === "orchestrator" && event.namespace === "none" && event.authority === "derived"));
     import_node_assert.default.ok(events.some((event) => event.type === "tool.succeeded" && event.origin === "host" && event.namespace === "app" && event.authority === "authoritative" && event.callId));
   });
-  import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS v2-tool-loop");
   console.log("PASS v2-event-contract");
 }
 async function testV2HookDenialPropagation() {
-  const root = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-v2-hook-"));
+  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-hook-"));
   let approvals = 0;
   await withServer([
     { tool_call: { name: "write_file", args: { path: "denied.txt", content: "never" } } },
@@ -42404,15 +43021,15 @@ async function testV2HookDenialPropagation() {
     });
     import_node_assert.default.strictEqual(result.reply, "\u30D5\u30C3\u30AF\u62D2\u5426\u3092\u78BA\u8A8D\u3057\u307E\u3057\u305F");
     import_node_assert.default.strictEqual(approvals, 0, "hook rejection must happen before approval");
-    import_node_assert.default.ok(!import_node_fs3.default.existsSync(import_node_path5.default.join(root, "denied.txt")));
+    import_node_assert.default.ok(!import_node_fs4.default.existsSync(import_node_path6.default.join(root, "denied.txt")));
     import_node_assert.default.ok(requestBodies[1].includes("phase2-policy-denied"), "hook rejection reason must be returned to the model");
     import_node_assert.default.ok(events.includes("tool.denied") && events.includes("step.failed"));
   });
-  import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS v2-hook-denial-propagation");
 }
 async function testV2PermissionActionsLastWins() {
-  const root = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-v2-permission-actions-"));
+  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-permission-actions-"));
   const ctx = makeCtx(root);
   const rules = [
     { permission: "write_file", pattern: "*", action: "ask" },
@@ -42463,7 +43080,7 @@ async function testV2PermissionActionsLastWins() {
   );
   import_node_assert.default.strictEqual(denied.status, "denied");
   import_node_assert.default.ok(denied.output.includes("permission denied"));
-  import_node_assert.default.ok(!import_node_fs3.default.existsSync(import_node_path5.default.join(root, "notes/private.txt")));
+  import_node_assert.default.ok(!import_node_fs4.default.existsSync(import_node_path6.default.join(root, "notes/private.txt")));
   import_node_assert.default.strictEqual(approvals, 0, "deny happens before the existing approval flow");
   const readDef = TOOL_DEFS.find((toolDef) => toolDef.name === "read_file");
   const asked = await executeV2ToolCall(
@@ -42489,12 +43106,12 @@ async function testV2PermissionActionsLastWins() {
     }]
   );
   import_node_assert.default.strictEqual(deniedAfterHookMutation.status, "denied", "permission evaluation must bind after other before-hooks");
-  import_node_assert.default.ok(!import_node_fs3.default.existsSync(import_node_path5.default.join(root, "notes/private.txt")));
-  import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+  import_node_assert.default.ok(!import_node_fs4.default.existsSync(import_node_path6.default.join(root, "notes/private.txt")));
+  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS v2-permission-actions-last-wins");
 }
 async function testV2PermissionNewVsOverwrite() {
-  const root = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-v2-permission-overwrite-"));
+  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-permission-overwrite-"));
   const ctx = makeCtx(root);
   const writeDef = TOOL_DEFS.find((toolDef) => toolDef.name === "write_file");
   const rules = [
@@ -42533,16 +43150,16 @@ async function testV2PermissionNewVsOverwrite() {
     import_node_assert.default.strictEqual(second.status, "succeeded");
     import_node_assert.default.strictEqual(second.executed, true);
     import_node_assert.default.strictEqual(approvals, 1, "existing writes must use write_file.overwrite and ask");
-    import_node_assert.default.strictEqual(import_node_fs3.default.readFileSync(import_node_path5.default.join(root, "same.txt"), "utf8"), "second");
+    import_node_assert.default.strictEqual(import_node_fs4.default.readFileSync(import_node_path6.default.join(root, "same.txt"), "utf8"), "second");
   } finally {
-    import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+    import_node_fs4.default.rmSync(root, { recursive: true, force: true });
   }
   console.log("PASS v2-permission-new-vs-overwrite");
 }
 async function testV2PermissionOverwriteLastWins() {
-  const root = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-v2-permission-overwrite-order-"));
+  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-permission-overwrite-order-"));
   const ctx = makeCtx(root);
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "existing.txt"), "before", "utf8");
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "existing.txt"), "before", "utf8");
   const args = { path: "existing.txt", content: "after" };
   try {
     const askThenDeny = [
@@ -42556,15 +43173,15 @@ async function testV2PermissionOverwriteLastWins() {
     import_node_assert.default.strictEqual(await evaluateToolPermission("host.write_file", args, ctx, askThenDeny), "deny");
     import_node_assert.default.strictEqual(await evaluateToolPermission("host.write_file", args, ctx, denyThenAsk), "ask");
   } finally {
-    import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+    import_node_fs4.default.rmSync(root, { recursive: true, force: true });
   }
   console.log("PASS v2-permission-overwrite-last-wins");
 }
 async function testV2PermissionOverwritePrecondition() {
-  const root = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-v2-permission-overwrite-precondition-"));
+  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-permission-overwrite-precondition-"));
   const ctx = makeCtx(root);
-  const target = import_node_path5.default.join(root, "existing.txt");
-  import_node_fs3.default.writeFileSync(target, "before", "utf8");
+  const target = import_node_path6.default.join(root, "existing.txt");
+  import_node_fs4.default.writeFileSync(target, "before", "utf8");
   const originalWriteDef = TOOL_DEFS.find((toolDef) => toolDef.name === "write_file");
   let runs = 0;
   const writeDef = {
@@ -42580,7 +43197,7 @@ async function testV2PermissionOverwritePrecondition() {
     },
     askYesNo: async () => {
       approvals++;
-      import_node_fs3.default.writeFileSync(target, "external-change", "utf8");
+      import_node_fs4.default.writeFileSync(target, "external-change", "utf8");
       return true;
     }
   };
@@ -42604,18 +43221,18 @@ async function testV2PermissionOverwritePrecondition() {
     import_node_assert.default.strictEqual(result.executed, false);
     import_node_assert.default.strictEqual(runs, 0, "approval precondition denial must happen before ToolDef.run");
     import_node_assert.default.strictEqual(approvals, 1);
-    import_node_assert.default.strictEqual(import_node_fs3.default.readFileSync(target, "utf8"), "external-change", "external content must be preserved");
+    import_node_assert.default.strictEqual(import_node_fs4.default.readFileSync(target, "utf8"), "external-change", "external content must be preserved");
   } finally {
-    import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+    import_node_fs4.default.rmSync(root, { recursive: true, force: true });
   }
   console.log("PASS v2-permission-overwrite-precondition");
 }
 async function testV2MinAskProfileZeroApprovals() {
-  const root = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-v2-min-ask-profile-"));
-  const profilePath = import_node_path5.default.join(process.cwd(), "config.flex.json");
-  const profile = JSON.parse(import_node_fs3.default.readFileSync(profilePath, "utf8"));
-  const exampleProfilePath = import_node_path5.default.join(process.cwd(), "config.example.json");
-  const exampleProfile = JSON.parse(import_node_fs3.default.readFileSync(exampleProfilePath, "utf8"));
+  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-min-ask-profile-"));
+  const profilePath = import_node_path6.default.join(process.cwd(), "config.flex.json");
+  const profile = JSON.parse(import_node_fs4.default.readFileSync(profilePath, "utf8"));
+  const exampleProfilePath = import_node_path6.default.join(process.cwd(), "config.example.json");
+  const exampleProfile = JSON.parse(import_node_fs4.default.readFileSync(exampleProfilePath, "utf8"));
   import_node_assert.default.strictEqual(profile.agentLoop, "v1", "shipped flex profile must retain the v1 default");
   import_node_assert.default.strictEqual(profile.safeCommandOnly, true);
   import_node_assert.default.strictEqual(exampleProfile.safeCommandOnly, true, "shipped example profile must retain the safe command hard guard");
@@ -42631,8 +43248,8 @@ async function testV2MinAskProfileZeroApprovals() {
     { permission: "start_process", pattern: "*", action: "allow" },
     { permission: "run_command", pattern: "*", action: "ask" }
   ]);
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "read.txt"), "needle in fixture", "utf8");
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "open.txt"), "open fixture", "utf8");
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "read.txt"), "needle in fixture", "utf8");
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "open.txt"), "open fixture", "utf8");
   const scenarios = [
     { userInput: "\u4E00\u89A7", tool_call: { name: "list_files", args: { path: ".", recursive: false } } },
     { userInput: "\u8AAD\u3080", tool_call: { name: "read_file", args: { path: "read.txt" } } },
@@ -42679,10 +43296,10 @@ async function testV2MinAskProfileZeroApprovals() {
       import_node_assert.default.strictEqual(requestBodies.length, scenarios.length * 2);
     });
     import_node_assert.default.strictEqual(approvals, 0, "ask-minimal profile must complete all five turns with zero approvals");
-    import_node_assert.default.strictEqual(import_node_fs3.default.readFileSync(import_node_path5.default.join(root, "new.txt"), "utf8"), "new fixture");
+    import_node_assert.default.strictEqual(import_node_fs4.default.readFileSync(import_node_path6.default.join(root, "new.txt"), "utf8"), "new fixture");
   } finally {
     startProcessDef.run = originalStartProcessRun;
-    import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+    import_node_fs4.default.rmSync(root, { recursive: true, force: true });
   }
   console.log("PASS v2-min-ask-profile-zero-approvals");
 }
@@ -42704,12 +43321,12 @@ async function testV2PermissionCommandConservative() {
   import_node_assert.default.strictEqual(parseFailure.allowEligible, false);
   const controller = createPermissionHook([{ permission: "run_command", pattern: "*", action: "allow" }]);
   const args = { command: "git status; npm run dev" };
-  await controller.hook({ tool: "host.run_command", args, ctx: makeCtx(import_node_os.default.tmpdir()) });
+  await controller.hook({ tool: "host.run_command", args, ctx: makeCtx(import_node_os2.default.tmpdir()) });
   import_node_assert.default.strictEqual(controller.takeDecision(args), "ask", "complex commands downgrade an allow to ask");
   console.log("PASS v2-permission-command-conservative");
 }
 async function testV2PermissionHardGuardComposition() {
-  const root = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-v2-permission-hard-"));
+  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-permission-hard-"));
   const io = { print: () => {
   }, askYesNo: async () => {
     throw new Error("permission allow must not ask");
@@ -42736,12 +43353,12 @@ async function testV2PermissionHardGuardComposition() {
   );
   import_node_assert.default.notStrictEqual(dangerous.status, "succeeded");
   import_node_assert.default.ok(dangerous.output.includes("\u7834\u58CA\u7684"));
-  import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS v2-permission-hard-guard-composition");
 }
 async function testV2PermissionEmptyCompatibility() {
-  const root = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-v2-permission-empty-"));
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(root, "same.txt"), "same", "utf8");
+  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-v2-permission-empty-"));
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(root, "same.txt"), "same", "utf8");
   const def = TOOL_DEFS.find((toolDef) => toolDef.name === "read_file");
   let missingApprovals = 0;
   let emptyApprovals = 0;
@@ -42774,12 +43391,12 @@ async function testV2PermissionEmptyCompatibility() {
   import_node_assert.default.strictEqual(empty.output, missing.output);
   import_node_assert.default.strictEqual(missingApprovals, 0);
   import_node_assert.default.strictEqual(emptyApprovals, 0);
-  import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS v2-permission-empty-compatibility");
 }
 async function testV2LimitsAndNoProgress() {
   async function expectWarning(label, steps, overrides, expected, prepare) {
-    const root = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), `ca-smoke-v2-${label}-`));
+    const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), `ca-smoke-v2-${label}-`));
     prepare?.(root);
     await withServer(steps, async (baseCfg) => {
       const warnings = [];
@@ -42795,15 +43412,15 @@ async function testV2LimitsAndNoProgress() {
       import_node_assert.default.strictEqual(result.aborted, true, label);
       import_node_assert.default.ok(warnings.some((warning) => warning.includes(expected)), `${label}: ${warnings.join(" | ")}`);
     });
-    import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+    import_node_fs4.default.rmSync(root, { recursive: true, force: true });
   }
   await expectWarning("iteration", [{ tool_call: { name: "list_files", args: {} } }], { maxToolIterations: 1 }, "\u6700\u5927\u53CD\u5FA9\u56DE\u6570");
   await expectWarning("host", [
     { tool_call: { name: "list_files", args: { path: "a" } } },
     { tool_call: { name: "list_files", args: { path: "b" } } }
   ], { maxToolExecutions: 1 }, "host\u30C4\u30FC\u30EB\u5B9F\u884C\u4E0A\u9650", (root) => {
-    import_node_fs3.default.mkdirSync(import_node_path5.default.join(root, "a"));
-    import_node_fs3.default.mkdirSync(import_node_path5.default.join(root, "b"));
+    import_node_fs4.default.mkdirSync(import_node_path6.default.join(root, "a"));
+    import_node_fs4.default.mkdirSync(import_node_path6.default.join(root, "b"));
   });
   await expectWarning("write", [{ tool_call: { name: "write_file", args: { path: "x.txt", content: "x" } } }], { maxWriteExecutions: 0 }, "\u66F8\u304D\u8FBC\u307F\u5B9F\u884C\u4E0A\u9650");
   await expectWarning("command", [{ tool_call: { name: "run_command", args: { command: "echo never" } } }], { allowArbitraryCommands: true, maxCommandExecutions: 0 }, "\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u4E0A\u9650");
@@ -42811,15 +43428,15 @@ async function testV2LimitsAndNoProgress() {
     { tool_call: { name: "list_files", args: { path: "a" } } },
     { tool_call: { name: "list_files", args: { path: "b" } } }
   ], { maxNoProgress: 1 }, "\u9032\u5C55\u304C\u306A\u3044", (root) => {
-    import_node_fs3.default.mkdirSync(import_node_path5.default.join(root, "a"));
-    import_node_fs3.default.mkdirSync(import_node_path5.default.join(root, "b"));
+    import_node_fs4.default.mkdirSync(import_node_path6.default.join(root, "a"));
+    import_node_fs4.default.mkdirSync(import_node_path6.default.join(root, "b"));
   });
   const backend = new FakeBackend(['{"answer":"v1 default"}\nAGENT_END']);
   const v1 = await runConfiguredAgentTurn({
     cfg: { baseURL: "", model: "", provider: "copilot-edge", copilot: { agentMode: false }, turnMode: "chat" },
     messages: [],
     userInput: "default",
-    ctx: makeCtx(import_node_os.default.tmpdir(), false),
+    ctx: makeCtx(import_node_os2.default.tmpdir(), false),
     io: ioStub(true),
     backend
   });
@@ -42836,7 +43453,7 @@ async function testDenial() {
         cfg: { ...cfg, allowArbitraryCommands: true },
         messages: [],
         userInput: "\u8D70\u3063\u3066",
-        ctx: makeCtx(import_node_os.default.tmpdir(), false),
+        ctx: makeCtx(import_node_os2.default.tmpdir(), false),
         io: ioStub(false)
       });
       import_node_assert.default.strictEqual(result.reply, "\u4E2D\u6B62\u3057\u307E\u3057\u305F");
@@ -42848,8 +43465,8 @@ async function testDenial() {
   console.log("PASS denial");
 }
 async function testCopilotChoosesFirstAction() {
-  const answerRoot = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(answerRoot, "evidence.txt"), "bootstrap evidence");
+  const answerRoot = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(answerRoot, "evidence.txt"), "bootstrap evidence");
   const answerBackend = new FakeBackend(['{"answer":"\u3053\u3093\u306B\u3061\u306F\uFF01"}\nAGENT_END']);
   const answerEvents = [];
   const cfg = { baseURL: "", model: "", provider: "copilot-edge", systemPrompt: "WORK_SYSTEM_PROMPT_SENTINEL", copilot: { agentMode: true } };
@@ -42872,9 +43489,9 @@ async function testCopilotChoosesFirstAction() {
   import_node_assert.default.ok(answerBackend.prompts[0].includes("BEGIN_UNTRUSTED_HOST_RESULT"));
   import_node_assert.default.ok(answerBackend.prompts[0].includes("evidence.txt"));
   import_node_assert.default.ok(answerBackend.prompts[0].includes("host.get_weather") && !answerBackend.prompts[0].includes("host.run_command(command)"));
-  import_node_assert.default.deepStrictEqual(import_node_fs3.default.readdirSync(answerRoot), ["evidence.txt"]);
-  import_node_fs3.default.rmSync(answerRoot, { recursive: true, force: true });
-  const safeRoot = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-safe-"));
+  import_node_assert.default.deepStrictEqual(import_node_fs4.default.readdirSync(answerRoot), ["evidence.txt"]);
+  import_node_fs4.default.rmSync(answerRoot, { recursive: true, force: true });
+  const safeRoot = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-safe-"));
   const safeBackend = new FakeBackend(['{"answer":"\u5916\u90E8\u60C5\u5831\u306F\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093"}\nAGENT_END']);
   const safeCtx = { ...makeCtx(safeRoot), safeCommandOnly: true };
   const safeAnswer = await runAgentTurn({ cfg, messages: [], userInput: "\u5929\u6C17\u3092\u6559\u3048\u3066", ctx: safeCtx, io: ioStub(true), backend: safeBackend });
@@ -42891,8 +43508,8 @@ async function testCopilotChoosesFirstAction() {
   const deniedWeather = await runAgentTurn({ cfg, messages: [], userInput: "\u5929\u6C17\u3092\u6559\u3048\u3066", ctx: safeCtx, io: ioStub(true), backend: new FakeBackend(['{"tool":"host.get_weather","args":{"location":"\u5E83\u5CF6\u5E02"}}\nAGENT_END']) });
   import_node_assert.default.strictEqual(deniedWeather.aborted, true);
   import_node_assert.default.ok(deniedWeather.messages.at(-1)?.content?.includes("\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u901A\u4FE1"));
-  import_node_fs3.default.rmSync(safeRoot, { recursive: true, force: true });
-  const toolRoot = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
+  import_node_fs4.default.rmSync(safeRoot, { recursive: true, force: true });
+  const toolRoot = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
   const toolBackend = new FakeBackend([
     '{"tool":"host.list_files","args":{}}\nAGENT_END',
     '{"answer":"\u8ABF\u67FB\u3057\u307E\u3057\u305F"}\nAGENT_END'
@@ -42914,8 +43531,8 @@ async function testCopilotChoosesFirstAction() {
   import_node_assert.default.ok(toolEvents.includes("tool.requested"));
   import_node_assert.default.ok(toolBackend.prompts[0].includes("TOOL_RESULT (\u7B2C0\u30BF\u30FC\u30F3\u81EA\u52D5\u5B9F\u884C"));
   import_node_assert.default.ok(toolBackend.prompts[1].includes("BEGIN_UNTRUSTED_HOST_RESULT"));
-  import_node_fs3.default.rmSync(toolRoot, { recursive: true, force: true });
-  const repeatRoot = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
+  import_node_fs4.default.rmSync(toolRoot, { recursive: true, force: true });
+  const repeatRoot = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
   const repeatBackend = new FakeBackend([
     '{"tool":"host.list_files","args":{}}\nAGENT_END',
     '{"tool":"host.list_files","args":{"path":".","glob":"**/*"}}\nAGENT_END',
@@ -42936,7 +43553,7 @@ async function testCopilotChoosesFirstAction() {
   import_node_assert.default.ok(repeat.messages.some((message) => String(message.content).includes("\u540C\u3058host\u64CD\u4F5C")));
   import_node_assert.default.strictEqual(repeatBackend.calls, 3);
   import_node_assert.default.strictEqual(repeatEvents.filter((type) => type === "tool.requested").length, 2);
-  import_node_fs3.default.rmSync(repeatRoot, { recursive: true, force: true });
+  import_node_fs4.default.rmSync(repeatRoot, { recursive: true, force: true });
   console.log("PASS copilot-tool-choice");
 }
 async function testModeBoundaries() {
@@ -42949,7 +43566,7 @@ async function testModeBoundaries() {
     cfg: { baseURL: "", model: "", provider: "copilot-edge", turnMode: "research", copilot: { agentMode: false } },
     messages: [],
     userInput: "\u6700\u65B0\u60C5\u5831\u3092\u8ABF\u3079\u3066",
-    ctx: makeCtx(import_node_os.default.tmpdir(), false),
+    ctx: makeCtx(import_node_os2.default.tmpdir(), false),
     io: ioStub(true),
     backend: researchBackend
   });
@@ -42965,7 +43582,7 @@ async function testModeBoundaries() {
     cfg: { baseURL: "", model: "", provider: "copilot-edge", turnMode: "research", copilot: { agentMode: false } },
     messages: [],
     userInput: "\u8ABF\u3079\u3066",
-    ctx: makeCtx(import_node_os.default.tmpdir(), false),
+    ctx: makeCtx(import_node_os2.default.tmpdir(), false),
     io: ioStub(true),
     backend: new FakeBackend(["\u691C\u7D22\u7D50\u679C\u306F\u3042\u308A\u307E\u305B\u3093"])
   });
@@ -42976,7 +43593,7 @@ async function testModeBoundaries() {
     cfg: { baseURL: "", model: "", provider: "copilot-edge", turnMode: "chat", copilot: { agentMode: false } },
     messages: [],
     userInput: "\u3053\u3093\u306B\u3061\u306F",
-    ctx: makeCtx(import_node_os.default.tmpdir(), false),
+    ctx: makeCtx(import_node_os2.default.tmpdir(), false),
     io: ioStub(true),
     backend: chatBackend
   });
@@ -42992,7 +43609,7 @@ async function testModeBoundaries() {
     cfg: { baseURL: "", model: "", provider: "copilot-edge", turnMode: "work", copilot: { agentMode: true } },
     messages: [],
     userInput: "\u691C\u7D22\u3057\u3066\u7DE8\u96C6\u3057\u3066",
-    ctx: makeCtx(import_node_os.default.tmpdir(), false),
+    ctx: makeCtx(import_node_os2.default.tmpdir(), false),
     io: { ...ioStub(true), event: (event) => nativeEvents.push(event.type) },
     backend: nativeBackend
   });
@@ -43006,14 +43623,14 @@ async function testModeBoundaries() {
     cfg: { baseURL: "", model: "", provider: "copilot-edge", turnMode: "work", copilot: { agentMode: true } },
     messages: [],
     userInput: "\u5B9F\u884C\u3057\u3066",
-    ctx: makeCtx(import_node_os.default.tmpdir(), false),
+    ctx: makeCtx(import_node_os2.default.tmpdir(), false),
     io: ioStub(true),
     backend: commandDisabledBackend
   });
   import_node_assert.default.strictEqual(commandDisabled.aborted, true);
   import_node_assert.default.strictEqual(commandDisabledBackend.calls, 1);
   import_node_assert.default.ok(commandDisabled.messages.at(-1)?.content?.includes("\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9"));
-  const root = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
+  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
   const approvalBackend = new FakeBackend([
     '{"tool":"host.write_file","args":{"path":"denied.txt","content":"x"}}\nAGENT_END',
     '{"answer":"\u5909\u66F4\u3057\u307E\u305B\u3093\u3067\u3057\u305F"}\nAGENT_END'
@@ -43029,8 +43646,8 @@ async function testModeBoundaries() {
   });
   import_node_assert.default.strictEqual(approval.reply, "\u5909\u66F4\u3057\u307E\u305B\u3093\u3067\u3057\u305F");
   import_node_assert.default.ok(approvalEvents.includes("tool.denied"));
-  import_node_assert.default.ok(!import_node_fs3.default.existsSync(import_node_path5.default.join(root, "denied.txt")));
-  import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+  import_node_assert.default.ok(!import_node_fs4.default.existsSync(import_node_path6.default.join(root, "denied.txt")));
+  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS mode-boundaries");
 }
 async function testProtocolParsing() {
@@ -43359,7 +43976,7 @@ async function testCopilotResponseCompletion() {
     import_node_assert.default.ok(COPILOT_CLICK_SEND_JS.includes(required2), `send-button detector missing ${required2}`);
     if (required2 !== "exclude.test(identity)" && required2 !== "diagnosticButtons") import_node_assert.default.ok(COPILOT_SEND_READY_JS.includes(required2), `send-button readiness detector missing ${required2}`);
   }
-  import_node_assert.default.ok(import_node_fs3.default.readFileSync(import_node_path5.default.join(process.cwd(), "src", "copilot.ts"), "utf8").includes("this.cdpMethod('Input.dispatchMouseEvent', { type: 'mousePressed'"), "send path must retain native CDP mouse fallback");
+  import_node_assert.default.ok(import_node_fs4.default.readFileSync(import_node_path6.default.join(process.cwd(), "src", "copilot.ts"), "utf8").includes("this.cdpMethod('Input.dispatchMouseEvent', { type: 'mousePressed'"), "send path must retain native CDP mouse fallback");
   import_node_assert.default.ok(COPILOT_CLICK_COPY_JS.includes("scope=latest"));
   import_node_assert.default.ok(COPILOT_CLICK_COPY_JS.includes("others.length>0"));
   for (const required2 of ["CopyButtonTestId", "CopyButtonContainerTestId", "pre,code", "copy\\s*(?:response|answer)"]) {
@@ -43642,7 +44259,7 @@ async function testCopilotChunkFallback() {
   console.log("PASS copilot-chunk-fallback");
 }
 async function testCopilotLoop() {
-  const root = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
+  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
   const extractedJson = '{"companies":[{"id":"JP01","values":{"revenue":123}}]}';
   const backend = new FakeBackend([
     `{"tool":"write_file","path":"work/extracted.json","content":"${extractedJson}","AGENT_END":true}`,
@@ -43659,18 +44276,18 @@ async function testCopilotLoop() {
   });
   import_node_assert.default.strictEqual(result.reply, "\u5B8C\u4E86\u3057\u307E\u3057\u305F");
   import_node_assert.default.strictEqual(result.aborted, false);
-  import_node_assert.default.strictEqual(import_node_fs3.default.readFileSync(import_node_path5.default.join(root, "work", "extracted.json"), "utf8"), extractedJson);
+  import_node_assert.default.strictEqual(import_node_fs4.default.readFileSync(import_node_path6.default.join(root, "work", "extracted.json"), "utf8"), extractedJson);
   import_node_assert.default.strictEqual(backend.calls, 2);
   import_node_assert.default.ok(backend.prompts[1].includes("BEGIN_UNTRUSTED_HOST_RESULT"));
   import_node_assert.default.ok(backend.prompts[0].includes("AGENT_END"));
-  import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS copilot-loop");
 }
 async function testCopilotToolResultBudgets() {
-  const readRoot = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(readRoot, "a-long.txt"), `${"x".repeat(3500)}
+  const readRoot = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(readRoot, "a-long.txt"), `${"x".repeat(3500)}
 LATE_TEXT_MARKER`);
-  import_node_fs3.default.writeFileSync(import_node_path5.default.join(readRoot, "z-final.xlsx"), Buffer.from("xlsx-placeholder"));
+  import_node_fs4.default.writeFileSync(import_node_path6.default.join(readRoot, "z-final.xlsx"), Buffer.from("xlsx-placeholder"));
   const readBackend = new FakeBackend([
     '{"tool":"host.read_files","args":{"patterns":["a-long.txt","z-final.xlsx"]}}\nAGENT_END',
     '{"answer":"read complete"}\nAGENT_END'
@@ -43687,10 +44304,10 @@ LATE_TEXT_MARKER`);
   import_node_assert.default.ok(readBackend.prompts[1].includes("LATE_TEXT_MARKER"), "read_files late text must reach the next prompt");
   import_node_assert.default.ok(readBackend.prompts[1].includes("z-final.xlsx"), "final xlsx entry must reach the next prompt");
   import_node_assert.default.ok(readBackend.prompts[1].includes("tools/Read-Xlsx.ps1"), "xlsx guidance must reach the next prompt");
-  import_node_fs3.default.rmSync(readRoot, { recursive: true, force: true });
-  const commandRoot = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
-  const emitterPath = import_node_path5.default.join(commandRoot, "emit-long.cjs");
-  import_node_fs3.default.writeFileSync(emitterPath, "process.stdout.write('A'.repeat(3500) + '\\nlast.xlsx FINAL_WORKBOOK_MARKER')");
+  import_node_fs4.default.rmSync(readRoot, { recursive: true, force: true });
+  const commandRoot = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
+  const emitterPath = import_node_path6.default.join(commandRoot, "emit-long.cjs");
+  import_node_fs4.default.writeFileSync(emitterPath, "process.stdout.write('A'.repeat(3500) + '\\nlast.xlsx FINAL_WORKBOOK_MARKER')");
   const command = `"${process.execPath}" "${emitterPath}"`;
   const commandBackend = new FakeBackend([
     JSON.stringify({ tool: "host.run_command", args: { command } }) + "\nAGENT_END",
@@ -43715,18 +44332,18 @@ LATE_TEXT_MARKER`);
   import_node_assert.default.ok(commandBackend.prompts[0].includes("\u4EFB\u610F\u306Ehost\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u81EA\u52D5\u627F\u8A8D\u6E08\u307F\u3067\u3059"), "auto-approved command prompt must state that approval is already granted");
   import_node_assert.default.ok(!commandBackend.prompts[0].includes("\u5B9F\u884C\u524D\u306B\u627F\u8A8D\u3092\u53D6\u5F97\u3057\u3066\u304F\u3060\u3055\u3044"), "auto-approved command prompt must not ask the model to request approval");
   import_node_assert.default.ok(commandBackend.prompts[1].includes("last.xlsx FINAL_WORKBOOK_MARKER"), "final command workbook must reach the next prompt");
-  import_node_fs3.default.rmSync(commandRoot, { recursive: true, force: true });
+  import_node_fs4.default.rmSync(commandRoot, { recursive: true, force: true });
   console.log("PASS copilot-tool-result-budgets");
 }
 async function testMaxIterationHistory() {
-  const root = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
+  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
   const backend = new FakeBackend(['{"tool":"host.list_files","args":{}}']);
   const cfg = { baseURL: "", model: "", provider: "copilot-edge", maxToolIterations: 1, copilot: { agentMode: true } };
   const result = await runAgentTurn({ cfg, messages: [], userInput: "\u5C65\u6B74\u3092\u6B8B\u3057\u3066", ctx: makeCtx(root), io: ioStub(true), backend });
   import_node_assert.default.strictEqual(result.aborted, true);
   import_node_assert.default.ok(result.messages.some((message) => message.role === "user" && message.content === "\u5C65\u6B74\u3092\u6B8B\u3057\u3066"));
   import_node_assert.default.ok(result.messages.some((message) => message.role === "assistant" && String(message.content).includes("\u6700\u5927\u53CD\u5FA9\u56DE\u6570")));
-  import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS max-iteration-history");
 }
 async function testCopilotPlainMode() {
@@ -43736,7 +44353,7 @@ async function testCopilotPlainMode() {
     cfg,
     messages: [],
     userInput: "\u8CEA\u554F",
-    ctx: makeCtx(import_node_os.default.tmpdir(), false),
+    ctx: makeCtx(import_node_os2.default.tmpdir(), false),
     io: ioStub(true),
     backend
   });
@@ -43746,7 +44363,7 @@ async function testCopilotPlainMode() {
   console.log("PASS copilot-plain");
 }
 async function testCopilotFenceMode() {
-  const root = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "ca-smoke-"));
+  const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "ca-smoke-"));
   const backend = new FakeBackend([
     '{"tool":"host.write_file","args":{"path":"fence.html"}}\n```html\n<p>fence ok</p>\n```\nAGENT_END',
     '{"answer":"\u30D5\u30A7\u30F3\u30B9\u5B8C\u4E86"}\nAGENT_END'
@@ -43761,8 +44378,8 @@ async function testCopilotFenceMode() {
     backend
   });
   import_node_assert.default.strictEqual(result.reply, "\u30D5\u30A7\u30F3\u30B9\u5B8C\u4E86");
-  import_node_assert.default.ok(import_node_fs3.default.readFileSync(import_node_path5.default.join(root, "fence.html"), "utf8").includes("<p>fence ok</p>"));
-  import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+  import_node_assert.default.ok(import_node_fs4.default.readFileSync(import_node_path6.default.join(root, "fence.html"), "utf8").includes("<p>fence ok</p>"));
+  import_node_fs4.default.rmSync(root, { recursive: true, force: true });
   console.log("PASS copilot-fence");
 }
 async function testLocalResponseConverter() {
@@ -43813,16 +44430,16 @@ async function testLocalResponseConverter() {
     ]);
     const converterInput = JSON.parse(lastUserContent);
     import_node_assert.default.deepStrictEqual(converterInput.host_tools?.map((tool2) => tool2.name), ["host.search_files"]);
-    const root = import_node_fs3.default.mkdtempSync(import_node_path5.default.join(import_node_os.default.tmpdir(), "converter-smoke-"));
+    const root = import_node_fs4.default.mkdtempSync(import_node_path6.default.join(import_node_os2.default.tmpdir(), "converter-smoke-"));
     const converted = await runAgentTurn({ cfg: { baseURL: "", model: "", provider: "copilot-edge", copilot: { agentMode: true }, localResponseConverter: settings }, messages: [], userInput: "\u7B54\u3048\u3066", ctx: makeCtx(root), io: ioStub(true), backend: new FakeBackend(["write_file \u306E\u5224\u65AD\u60C5\u5831\u304C\u4E0D\u8DB3"]) });
     import_node_assert.default.strictEqual(converted.reply, "\u5909\u63DB\u6E08\u307F");
     responseContent = '{"tool":"host.write_file","args":{"unexpected":true}}';
     const rejected = await runAgentTurn({ cfg: { baseURL: "", model: "", provider: "copilot-edge", copilot: { agentMode: true }, localResponseConverter: settings }, messages: [], userInput: "\u66F8\u3044\u3066", ctx: makeCtx(root), io: ioStub(true), backend: new FakeBackend(["write_file \u306E\u5224\u65AD\u60C5\u5831\u304C\u4E0D\u8DB3", '{"answer":"schema rejected"}\nAGENT_END']) });
     import_node_assert.default.strictEqual(rejected.reply, "schema rejected");
-    import_node_assert.default.ok(!import_node_fs3.default.existsSync(import_node_path5.default.join(root, "unexpected")), "schema-invalid converter args must not execute");
-    import_node_fs3.default.rmSync(root, { recursive: true, force: true });
+    import_node_assert.default.ok(!import_node_fs4.default.existsSync(import_node_path6.default.join(root, "unexpected")), "schema-invalid converter args must not execute");
+    import_node_fs4.default.rmSync(root, { recursive: true, force: true });
     responseContent = "invalid converter content";
-    const fallback = await runAgentTurn({ cfg: { baseURL: "", model: "", provider: "copilot-edge", copilot: { agentMode: true }, localResponseConverter: settings }, messages: [], userInput: "\u7B54\u3048\u3066", ctx: makeCtx(import_node_os.default.tmpdir(), false), io: ioStub(true), backend: new FakeBackend(["write_file \u306E\u5224\u65AD\u60C5\u5831\u304C\u4E0D\u8DB3", '{"answer":"fallback raw"}\nAGENT_END']) });
+    const fallback = await runAgentTurn({ cfg: { baseURL: "", model: "", provider: "copilot-edge", copilot: { agentMode: true }, localResponseConverter: settings }, messages: [], userInput: "\u7B54\u3048\u3066", ctx: makeCtx(import_node_os2.default.tmpdir(), false), io: ioStub(true), backend: new FakeBackend(["write_file \u306E\u5224\u65AD\u60C5\u5831\u304C\u4E0D\u8DB3", '{"answer":"fallback raw"}\nAGENT_END']) });
     import_node_assert.default.strictEqual(fallback.reply, "fallback raw");
   } finally {
     await new Promise((resolve2) => server.close(() => resolve2()));
@@ -43838,14 +44455,14 @@ async function testLocalResponseConverter() {
   console.log("PASS local-response-converter");
 }
 async function testUiContract() {
-  const html = import_node_fs3.default.readFileSync(import_node_path5.default.join(process.cwd(), "public", "index.html"), "utf8");
-  const classic = import_node_fs3.default.readFileSync(import_node_path5.default.join(process.cwd(), "public", "classic.html"), "utf8");
+  const html = import_node_fs4.default.readFileSync(import_node_path6.default.join(process.cwd(), "public", "index.html"), "utf8");
+  const classic = import_node_fs4.default.readFileSync(import_node_path6.default.join(process.cwd(), "public", "classic.html"), "utf8");
   const script = classic.match(/<script>([\s\S]*?)<\/script>/)?.[1];
   import_node_assert.default.ok(script, "classic UI script missing");
   new Function(script);
   for (const required2 of ["run-plan", "run-eyebrow", "run-pause", "run-resume", "run-retry", "run-complete", "\u56DE\u7B54\u5B8C\u4E86", "activity-details", "\u5B9F\u969B\u306E\u5DEE\u5206\u3092\u8868\u793A", "\u5DEE\u5206\u306E\u7D9A\u304D", "preview-frame", "verification-list", "\u8A3A\u65ADJSON", "approval-meta", "parentRunId", "/api/runs/", "/api/changes/", "compositionstart", "aria-live", "mode-select", "\u3053\u306EPC\u3067\u5B9F\u884C", "Copilot\u5185\u3067\u89B3\u6E2C", "@media (max-width: 720px)", "demo-view", "diagnostic-view", "view-toggle", "artifacts-panel", "\u904E\u53BB\u306E\u5B9F\u884C", "friendlyToolName", "\u5165\u529B\u306E\u53CD\u6620\u306B\u5931\u6557\u3057\u305F\u305F\u3081\u3001\u81EA\u52D5\u3067\u3084\u308A\u76F4\u3057\u3066\u3044\u307E\u3059\u3002"]) import_node_assert.default.ok(classic.includes(required2), `classic UI contract missing: ${required2}`);
-  const frontend = import_node_fs3.default.readFileSync(import_node_path5.default.join(process.cwd(), "src", "ui", "main.ts"), "utf8");
-  const styles = import_node_fs3.default.readFileSync(import_node_path5.default.join(process.cwd(), "src", "ui", "styles.css"), "utf8");
+  const frontend = import_node_fs4.default.readFileSync(import_node_path6.default.join(process.cwd(), "src", "ui", "main.ts"), "utf8");
+  const styles = import_node_fs4.default.readFileSync(import_node_path6.default.join(process.cwd(), "src", "ui", "styles.css"), "utf8");
   for (const required2 of ['lang="ja"', 'id="app"', "/assets/ui.js", "/assets/ui.css", "/classic"]) import_node_assert.default.ok(html.includes(required2), `default shell contract missing: ${required2}`);
   for (const required2 of ["AssistantRuntimeProvider", "useExternalStoreRuntime", "useAui", "aui.composer.setText", "ThreadPrimitive", "ComposerPrimitive", "MessagePrimitive", "approval-allow", "approval-deny", "approval-target", "approval.binding?.path", "approval.binding?.command", "approval.question", "\u5BFE\u8C61\u30D1\u30B9:", "\u5B9F\u884C\u5185\u5BB9:", "\u78BA\u8A8D\u5185\u5BB9:", "progress-panel", "/api/turn", "/api/approvals/resolve", "list", "read", "search", "write", "open", "\u5B89\u5168\u4E0A\u9650\u306B\u3088\u308A\u505C\u6B62\u3057\u307E\u3057\u305F"]) import_node_assert.default.ok(frontend.includes(required2), `default UI contract missing: ${required2}`);
   for (const required2 of ["@media (max-width: 1100px)", "@media (max-width: 860px)", "@media (max-width: 640px)", "prefers-reduced-motion", ":focus-visible"]) import_node_assert.default.ok(styles.includes(required2), `responsive/accessibility contract missing: ${required2}`);
@@ -43861,7 +44478,7 @@ async function testUiContract() {
   import_node_assert.default.ok(!frontend.includes("run.status === 'failed' || run.status === 'canceled' || run.status === 'paused'"), "paused runs must not expose retry");
   import_node_assert.default.ok(!/\.value\s*=/u.test(frontend), "suggestions must use assistant-ui composer state, not DOM value assignment");
   import_node_assert.default.ok(!/dispatchEvent\(new Event\(['"]input['"]/u.test(frontend), "suggestions must not synthesize DOM input events");
-  const server = import_node_fs3.default.readFileSync(import_node_path5.default.join(process.cwd(), "src", "server.ts"), "utf8");
+  const server = import_node_fs4.default.readFileSync(import_node_path6.default.join(process.cwd(), "src", "server.ts"), "utf8");
   for (const required2 of ["url.pathname === '/classic'", "'/assets/ui.js'", "'/assets/ui.css'", "classicHtmlPath", "uiAssets"]) import_node_assert.default.ok(server.includes(required2), `static route contract missing: ${required2}`);
   import_node_assert.default.ok(server.indexOf("url.pathname === '/classic'") < server.indexOf("url.pathname === '/api/info'"), "/classic must be handled before API routes");
   console.log("PASS ui-contract (default + classic + presentation-only)");
@@ -44010,15 +44627,15 @@ async function testOpenAICompatibleBridge() {
   cancellationServer.abortAll();
   await new Promise((resolve2) => cancellationServer.close(() => resolve2()));
   for (const relative of ["vendor/opencode/Get-OpenCode.ps1", "vendor/opencode/manifest.json", "vendor/opencode/LICENSE-OpenCode.txt"]) {
-    const bytes = import_node_fs3.default.readFileSync(import_node_path5.default.join(process.cwd(), relative));
+    const bytes = import_node_fs4.default.readFileSync(import_node_path6.default.join(process.cwd(), relative));
     import_node_assert.default.deepStrictEqual([...bytes.subarray(0, 3)], [239, 187, 191], `${relative} must use UTF-8 BOM`);
     import_node_assert.default.ok(!/(?<!\r)\n/u.test(bytes.subarray(3).toString("utf8")), `${relative} must use CRLF`);
   }
   console.log("PASS openai-compatible-bridge");
 }
 async function testDemoRecordingContract() {
-  const repoRoot = import_node_path5.default.resolve(process.cwd(), "..", "..");
-  const recorder = import_node_fs3.default.readFileSync(import_node_path5.default.join(repoRoot, "demo", "renketsu-demo", "Record-Demo.ps1"), "utf8");
+  const repoRoot = import_node_path6.default.resolve(process.cwd(), "..", "..");
+  const recorder = import_node_fs4.default.readFileSync(import_node_path6.default.join(repoRoot, "demo", "renketsu-demo", "Record-Demo.ps1"), "utf8");
   for (const required2 of [
     "/api/copilot/visible-session",
     "sessionId = $TargetSessionId",
@@ -44030,13 +44647,14 @@ async function testDemoRecordingContract() {
     import_node_assert.default.ok(recorder.includes(required2), `Record-Demo visibility contract missing: ${required2}`);
   }
   import_node_assert.default.ok(!recorder.includes("Sort-Object StartTime -Descending"), "Record-Demo must not choose an unrelated newest Edge window");
-  const motionGate = import_node_fs3.default.readFileSync(import_node_path5.default.join(repoRoot, "demo", "video", "qa", "Test-VideoMotion.ps1"), "utf8");
+  const motionGate = import_node_fs4.default.readFileSync(import_node_path6.default.join(repoRoot, "demo", "video", "qa", "Test-VideoMotion.ps1"), "utf8");
   for (const required2 of ["SampleIntervalSec = 2", "tblend=all_mode=difference", "signalstats", "MinimumMovingPairs", "MinimumMovingRatio", "MaximumStaticSec", "crop=430:900:260:85"]) {
     import_node_assert.default.ok(motionGate.includes(required2), `video motion gate missing: ${required2}`);
   }
   console.log("PASS demo-recording-contract");
 }
 (async () => {
+  await testAuditLog();
   await testWeather();
   await testApprovals();
   await testTools();

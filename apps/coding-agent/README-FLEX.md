@@ -105,6 +105,19 @@ llama.cppサーバーは `--live-converter` のときだけ必要です。フラ
 
 未指定または空配列の `permissions` は従来どおりです。設定例のように広い `ask` を先に置き、後ろへ狭い `allow` / `deny` を置いてください。
 
+## 実行監査ログ（issue #37）
+
+hostツールの完了結果は、既存の`AgentEvent`を`callId`で相関して、専用の`audit.jsonl`へ1結果1行で追記します。既定保存先はワークスペース外のWindows `LOCALAPPDATA\\CompanyAppsShare\\audit\\audit.jsonl`（環境変数がない場合は決定的なユーザー状態／一時領域フォールバック）です。`auditLogDir`で保存ディレクトリを上書きできますが、ワークスペース内を指定すると起動時に拒否されます。ログはUTC日付で分割せず、1つの安定したファイルをappendモードだけで使います。
+
+各行は`schema_version: 1`のJSONオブジェクトで、`event_id`、`timestamp`、`session_id`、`run_id`、`call_id`、`tool_name`、`arguments`（要約と最終引数のSHA-256のみ）、`permission`、`approval`、`result`、`target`（利用可能な変更前／変更後ハッシュを含む）を持ちます。読み取り・CSV出力は次の読み取り専用APIから行えます。`limit`は最大500件で、`tool`、`result`（`success` / `failure` / `refused`）、`permission`（`allow` / `ask` / `deny`）で絞り込めます。クライアントからファイルパスは受け取りません。
+
+```text
+GET /api/audit?limit=100&result=refused
+GET /api/audit.csv?tool=host.write_file
+```
+
+書き込み・切り詰め・削除APIはありません。セッション履歴の削除・選択は監査ログから独立しています。監査ログは追記整合性を目的とし、ハッシュチェーンや改ざん防止は対象外です。承認の事実はUI状態やクライアント理由文字列ではなく、サーバーが既存の承認API／`approval.requested` / `approval.resolved`イベントへ付与する構造化`provenance`（`actor`、`automatic`）から記録します。UI解決は常に`actor=user`、期限切れ・キャンセル・終了による解決は`actor=policy`です。追記障害を検知したサーバーはunhealthyをラッチし、後続のwork／resume／retryを503で停止します。
+
 Layer 1 is the default and needs neither llama.cpp nor a local model. From `apps/coding-agent`, start the agent for any existing folder; that folder is the only file-operation boundary:
 
 ```powershell

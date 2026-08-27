@@ -92,6 +92,8 @@ export interface AgentConfig {
   chatTemplateKwargs?: Record<string, unknown>
   /** Internal per-turn capability lock. It is never selected by the model. */
   turnMode?: TurnMode
+  /** Optional append-only audit directory. It must resolve outside the workspace. */
+  auditLogDir?: string
 }
 
 const DEFAULT_CONFIG: AgentConfig = {

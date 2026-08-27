@@ -4701,8 +4701,8 @@ var require_auth_config = __commonJS({
       writeAuthConfig: () => writeAuthConfig
     });
     module2.exports = __toCommonJS(auth_config_exports);
-    var fs5 = __toESM2(require("fs"));
-    var path7 = __toESM2(require("path"));
+    var fs6 = __toESM2(require("fs"));
+    var path8 = __toESM2(require("path"));
     var import_token_util = require_token_util();
     function getAuthConfigPath() {
       const dataDir = (0, import_token_util.getVercelDataDir)();
@@ -4711,15 +4711,15 @@ var require_auth_config = __commonJS({
           `Unable to find Vercel CLI data directory. Your platform: ${process.platform}. Supported: darwin, linux, win32.`
         );
       }
-      return path7.join(dataDir, "auth.json");
+      return path8.join(dataDir, "auth.json");
     }
     function readAuthConfig() {
       try {
         const authPath = getAuthConfigPath();
-        if (!fs5.existsSync(authPath)) {
+        if (!fs6.existsSync(authPath)) {
           return null;
         }
-        const content = fs5.readFileSync(authPath, "utf8");
+        const content = fs6.readFileSync(authPath, "utf8");
         if (!content) {
           return null;
         }
@@ -4730,11 +4730,11 @@ var require_auth_config = __commonJS({
     }
     function writeAuthConfig(config2) {
       const authPath = getAuthConfigPath();
-      const authDir = path7.dirname(authPath);
-      if (!fs5.existsSync(authDir)) {
-        fs5.mkdirSync(authDir, { mode: 504, recursive: true });
+      const authDir = path8.dirname(authPath);
+      if (!fs6.existsSync(authDir)) {
+        fs6.mkdirSync(authDir, { mode: 504, recursive: true });
       }
-      fs5.writeFileSync(authPath, JSON.stringify(config2, null, 2), { mode: 384 });
+      fs6.writeFileSync(authPath, JSON.stringify(config2, null, 2), { mode: 384 });
     }
     function isValidAccessToken(authConfig, expirationBufferMs = 0) {
       if (!authConfig.token)
@@ -4925,8 +4925,8 @@ var require_token_util = __commonJS({
       saveToken: () => saveToken
     });
     module2.exports = __toCommonJS(token_util_exports);
-    var path7 = __toESM2(require("path"));
-    var fs5 = __toESM2(require("fs"));
+    var path8 = __toESM2(require("path"));
+    var fs6 = __toESM2(require("fs"));
     var import_token_error = require_token_error();
     var import_token_io = require_token_io();
     var import_auth_config = require_auth_config();
@@ -4938,7 +4938,7 @@ var require_token_util = __commonJS({
       if (!dataDir) {
         return null;
       }
-      return path7.join(dataDir, vercelFolder);
+      return path8.join(dataDir, vercelFolder);
     }
     async function getVercelToken2(options) {
       const authConfig = (0, import_auth_config.readAuthConfig)();
@@ -5014,13 +5014,13 @@ var require_token_util = __commonJS({
           "Unable to find project root directory. Have you linked your project with `vc link?`"
         );
       }
-      const prjPath = path7.join(dir, ".vercel", "project.json");
-      if (!fs5.existsSync(prjPath)) {
+      const prjPath = path8.join(dir, ".vercel", "project.json");
+      if (!fs6.existsSync(prjPath)) {
         throw new import_token_error.VercelOidcTokenError(
           "project.json not found, have you linked your project with `vc link?`"
         );
       }
-      const prj = JSON.parse(fs5.readFileSync(prjPath, "utf8"));
+      const prj = JSON.parse(fs6.readFileSync(prjPath, "utf8"));
       if (typeof prj.projectId !== "string" && typeof prj.orgId !== "string") {
         throw new TypeError(
           "Expected a string-valued projectId property. Try running `vc link` to re-link your project."
@@ -5035,11 +5035,11 @@ var require_token_util = __commonJS({
           "Unable to find user data directory. Please reach out to Vercel support."
         );
       }
-      const tokenPath = path7.join(dir, "com.vercel.token", `${projectId}.json`);
+      const tokenPath = path8.join(dir, "com.vercel.token", `${projectId}.json`);
       const tokenJson = JSON.stringify(token);
-      fs5.mkdirSync(path7.dirname(tokenPath), { mode: 504, recursive: true });
-      fs5.writeFileSync(tokenPath, tokenJson);
-      fs5.chmodSync(tokenPath, 432);
+      fs6.mkdirSync(path8.dirname(tokenPath), { mode: 504, recursive: true });
+      fs6.writeFileSync(tokenPath, tokenJson);
+      fs6.chmodSync(tokenPath, 432);
       return;
     }
     function loadToken(projectId) {
@@ -5049,11 +5049,11 @@ var require_token_util = __commonJS({
           "Unable to find user data directory. Please reach out to Vercel support."
         );
       }
-      const tokenPath = path7.join(dir, "com.vercel.token", `${projectId}.json`);
-      if (!fs5.existsSync(tokenPath)) {
+      const tokenPath = path8.join(dir, "com.vercel.token", `${projectId}.json`);
+      if (!fs6.existsSync(tokenPath)) {
         return null;
       }
-      const token = JSON.parse(fs5.readFileSync(tokenPath, "utf8"));
+      const token = JSON.parse(fs6.readFileSync(tokenPath, "utf8"));
       assertVercelOidcTokenResponse(token);
       return token;
     }
@@ -5655,11 +5655,11 @@ var require_shell_quote = __commonJS({
 
 // src/server.ts
 var import_node_http3 = __toESM(require("node:http"));
-var import_node_crypto3 = __toESM(require("node:crypto"));
+var import_node_crypto4 = __toESM(require("node:crypto"));
 var import_node_child_process4 = require("node:child_process");
 var import_node_util2 = __toESM(require("node:util"));
-var import_node_fs4 = __toESM(require("node:fs"));
-var import_node_path6 = __toESM(require("node:path"));
+var import_node_fs5 = __toESM(require("node:fs"));
+var import_node_path7 = __toESM(require("node:path"));
 
 // src/config.ts
 var import_node_fs = __toESM(require("node:fs"));
@@ -5756,9 +5756,322 @@ function resolveApiKey(cfg2) {
   return process.env[cfg2.apiKeyEnv ?? "COMPANY_LLM_API_KEY"];
 }
 
+// src/audit-log.ts
+var import_node_crypto = __toESM(require("node:crypto"));
+var import_node_fs2 = __toESM(require("node:fs"));
+var import_node_os = __toESM(require("node:os"));
+var import_node_path2 = __toESM(require("node:path"));
+var DEFAULT_FILE_NAME = "audit.jsonl";
+var DEFAULT_MAX_RECORDS = 200;
+var MAX_QUERY_RECORDS = 500;
+function existingAncestor(value) {
+  let cursor = import_node_path2.default.resolve(value);
+  while (!import_node_fs2.default.existsSync(cursor)) {
+    const parent = import_node_path2.default.dirname(cursor);
+    if (parent === cursor) return cursor;
+    cursor = parent;
+  }
+  return cursor;
+}
+function realPathWithMissingTail(value) {
+  const absolute = import_node_path2.default.resolve(value);
+  const ancestor = existingAncestor(absolute);
+  const tail = import_node_path2.default.relative(ancestor, absolute);
+  let realAncestor;
+  try {
+    realAncestor = import_node_fs2.default.realpathSync.native(ancestor);
+  } catch {
+    realAncestor = import_node_path2.default.resolve(ancestor);
+  }
+  return import_node_path2.default.resolve(realAncestor, tail);
+}
+function isInside(root, candidate) {
+  const relative = import_node_path2.default.relative(realPathWithMissingTail(root), realPathWithMissingTail(candidate));
+  return relative === "" || relative !== ".." && !relative.startsWith(`..${import_node_path2.default.sep}`) && !import_node_path2.default.isAbsolute(relative);
+}
+function assertNoReparseComponents(value) {
+  let cursor = import_node_path2.default.resolve(value);
+  while (true) {
+    if (import_node_fs2.default.existsSync(cursor)) {
+      const stat = import_node_fs2.default.lstatSync(cursor);
+      if (stat.isSymbolicLink()) throw new Error(`\u76E3\u67FB\u30ED\u30B0\u4FDD\u5B58\u5148\u306B\u30B7\u30F3\u30DC\u30EA\u30C3\u30AF\u30EA\u30F3\u30AF\uFF0F\u518D\u89E3\u6790\u70B9\u306F\u6307\u5B9A\u3067\u304D\u307E\u305B\u3093: ${cursor}`);
+    }
+    const parent = import_node_path2.default.dirname(cursor);
+    if (parent === cursor) return;
+    cursor = parent;
+  }
+}
+function fallbackDirectory(workspace2) {
+  const candidates = process.platform === "win32" ? [
+    process.env.LOCALAPPDATA,
+    process.env.APPDATA,
+    import_node_os.default.homedir() ? import_node_path2.default.join(import_node_os.default.homedir(), ".company-apps-share") : void 0,
+    import_node_os.default.tmpdir()
+  ] : [
+    process.env.XDG_STATE_HOME,
+    import_node_os.default.homedir() ? import_node_path2.default.join(import_node_os.default.homedir(), ".local", "state") : void 0,
+    import_node_os.default.tmpdir()
+  ];
+  for (const base of candidates) {
+    if (!base) continue;
+    const candidate = process.platform === "win32" ? import_node_path2.default.join(base, "CompanyAppsShare", "audit") : import_node_path2.default.join(base, "company-apps-share", "audit");
+    if (!isInside(workspace2, candidate)) return candidate;
+  }
+  throw new Error("\u76E3\u67FB\u30ED\u30B0\u306E\u65E2\u5B9A\u4FDD\u5B58\u5148\u3092\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u306B\u6C7A\u5B9A\u3067\u304D\u307E\u305B\u3093");
+}
+function resolveAuditDirectory(workspace2, configured) {
+  const root = import_node_path2.default.resolve(workspace2);
+  const requested = typeof configured === "string" && configured.trim() ? import_node_path2.default.resolve(configured) : fallbackDirectory(root);
+  if (isInside(root, requested)) {
+    throw new Error(`\u76E3\u67FB\u30ED\u30B0\u4FDD\u5B58\u5148\u306F\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u3067\u306A\u3051\u308C\u3070\u306A\u308A\u307E\u305B\u3093: ${requested}`);
+  }
+  return requested;
+}
+function canonicalizeAuditValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalizeAuditValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => [key, canonicalizeAuditValue(item)]));
+  }
+  return value;
+}
+function auditArgsSha256(args) {
+  const canonical = JSON.stringify(canonicalizeAuditValue(args));
+  return import_node_crypto.default.createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+function makeAuditArguments(summary, args) {
+  return { summary, sha256: auditArgsSha256(args) };
+}
+function nullAuditTarget(target) {
+  return {
+    path: typeof target?.path === "string" ? target.path : null,
+    before_sha256: typeof target?.before_sha256 === "string" ? target.before_sha256 : null,
+    after_sha256: typeof target?.after_sha256 === "string" ? target.after_sha256 : null
+  };
+}
+var READ_TOOL_NAMES = /* @__PURE__ */ new Set(["host.read_file", "host.read_files", "host.list_files", "host.search_files", "host.read_xlsx", "host.get_weather"]);
+function permissionFromEvents(event, history) {
+  if (event.audit?.permission?.decision) return event.audit.permission.decision;
+  const prior = [...history].reverse().find((candidate) => candidate.audit?.permission?.decision);
+  if (prior?.audit?.permission?.decision) return prior.audit.permission.decision;
+  return event.tool && READ_TOOL_NAMES.has(event.tool) ? "allow" : "ask";
+}
+function structuredApprovalProvenance(event) {
+  if (event.origin !== "host" || event.authority !== "authoritative") return void 0;
+  if (typeof event.metadata?.approval !== "object" || event.metadata.approval === null) return void 0;
+  const raw = event.metadata.approval.provenance;
+  if (!raw || typeof raw !== "object") return void 0;
+  const candidate = raw;
+  if (candidate.actor !== "user" && candidate.actor !== "policy" || typeof candidate.automatic !== "boolean") return void 0;
+  return { actor: candidate.actor, automatic: candidate.automatic };
+}
+function auditRecordFromOutcome(input) {
+  const { event } = input;
+  if (event.origin && event.origin !== "host") return null;
+  if (event.type !== "tool.succeeded" && event.type !== "tool.failed" && event.type !== "tool.denied") return null;
+  const history = input.history ?? [];
+  const callEvents = event.callId ? history.filter((candidate) => candidate.callId === event.callId) : [];
+  const eventAudit = event.audit;
+  const requested = [...callEvents].reverse().find((candidate) => candidate.type === "tool.requested");
+  const argumentsMeta = eventAudit?.arguments ?? requested?.audit?.arguments ?? makeAuditArguments(event.summary ?? event.tool ?? "", {});
+  const permission = permissionFromEvents(event, callEvents);
+  const approvalRequested = callEvents.some((candidate) => candidate.type === "approval.requested");
+  const resolvedEvents = callEvents.filter((candidate) => candidate.type === "approval.resolved" && typeof candidate.approved === "boolean");
+  const policyResolved = [...resolvedEvents].reverse().find((candidate) => {
+    const provenance = structuredApprovalProvenance(candidate);
+    return provenance?.actor === "policy" && provenance.automatic === true;
+  });
+  const resolved = policyResolved ?? [...resolvedEvents].reverse()[0];
+  const automatic = [...callEvents].reverse().find((candidate) => candidate.type === "tool.approved" && candidate.metadata?.automatic === true);
+  let approval = eventAudit?.approval ?? {
+    required: approvalRequested || Boolean(event.tool && !READ_TOOL_NAMES.has(event.tool)),
+    outcome: "not_required",
+    actor: "policy",
+    automatic: false
+  };
+  if (resolved) {
+    const provenance = structuredApprovalProvenance(resolved);
+    const policyResolution = provenance?.actor === "policy" && provenance.automatic === true;
+    approval = { required: true, outcome: resolved.approved ? "approved" : "denied", actor: policyResolution ? "policy" : "user", automatic: policyResolution };
+  } else if (automatic) {
+    approval = { required: true, outcome: "approved", actor: "policy", automatic: true };
+  } else if (permission === "deny") {
+    approval = { required: false, outcome: "not_required", actor: "policy", automatic: true };
+  }
+  const metadata = event.metadata;
+  const target = nullAuditTarget({
+    ...eventAudit?.target,
+    path: eventAudit?.target?.path ?? (typeof metadata?.path === "string" ? metadata.path : null),
+    before_sha256: eventAudit?.target?.before_sha256 ?? (typeof metadata?.beforeHash === "string" ? metadata.beforeHash : null),
+    after_sha256: eventAudit?.target?.after_sha256 ?? (typeof metadata?.afterHash === "string" ? metadata.afterHash : null)
+  });
+  const outcome = event.type === "tool.succeeded" ? "success" : event.type === "tool.failed" ? "failure" : "refused";
+  return makeAuditRecord({
+    event_id: event.eventId ?? `${input.runId}-audit-${event.callId ?? event.type}`,
+    timestamp: new Date(event.at ?? Date.now()).toISOString(),
+    session_id: input.sessionId,
+    run_id: input.runId,
+    call_id: event.callId ?? null,
+    tool_name: event.tool ?? "unknown",
+    arguments: argumentsMeta,
+    permission: { decision: permission },
+    approval,
+    result: {
+      outcome,
+      duration_ms: typeof event.durationMs === "number" ? event.durationMs : null,
+      error: outcome === "success" ? null : event.error ?? event.output ?? null
+    },
+    target
+  });
+}
+function clampLimit(value, fallback = DEFAULT_MAX_RECORDS) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(MAX_QUERY_RECORDS, Math.max(1, Math.trunc(value)));
+}
+function validRecord(value) {
+  if (!value || typeof value !== "object") return false;
+  const record2 = value;
+  return record2.schema_version === 1 && typeof record2.event_id === "string" && typeof record2.timestamp === "string" && typeof record2.session_id === "string" && typeof record2.run_id === "string" && (record2.call_id === null || typeof record2.call_id === "string") && typeof record2.tool_name === "string" && !!record2.arguments && typeof record2.arguments.summary === "string" && typeof record2.arguments.sha256 === "string" && !!record2.permission && (record2.permission.decision === "allow" || record2.permission.decision === "ask" || record2.permission.decision === "deny") && !!record2.approval && typeof record2.approval.required === "boolean" && (record2.approval.outcome === "not_required" || record2.approval.outcome === "approved" || record2.approval.outcome === "denied") && (record2.approval.actor === "policy" || record2.approval.actor === "user") && typeof record2.approval.automatic === "boolean" && !!record2.result && (record2.result.outcome === "success" || record2.result.outcome === "failure" || record2.result.outcome === "refused") && (record2.result.duration_ms === null || typeof record2.result.duration_ms === "number") && (record2.result.error === null || typeof record2.result.error === "string") && !!record2.target && (record2.target.path === null || typeof record2.target.path === "string") && (record2.target.before_sha256 === null || typeof record2.target.before_sha256 === "string") && (record2.target.after_sha256 === null || typeof record2.target.after_sha256 === "string");
+}
+function csvCell(value) {
+  const text2 = typeof value === "string" ? value : JSON.stringify(value);
+  const normalized = text2 ?? "";
+  return /[",\r\n]/u.test(normalized) ? `"${normalized.replaceAll('"', '""')}"` : normalized;
+}
+var AUDIT_CSV_HEADERS = [
+  "schema_version",
+  "event_id",
+  "timestamp",
+  "session_id",
+  "run_id",
+  "call_id",
+  "tool_name",
+  "arguments",
+  "permission",
+  "approval",
+  "result",
+  "target"
+];
+function auditRecordsToCsv(records2) {
+  const rows = [AUDIT_CSV_HEADERS.join(",")];
+  for (const record2 of records2) {
+    rows.push([
+      record2.schema_version,
+      record2.event_id,
+      record2.timestamp,
+      record2.session_id,
+      record2.run_id,
+      record2.call_id,
+      record2.tool_name,
+      record2.arguments,
+      record2.permission,
+      record2.approval,
+      record2.result,
+      record2.target
+    ].map(csvCell).join(","));
+  }
+  return `${rows.join("\r\n")}\r
+`;
+}
+var AuditLog = class {
+  directory;
+  filePath;
+  initialized = false;
+  appendHandle = null;
+  appendFailure = null;
+  seenOutcomeKeys = /* @__PURE__ */ new Set();
+  constructor(options) {
+    this.directory = resolveAuditDirectory(options.workspace, options.directory);
+    const fileName = options.fileName?.trim() || DEFAULT_FILE_NAME;
+    if (import_node_path2.default.basename(fileName) !== fileName || fileName.includes("..")) throw new Error("\u76E3\u67FB\u30ED\u30B0\u306E\u30D5\u30A1\u30A4\u30EB\u540D\u304C\u4E0D\u6B63\u3067\u3059");
+    this.filePath = import_node_path2.default.join(this.directory, fileName);
+  }
+  /** Create/open the destination in append mode and validate its boundaries. */
+  initialize() {
+    if (this.initialized) return;
+    import_node_fs2.default.mkdirSync(this.directory, { recursive: true });
+    assertNoReparseComponents(this.directory);
+    assertNoReparseComponents(this.filePath);
+    if (isInside(this.directory, this.filePath) === false) throw new Error("\u76E3\u67FB\u30ED\u30B0\u30D5\u30A1\u30A4\u30EB\u304C\u4FDD\u5B58\u5148\u30C7\u30A3\u30EC\u30AF\u30C8\u30EA\u5916\u3067\u3059");
+    if (import_node_fs2.default.existsSync(this.filePath)) {
+      const stat = import_node_fs2.default.lstatSync(this.filePath);
+      if (stat.isSymbolicLink()) throw new Error(`\u76E3\u67FB\u30ED\u30B0\u30D5\u30A1\u30A4\u30EB\u306F\u30B7\u30F3\u30DC\u30EA\u30C3\u30AF\u30EA\u30F3\u30AF\uFF0F\u518D\u89E3\u6790\u70B9\u3092\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093: ${this.filePath}`);
+      if (!stat.isFile()) throw new Error(`\u76E3\u67FB\u30ED\u30B0\u304C\u901A\u5E38\u30D5\u30A1\u30A4\u30EB\u3067\u306F\u3042\u308A\u307E\u305B\u3093: ${this.filePath}`);
+    }
+    this.appendHandle = import_node_fs2.default.openSync(this.filePath, "a");
+    this.initialized = true;
+  }
+  get ready() {
+    return this.initialized;
+  }
+  get healthy() {
+    return this.initialized && this.appendFailure === null;
+  }
+  get failureReason() {
+    return this.appendFailure;
+  }
+  /** Append one complete JSON object line; existing bytes are never replaced. */
+  append(record2, dedupeKey) {
+    if (!this.initialized) throw new Error("\u76E3\u67FB\u30ED\u30B0\u304C\u521D\u671F\u5316\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
+    if (this.appendFailure) throw new Error(`\u76E3\u67FB\u30ED\u30B0\u306Funhealthy\u3067\u3059: ${this.appendFailure}`);
+    if (!validRecord(record2)) {
+      this.appendFailure = "\u76E3\u67FB\u30ED\u30B0\u30EC\u30B3\u30FC\u30C9\u304Cschema_version 1\u306B\u9069\u5408\u3057\u307E\u305B\u3093";
+      throw new Error(`\u76E3\u67FB\u30ED\u30B0\u8FFD\u8A18\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${this.appendFailure}`);
+    }
+    if (dedupeKey && this.seenOutcomeKeys.has(dedupeKey)) return;
+    const line = `${JSON.stringify(record2)}
+`;
+    if (this.appendHandle === null) {
+      this.appendFailure = "\u76E3\u67FB\u30ED\u30B0\u306E\u8FFD\u8A18\u30CF\u30F3\u30C9\u30EB\u304C\u3042\u308A\u307E\u305B\u3093";
+      throw new Error(`\u76E3\u67FB\u30ED\u30B0\u8FFD\u8A18\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${this.appendFailure}`);
+    }
+    try {
+      import_node_fs2.default.writeSync(this.appendHandle, line, void 0, "utf8");
+    } catch (err) {
+      this.appendFailure = err.message || String(err);
+      throw new Error(`\u76E3\u67FB\u30ED\u30B0\u8FFD\u8A18\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${this.appendFailure}`);
+    }
+    if (dedupeKey) this.seenOutcomeKeys.add(dedupeKey);
+  }
+  records(limit = DEFAULT_MAX_RECORDS, filters = {}) {
+    if (!this.initialized) throw new Error("\u76E3\u67FB\u30ED\u30B0\u304C\u521D\u671F\u5316\u3055\u308C\u3066\u3044\u307E\u305B\u3093");
+    if (!import_node_fs2.default.existsSync(this.filePath)) return [];
+    const text2 = import_node_fs2.default.readFileSync(this.filePath, "utf8");
+    const lines = text2.split(/\r?\n/u);
+    const found = [];
+    for (let i = lines.length - 1; i >= 0 && found.length < clampLimit(limit); i--) {
+      const line = lines[i]?.trim();
+      if (!line) continue;
+      try {
+        const parsed = JSON.parse(line);
+        if (!validRecord(parsed)) continue;
+        const record2 = parsed;
+        if (filters.tool && record2.tool_name !== filters.tool) continue;
+        if (filters.result && record2.result.outcome !== filters.result) continue;
+        if (filters.permission && record2.permission.decision !== filters.permission) continue;
+        found.push(record2);
+      } catch {
+      }
+    }
+    return found;
+  }
+  csv(limit = DEFAULT_MAX_RECORDS, filters = {}) {
+    return auditRecordsToCsv(this.records(limit, filters));
+  }
+};
+function createAuditLog(options) {
+  return new AuditLog(options);
+}
+function auditAvailability(log, initError) {
+  if (log?.healthy && !initError) return { available: true, detail: null };
+  return { available: false, detail: initError ?? log?.failureReason ?? "\u76E3\u67FB\u30ED\u30B0\u304C\u521D\u671F\u5316\u3055\u308C\u3066\u3044\u307E\u305B\u3093" };
+}
+function makeAuditRecord(input) {
+  return { schema_version: 1, ...input };
+}
+
 // src/agent.ts
-var import_node_crypto2 = __toESM(require("node:crypto"));
-var import_node_path3 = __toESM(require("node:path"));
+var import_node_crypto3 = __toESM(require("node:crypto"));
+var import_node_path4 = __toESM(require("node:path"));
 var import_jsonrepair2 = __toESM(require_cjs());
 
 // src/converter.ts
@@ -6211,11 +6524,11 @@ async function chat(cfg2, messages, tools, signal) {
 }
 
 // src/tools.ts
-var import_node_fs2 = __toESM(require("node:fs"));
+var import_node_fs3 = __toESM(require("node:fs"));
 var import_node_child_process2 = require("node:child_process");
-var import_node_crypto = __toESM(require("node:crypto"));
+var import_node_crypto2 = __toESM(require("node:crypto"));
 var import_promises = __toESM(require("node:fs/promises"));
-var import_node_path2 = __toESM(require("node:path"));
+var import_node_path3 = __toESM(require("node:path"));
 var import_node_util = __toESM(require("node:util"));
 var import_iconv_lite = __toESM(require_lib());
 
@@ -6551,7 +6864,7 @@ var MAX_READ_FILES_CHARS = 8e4;
 var READ_XLSX_USAGE = "powershell.exe -NoProfile -File tools\\Read-Xlsx.ps1 -Path <\u30D1\u30B9>";
 var UPDATE_LEDGER_USAGE = "powershell.exe -NoProfile -File tools\\Update-Ledger.ps1 -Extracted <\u62BD\u51FAJSON> -Rates <\u30EC\u30FC\u30C8CSV> -Ledger <\u53F0\u5E33xlsx>";
 function sha256(text2) {
-  return import_node_crypto.default.createHash("sha256").update(text2, "utf8").digest("hex");
+  return import_node_crypto2.default.createHash("sha256").update(text2, "utf8").digest("hex");
 }
 function lineDelta(before, after) {
   const beforeLines = before === "" ? [] : before.split(/\r?\n/);
@@ -6631,17 +6944,17 @@ function normalizeRunCommand(command) {
       throw new Error(`Read-Xlsx \u306F ${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
     }
     const normalized = pathWords.map((word) => word.replaceAll("/", "\\"));
-    const reportPaths = normalized.length > 1 ? normalized.filter((word) => !(import_node_path2.default.win32.dirname(word) === "." && import_node_path2.default.win32.basename(word).toLowerCase() === "\u96C6\u8A08\u53F0\u5E33.xlsx")) : normalized;
+    const reportPaths = normalized.length > 1 ? normalized.filter((word) => !(import_node_path3.default.win32.dirname(word) === "." && import_node_path3.default.win32.basename(word).toLowerCase() === "\u96C6\u8A08\u53F0\u5E33.xlsx")) : normalized;
     if (reportPaths.length === 0) throw new Error(`Read-Xlsx \u306F ${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
     let normalizedPath;
     if (reportPaths.length === 1) {
       normalizedPath = reportPaths[0];
     } else {
-      const directories = new Set(reportPaths.map((word) => import_node_path2.default.win32.dirname(word).toLowerCase()));
-      if (directories.size !== 1 || reportPaths.some((word) => import_node_path2.default.win32.extname(word).toLowerCase() !== ".xlsx")) {
+      const directories = new Set(reportPaths.map((word) => import_node_path3.default.win32.dirname(word).toLowerCase()));
+      if (directories.size !== 1 || reportPaths.some((word) => import_node_path3.default.win32.extname(word).toLowerCase() !== ".xlsx")) {
         throw new Error(`Read-Xlsx \u306E\u8907\u6570\u30D5\u30A1\u30A4\u30EB\u306F\u540C\u3058\u30D5\u30A9\u30EB\u30C0\u30FC\u306E *.xlsx \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\u3002${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
       }
-      normalizedPath = import_node_path2.default.win32.join(import_node_path2.default.win32.dirname(reportPaths[0]), "*.xlsx");
+      normalizedPath = import_node_path3.default.win32.join(import_node_path3.default.win32.dirname(reportPaths[0]), "*.xlsx");
     }
     return `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\\Read-Xlsx.ps1 -Path ${quoteCommandWord(normalizedPath)}`;
   }
@@ -6695,8 +7008,8 @@ function normalizeWorkspaceOpenCommand(command, ctx2) {
   } catch {
     throw new Error(`run_command\u62D2\u5426: \u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u3078\u306E\u30A2\u30AF\u30BB\u30B9\u306F\u7981\u6B62\u3067\u3059: ${candidate}`);
   }
-  if (!import_node_fs2.default.existsSync(absolute)) throw new Error(`run_command\u62D2\u5426: \u958B\u304F\u5BFE\u8C61\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${candidate}`);
-  const stat = import_node_fs2.default.lstatSync(absolute);
+  if (!import_node_fs3.default.existsSync(absolute)) throw new Error(`run_command\u62D2\u5426: \u958B\u304F\u5BFE\u8C61\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${candidate}`);
+  const stat = import_node_fs3.default.lstatSync(absolute);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`run_command\u62D2\u5426: \u901A\u5E38\u30D5\u30A1\u30A4\u30EB\u4EE5\u5916\u306F\u958B\u3051\u307E\u305B\u3093: ${candidate}`);
   const allowedExtensions = /* @__PURE__ */ new Set([
     ".txt",
@@ -6734,7 +7047,7 @@ function normalizeWorkspaceOpenCommand(command, ctx2) {
     ".wav",
     ".m4a"
   ]);
-  const extension = import_node_path2.default.extname(absolute).toLowerCase();
+  const extension = import_node_path3.default.extname(absolute).toLowerCase();
   if (!allowedExtensions.has(extension)) throw new Error(`run_command\u62D2\u5426: \u5B89\u5168\u306B\u958B\u3051\u308B\u901A\u5E38\u6587\u66F8\u30FB\u30E1\u30C7\u30A3\u30A2\u5F62\u5F0F\u3067\u306F\u3042\u308A\u307E\u305B\u3093: ${candidate}`);
   if (absolute.includes("'")) throw new Error("run_command\u62D2\u5426: \u958B\u304F\u5BFE\u8C61\u306E\u30D1\u30B9\u306B\u5F15\u7528\u7B26\u306F\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093");
   return `powershell.exe -NoProfile -Command "Invoke-Item -LiteralPath '${absolute}'"`;
@@ -7052,7 +7365,7 @@ function workspaceGlobToRegExp(pattern) {
 function normalizeWorkspaceGlob(pattern) {
   const normalized = pattern.trim().replaceAll("\\", "/").replace(/^\.\//, "");
   if (!normalized) throw new Error("pattern \u304C\u7A7A\u3067\u3059");
-  if (import_node_path2.default.isAbsolute(normalized) || /^[A-Za-z]:/.test(normalized) || normalized.split("/").includes("..")) {
+  if (import_node_path3.default.isAbsolute(normalized) || /^[A-Za-z]:/.test(normalized) || normalized.split("/").includes("..")) {
     throw new Error(`\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u3092\u6307\u3059pattern\u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093: ${pattern}`);
   }
   return normalized.endsWith("/") ? `${normalized}*` : normalized;
@@ -7067,29 +7380,29 @@ function decodeWorkspaceText(bytes) {
     return import_iconv_lite.default.decode(bytes, "cp932");
   }
 }
-function realPathWithMissingTail(abs) {
+function realPathWithMissingTail2(abs) {
   let cursor = abs;
   const tail = [];
-  while (!import_node_fs2.default.existsSync(cursor)) {
-    const parent = import_node_path2.default.dirname(cursor);
+  while (!import_node_fs3.default.existsSync(cursor)) {
+    const parent = import_node_path3.default.dirname(cursor);
     if (parent === cursor) return abs;
-    tail.unshift(import_node_path2.default.basename(cursor));
+    tail.unshift(import_node_path3.default.basename(cursor));
     cursor = parent;
   }
-  const real = import_node_fs2.default.realpathSync.native(cursor);
-  return import_node_path2.default.resolve(real, ...tail);
+  const real = import_node_fs3.default.realpathSync.native(cursor);
+  return import_node_path3.default.resolve(real, ...tail);
 }
 function isWithin(root, candidate) {
-  const relative = import_node_path2.default.relative(root, candidate);
-  return relative === "" || !relative.startsWith("..") && !import_node_path2.default.isAbsolute(relative);
+  const relative = import_node_path3.default.relative(root, candidate);
+  return relative === "" || !relative.startsWith("..") && !import_node_path3.default.isAbsolute(relative);
 }
 function resolveInWorkspace(p, ctx2) {
   if (!p) throw new Error("\u30D1\u30B9\u304C\u7A7A\u3067\u3059");
-  const workspaceAbs = import_node_path2.default.resolve(ctx2.workspace);
-  const abs = import_node_path2.default.isAbsolute(p) ? import_node_path2.default.normalize(p) : import_node_path2.default.resolve(workspaceAbs, p);
+  const workspaceAbs = import_node_path3.default.resolve(ctx2.workspace);
+  const abs = import_node_path3.default.isAbsolute(p) ? import_node_path3.default.normalize(p) : import_node_path3.default.resolve(workspaceAbs, p);
   if (ctx2.restrictToWorkspace) {
-    const rootReal = realPathWithMissingTail(workspaceAbs);
-    const candidateReal = realPathWithMissingTail(abs);
+    const rootReal = realPathWithMissingTail2(workspaceAbs);
+    const candidateReal = realPathWithMissingTail2(abs);
     if (!isWithin(rootReal, candidateReal)) {
       throw new Error(`\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u306E\u30D1\u30B9\u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093: ${p}`);
     }
@@ -7106,7 +7419,7 @@ async function walk(dir, cb, depth = 0) {
   }
   for (const e of entries) {
     if (IGNORED_DIRS.has(e.name)) continue;
-    const full = import_node_path2.default.join(dir, e.name);
+    const full = import_node_path3.default.join(dir, e.name);
     if (e.isDirectory()) await walk(full, cb, depth + 1);
     else if (e.isFile()) cb(full);
   }
@@ -7197,14 +7510,14 @@ var TOOL_DEFS = [
         for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name, "ja"))) {
           if (out.length >= MAX_LIST) break;
           if (!re2 || re2.test(entry.name)) {
-            const relative = import_node_path2.default.relative(ctx2.workspace, import_node_path2.default.join(base, entry.name)).replaceAll("\\", "/");
+            const relative = import_node_path3.default.relative(ctx2.workspace, import_node_path3.default.join(base, entry.name)).replaceAll("\\", "/");
             out.push(entry.isDirectory() ? `${relative}/` : relative);
           }
         }
       } else {
         await walk(base, (f) => {
           if (out.length >= MAX_LIST) return;
-          if (!re2 || re2.test(import_node_path2.default.basename(f))) out.push(import_node_path2.default.relative(ctx2.workspace, f).replaceAll("\\", "/"));
+          if (!re2 || re2.test(import_node_path3.default.basename(f))) out.push(import_node_path3.default.relative(ctx2.workspace, f).replaceAll("\\", "/"));
         });
       }
       return out.length === 0 ? "(\u8A72\u5F53\u306A\u3057)" : truncate(out.join("\n"));
@@ -7269,14 +7582,14 @@ var TOOL_DEFS = [
       const selected = /* @__PURE__ */ new Map();
       const addFile = (abs, displayPath) => {
         const checked = resolveInWorkspace(abs, ctx2);
-        const relative = (displayPath ?? import_node_path2.default.relative(ctx2.workspace, checked)).replaceAll("\\", "/");
+        const relative = (displayPath ?? import_node_path3.default.relative(ctx2.workspace, checked)).replaceAll("\\", "/");
         selected.set(checked.toLowerCase(), { abs: checked, relative });
       };
       for (const requested of requestedPaths) addFile(resolveInWorkspace(requested, ctx2), requested.replaceAll("\\", "/"));
       if (patterns.length > 0) {
         const matchers = patterns.map(workspaceGlobToRegExp);
         await walk(ctx2.workspace, (file2) => {
-          const relative = import_node_path2.default.relative(ctx2.workspace, file2).replaceAll("\\", "/");
+          const relative = import_node_path3.default.relative(ctx2.workspace, file2).replaceAll("\\", "/");
           if (matchers.some((matcher) => matcher.test(relative))) addFile(file2, relative);
         });
       }
@@ -7307,7 +7620,7 @@ var TOOL_DEFS = [
         const heading = `===== ${file2.relative} =====
 `;
         const xlsxHint = `run_command\u3067 tools/Read-Xlsx.ps1 ${file2.relative} \u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044`;
-        if (import_node_path2.default.extname(file2.relative).toLowerCase() === ".xlsx") {
+        if (import_node_path3.default.extname(file2.relative).toLowerCase() === ".xlsx") {
           const section = `${heading}${xlsxHint}
 `;
           if (used + section.length <= bodyBudget) {
@@ -7362,12 +7675,12 @@ var TOOL_DEFS = [
     async run(args, ctx2) {
       const requested = String(args.path ?? "");
       const abs = resolveInWorkspace(requested, ctx2);
-      if (import_node_path2.default.extname(abs).toLowerCase() !== ".xlsx") throw new Error("read_xlsx \u306F .xlsx \u30D5\u30A1\u30A4\u30EB\u3060\u3051\u3092\u8AAD\u307F\u53D6\u308C\u307E\u3059");
+      if (import_node_path3.default.extname(abs).toLowerCase() !== ".xlsx") throw new Error("read_xlsx \u306F .xlsx \u30D5\u30A1\u30A4\u30EB\u3060\u3051\u3092\u8AAD\u307F\u53D6\u308C\u307E\u3059");
       const stat = await import_promises.default.stat(abs).catch(() => null);
       if (!stat?.isFile()) throw new Error(`xlsx\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${requested}`);
-      const appRoot = import_node_path2.default.resolve(__dirname, "..");
-      const helper = import_node_path2.default.join(appRoot, "tools", "Read-Xlsx.ps1");
-      if (!import_node_fs2.default.existsSync(helper)) throw new Error(`xlsx\u8AAD\u307F\u53D6\u308A\u30D8\u30EB\u30D1\u30FC\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${helper}`);
+      const appRoot = import_node_path3.default.resolve(__dirname, "..");
+      const helper = import_node_path3.default.join(appRoot, "tools", "Read-Xlsx.ps1");
+      if (!import_node_fs3.default.existsSync(helper)) throw new Error(`xlsx\u8AAD\u307F\u53D6\u308A\u30D8\u30EB\u30D1\u30FC\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${helper}`);
       const { stdout, stderr } = await execFileAsync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", helper, "-Path", abs], {
         cwd: ctx2.workspace,
         windowsHide: true,
@@ -7405,11 +7718,11 @@ var TOOL_DEFS = [
         if (e.code !== "ENOENT") throw err;
         existedBefore = false;
       }
-      await import_promises.default.mkdir(import_node_path2.default.dirname(abs), { recursive: true });
+      await import_promises.default.mkdir(import_node_path3.default.dirname(abs), { recursive: true });
       await import_promises.default.writeFile(abs, content, "utf8");
       const readBack = await import_promises.default.readFile(abs, "utf8");
       recordFileSnapshot(abs, ctx2, before, existedBefore, readBack);
-      const result = formatFileChangeResult("\u66F8\u304D\u8FBC\u307F", import_node_path2.default.relative(ctx2.workspace, abs), before, readBack, 1, existedBefore);
+      const result = formatFileChangeResult("\u66F8\u304D\u8FBC\u307F", import_node_path3.default.relative(ctx2.workspace, abs), before, readBack, 1, existedBefore);
       return `${result}
 \u30B5\u30A4\u30BA: ${Buffer.byteLength(readBack)} bytes`;
     }
@@ -7442,13 +7755,13 @@ var TOOL_DEFS = [
       const next = replaceAll ? src.split(oldStr).join(newStr) : src.replace(oldStr, newStr);
       if (next === src) {
         recordFileSnapshot(abs, ctx2, src, true, src);
-        return formatFileChangeResult("\u7DE8\u96C6", import_node_path2.default.relative(ctx2.workspace, abs), src, src, count, true);
+        return formatFileChangeResult("\u7DE8\u96C6", import_node_path3.default.relative(ctx2.workspace, abs), src, src, count, true);
       }
       await import_promises.default.writeFile(abs, next, "utf8");
       const readBack = await import_promises.default.readFile(abs, "utf8");
       if (readBack !== next) throw new Error("\u7DE8\u96C6\u5F8C\u306E\u518D\u8AAD\u8FBC\u5185\u5BB9\u304C\u4E00\u81F4\u3057\u307E\u305B\u3093");
       recordFileSnapshot(abs, ctx2, src, true, readBack);
-      return formatFileChangeResult("\u7DE8\u96C6", import_node_path2.default.relative(ctx2.workspace, abs), src, readBack, count, true);
+      return formatFileChangeResult("\u7DE8\u96C6", import_node_path3.default.relative(ctx2.workspace, abs), src, readBack, count, true);
     }
   },
   {
@@ -7499,7 +7812,7 @@ var TOOL_DEFS = [
         for (let i = 0; i < lines.length; i++) {
           if (results.length >= MAX_SEARCH_RESULTS) break;
           if (re2.test(lines[i])) {
-            results.push(`${import_node_path2.default.relative(ctx2.workspace, f).replaceAll("\\", "/")}:${i + 1}: ${truncate(lines[i], 300)}`);
+            results.push(`${import_node_path3.default.relative(ctx2.workspace, f).replaceAll("\\", "/")}:${i + 1}: ${truncate(lines[i], 300)}`);
           }
         }
       }
@@ -7753,12 +8066,21 @@ function attachFenceContent(raw, end, parsed) {
     parsed.args = { ...parsed.args ?? {}, content: fm[1].replace(/^\r?\n/, "").trim() };
   }
 }
+function buildToolAuditMetadata(tool2, args, permission, approval, target = {}) {
+  const pathValue = typeof args.path === "string" ? args.path : null;
+  return {
+    arguments: makeAuditArguments(summarize(tool2, args), args),
+    permission: { decision: permission },
+    approval,
+    target: nullAuditTarget({ path: pathValue, ...target })
+  };
+}
 function buildResearchBundle(question, summary, retrievedAt = (/* @__PURE__ */ new Date()).toISOString()) {
   const urls = [...summary.matchAll(/https?:\/\/[^\s<>()\[\]"'（）【】、。]+/g)].map((match2) => match2[0].replace(/[.,;:!?、。]+$/, ""));
   const uniqueUrls = [...new Set(urls)];
   const sources = uniqueUrls.map((url2) => ({ url: url2, retrievedAt }));
   const claims = summary.split(/\r?\n+/).map((text2) => text2.trim()).filter(Boolean).map((text2) => ({ text: text2, citations: sources }));
-  const contentHash = import_node_crypto2.default.createHash("sha256").update(summary, "utf8").digest("hex");
+  const contentHash = import_node_crypto3.default.createHash("sha256").update(summary, "utf8").digest("hex");
   return { researchId: `research-${contentHash.slice(0, 16)}`, question, summary, claims, sources, retrievedAt, contentHash };
 }
 var END_MARKER = "AGENT_END";
@@ -7815,7 +8137,7 @@ function toolRequestKey(name24, args) {
   if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) return `${name24}:${JSON.stringify(normalized)}`;
   const copy = { ...normalized };
   const bare = bareToolName(name24);
-  if (typeof copy.path === "string") copy.path = import_node_path3.default.normalize(copy.path).replaceAll("\\", "/");
+  if (typeof copy.path === "string") copy.path = import_node_path4.default.normalize(copy.path).replaceAll("\\", "/");
   if (bare === "list_files") {
     if (copy.path === "" || copy.path === ".") delete copy.path;
     if (copy.glob === "*" || copy.glob === "**" || copy.glob === "**/*") delete copy.glob;
@@ -7860,8 +8182,9 @@ async function bootstrapWorkspaceEvidence(ctx2, io) {
     return ["TOOL_RESULT (\u7B2C0\u30BF\u30FC\u30F3\u81EA\u52D5\u5B9F\u884C)", formatHostResult(tool2, "[tool error] list_files\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093", null, "failed", callId, ctx2.runId)].join("\n");
   }
   const summary = "list_files: \u7B2C0\u30BF\u30FC\u30F3\u306E\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u8A3C\u62E0\u3092\u53D6\u5F97";
-  io.event?.({ type: "tool.requested", tool: tool2, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
-  io.event?.({ type: "step.started", tool: tool2, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
+  const audit = buildToolAuditMetadata(tool2, {}, "allow", { required: false, outcome: "not_required", actor: "policy", automatic: true });
+  io.event?.({ type: "tool.requested", tool: tool2, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
+  io.event?.({ type: "step.started", tool: tool2, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
   const startedAt = Date.now();
   let output;
   try {
@@ -7871,8 +8194,8 @@ async function bootstrapWorkspaceEvidence(ctx2, io) {
   }
   const failed = output.startsWith("[tool error]");
   const durationMs = Date.now() - startedAt;
-  io.event?.({ type: failed ? "tool.failed" : "tool.succeeded", tool: tool2, summary, output: output.slice(0, 1200), durationMs, origin: "host", namespace: "app", authority: "authoritative", callId });
-  io.event?.({ type: failed ? "step.failed" : "step.completed", tool: tool2, summary, output: output.slice(0, 800), durationMs, origin: "host", namespace: "app", authority: "authoritative", callId });
+  io.event?.({ type: failed ? "tool.failed" : "tool.succeeded", tool: tool2, summary, output: output.slice(0, 1200), durationMs, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
+  io.event?.({ type: failed ? "step.failed" : "step.completed", tool: tool2, summary, output: output.slice(0, 800), durationMs, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
   return [
     "TOOL_RESULT (\u7B2C0\u30BF\u30FC\u30F3\u81EA\u52D5\u5B9F\u884C\u3002\u30E2\u30C7\u30EB\u5224\u65AD\u56DE\u6570\u30FBhost\u5B9F\u884C\u4E88\u7B97\u306B\u306F\u4E0D\u7B97\u5165)",
     formatHostResult(tool2, output, null, failed ? "failed" : "succeeded", callId, ctx2.runId)
@@ -8075,34 +8398,61 @@ async function runCopilotTurn(opts) {
     const qualified = qualifiedToolName(def.name);
     const callId = `host-call-${executions + 1}`;
     const summary = summarize(qualified, args);
-    io.event?.({ type: "tool.requested", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
-    io.event?.({ type: "step.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
+    const permission = def.kind === "read" ? "allow" : "ask";
+    let audit = buildToolAuditMetadata(qualified, args, permission, {
+      required: def.kind !== "read",
+      outcome: def.kind === "read" ? "not_required" : "not_required",
+      actor: "policy",
+      automatic: def.kind === "read"
+    });
+    io.event?.({ type: "tool.requested", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
+    io.event?.({ type: "step.started", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
     if (def.kind !== "read") {
       const auto = def.kind === "write" ? policy.autoApproveWrite : policy.autoApproveCommand;
       const fileBinding = await captureFileBinding(def, args, ctx2);
+      audit = buildToolAuditMetadata(qualified, args, permission, {
+        required: true,
+        outcome: "not_required",
+        actor: "policy",
+        automatic: false
+      }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
       const approvalBinding = { ...fileBinding, toolName: qualified, argsHash: JSON.stringify(normalizeForKey(args)), command: typeof args.command === "string" ? args.command : void 0, network: def.kind === "command", callId };
       if (!auto) {
+        io.event?.({ type: "approval.requested", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
         const ok = await io.askYesNo(`\u5B9F\u884C\u3092\u8A31\u53EF\u3057\u307E\u3059\u304B\uFF1F
 ${summary}`, approvalBinding);
-        if (ok) io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, origin: "host", namespace: "app", authority: "authoritative", callId });
+        audit = buildToolAuditMetadata(qualified, args, permission, {
+          required: true,
+          outcome: ok ? "approved" : "denied",
+          actor: "user",
+          automatic: false
+        }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
+        io.event?.({ type: "approval.resolved", tool: qualified, summary, approved: ok, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
+        if (ok) io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
         if (ok && await approvalPreconditionChanged(approvalBinding, ctx2)) {
-          io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u627F\u8A8D\u3092\u7121\u52B9\u5316\u3057\u307E\u3057\u305F", origin: "host", namespace: "app", authority: "authoritative", callId });
+          io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u627F\u8A8D\u3092\u7121\u52B9\u5316\u3057\u307E\u3057\u305F", audit, origin: "host", namespace: "app", authority: "authoritative", callId });
           steps.push(formatHostResult(qualified, "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u5B9F\u884C\u3057\u307E\u305B\u3093\u3067\u3057\u305F", null, "denied", callId, ctx2.runId));
           continue;
         }
         if (!ok) {
-          io.event?.({ type: "tool.denied", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
+          io.event?.({ type: "tool.denied", tool: qualified, summary, error: "\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F", audit, origin: "host", namespace: "app", authority: "authoritative", callId });
           steps.push(formatHostResult(qualified, "\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F", null, "denied", callId, ctx2.runId));
           continue;
         }
       } else {
-        io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, metadata: { automatic: true }, origin: "host", namespace: "app", authority: "authoritative", callId });
+        audit = buildToolAuditMetadata(qualified, args, permission, {
+          required: true,
+          outcome: "approved",
+          actor: "policy",
+          automatic: true
+        }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
+        io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, audit, metadata: { automatic: true }, origin: "host", namespace: "app", authority: "authoritative", callId });
       }
     }
     executions++;
     if (def.kind === "write") writes++;
     if (def.kind === "command") commands++;
-    io.event?.({ type: "tool.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId });
+    io.event?.({ type: "tool.started", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId });
     io.print(`[tool] ${summary}`);
     if (stopRequested()) return canceled();
     const startedAt = Date.now();
@@ -8118,8 +8468,12 @@ ${summary}`, approvalBinding);
     const resultKey = `${qualified}:${metadata?.afterHash ?? output.slice(0, 1600)}`;
     noProgress = failed || resultKey === lastResultKey ? noProgress + 1 : 0;
     lastResultKey = resultKey;
-    io.event?.({ type: failed ? "tool.failed" : "tool.succeeded", tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId });
-    io.event?.({ type: failed ? "step.failed" : "step.completed", tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId });
+    const terminalAudit = buildToolAuditMetadata(qualified, args, permission, audit.approval, {
+      ...audit.target,
+      after_sha256: typeof metadata?.afterHash === "string" ? metadata.afterHash : null
+    });
+    io.event?.({ type: failed ? "tool.failed" : "tool.succeeded", tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId });
+    io.event?.({ type: failed ? "step.failed" : "step.completed", tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId });
     steps.push(formatHostResult(qualified, output, metadata, failed ? "failed" : "succeeded", callId, ctx2.runId));
     steps.push(`SYSTEM: ${qualified} \u306F\u5B9F\u884C\u6E08\u307F\u3067\u3059\u3002\u7D50\u679C\u3092\u6839\u62E0\u306B\u6B21\u306E1\u624B\u3092\u5224\u65AD\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
     if (noProgress >= maxNoProgress) return stopWithWarning(`host\u30C4\u30FC\u30EB\u7D50\u679C\u306B\u9032\u5C55\u304C\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F\uFF08${maxNoProgress}\u56DE\u9023\u7D9A\uFF09`);
@@ -8253,43 +8607,75 @@ async function executeCall(call, cfg2, ctx2, io) {
   if (argError) return `[validation error] ${argError}`;
   const qualified = qualifiedToolName(def.name);
   const summary = summarize(qualified, args);
-  io.event?.({ type: "tool.requested", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
-  io.event?.({ type: "step.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+  const permission = def.kind === "read" ? "allow" : "ask";
+  let audit = buildToolAuditMetadata(qualified, args, permission, {
+    required: def.kind !== "read",
+    outcome: "not_required",
+    actor: "policy",
+    automatic: def.kind === "read"
+  });
+  io.event?.({ type: "tool.requested", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+  io.event?.({ type: "step.started", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
   if (def.kind !== "read") {
     const auto = def.kind === "write" ? policy.autoApproveWrite : policy.autoApproveCommand;
     const fileBinding = await captureFileBinding(def, args, ctx2);
+    audit = buildToolAuditMetadata(qualified, args, permission, {
+      required: true,
+      outcome: "not_required",
+      actor: "policy",
+      automatic: false
+    }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
     const approvalBinding = { ...fileBinding, toolName: qualified, argsHash: JSON.stringify(normalizeForKey(args)), command: typeof args.command === "string" ? args.command : void 0, network: def.kind === "command", callId: call.id };
     if (!auto) {
+      io.event?.({ type: "approval.requested", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
       const ok = await io.askYesNo(`\u5B9F\u884C\u3092\u8A31\u53EF\u3057\u307E\u3059\u304B\uFF1F
 ${summary}`, approvalBinding);
-      if (ok) io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+      audit = buildToolAuditMetadata(qualified, args, permission, {
+        required: true,
+        outcome: ok ? "approved" : "denied",
+        actor: "user",
+        automatic: false
+      }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
+      io.event?.({ type: "approval.resolved", tool: qualified, summary, approved: ok, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+      if (ok) io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
       if (ok && await approvalPreconditionChanged(approvalBinding, ctx2)) {
-        io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u627F\u8A8D\u3092\u7121\u52B9\u5316\u3057\u307E\u3057\u305F", origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+        io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u627F\u8A8D\u3092\u7121\u52B9\u5316\u3057\u307E\u3057\u305F", audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
         return "(\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)";
       }
       if (!ok) {
-        io.event?.({ type: "tool.denied", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+        io.event?.({ type: "tool.denied", tool: qualified, summary, error: "\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F", audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
         return "(\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F)";
       }
     } else {
-      io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, metadata: { automatic: true }, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+      audit = buildToolAuditMetadata(qualified, args, permission, {
+        required: true,
+        outcome: "approved",
+        actor: "policy",
+        automatic: true
+      }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
+      io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, audit, metadata: { automatic: true }, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
     }
   }
-  io.event?.({ type: "tool.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+  io.event?.({ type: "tool.started", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
   io.print(`[tool] ${summary}`);
   const startedAt = Date.now();
   try {
     const output = await def.run(args, ctx2);
     const durationMs = Date.now() - startedAt;
     const metadata = parseToolResultMeta(output);
-    io.event?.({ type: "tool.succeeded", tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
-    io.event?.({ type: "step.completed", tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+    const terminalAudit = buildToolAuditMetadata(qualified, args, permission, audit.approval, {
+      ...audit.target,
+      after_sha256: typeof metadata?.afterHash === "string" ? metadata.afterHash : null
+    });
+    io.event?.({ type: "tool.succeeded", tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+    io.event?.({ type: "step.completed", tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
     return output;
   } catch (err) {
     const output = `[tool error] ${err.message}`;
     const durationMs = Date.now() - startedAt;
-    io.event?.({ type: "tool.failed", tool: qualified, summary, output, error: output, durationMs, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
-    io.event?.({ type: "step.failed", tool: qualified, summary, output, error: output, durationMs, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+    const terminalAudit = buildToolAuditMetadata(qualified, args, permission, audit.approval, { ...audit.target });
+    io.event?.({ type: "tool.failed", tool: qualified, summary, output, error: output, durationMs, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
+    io.event?.({ type: "step.failed", tool: qualified, summary, output, error: output, durationMs, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.id });
     return output;
   }
 }
@@ -9421,10 +9807,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path7) {
-  if (!path7)
+function getElementAtPath(obj, path8) {
+  if (!path8)
     return obj;
-  return path7.reduce((acc, key) => acc?.[key], obj);
+  return path8.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -9833,11 +10219,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path7, issues) {
+function prefixIssues(path8, issues) {
   return issues.map((iss) => {
     var _a24;
     (_a24 = iss).path ?? (_a24.path = []);
-    iss.path.unshift(path7);
+    iss.path.unshift(path8);
     return iss;
   });
 }
@@ -9984,16 +10370,16 @@ function flattenError(error51, mapper = (issue2) => issue2.message) {
 }
 function formatError(error51, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error52, path7 = []) => {
+  const processError = (error52, path8 = []) => {
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else {
-        const fullpath = [...path7, ...issue2.path];
+        const fullpath = [...path8, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -10020,17 +10406,17 @@ function formatError(error51, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error51, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error52, path7 = []) => {
+  const processError = (error52, path8 = []) => {
     var _a24, _b17;
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else {
-        const fullpath = [...path7, ...issue2.path];
+        const fullpath = [...path8, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -10062,8 +10448,8 @@ function treeifyError(error51, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path7 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path7) {
+  const path8 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path8) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -22755,13 +23141,13 @@ function resolveRef(ref, ctx2) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path7 = ref.slice(1).split("/").filter(Boolean);
-  if (path7.length === 0) {
+  const path8 = ref.slice(1).split("/").filter(Boolean);
+  if (path8.length === 0) {
     return ctx2.rootSchema;
   }
   const defsKey = ctx2.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path7[0] === defsKey) {
-    const key = path7[1];
+  if (path8[0] === defsKey) {
+    const key = path8[1];
     if (!key || !ctx2.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -23528,8 +23914,8 @@ function getErrorMap2() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path7, errorMaps, issueData } = params;
-  const fullPath = [...path7, ...issueData.path || []];
+  const { data, path: path8, errorMaps, issueData } = params;
+  const fullPath = [...path8, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -23644,11 +24030,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path7, key) {
+  constructor(parent, value, path8, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path7;
+    this._path = path8;
     this._key = key;
   }
   get path() {
@@ -31372,8 +31758,8 @@ function createOpenAICompatible(options) {
   const getHeaders = () => withUserAgentSuffix(headers, `ai-sdk/openai-compatible/${VERSION2}`);
   const getCommonModelConfig = (modelType) => ({
     provider: `${providerName}.${modelType}`,
-    url: ({ path: path7 }) => {
-      const url2 = new URL(`${baseURL}${path7}`);
+    url: ({ path: path8 }) => {
+      const url2 = new URL(`${baseURL}${path8}`);
       if (options.queryParams) {
         url2.search = new URLSearchParams(options.queryParams).toString();
       }
@@ -39695,7 +40081,7 @@ async function runToolExecuteBeforeHooks(input, perRunHooks = []) {
 }
 
 // src/permission-hook.ts
-var import_node_path4 = __toESM(require("node:path"));
+var import_node_path5 = __toESM(require("node:path"));
 var import_shell_quote = __toESM(require_shell_quote());
 
 // src/vendor/opencode-permission/wildcard.ts
@@ -40004,16 +40390,16 @@ var ARITY = {
 function normalizeWorkspacePattern(value, ctx2) {
   const source = value.trim().replaceAll("\\", "/");
   if (!source) return "";
-  const workspace2 = import_node_path4.default.resolve(ctx2.workspace);
-  const absolute = import_node_path4.default.resolve(workspace2, source);
-  return import_node_path4.default.relative(workspace2, absolute).replaceAll("\\", "/") || ".";
+  const workspace2 = import_node_path5.default.resolve(ctx2.workspace);
+  const absolute = import_node_path5.default.resolve(workspace2, source);
+  return import_node_path5.default.relative(workspace2, absolute).replaceAll("\\", "/") || ".";
 }
 function joinPathAndGlob(pathValue, globValue) {
   const base = pathValue.trim();
   const glob = globValue.trim();
   if (!base || base === ".") return glob;
   if (!glob) return base;
-  if (import_node_path4.default.isAbsolute(glob) || /^[A-Za-z]:[\\/]/u.test(glob)) return glob;
+  if (import_node_path5.default.isAbsolute(glob) || /^[A-Za-z]:[\\/]/u.test(glob)) return glob;
   return `${base.replace(/[\\/]+$/u, "")}/${glob.replace(/^[\\/]+/u, "")}`;
 }
 function commandPermissionTarget(command) {
@@ -40196,8 +40582,14 @@ async function executeV2ToolCall(call, def, cfg2, ctx2, io, beforeHooks) {
   if (argError) return { output: `[validation error] ${argError}`, status: "failed", executed: false, metadata: null };
   const qualified = qualifiedToolName(def.name);
   const summary = summarize(qualified, args);
-  io.event?.({ type: "tool.requested", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
-  io.event?.({ type: "step.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+  let audit = buildToolAuditMetadata(qualified, args, def.kind === "read" ? "allow" : "ask", {
+    required: def.kind !== "read",
+    outcome: "not_required",
+    actor: "policy",
+    automatic: def.kind === "read"
+  });
+  io.event?.({ type: "tool.requested", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+  io.event?.({ type: "step.started", tool: qualified, summary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
   const permissionController = cfg2.permissions && cfg2.permissions.length > 0 ? createPermissionHook(cfg2.permissions) : void 0;
   const effectiveBeforeHooks = permissionController ? [...beforeHooks, permissionController.hook] : beforeHooks;
   let permissionDecision;
@@ -40207,13 +40599,28 @@ async function executeV2ToolCall(call, def, cfg2, ctx2, io, beforeHooks) {
   } catch (err) {
     const reason = err.message || String(err);
     const output = `[hook denied] ${reason}`;
-    io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: reason, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
-    io.event?.({ type: "step.failed", tool: qualified, summary, output, error: reason, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+    const permission2 = permissionController && /^permission denied:/u.test(reason) ? "deny" : def.kind === "read" ? "allow" : "ask";
+    audit = buildToolAuditMetadata(qualified, args, permission2, {
+      required: false,
+      outcome: "not_required",
+      actor: "policy",
+      automatic: true
+    });
+    io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: reason, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+    io.event?.({ type: "step.failed", tool: qualified, summary, output, error: reason, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
     return { output, status: "denied", executed: false, metadata: null };
   }
   const policy = capabilityPolicy(cfg2, "work");
   const permissionAsk = permissionDecision === "ask";
   const permissionAllow = permissionDecision === "allow";
+  const permission = permissionDecision ?? (def.kind === "read" ? "allow" : "ask");
+  const effectiveSummary = summarize(qualified, args);
+  audit = buildToolAuditMetadata(qualified, args, permission, {
+    required: def.kind !== "read",
+    outcome: def.kind === "read" ? "not_required" : "not_required",
+    actor: "policy",
+    automatic: def.kind === "read"
+  });
   if (permissionAsk || def.kind !== "read") {
     const automatic = permissionAllow || !permissionAsk && (def.kind === "write" ? policy.autoApproveWrite : policy.autoApproveCommand);
     const fileBinding = await captureFileBinding(def, args, ctx2);
@@ -40225,43 +40632,66 @@ async function executeV2ToolCall(call, def, cfg2, ctx2, io, beforeHooks) {
       network: def.kind === "command",
       callId: call.toolCallId
     };
+    audit = buildToolAuditMetadata(qualified, args, permission, {
+      required: true,
+      outcome: "not_required",
+      actor: "policy",
+      automatic: false
+    }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
     if (!automatic) {
-      io.event?.({ type: "approval.requested", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+      io.event?.({ type: "approval.requested", tool: qualified, summary: effectiveSummary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
       const approved = await io.askYesNo(`\u5B9F\u884C\u3092\u8A31\u53EF\u3057\u307E\u3059\u304B\uFF1F
-${summary}`, binding);
-      io.event?.({ type: "approval.resolved", tool: qualified, summary, approved, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+${effectiveSummary}`, binding);
+      audit = buildToolAuditMetadata(qualified, args, permission, {
+        required: true,
+        outcome: approved ? "approved" : "denied",
+        actor: "user",
+        automatic: false
+      }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
+      io.event?.({ type: "approval.resolved", tool: qualified, summary: effectiveSummary, approved, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
       if (approved && await approvalPreconditionChanged(binding, ctx2)) {
         const output = "\u627F\u8A8D\u5F8C\u306B\u5BFE\u8C61\u30D5\u30A1\u30A4\u30EB\u304C\u5909\u66F4\u3055\u308C\u305F\u305F\u3081\u5B9F\u884C\u3057\u307E\u305B\u3093\u3067\u3057\u305F";
-        io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, error: output, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
-        io.event?.({ type: "step.failed", tool: qualified, summary, output, error: output, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+        io.event?.({ type: "tool.denied", tool: qualified, summary: effectiveSummary, approved: false, error: output, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+        io.event?.({ type: "step.failed", tool: qualified, summary: effectiveSummary, output, error: output, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
         return { output, status: "denied", executed: false, metadata: null };
       }
       if (!approved) {
         const output = "\u30E6\u30FC\u30B6\u30FC\u304C\u62D2\u5426\u3057\u307E\u3057\u305F";
-        io.event?.({ type: "tool.denied", tool: qualified, summary, approved: false, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
-        io.event?.({ type: "step.failed", tool: qualified, summary, output, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+        io.event?.({ type: "tool.denied", tool: qualified, summary: effectiveSummary, approved: false, output, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+        io.event?.({ type: "step.failed", tool: qualified, summary: effectiveSummary, output, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
         return { output, status: "denied", executed: false, metadata: null };
       }
-      io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+      io.event?.({ type: "tool.approved", tool: qualified, summary: effectiveSummary, approved: true, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
     } else {
-      io.event?.({ type: "tool.approved", tool: qualified, summary, approved: true, metadata: { automatic: true, ...permissionAllow ? { permission: "allow" } : {} }, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+      audit = buildToolAuditMetadata(qualified, args, permission, {
+        required: true,
+        outcome: "approved",
+        actor: "policy",
+        automatic: true
+      }, { path: fileBinding.path ?? null, before_sha256: fileBinding.beforeHash ?? null });
+      io.event?.({ type: "tool.approved", tool: qualified, summary: effectiveSummary, approved: true, audit, metadata: { automatic: true, ...permissionAllow ? { permission: "allow" } : {} }, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
     }
   }
-  io.event?.({ type: "tool.started", tool: qualified, summary, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
-  io.print(`[tool] ${summary}`);
+  io.event?.({ type: "tool.started", tool: qualified, summary: effectiveSummary, audit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+  io.print(`[tool] ${effectiveSummary}`);
   const startedAt = Date.now();
   try {
     const output = await def.run(args, ctx2);
     const durationMs = Date.now() - startedAt;
     const metadata = parseToolResultMeta(output);
-    io.event?.({ type: "tool.succeeded", tool: qualified, summary, output: output.slice(0, 1200), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
-    io.event?.({ type: "step.completed", tool: qualified, summary, output: output.slice(0, 800), durationMs, metadata, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+    const terminalAudit = buildToolAuditMetadata(qualified, args, permission, audit.approval, {
+      ...audit.target,
+      after_sha256: typeof metadata?.afterHash === "string" ? metadata.afterHash : null
+    });
+    io.event?.({ type: "tool.succeeded", tool: qualified, summary: effectiveSummary, output: output.slice(0, 1200), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+    io.event?.({ type: "step.completed", tool: qualified, summary: effectiveSummary, output: output.slice(0, 800), durationMs, metadata, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
     return { output, status: "succeeded", executed: true, metadata };
   } catch (err) {
     const output = `[tool error] ${err.message}`;
     const durationMs = Date.now() - startedAt;
-    io.event?.({ type: "tool.failed", tool: qualified, summary, output, error: output, durationMs, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
-    io.event?.({ type: "step.failed", tool: qualified, summary, output, error: output, durationMs, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+    const terminalAudit = buildToolAuditMetadata(qualified, args, permission, audit.approval, { ...audit.target });
+    io.event?.({ type: "tool.failed", tool: qualified, summary: effectiveSummary, output, error: output, durationMs, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
+    io.event?.({ type: "step.failed", tool: qualified, summary: effectiveSummary, output, error: output, durationMs, audit: terminalAudit, origin: "host", namespace: "app", authority: "authoritative", callId: call.toolCallId });
     return { output, status: "failed", executed: true, metadata: null };
   }
 }
@@ -40379,8 +40809,8 @@ function runConfiguredAgentTurn(opts) {
 // src/copilot.ts
 var import_node_child_process3 = require("node:child_process");
 var import_node_net = __toESM(require("node:net"));
-var import_node_fs3 = __toESM(require("node:fs"));
-var import_node_path5 = __toESM(require("node:path"));
+var import_node_fs4 = __toESM(require("node:fs"));
+var import_node_path6 = __toESM(require("node:path"));
 function selectBrowserProcessId(processInfo) {
   if (!Array.isArray(processInfo)) return null;
   const browser = processInfo.find((item) => {
@@ -40800,10 +41230,10 @@ async function findFreePort() {
   });
 }
 function profileIsInUse(profileDir) {
-  if (["SingletonLock", "SingletonCookie", "SingletonSocket"].some((name24) => import_node_fs3.default.existsSync(import_node_path5.default.join(profileDir, name24)))) return true;
+  if (["SingletonLock", "SingletonCookie", "SingletonSocket"].some((name24) => import_node_fs4.default.existsSync(import_node_path6.default.join(profileDir, name24)))) return true;
   if (process.platform !== "win32") return false;
   try {
-    const needle = import_node_path5.default.resolve(profileDir).replace(/[\\/]+$/, "").toLowerCase();
+    const needle = import_node_path6.default.resolve(profileDir).replace(/[\\/]+$/, "").toLowerCase();
     const marker24 = `--user-data-dir=${needle}`;
     const output = (0, import_node_child_process3.execFileSync)("powershell.exe", [
       "-NoProfile",
@@ -40823,8 +41253,8 @@ function profileIsInUse(profileDir) {
 function findEdgePath() {
   const roots = [process.env["ProgramFiles(x86)"], process.env.ProgramFiles, process.env.LOCALAPPDATA].filter(Boolean);
   for (const root of roots) {
-    const p = import_node_path5.default.join(root, "Microsoft", "Edge", "Application", "msedge.exe");
-    if (import_node_fs3.default.existsSync(p)) return p;
+    const p = import_node_path6.default.join(root, "Microsoft", "Edge", "Application", "msedge.exe");
+    if (import_node_fs4.default.existsSync(p)) return p;
   }
   throw new Error("Microsoft Edge \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3002Edge \u3092\u30A4\u30F3\u30B9\u30C8\u30FC\u30EB\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
 }
@@ -40977,24 +41407,24 @@ var CopilotEdgeClient = class {
   }
   hardenPreferences(profileDir) {
     try {
-      const prefPath = import_node_path5.default.join(profileDir, "Default", "Preferences");
-      if (!import_node_fs3.default.existsSync(prefPath)) return;
-      const j = JSON.parse(import_node_fs3.default.readFileSync(prefPath, "utf8"));
+      const prefPath = import_node_path6.default.join(profileDir, "Default", "Preferences");
+      if (!import_node_fs4.default.existsSync(prefPath)) return;
+      const j = JSON.parse(import_node_fs4.default.readFileSync(prefPath, "utf8"));
       if (!j.session) j.session = {};
       j.session.restore_on_startup = 4;
       j.session.startup_urls = [];
       if (j.profile) j.profile.exit_type = "Normal";
-      import_node_fs3.default.writeFileSync(prefPath, JSON.stringify(j), "utf8");
+      import_node_fs4.default.writeFileSync(prefPath, JSON.stringify(j), "utf8");
     } catch {
     }
   }
   chooseEdgeProfile() {
-    const root = import_node_path5.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent");
-    import_node_fs3.default.mkdirSync(root, { recursive: true });
+    const root = import_node_path6.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent");
+    import_node_fs4.default.mkdirSync(root, { recursive: true });
     const suffix = (this.s.profileName ?? "default").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "default";
-    const stable = import_node_path5.default.join(root, suffix === "default" ? "edge-profile" : "edge-profile-" + suffix);
+    const stable = import_node_path6.default.join(root, suffix === "default" ? "edge-profile" : "edge-profile-" + suffix);
     if (!profileIsInUse(stable)) return stable;
-    return import_node_fs3.default.mkdtempSync(import_node_path5.default.join(root, "edge-profile-" + suffix + "-session-"));
+    return import_node_fs4.default.mkdtempSync(import_node_path6.default.join(root, "edge-profile-" + suffix + "-session-"));
   }
   async ensureEdge() {
     if (this.s.reuseExistingEdge) {
@@ -41524,6 +41954,8 @@ var CopilotEdgeClient = class {
 };
 
 // src/approvals.ts
+var USER_PROVENANCE = { actor: "user", automatic: false };
+var POLICY_PROVENANCE = { actor: "policy", automatic: true };
 var pending = /* @__PURE__ */ new Map();
 var resolutions = /* @__PURE__ */ new Map();
 var sequence2 = 0;
@@ -41545,7 +41977,7 @@ function requestApproval(request) {
       const current = pending.get(id);
       if (current !== entry) return;
       pending.delete(id);
-      const result = { id, approved: false, reason: "\u627F\u8A8D\u671F\u9650\u5207\u308C", resolvedAt: Date.now() };
+      const result = { id, approved: false, reason: "\u627F\u8A8D\u671F\u9650\u5207\u308C", resolvedAt: Date.now(), provenance: { ...POLICY_PROVENANCE } };
       resolutions.set(id, result);
       while (resolutions.size > 100) resolutions.delete(resolutions.keys().next().value);
       resolve2(false);
@@ -41555,14 +41987,16 @@ function requestApproval(request) {
 function listApprovals() {
   return [...pending.values()].sort((a, b) => a.createdAt - b.createdAt).map(({ resolve: _resolve, ...snapshot2 }) => snapshot2);
 }
-function resolveApproval(id, approved, reason = approved ? "\u5229\u7528\u8005\u304C\u8A31\u53EF\u3057\u307E\u3057\u305F" : "\u5229\u7528\u8005\u304C\u62D2\u5426\u3057\u307E\u3057\u305F") {
+function resolveApproval(id, approved, reason = approved ? "\u5229\u7528\u8005\u304C\u8A31\u53EF\u3057\u307E\u3057\u305F" : "\u5229\u7528\u8005\u304C\u62D2\u5426\u3057\u307E\u3057\u305F", provenance = USER_PROVENANCE) {
   const entry = pending.get(id);
   if (!entry) return false;
   pending.delete(id);
-  const result = { id, approved: Boolean(approved), reason, resolvedAt: Date.now() };
+  const normalizedApproved = Boolean(approved);
+  const safeReason = provenance.actor === "user" ? normalizedApproved ? "\u5229\u7528\u8005\u304C\u8A31\u53EF\u3057\u307E\u3057\u305F" : "\u5229\u7528\u8005\u304C\u62D2\u5426\u3057\u307E\u3057\u305F" : reason;
+  const result = { id, approved: normalizedApproved, reason: safeReason, resolvedAt: Date.now(), provenance: { ...provenance } };
   resolutions.set(id, result);
   while (resolutions.size > 100) resolutions.delete(resolutions.keys().next().value);
-  entry.resolve(Boolean(approved));
+  entry.resolve(normalizedApproved);
   return true;
 }
 function getApprovalResolution(id) {
@@ -41570,7 +42004,7 @@ function getApprovalResolution(id) {
 }
 function clearApprovals() {
   for (const entry of pending.values()) {
-    const result = { id: entry.id, approved: false, reason: "\u30B5\u30FC\u30D0\u30FC\u7D42\u4E86\u306B\u3088\u308A\u89E3\u9664\u3055\u308C\u307E\u3057\u305F", resolvedAt: Date.now() };
+    const result = { id: entry.id, approved: false, reason: "\u30B5\u30FC\u30D0\u30FC\u7D42\u4E86\u306B\u3088\u308A\u89E3\u9664\u3055\u308C\u307E\u3057\u305F", resolvedAt: Date.now(), provenance: { ...POLICY_PROVENANCE } };
     resolutions.set(entry.id, result);
     entry.resolve(false);
   }
@@ -41586,31 +42020,42 @@ function argValue(flag) {
 }
 var cfg = loadConfig(argValue("--config"));
 var workspaceArg = argValue("--workspace");
-var workspace = workspaceArg ? import_node_path6.default.resolve(workspaceArg) : process.cwd();
+var workspace = workspaceArg ? import_node_path7.default.resolve(workspaceArg) : process.cwd();
 var ctx = { workspace, restrictToWorkspace: cfg.restrictToWorkspace ?? true, safeCommandOnly: cfg.safeCommandOnly === true, weatherDefaultLocation: cfg.weather?.defaultLocation };
-var here = typeof __dirname !== "undefined" ? __dirname : import_node_path6.default.dirname(process.argv[1] ?? ".");
+var here = typeof __dirname !== "undefined" ? __dirname : import_node_path7.default.dirname(process.argv[1] ?? ".");
 var indexCandidates = [
   process.env.INDEX_HTML,
-  import_node_path6.default.join(here, "..", "public", "index.html"),
-  import_node_path6.default.join(process.cwd(), "public", "index.html")
+  import_node_path7.default.join(here, "..", "public", "index.html"),
+  import_node_path7.default.join(process.cwd(), "public", "index.html")
 ];
-var indexHtmlPath = indexCandidates.find((p) => typeof p === "string" && import_node_fs4.default.existsSync(p));
+var indexHtmlPath = indexCandidates.find((p) => typeof p === "string" && import_node_fs5.default.existsSync(p));
 var classicCandidates = [
   process.env.CLASSIC_HTML,
-  import_node_path6.default.join(here, "..", "public", "classic.html"),
-  import_node_path6.default.join(process.cwd(), "public", "classic.html")
+  import_node_path7.default.join(here, "..", "public", "classic.html"),
+  import_node_path7.default.join(process.cwd(), "public", "classic.html")
 ];
-var classicHtmlPath = classicCandidates.find((p) => typeof p === "string" && import_node_fs4.default.existsSync(p));
+var classicHtmlPath = classicCandidates.find((p) => typeof p === "string" && import_node_fs5.default.existsSync(p));
 var uiAssets = {
-  "/assets/ui.js": { path: import_node_path6.default.join(here, "ui.js"), contentType: "text/javascript; charset=utf-8" },
-  "/assets/ui.css": { path: import_node_path6.default.join(here, "ui.css"), contentType: "text/css; charset=utf-8" }
+  "/assets/ui.js": { path: import_node_path7.default.join(here, "ui.js"), contentType: "text/javascript; charset=utf-8" },
+  "/assets/ui.css": { path: import_node_path7.default.join(here, "ui.css"), contentType: "text/css; charset=utf-8" }
 };
-var distributionStatePath = import_node_path6.default.join(process.env.LOCALAPPDATA ?? import_node_path6.default.dirname(here), "CompanyApps", "state", "coding-agent.json");
-var persistencePath = import_node_path6.default.join(process.env.APPDATA ?? process.env.LOCALAPPDATA ?? import_node_path6.default.dirname(here), "CompanyApps", "coding-agent", "state.json");
+var distributionStatePath = import_node_path7.default.join(process.env.LOCALAPPDATA ?? import_node_path7.default.dirname(here), "CompanyApps", "state", "coding-agent.json");
+var persistencePath = import_node_path7.default.join(process.env.APPDATA ?? process.env.LOCALAPPDATA ?? import_node_path7.default.dirname(here), "CompanyApps", "coding-agent", "state.json");
+var auditLog = null;
+var auditInitError = null;
+try {
+  const candidate = createAuditLog({ workspace, directory: cfg.auditLogDir });
+  candidate.initialize();
+  auditLog = candidate;
+} catch (err) {
+  auditInitError = err.message || String(err);
+  console.error(`[audit] \u521D\u671F\u5316\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${auditInitError}`);
+}
+var auditedOutcomeKeys = /* @__PURE__ */ new Set();
 function readDistributionState() {
   try {
-    if (!import_node_fs4.default.existsSync(distributionStatePath)) return { phase: "unknown", message: "\u30E9\u30F3\u30C1\u30E3\u30FC\u306E\u72B6\u614B\u306F\u672A\u53D6\u5F97\u3067\u3059", sharedVersion: null, localVersion: null, verified: false };
-    return JSON.parse(import_node_fs4.default.readFileSync(distributionStatePath, "utf8"));
+    if (!import_node_fs5.default.existsSync(distributionStatePath)) return { phase: "unknown", message: "\u30E9\u30F3\u30C1\u30E3\u30FC\u306E\u72B6\u614B\u306F\u672A\u53D6\u5F97\u3067\u3059", sharedVersion: null, localVersion: null, verified: false };
+    return JSON.parse(import_node_fs5.default.readFileSync(distributionStatePath, "utf8"));
   } catch (err) {
     return { phase: "failed", message: err.message, sharedVersion: null, localVersion: null, verified: false };
   }
@@ -41707,12 +42152,29 @@ function createRun(session, request, mode, parentRunId) {
   session.runs.unshift(run.id);
   return run;
 }
+function appendAuditForOutcome(run, event) {
+  if (event.origin !== "host" || event.type !== "tool.succeeded" && event.type !== "tool.failed" && event.type !== "tool.denied") return;
+  const key = `${run.id}:${event.callId ?? event.eventId ?? event.type}`;
+  if (auditedOutcomeKeys.has(key)) return;
+  if (!auditLog || auditInitError || !auditLog.healthy) throw new Error(`\u76E3\u67FB\u30ED\u30B0\u3092\u5229\u7528\u3067\u304D\u306A\u3044\u305F\u3081host\u30C4\u30FC\u30EB\u7D50\u679C\u3092\u78BA\u5B9A\u3067\u304D\u307E\u305B\u3093: ${auditInitError ?? auditLog?.failureReason ?? "\u672A\u521D\u671F\u5316"}`);
+  try {
+    const record2 = auditRecordFromOutcome({ sessionId: run.sessionId, runId: run.id, event, history: run.auditEvents ?? [] });
+    if (!record2) return;
+    auditLog.append(record2, key);
+    auditedOutcomeKeys.add(key);
+  } catch (err) {
+    const detail = err.message || String(err);
+    auditInitError ??= `\u76E3\u67FB\u30ED\u30B0\u8FFD\u8A18\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${detail}`;
+    throw new Error(auditInitError);
+  }
+}
 function addRunEvent(run, event) {
   run.updatedAt = Date.now();
   const sequence3 = run.nextSequence ?? (run.auditEvents ?? run.events).reduce((max, entry) => Math.max(max, entry.sequence), 0) + 1;
   run.nextSequence = sequence3 + 1;
   const eventId = `${run.id}-event-${sequence3}`;
   const nextEvent = { ...event, origin: event.origin ?? "orchestrator", namespace: event.namespace ?? "none", authority: event.authority ?? "derived", eventId, runId: run.id, stepId: run.phase, toolEventId: eventId, sequence: sequence3, at: run.updatedAt };
+  appendAuditForOutcome(run, nextEvent);
   run.auditEvents ??= [];
   run.auditEvents.push(nextEvent);
   run.events.push(nextEvent);
@@ -41773,7 +42235,7 @@ function changeFromEvent(run, event) {
     changed,
     status: metadata?.status === "no_op" ? "no_op" : "applied_unverified",
     existedBefore: snapshot2?.existedBefore ?? previous?.existedBefore ?? metadata?.existedBefore === true,
-    beforeHash: previous?.beforeHash ?? (typeof metadata?.beforeHash === "string" ? metadata.beforeHash : before ? import_node_crypto3.default.createHash("sha256").update(before, "utf8").digest("hex") : void 0),
+    beforeHash: previous?.beforeHash ?? (typeof metadata?.beforeHash === "string" ? metadata.beforeHash : before ? import_node_crypto4.default.createHash("sha256").update(before, "utf8").digest("hex") : void 0),
     afterHash: typeof metadata?.afterHash === "string" ? metadata.afterHash : snapshot2?.afterHash,
     readBack: metadata?.readBack === true,
     addedLines: typeof metadata?.addedLines === "number" ? metadata.addedLines : void 0,
@@ -41938,7 +42400,8 @@ function updateRunFromEvent(run, event) {
     origin: event.origin,
     namespace: event.namespace,
     authority: event.authority,
-    callId: event.callId
+    callId: event.callId,
+    audit: event.audit
   });
 }
 function updateRunFromLog(run, text2) {
@@ -42004,16 +42467,16 @@ function persistState() {
       sessions: [...sessions.values()],
       runs: [...runs.values()]
     };
-    import_node_fs4.default.mkdirSync(import_node_path6.default.dirname(persistencePath), { recursive: true });
-    import_node_fs4.default.writeFileSync(persistencePath, JSON.stringify(state), "utf8");
+    import_node_fs5.default.mkdirSync(import_node_path7.default.dirname(persistencePath), { recursive: true });
+    import_node_fs5.default.writeFileSync(persistencePath, JSON.stringify(state), "utf8");
   } catch (err) {
     console.warn(`[state] \u6C38\u7D9A\u5316\u3092\u30B9\u30AD\u30C3\u30D7\u3057\u307E\u3057\u305F: ${err.message}`);
   }
 }
 function restoreState() {
   try {
-    if (!import_node_fs4.default.existsSync(persistencePath)) return;
-    const raw = JSON.parse(import_node_fs4.default.readFileSync(persistencePath, "utf8"));
+    if (!import_node_fs5.default.existsSync(persistencePath)) return;
+    const raw = JSON.parse(import_node_fs5.default.readFileSync(persistencePath, "utf8"));
     if (!Array.isArray(raw.sessions) || !raw.sessions.length) return;
     sessions.clear();
     runs.clear();
@@ -42088,12 +42551,14 @@ function makeRunIO(run, controller) {
       run.phase = "execute";
       run.currentStep = question;
       run.nextAction = "\u627F\u8A8D\u307E\u305F\u306F\u62D2\u5426\u3092\u9078\u629E\u3057\u3066\u304F\u3060\u3055\u3044";
-      addRunEvent(run, { type: "approval.requested", message: question, metadata: { approval: run.approval } });
+      addRunEvent(run, { type: "approval.requested", message: question, metadata: { approval: run.approval }, origin: "host", namespace: "app", authority: "authoritative", callId: binding?.callId });
       const approved = await pending2;
       const resolution = run.approval?.id ? getApprovalResolution(run.approval.id) : void 0;
       run.approval = { ...run.approval, approved, ...resolution ? { reason: resolution.reason } : {} };
-      if (resolution?.reason === "\u627F\u8A8D\u671F\u9650\u5207\u308C") addRunEvent(run, { type: "approval.expired", message: resolution.reason, approved: false, metadata: { approval: run.approval } });
-      addRunEvent(run, { type: "approval.resolved", message: resolution?.reason ?? (approved ? "\u627F\u8A8D\u3057\u307E\u3057\u305F" : "\u62D2\u5426\u3057\u307E\u3057\u305F"), approved, metadata: { approval: run.approval } });
+      const provenance = resolution?.provenance ?? { actor: "user", automatic: false };
+      const approvalMetadata = { ...run.approval, provenance };
+      if (provenance.actor === "policy" && resolution?.reason === "\u627F\u8A8D\u671F\u9650\u5207\u308C") addRunEvent(run, { type: "approval.expired", message: resolution.reason, approved: false, metadata: { approval: approvalMetadata }, origin: "host", namespace: "app", authority: "authoritative", callId: binding?.callId });
+      addRunEvent(run, { type: "approval.resolved", message: resolution?.reason ?? (approved ? "\u627F\u8A8D\u3057\u307E\u3057\u305F" : "\u62D2\u5426\u3057\u307E\u3057\u305F"), approved, metadata: { approval: approvalMetadata }, origin: "host", namespace: "app", authority: "authoritative", callId: binding?.callId });
       if (!run.cancelRequested) run.status = "running";
       return approved;
     },
@@ -42167,12 +42632,28 @@ function readBody(req) {
     req.on("error", reject);
   });
 }
+function auditFilters(url2) {
+  const rawLimit = Number(url2.searchParams.get("limit") ?? 200);
+  const limit = Number.isFinite(rawLimit) ? Math.min(500, Math.max(1, Math.trunc(rawLimit))) : 200;
+  const tool2 = url2.searchParams.get("tool") || void 0;
+  const resultValue = url2.searchParams.get("result");
+  const permissionValue = url2.searchParams.get("permission");
+  const result = resultValue === "success" || resultValue === "failure" || resultValue === "refused" ? resultValue : void 0;
+  const permission = permissionValue === "allow" || permissionValue === "ask" || permissionValue === "deny" ? permissionValue : void 0;
+  return { limit, ...tool2 ? { tool: tool2 } : {}, ...result ? { result } : {}, ...permission ? { permission } : {} };
+}
+function auditUnavailable(res) {
+  const availability = auditAvailability(auditLog, auditInitError);
+  if (availability.available) return false;
+  json3(res, 503, { error: "audit log unavailable", detail: availability.detail });
+  return true;
+}
 var server = import_node_http3.default.createServer(async (req, res) => {
   const url2 = new URL(req.url ?? "/", "http://localhost");
   if (req.method === "GET" && url2.pathname === "/") {
     if (indexHtmlPath) {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-      res.end(import_node_fs4.default.readFileSync(indexHtmlPath));
+      res.end(import_node_fs5.default.readFileSync(indexHtmlPath));
     } else {
       res.writeHead(500);
       res.end("public/index.html \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
@@ -42182,7 +42663,7 @@ var server = import_node_http3.default.createServer(async (req, res) => {
   if (req.method === "GET" && url2.pathname === "/classic") {
     if (classicHtmlPath) {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-      res.end(import_node_fs4.default.readFileSync(classicHtmlPath));
+      res.end(import_node_fs5.default.readFileSync(classicHtmlPath));
     } else {
       res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
       res.end("classic UI not found");
@@ -42191,9 +42672,9 @@ var server = import_node_http3.default.createServer(async (req, res) => {
   }
   const uiAsset = uiAssets[url2.pathname];
   if (req.method === "GET" && uiAsset) {
-    if (import_node_fs4.default.existsSync(uiAsset.path)) {
+    if (import_node_fs5.default.existsSync(uiAsset.path)) {
       res.writeHead(200, { "content-type": uiAsset.contentType, "cache-control": "no-cache" });
-      res.end(import_node_fs4.default.readFileSync(uiAsset.path));
+      res.end(import_node_fs5.default.readFileSync(uiAsset.path));
     } else {
       res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
       res.end("UI asset not found");
@@ -42201,7 +42682,7 @@ var server = import_node_http3.default.createServer(async (req, res) => {
     return;
   }
   if (req.method === "GET" && url2.pathname === "/api/info") {
-    json3(res, 200, { model: cfg.model || (cfg.provider ?? ""), provider: cfg.provider ?? "openai", workspace, project: import_node_path6.default.basename(workspace), version: "0.10.8", distribution: readDistributionState() });
+    json3(res, 200, { model: cfg.model || (cfg.provider ?? ""), provider: cfg.provider ?? "openai", workspace, project: import_node_path7.default.basename(workspace), version: "0.10.8", distribution: readDistributionState() });
     return;
   }
   if (url2.pathname === "/api/copilot/visible-session") {
@@ -42246,12 +42727,36 @@ var server = import_node_http3.default.createServer(async (req, res) => {
     json3(res, 200, readDistributionState());
     return;
   }
+  if (req.method === "GET" && url2.pathname === "/api/audit") {
+    if (auditUnavailable(res)) return;
+    try {
+      const filters = auditFilters(url2);
+      const records2 = auditLog.records(filters.limit, filters);
+      json3(res, 200, { records: records2, count: records2.length, limit: filters.limit, filters: { tool: filters.tool ?? null, result: filters.result ?? null, permission: filters.permission ?? null } });
+    } catch (err) {
+      json3(res, 503, { error: "audit log unavailable", detail: err.message });
+    }
+    return;
+  }
+  if (req.method === "GET" && url2.pathname === "/api/audit.csv") {
+    if (auditUnavailable(res)) return;
+    try {
+      const filters = auditFilters(url2);
+      const csv = auditLog.csv(filters.limit, filters);
+      res.writeHead(200, { "content-type": "text/csv; charset=utf-8", "content-disposition": 'inline; filename="audit.csv"' });
+      res.end(csv);
+    } catch (err) {
+      json3(res, 503, { error: "audit log unavailable", detail: err.message });
+    }
+    return;
+  }
   if (req.method === "GET" && url2.pathname === "/api/log") {
     const offset = Number(url2.searchParams.get("offset") ?? 0);
     json3(res, 200, { total: logLines.length, lines: logLines.slice(offset) });
     return;
   }
   if (req.method === "POST" && url2.pathname === "/api/runs") {
+    if (auditUnavailable(res)) return;
     if (activeRunId) {
       json3(res, 409, { error: "\u5225\u306E\u5B9F\u884C\u304C\u9032\u884C\u4E2D\u3067\u3059", activeRun: runSnapshot(runs.get(activeRunId)) });
       return;
@@ -42479,6 +42984,7 @@ var server = import_node_http3.default.createServer(async (req, res) => {
   }
   const resumePath = url2.pathname.match(/^\/api\/runs\/([^/]+)\/resume$/);
   if (req.method === "POST" && resumePath) {
+    if (auditUnavailable(res)) return;
     const base = runs.get(resumePath[1]);
     if (!base) {
       json3(res, 404, { error: "run not found" });
@@ -42507,6 +43013,7 @@ var server = import_node_http3.default.createServer(async (req, res) => {
   }
   const retryPath = url2.pathname.match(/^\/api\/runs\/([^/]+)\/retry$/);
   if (req.method === "POST" && retryPath) {
+    if (auditUnavailable(res)) return;
     const base = runs.get(retryPath[1]);
     if (!base) {
       json3(res, 404, { error: "run not found" });
@@ -42555,7 +43062,7 @@ var server = import_node_http3.default.createServer(async (req, res) => {
     run.currentStep = "\u30AD\u30E3\u30F3\u30BB\u30EB\u3092\u8981\u6C42\u3057\u307E\u3057\u305F";
     run.nextAction = "\u73FE\u5728\u306E\u30C4\u30FC\u30EB\u547C\u3073\u51FA\u3057\u304C\u7D42\u308F\u308B\u306E\u3092\u5F85\u3063\u3066\u3044\u307E\u3059";
     addRunEvent(run, { type: "run.cancel_requested", message: "\u30AD\u30E3\u30F3\u30BB\u30EB\u3092\u8981\u6C42\u3057\u307E\u3057\u305F" });
-    if (run.approval?.id) resolveApproval(run.approval.id, false, "\u5B9F\u884C\u30AD\u30E3\u30F3\u30BB\u30EB\u306B\u3088\u308A\u62D2\u5426\u3055\u308C\u307E\u3057\u305F");
+    if (run.approval?.id) resolveApproval(run.approval.id, false, "\u5B9F\u884C\u30AD\u30E3\u30F3\u30BB\u30EB\u306B\u3088\u308A\u62D2\u5426\u3055\u308C\u307E\u3057\u305F", { actor: "policy", automatic: true });
     runControllers.get(run.id)?.abort();
     for (const artifact of run.artifacts.filter((entry) => entry.processId)) {
       try {
@@ -42573,7 +43080,7 @@ var server = import_node_http3.default.createServer(async (req, res) => {
   if (req.method === "POST" && url2.pathname === "/api/approvals/resolve") {
     try {
       const b = JSON.parse(await readBody(req));
-      const ok = resolveApproval(String(b.id ?? ""), Boolean(b.approved), b.reason);
+      const ok = resolveApproval(String(b.id ?? ""), Boolean(b.approved));
       if (!ok) {
         json3(res, 404, { error: "approval not found" });
         return;
@@ -42667,6 +43174,7 @@ var server = import_node_http3.default.createServer(async (req, res) => {
     return;
   }
   if (req.method === "POST" && url2.pathname === "/api/turn") {
+    if (auditUnavailable(res)) return;
     if (activeRunId) {
       const activeRun = runs.get(activeRunId);
       json3(res, 409, {
@@ -42734,23 +43242,23 @@ function verificationProfileFor(run, requested) {
   if (paths.some((p) => p.endsWith(".ps1"))) return "powershell";
   return "generic";
 }
-function realPathWithMissingTail2(abs) {
+function realPathWithMissingTail3(abs) {
   let cursor = abs;
   const tail = [];
-  while (!import_node_fs4.default.existsSync(cursor)) {
-    const parent = import_node_path6.default.dirname(cursor);
+  while (!import_node_fs5.default.existsSync(cursor)) {
+    const parent = import_node_path7.default.dirname(cursor);
     if (parent === cursor) return abs;
-    tail.unshift(import_node_path6.default.basename(cursor));
+    tail.unshift(import_node_path7.default.basename(cursor));
     cursor = parent;
   }
-  return import_node_path6.default.resolve(import_node_fs4.default.realpathSync.native(cursor), ...tail);
+  return import_node_path7.default.resolve(import_node_fs5.default.realpathSync.native(cursor), ...tail);
 }
 function safeChangedPath(change) {
-  const rootReal = realPathWithMissingTail2(import_node_path6.default.resolve(workspace));
-  const abs = import_node_path6.default.resolve(workspace, change.path);
-  const candidateReal = realPathWithMissingTail2(abs);
-  const relative = import_node_path6.default.relative(rootReal, candidateReal);
-  if (relative.startsWith("..") || import_node_path6.default.isAbsolute(relative)) throw new Error("\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u306E\u5909\u66F4\u3067\u3059");
+  const rootReal = realPathWithMissingTail3(import_node_path7.default.resolve(workspace));
+  const abs = import_node_path7.default.resolve(workspace, change.path);
+  const candidateReal = realPathWithMissingTail3(abs);
+  const relative = import_node_path7.default.relative(rootReal, candidateReal);
+  if (relative.startsWith("..") || import_node_path7.default.isAbsolute(relative)) throw new Error("\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u306E\u5909\u66F4\u3067\u3059");
   return abs;
 }
 async function performVerification(run, requested) {
@@ -42764,8 +43272,8 @@ async function performVerification(run, requested) {
     const check2 = checks[0];
     try {
       const abs = safeChangedPath(change);
-      const current = import_node_fs4.default.readFileSync(abs, "utf8");
-      const currentHash = import_node_crypto3.default.createHash("sha256").update(current, "utf8").digest("hex");
+      const current = import_node_fs5.default.readFileSync(abs, "utf8");
+      const currentHash = import_node_crypto4.default.createHash("sha256").update(current, "utf8").digest("hex");
       if (!change.afterHash || currentHash !== change.afterHash) {
         check2.status = "fail";
         check2.evidence = `${change.path}: \u5909\u66F4\u5F8C\u30CF\u30C3\u30B7\u30E5\u304C\u4E00\u81F4\u3057\u307E\u305B\u3093`;
@@ -42793,13 +43301,13 @@ async function performVerification(run, requested) {
       if (lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".cjs")) {
         await execFileAsync2(process.execPath, ["--check", abs], { timeout: 15e3, windowsHide: true });
       } else if (lower.endsWith(".json")) {
-        JSON.parse(import_node_fs4.default.readFileSync(abs, "utf8"));
+        JSON.parse(import_node_fs5.default.readFileSync(abs, "utf8"));
       } else if (lower.endsWith(".html")) {
-        const text2 = import_node_fs4.default.readFileSync(abs, "utf8");
+        const text2 = import_node_fs5.default.readFileSync(abs, "utf8");
         if (!/<html[\s>]/i.test(text2) || !/<\/html>/i.test(text2)) throw new Error(`${change.path}: html\u306E\u30EB\u30FC\u30C8\u8981\u7D20\u304C\u4E0D\u5B8C\u5168\u3067\u3059`);
       } else if (lower.endsWith(".ts") || lower.endsWith(".tsx")) {
-        const tsc = import_node_path6.default.join(workspace, "node_modules", ".bin", process.platform === "win32" ? "tsc.cmd" : "tsc");
-        if (import_node_fs4.default.existsSync(tsc)) await execFileAsync2(tsc, ["--noEmit", "--pretty", "false"], { cwd: workspace, timeout: 6e4, windowsHide: true });
+        const tsc = import_node_path7.default.join(workspace, "node_modules", ".bin", process.platform === "win32" ? "tsc.cmd" : "tsc");
+        if (import_node_fs5.default.existsSync(tsc)) await execFileAsync2(tsc, ["--noEmit", "--pretty", "false"], { cwd: workspace, timeout: 6e4, windowsHide: true });
         else throw new Error("TypeScript\u30B3\u30F3\u30D1\u30A4\u30E9\u304C\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306B\u3042\u308A\u307E\u305B\u3093");
       } else if (lower.endsWith(".ps1")) {
         syntax.status = "todo";
