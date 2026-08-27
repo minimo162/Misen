@@ -16,6 +16,9 @@
 | Vercel AI SDK (`ai`) | 6.0.268 | Apache-2.0 | `apps/coding-agent/package-lock.json` / npm install | 実験的なagent loop v2のモデル・tool loop API |
 | AI SDK OpenAI-Compatible Provider (`@ai-sdk/openai-compatible`) | 2.0.72 | Apache-2.0 | `apps/coding-agent/package-lock.json` / npm install | copilot-openai-bridgeの `/v1/chat/completions` へ接続するprovider |
 | shell-quote | 1.10.0 | MIT | `apps/coding-agent/package-lock.json`; install時の `apps/coding-agent/node_modules/shell-quote/` | v2 permission hookでのshell token/operator解析。追加の `@types/shell-quote` は導入しない |
+| assistant-ui React (`@assistant-ui/react`) | 0.15.16 | MIT | `apps/coding-agent/package-lock.json` / npm install | 既存サーバー状態を表示するスレッド、コンポーザー、ExternalStoreRuntimeのUIプリミティブ。ツール実行・承認は委譲しない |
+| React | 19.2.8 | MIT | `apps/coding-agent/package-lock.json` / npm install | assistant-ui ベースのブラウザ画面の描画 |
+| React DOM | 19.2.8 | MIT | `apps/coding-agent/package-lock.json` / npm install | ブラウザの `#app` への React マウント |
 
 `apps/coding-agent/vendor/npm/package-lock.json` の resolved/integrity と `package.json` の exact dependency も、上記 npm パッケージの固定根拠です。ImportExcel の `ImportExcel.psd1` は ModuleVersion 7.8.10 と `EPPlus.dll` の required assembly を示します。
 
@@ -33,6 +36,8 @@
 - Vercel AI SDK 6.0.268 (Apache-2.0): `apps/coding-agent/node_modules/ai/LICENSE`（install時）およびpackage metadata。固定解決版は `apps/coding-agent/package-lock.json` に記録します。
 - AI SDK OpenAI-Compatible Provider 2.0.72 (Apache-2.0): `apps/coding-agent/node_modules/@ai-sdk/openai-compatible/LICENSE`（install時）およびpackage metadata。固定解決版は `apps/coding-agent/package-lock.json` に記録します。
 - shell-quote 1.10.0 (MIT): `apps/coding-agent/node_modules/shell-quote/LICENSE`（install時）。固定解決版、resolved URL、integrity、license は `apps/coding-agent/package-lock.json` に記録します。`@types/shell-quote` は追加していません。
+- assistant-ui React 0.15.16 (MIT): `apps/coding-agent/node_modules/@assistant-ui/react/LICENSE`（install時）および package metadata。固定解決版、resolved URL、integrity、license は `apps/coding-agent/package-lock.json` に記録します。ExternalStoreRuntime のpresentation-only利用であり、client-side tool executionは有効化しません。
+- React 19.2.8 / React DOM 19.2.8 (MIT): `apps/coding-agent/node_modules/react/LICENSE`、`apps/coding-agent/node_modules/react-dom/LICENSE`（install時）および package metadata。固定解決版、resolved URL、integrity、license は `apps/coding-agent/package-lock.json` に記録します。
 
 ## 取得と実行の境界
 

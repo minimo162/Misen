@@ -41595,6 +41595,16 @@ var indexCandidates = [
   import_node_path6.default.join(process.cwd(), "public", "index.html")
 ];
 var indexHtmlPath = indexCandidates.find((p) => typeof p === "string" && import_node_fs4.default.existsSync(p));
+var classicCandidates = [
+  process.env.CLASSIC_HTML,
+  import_node_path6.default.join(here, "..", "public", "classic.html"),
+  import_node_path6.default.join(process.cwd(), "public", "classic.html")
+];
+var classicHtmlPath = classicCandidates.find((p) => typeof p === "string" && import_node_fs4.default.existsSync(p));
+var uiAssets = {
+  "/assets/ui.js": { path: import_node_path6.default.join(here, "ui.js"), contentType: "text/javascript; charset=utf-8" },
+  "/assets/ui.css": { path: import_node_path6.default.join(here, "ui.css"), contentType: "text/css; charset=utf-8" }
+};
 var distributionStatePath = import_node_path6.default.join(process.env.LOCALAPPDATA ?? import_node_path6.default.dirname(here), "CompanyApps", "state", "coding-agent.json");
 var persistencePath = import_node_path6.default.join(process.env.APPDATA ?? process.env.LOCALAPPDATA ?? import_node_path6.default.dirname(here), "CompanyApps", "coding-agent", "state.json");
 function readDistributionState() {
@@ -42166,6 +42176,27 @@ var server = import_node_http3.default.createServer(async (req, res) => {
     } else {
       res.writeHead(500);
       res.end("public/index.html \u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
+    }
+    return;
+  }
+  if (req.method === "GET" && url2.pathname === "/classic") {
+    if (classicHtmlPath) {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(import_node_fs4.default.readFileSync(classicHtmlPath));
+    } else {
+      res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+      res.end("classic UI not found");
+    }
+    return;
+  }
+  const uiAsset = uiAssets[url2.pathname];
+  if (req.method === "GET" && uiAsset) {
+    if (import_node_fs4.default.existsSync(uiAsset.path)) {
+      res.writeHead(200, { "content-type": uiAsset.contentType, "cache-control": "no-cache" });
+      res.end(import_node_fs4.default.readFileSync(uiAsset.path));
+    } else {
+      res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+      res.end("UI asset not found");
     }
     return;
   }
