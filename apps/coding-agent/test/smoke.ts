@@ -695,17 +695,90 @@ async function testOllamaProvider(): Promise<void> {
   }
   try {
     const loaded = loadConfig(writeConfig('valid.json', {
-      provider: 'ollama', baseURL: 'http://127.0.0.1:11434/v1', model: 'ornith-1.5:9b'
+      provider: 'ollama', baseURL: 'http://127.0.0.1:11434/v1', model: 'ornith-1.5:9b',
+      generationLimits: {
+        readToolRequestMaxOutputTokens: 256,
+        actionToolRequestMaxOutputTokens: 1024,
+        finalResponseMaxOutputTokens: 192
+      }
     }))
     assert.strictEqual(loaded.provider, 'ollama')
     assert.strictEqual(loaded.agentLoop, 'v1')
+    assert.deepStrictEqual(loaded.generationLimits, {
+      readToolRequestMaxOutputTokens: 256,
+      actionToolRequestMaxOutputTokens: 1024,
+      finalResponseMaxOutputTokens: 192
+    })
     assert.throws(() => loadConfig(writeConfig('unsupported.json', { provider: 'unsupported', baseURL: 'http://127.0.0.1:1/v1', model: 'x' })), /サポートされていない provider/u)
     assert.throws(() => loadConfig(writeConfig('missing.json', { provider: 'ollama', baseURL: 'http://127.0.0.1:11434/v1' })), /baseURL \/ model/u)
     assert.throws(() => loadConfig(writeConfig('remote.json', { provider: 'ollama', baseURL: 'https://example.com/v1', model: 'x' })), /loopback/u)
     assert.throws(() => loadConfig(writeConfig('bad-reasoning.json', { provider: 'ollama', baseURL: 'http://127.0.0.1:11434/v1', model: 'x', reasoningEffort: 'max' })), /reasoningEffort/u)
     assert.throws(() => loadConfig(writeConfig('bad-optimization.json', { provider: 'ollama', baseURL: 'http://127.0.0.1:11434/v1', model: 'x', agentOptimization: 'maybe' })), /agentOptimization/u)
+    for (const invalid of [31, 4097, 1.5, '256', null]) {
+      assert.throws(() => loadConfig(writeConfig(`bad-generation-${String(invalid)}.json`, {
+        provider: 'ollama', baseURL: 'http://127.0.0.1:11434/v1', model: 'x',
+        generationLimits: { readToolRequestMaxOutputTokens: invalid }
+      })), /generationLimits/u)
+    }
   } finally {
     fs.rmSync(configDir, { recursive: true, force: true })
+  }
+
+  // Ordinary read work uses the narrow read cap and then a bounded final
+  // request. Capture only the parsed fields needed for the assertion; the
+  // ephemeral request bodies are discarded with the mock after this block.
+  const readWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-ollama-read-limits-'))
+  fs.writeFileSync(path.join(readWorkspace, '概要_日本語.txt'), '色: 青\n', 'utf8')
+  const readMock = await listenOllamaMock((_body, requestNumber) => {
+    if (requestNumber === 1) {
+      return {
+        body: JSON.stringify({
+          id: 'ollama-read-limits-1', object: 'chat.completion', created: 0, model: 'mock',
+          choices: [{ index: 0, message: { role: 'assistant', content: '', tool_calls: [{ id: 'read-limits-call-1', type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: '概要_日本語.txt' }) } }] }, finish_reason: 'tool_calls' }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+        })
+      }
+    }
+    return {
+      body: JSON.stringify({
+        id: 'ollama-read-limits-2', object: 'chat.completion', created: 0, model: 'mock',
+        choices: [{ index: 0, message: { role: 'assistant', content: '色は青です。' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+      })
+    }
+  })
+  try {
+    const readEvents: AgentEvent[] = []
+    const result = await runAgentTurnV2({
+      cfg: {
+        provider: 'ollama', agentLoop: 'v2', baseURL: readMock.url, model: 'mock', reasoningEffort: 'none',
+        generationLimits: {
+          readToolRequestMaxOutputTokens: 256,
+          actionToolRequestMaxOutputTokens: 1024,
+          finalResponseMaxOutputTokens: 192
+        }
+      },
+      messages: [], userInput: '概要_日本語.txtを読んで、色を教えてください。', ctx: makeCtx(readWorkspace), io: { ...ioStub(true), event: (event) => readEvents.push(event) }
+    })
+    assert.strictEqual(result.aborted, false)
+    assert.strictEqual(result.reply, '色は青です。')
+    assert.strictEqual(readMock.requests[0]?.body.max_tokens, 256, 'read request must use readToolRequestMaxOutputTokens')
+    assert.strictEqual(readMock.requests[0]?.body.reasoning_effort, 'none')
+    assert.strictEqual(readMock.requests[1]?.body.max_tokens, 192, 'final request must use finalResponseMaxOutputTokens')
+    assert.strictEqual(readMock.requests[1]?.body.reasoning_effort, 'none')
+    const firstTools = readMock.requests[0]?.body.tools
+    const finalTools = readMock.requests[1]?.body.tools
+    assert.ok(Array.isArray(firstTools) && firstTools.length > 0, 'read request must expose the read subset')
+    assert.ok(finalTools === undefined || (Array.isArray(finalTools) && finalTools.length === 0), 'final request must expose zero tool schemas')
+    const records = readEvents.filter((event) => event.type === 'model.decision').map((event) => event.metadata?.requestTelemetry as Record<string, unknown>)
+    assert.deepStrictEqual(records.map((record) => record.generationPhase), ['work-read-tool', 'work-final'])
+    assert.deepStrictEqual(records.map((record) => record.requestedMaxOutputTokens), [256, 192])
+    assert.strictEqual(records.at(-1)?.exposedToolCount, 0)
+    assert.strictEqual(records.at(-1)?.toolSchemaBytes, 0)
+  } finally {
+    readMock.requests.length = 0
+    await new Promise<void>((resolve) => readMock.server.close(() => resolve()))
+    fs.rmSync(readWorkspace, { recursive: true, force: true })
   }
 
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-ollama-workspace-'))
@@ -735,7 +808,12 @@ async function testOllamaProvider(): Promise<void> {
     const result = await runAgentTurnV2({
       cfg: {
         provider: 'ollama', agentLoop: 'v2', baseURL: mock.url, model: 'mock', reasoningEffort: 'high',
-        autoApprove: { write: true }, maxToolIterations: 3
+        autoApprove: { write: true }, maxToolIterations: 3,
+        generationLimits: {
+          readToolRequestMaxOutputTokens: 256,
+          actionToolRequestMaxOutputTokens: 1024,
+          finalResponseMaxOutputTokens: 192
+        }
       },
       messages: [], userInput: '日本語ファイルを書いて', ctx: makeCtx(workspace), io: { ...ioStub(true), event: (event) => ollamaEvents.push(event) }
     })
@@ -745,6 +823,10 @@ async function testOllamaProvider(): Promise<void> {
     assert.ok(mock.requests[0].contentType?.toLowerCase().includes('application/json') && mock.requests[0].contentType?.toLowerCase().includes('charset=utf-8'))
     assert.strictEqual(mock.requests[0].authorization, null, 'Ollama must not receive Authorization')
     assert.strictEqual(mock.requests[0].body.reasoning_effort, 'high')
+    assert.strictEqual(mock.requests[0].body.max_tokens, 1024, 'action request must use actionToolRequestMaxOutputTokens')
+    assert.strictEqual(mock.requests[1].body.max_tokens, 192, 'final request must use finalResponseMaxOutputTokens')
+    assert.ok(Array.isArray(mock.requests[0].body.tools) && (mock.requests[0].body.tools as unknown[]).length > 0, 'write request must expose the action subset')
+    assert.ok(mock.requests[1].body.tools === undefined || (Array.isArray(mock.requests[1].body.tools) && (mock.requests[1].body.tools as unknown[]).length === 0), 'write final request must expose zero tool schemas')
     const secondBody = JSON.stringify(mock.requests[1]?.body ?? {})
     assert.ok(secondBody.includes('メモ.txt') && secondBody.includes('確認'), 'Japanese tool args must survive the UTF-8 boundary')
     const modelEvents = ollamaEvents.filter((event) => event.type === 'model.decision')
@@ -752,10 +834,106 @@ async function testOllamaProvider(): Promise<void> {
     assert.ok(modelEvents.every((event) => event.origin === 'ollama'), 'Ollama model decisions must retain Ollama provenance')
     assert.ok(!modelEvents.some((event) => event.origin === 'copilot'), 'Ollama model decisions must not claim Copilot provenance')
   } finally {
+    mock.requests.length = 0
     await new Promise<void>((resolve) => mock.server.close(() => resolve()))
     fs.rmSync(workspace, { recursive: true, force: true })
     if (previousKey === undefined) delete process.env.COMPANY_LLM_API_KEY
     else process.env.COMPANY_LLM_API_KEY = previousKey
+  }
+
+  // A read-write request stays open after the read and closes only after the
+  // successful write. The final request is a separate zero-tool bounded call.
+  const readWriteWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-ollama-read-write-'))
+  fs.writeFileSync(path.join(readWriteWorkspace, 'source.txt'), 'source', 'utf8')
+  const readWrite = await listenOllamaMock((_body, requestNumber) => {
+    const message = requestNumber === 1
+      ? { role: 'assistant', content: '', tool_calls: [{ id: 'rw-read', type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: 'source.txt' }) } }] }
+      : requestNumber === 2
+        ? { role: 'assistant', content: '', tool_calls: [{ id: 'rw-write', type: 'function', function: { name: 'write_file', arguments: JSON.stringify({ path: 'output.txt', content: 'copied' }) } }] }
+        : { role: 'assistant', content: '読み書きが完了しました' }
+    return { body: JSON.stringify({ id: `ollama-rw-${requestNumber}`, object: 'chat.completion', created: 0, model: 'mock', choices: [{ index: 0, message, finish_reason: requestNumber < 3 ? 'tool_calls' : 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }) }
+  })
+  try {
+    const events: AgentEvent[] = []
+    const result = await runAgentTurnV2({
+      cfg: { provider: 'ollama', agentLoop: 'v2', baseURL: readWrite.url, model: 'mock', reasoningEffort: 'none', autoApprove: { write: true }, generationLimits: { readToolRequestMaxOutputTokens: 256, actionToolRequestMaxOutputTokens: 1024, finalResponseMaxOutputTokens: 192 } },
+      messages: [], userInput: 'source.txtを読んで、結果をoutput.txtへ書いて', ctx: makeCtx(readWriteWorkspace), io: { ...ioStub(true), event: (event) => events.push(event) }
+    })
+    assert.strictEqual(result.aborted, false)
+    assert.strictEqual(fs.readFileSync(path.join(readWriteWorkspace, 'output.txt'), 'utf8'), 'copied')
+    assert.strictEqual(readWrite.requests.length, 3)
+    assert.ok(Array.isArray(readWrite.requests[0].body.tools) && (readWrite.requests[0].body.tools as unknown[]).length > 0)
+    assert.strictEqual(readWrite.requests[0].body.max_tokens, 1024, 'read-write request exposes write, so it uses action cap')
+    assert.strictEqual(readWrite.requests[0].body.reasoning_effort, 'none')
+    assert.ok(Array.isArray(readWrite.requests[1].body.tools) && (readWrite.requests[1].body.tools as unknown[]).length > 0, 'read-write must stay open after read')
+    assert.strictEqual(readWrite.requests[1].body.max_tokens, 1024)
+    assert.ok(readWrite.requests[2].body.tools === undefined || (Array.isArray(readWrite.requests[2].body.tools) && (readWrite.requests[2].body.tools as unknown[]).length === 0), 'read-write final request must expose zero tool schemas')
+    assert.strictEqual(readWrite.requests[2].body.max_tokens, 192)
+    assert.strictEqual(readWrite.requests[2].body.reasoning_effort, 'none')
+    const records = events.filter((event) => event.type === 'model.decision').map((event) => event.metadata?.requestTelemetry as Record<string, unknown>)
+    assert.deepStrictEqual(records.map((record) => record.generationPhase), ['work-action-tool', 'work-action-tool', 'work-final'])
+    assert.deepStrictEqual(records.map((record) => record.requestedMaxOutputTokens), [1024, 1024, 192])
+    assert.strictEqual(records.at(-1)?.exposedToolCount, 0)
+    assert.strictEqual(records.at(-1)?.toolSchemaBytes, 0)
+  } finally {
+    readWrite.requests.length = 0
+    await new Promise<void>((resolve) => readWrite.server.close(() => resolve()))
+    fs.rmSync(readWriteWorkspace, { recursive: true, force: true })
+  }
+
+  // Command/coding and uncertain fallback turns must not auto-close merely
+  // because a read happens to succeed on the first model decision.
+  const noEarlyCloseCases: Array<{ label: string; userInput: string }> = [
+    { label: 'command', userInput: 'コマンドを実行して' },
+    { label: 'coding', userInput: '実装してください' },
+    { label: 'uncertain', userInput: 'それを処理して' }
+  ]
+  for (const testCase of noEarlyCloseCases) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), `ca-smoke-ollama-no-close-${testCase.label}-`))
+    fs.writeFileSync(path.join(root, 'input.txt'), 'input', 'utf8')
+    const mock = await listenOllamaMock((_body, requestNumber) => {
+      const message = requestNumber === 1
+        ? { role: 'assistant', content: '', tool_calls: [{ id: `${testCase.label}-read`, type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: 'input.txt' }) } }] }
+        : { role: 'assistant', content: '続行確認' }
+      return { body: JSON.stringify({ id: `ollama-no-close-${testCase.label}-${requestNumber}`, object: 'chat.completion', created: 0, model: 'mock', choices: [{ index: 0, message, finish_reason: requestNumber === 1 ? 'tool_calls' : 'stop' }] }) }
+    })
+    try {
+      const result = await runAgentTurnV2({
+        cfg: { provider: 'ollama', agentLoop: 'v2', baseURL: mock.url, model: 'mock', reasoningEffort: 'none', generationLimits: { readToolRequestMaxOutputTokens: 256, actionToolRequestMaxOutputTokens: 1024, finalResponseMaxOutputTokens: 192 } },
+        messages: [], userInput: testCase.userInput, ctx: makeCtx(root), io: ioStub(true)
+      })
+      assert.strictEqual(result.aborted, false, `${testCase.label} should continue to a normal response`)
+      assert.strictEqual(mock.requests.length, 2, `${testCase.label} must make a second model request`)
+      assert.ok(Array.isArray(mock.requests[1].body.tools) && (mock.requests[1].body.tools as unknown[]).length > 0, `${testCase.label} second request must retain tools`)
+    } finally {
+      mock.requests.length = 0
+      await new Promise<void>((resolve) => mock.server.close(() => resolve()))
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  }
+
+  // A tool call returned during the tools-closed final phase is fail-safe:
+  // reject it and stop without issuing another provider request.
+  const finalToolWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-ollama-final-tool-'))
+  fs.writeFileSync(path.join(finalToolWorkspace, 'input.txt'), 'input', 'utf8')
+  const finalTool = await listenOllamaMock((_body, requestNumber) => {
+    const message = requestNumber === 1
+      ? { role: 'assistant', content: '', tool_calls: [{ id: 'final-read', type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: 'input.txt' }) } }] }
+      : { role: 'assistant', content: '', tool_calls: [{ id: 'unexpected-final-tool', type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: 'input.txt' }) } }] }
+    return { body: JSON.stringify({ id: `ollama-final-tool-${requestNumber}`, object: 'chat.completion', created: 0, model: 'mock', choices: [{ index: 0, message, finish_reason: 'tool_calls' }] }) }
+  })
+  try {
+    const result = await runAgentTurnV2({
+      cfg: { provider: 'ollama', agentLoop: 'v2', baseURL: finalTool.url, model: 'mock', reasoningEffort: 'none', generationLimits: { readToolRequestMaxOutputTokens: 256, actionToolRequestMaxOutputTokens: 1024, finalResponseMaxOutputTokens: 192 } },
+      messages: [], userInput: 'input.txtを読んで', ctx: makeCtx(finalToolWorkspace), io: ioStub(true)
+    })
+    assert.strictEqual(result.aborted, true, 'tool call in final phase must fail safe')
+    assert.strictEqual(finalTool.requests.length, 2, 'final tool call must not trigger another request')
+    assert.ok(finalTool.requests[1].body.tools === undefined || (Array.isArray(finalTool.requests[1].body.tools) && (finalTool.requests[1].body.tools as unknown[]).length === 0))
+  } finally {
+    finalTool.requests.length = 0
+    await new Promise<void>((resolve) => finalTool.server.close(() => resolve()))
+    fs.rmSync(finalToolWorkspace, { recursive: true, force: true })
   }
 
   const invalid = await listenOllamaMock(() => ({ contentType: 'application/json', body: new Uint8Array([0x7b, 0x22, 0x74, 0x22, 0x3a, 0xc3, 0x28, 0x7d]) }))
@@ -1177,7 +1355,7 @@ async function testV2ToolLoopAndEventContract(): Promise<void> {
     const events: Array<{ type: string; origin?: string; namespace?: string; authority?: string; callId?: string }> = []
     const logs: string[] = []
     const result = await runConfiguredAgentTurn({
-      cfg: { ...baseCfg, agentLoop: 'v2', autoApprove: { write: true } },
+      cfg: { ...baseCfg, agentLoop: 'v2', agentOptimization: 'off', autoApprove: { write: true } },
       messages: [{ role: 'system', content: 'smoke system' }],
       userInput: '作って',
       ctx: makeCtx(root),
@@ -1188,6 +1366,7 @@ async function testV2ToolLoopAndEventContract(): Promise<void> {
     assert.strictEqual(fs.readFileSync(path.join(root, 'v2.txt'), 'utf8'), 'from v2')
     assert.strictEqual(prompts.length, 2)
     assert.ok(prompts[1].includes('BEGIN_UNTRUSTED_HOST_RESULT'))
+    assert.ok(prompts[1].includes('AVAILABLE_FUNCTIONS='), 'optimization off must retain the existing tool schema exposure')
     assert.ok(events.some((event) => event.type === 'model.decision' && event.origin === 'copilot' && event.namespace === 'none' && event.authority === 'claimed'))
     assert.ok(events.some((event) => event.type === 'plan.created' && event.origin === 'orchestrator' && event.namespace === 'none' && event.authority === 'derived'))
     assert.ok(events.some((event) => event.type === 'tool.succeeded' && event.origin === 'host' && event.namespace === 'app' && event.authority === 'authoritative' && event.callId))

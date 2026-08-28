@@ -54,6 +54,9 @@ export interface RequestTelemetryPruningSummary {
 
 export type ToolResultStatus = 'succeeded' | 'failed' | 'denied' | 'unknown'
 
+/** Safe, bounded phase labels for ordinary v2 work requests. */
+export type RequestTelemetryGenerationPhase = 'work-read-tool' | 'work-action-tool' | 'work-final'
+
 /**
  * A tool definition reduced to names and parameter names.  Descriptions,
  * schemas, implementations, and arguments are intentionally not accepted.
@@ -96,6 +99,10 @@ export interface RequestTelemetryBeginInput {
   /** Caller-computed UTF-8 approximation over trusted result metadata. */
   readonly toolResultContextBytes?: number | null
   readonly pruning?: RequestTelemetryPruningInput
+  /** Optional phase label; omitted for chat/research and legacy callers. */
+  readonly generationPhase?: RequestTelemetryGenerationPhase
+  /** Requested generation bound, distinct from provider-reported usage. */
+  readonly requestedMaxOutputTokens?: number | null
 }
 
 export interface RequestTelemetryRecord {
@@ -111,6 +118,8 @@ export interface RequestTelemetryRecord {
   readonly toolSchemaBytes: number | null
   readonly toolResultContextBytes: number | null
   readonly pruning: RequestTelemetryPruningSummary
+  readonly generationPhase?: RequestTelemetryGenerationPhase
+  readonly requestedMaxOutputTokens?: number | null
 }
 
 export interface RequestTelemetryCollectorOptions {
@@ -197,6 +206,22 @@ function safeElapsed(value: unknown): number {
 function safeToken(value: unknown, label: string): NullableTokenCount {
   if (value === undefined || value === null) return null
   return safeCount(value, label)
+}
+
+function safeRequestedMaxOutputTokens(value: unknown): number | null | undefined {
+  if (value === undefined) return undefined
+  if (value === null) return null
+  const count = safeCount(value, 'requestedMaxOutputTokens')
+  if (count < 32 || count > 4096) throw new RangeError('requestedMaxOutputTokens must be between 32 and 4096')
+  return count
+}
+
+function safeGenerationPhase(value: unknown): RequestTelemetryGenerationPhase | undefined {
+  if (value === undefined) return undefined
+  if (value !== 'work-read-tool' && value !== 'work-action-tool' && value !== 'work-final') {
+    throw new TypeError('generationPhase is not a supported phase')
+  }
+  return value
 }
 
 function safeTokenUsage(value: ProviderReportedTokenUsage | undefined): RequestTelemetryTokenUsage {
@@ -360,9 +385,11 @@ function safeBeginInput(input: RequestTelemetryBeginInput): {
   toolSchemaBytes: number | null | undefined
   toolResultContextBytes: number | null | undefined
   pruning: RequestTelemetryPruningSummary
+  generationPhase: RequestTelemetryGenerationPhase | undefined
+  requestedMaxOutputTokens: number | null | undefined
 } {
   if (!isPlainObject(input)) throw new TypeError('request telemetry input must be a plain metadata object')
-  rejectUnknownKeys(input, ['requestIndex', 'runId', 'provider', 'model', 'workingMessageCount', 'exposedToolDefs', 'exposedToolCount', 'toolSchemaBytes', 'toolResultContext', 'toolResultContextBytes', 'pruning'], 'request telemetry input')
+  rejectUnknownKeys(input, ['requestIndex', 'runId', 'provider', 'model', 'workingMessageCount', 'exposedToolDefs', 'exposedToolCount', 'toolSchemaBytes', 'toolResultContext', 'toolResultContextBytes', 'pruning', 'generationPhase', 'requestedMaxOutputTokens'], 'request telemetry input')
   const requestIndex = safeCount(input.requestIndex, 'requestIndex')
   const runId = safeString(input.runId, 'runId')
   const provider = safeString(input.provider, 'provider')
@@ -383,13 +410,17 @@ function safeBeginInput(input: RequestTelemetryBeginInput): {
     ? input.toolResultContextBytes
     : safeCount(input.toolResultContextBytes, 'toolResultContextBytes')
   const pruning = safePruning(input.pruning)
+  const generationPhase = safeGenerationPhase(input.generationPhase)
+  const requestedMaxOutputTokens = safeRequestedMaxOutputTokens(input.requestedMaxOutputTokens)
   return {
     input: Object.freeze({ requestIndex, runId, provider, model, workingMessageCount, exposedToolCount, toolSchemaBytes, toolResultContextBytes }),
     toolDefs,
     resultContext,
     toolSchemaBytes,
     toolResultContextBytes,
-    pruning
+    pruning,
+    generationPhase,
+    requestedMaxOutputTokens
   }
 }
 
@@ -444,7 +475,9 @@ export class RequestTelemetryCollector {
         toolResultContextBytes: safe.toolResultContextBytes !== undefined
           ? safe.toolResultContextBytes
           : safe.resultContext === undefined ? null : approximateToolResultContextBytes(safe.resultContext),
-        pruning: safe.pruning
+        pruning: safe.pruning,
+        ...(safe.generationPhase !== undefined ? { generationPhase: safe.generationPhase } : {}),
+        ...(safe.requestedMaxOutputTokens !== undefined ? { requestedMaxOutputTokens: safe.requestedMaxOutputTokens } : {})
       })
       finished = true
       this.#records.push(record)
@@ -500,7 +533,9 @@ export function createRequestTelemetryRecord(
     toolResultContextBytes: safe.toolResultContextBytes !== undefined
       ? safe.toolResultContextBytes
       : safe.resultContext === undefined ? null : approximateToolResultContextBytes(safe.resultContext),
-    pruning: safe.pruning
+    pruning: safe.pruning,
+    ...(safe.generationPhase !== undefined ? { generationPhase: safe.generationPhase } : {}),
+    ...(safe.requestedMaxOutputTokens !== undefined ? { requestedMaxOutputTokens: safe.requestedMaxOutputTokens } : {})
   })
 }
 
@@ -512,10 +547,12 @@ export function parseRequestTelemetryRecord(value: unknown): RequestTelemetryRec
     'tokenUsage', 'workingMessageCount', 'exposedToolCount', 'toolSchemaBytes',
     'toolResultContextBytes', 'pruning'
   ] as const
-  rejectUnknownKeys(value, requiredKeys, 'request telemetry record')
+  rejectUnknownKeys(value, [...requiredKeys, 'generationPhase', 'requestedMaxOutputTokens'], 'request telemetry record')
   for (const key of requiredKeys) if (!Object.hasOwn(value, key)) throw new TypeError(`request telemetry record is missing ${key}`)
   if (value.schemaVersion !== REQUEST_TELEMETRY_SCHEMA_VERSION) throw new TypeError('request telemetry schemaVersion is unsupported')
   const nullableCount = (candidate: unknown, label: string): number | null => candidate === null ? null : safeCount(candidate, label)
+  const generationPhase = safeGenerationPhase(value.generationPhase)
+  const requestedMaxOutputTokens = safeRequestedMaxOutputTokens(value.requestedMaxOutputTokens)
   return freezeRecord({
     schemaVersion: REQUEST_TELEMETRY_SCHEMA_VERSION,
     requestIndex: safeCount(value.requestIndex, 'requestIndex'),
@@ -528,6 +565,8 @@ export function parseRequestTelemetryRecord(value: unknown): RequestTelemetryRec
     exposedToolCount: safeCount(value.exposedToolCount, 'exposedToolCount', TOOL_MAX_COUNT),
     toolSchemaBytes: nullableCount(value.toolSchemaBytes, 'toolSchemaBytes'),
     toolResultContextBytes: nullableCount(value.toolResultContextBytes, 'toolResultContextBytes'),
-    pruning: safePruning(value.pruning as RequestTelemetryPruningInput)
+    pruning: safePruning(value.pruning as RequestTelemetryPruningInput),
+    ...(generationPhase !== undefined ? { generationPhase } : {}),
+    ...(requestedMaxOutputTokens !== undefined ? { requestedMaxOutputTokens } : {})
   })
 }

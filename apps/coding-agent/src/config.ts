@@ -69,6 +69,13 @@ export interface WeatherSettings {
   defaultLocation?: string
 }
 
+/** Optional Ollama/v2 ordinary-work output-token caps by request phase. */
+export interface GenerationLimits {
+  readToolRequestMaxOutputTokens?: number
+  actionToolRequestMaxOutputTokens?: number
+  finalResponseMaxOutputTokens?: number
+}
+
 /** Optional loopback-only llama.cpp post-processor for Copilot's raw reply. */
 export interface LocalResponseConverterSettings {
   enabled?: boolean
@@ -107,6 +114,8 @@ export interface AgentConfig {
   externalProvider?: ExternalProviderSettings
   /** Optional provider-specific reasoning budget. Ollama sends this as reasoning_effort. */
   reasoningEffort?: ReasoningEffort
+  /** Optional phase-specific output-token caps (applied only to Ollama/v2 ordinary work). */
+  generationLimits?: GenerationLimits
   /** Deterministic v2 prompt/context optimization toggle. Telemetry remains enabled in both modes. */
   agentOptimization?: AgentOptimizationMode
   copilot?: CopilotSettingsPartial
@@ -194,6 +203,30 @@ function validateProviderConfig(provider: unknown, raw: AgentConfig, found: stri
   return provider
 }
 
+function validateGenerationLimits(raw: AgentConfig, found: string): GenerationLimits | undefined {
+  const configured = (raw as unknown as { generationLimits?: unknown }).generationLimits
+  if (configured === undefined) return undefined
+  if (!configured || typeof configured !== 'object' || Array.isArray(configured)) {
+    throw new Error(`generationLimits はオブジェクトで指定してください: ${found}`)
+  }
+  const candidate = configured as Record<string, unknown>
+  const keys: Array<keyof GenerationLimits> = [
+    'readToolRequestMaxOutputTokens',
+    'actionToolRequestMaxOutputTokens',
+    'finalResponseMaxOutputTokens'
+  ]
+  const normalized: GenerationLimits = {}
+  for (const key of keys) {
+    const value = candidate[key]
+    if (value === undefined) continue
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 32 || value > 4096) {
+      throw new Error(`generationLimits.${key} は32以上4096以下の整数で指定してください: ${found}`)
+    }
+    normalized[key] = value as number
+  }
+  return normalized
+}
+
 function parseConfig(found: string): AgentConfig {
   const raw = JSON.parse(fs.readFileSync(found, 'utf8')) as AgentConfig
   if (raw.agentLoop !== undefined && raw.agentLoop !== 'v1' && raw.agentLoop !== 'v2') {
@@ -205,6 +238,7 @@ function parseConfig(found: string): AgentConfig {
   // Existing config files without an explicit provider remain on the generic
   // OpenAI-compatible path. The generated no-config default is still Copilot.
   const provider = validateProviderConfig(raw.provider ?? 'openai', raw, found)
+  const generationLimits = validateGenerationLimits(raw, found)
   const configuredPermissions = (raw as unknown as { permissions?: unknown }).permissions
   let permissions: PermissionRule[] | undefined
   if (configuredPermissions !== undefined) {
@@ -232,6 +266,7 @@ function parseConfig(found: string): AgentConfig {
     autoApprove: { ...DEFAULT_CONFIG.autoApprove, ...(raw.autoApprove ?? {}) },
     copilot: { ...DEFAULT_CONFIG.copilot, ...(raw.copilot ?? {}) },
     localResponseConverter: { ...DEFAULT_CONFIG.localResponseConverter, ...(raw.localResponseConverter ?? {}) },
+    ...(generationLimits !== undefined ? { generationLimits } : {}),
     configPath: path.resolve(found)
   }
 }
