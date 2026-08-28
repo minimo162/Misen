@@ -21,9 +21,9 @@ import { assertSyntheticWorkspaceBoundary, capabilityPolicy, resolveApiKey, type
 import { runToolExecuteBeforeHooks, type ToolExecuteBeforeHook } from './hooks'
 import { createPermissionHook, type PermissionDecision } from './permission-hook'
 import type { ChatMessage, ToolCall } from './llm'
+import { containsAgentImage, normalizeAgentUserContent, type AgentUserContent } from './multimodal'
 import {
   bareToolName,
-  findHostTool,
   parseToolResultMeta,
   qualifiedToolName,
   toolDefsForContract,
@@ -101,8 +101,21 @@ export interface AgentV2Options {
   cfg: AgentConfig
   messages: ChatMessage[]
   userInput: string
+  /** Ephemeral text/image content for the model; never returned in messages. */
+  userContent?: AgentUserContent
   ctx: ToolContext
   io: AgentIO
+  /** Optional run-scoped host tool allowlist. An empty list exposes no tools. */
+  toolDefs?: readonly ToolDef[]
+  /**
+   * Produce ephemeral model-only context after a host-tool observation. The
+   * callback may be async; returned image content is never persisted.
+   */
+  afterToolObservation?: (observation: {
+    toolName: string
+    input: unknown
+    status: ExecutedToolCall['status']
+  }) => AgentUserContent | undefined | PromiseLike<AgentUserContent | undefined>
   /** Per-run hooks are primarily a deterministic test seam. */
   beforeHooks?: readonly ToolExecuteBeforeHook[]
   /** A model override keeps smoke tests entirely local and deterministic. */
@@ -116,7 +129,7 @@ export interface ExecutedToolCall {
   metadata: Record<string, unknown> | null
 }
 
-function toModelMessages(messages: ChatMessage[]): V2ModelMessage[] {
+function toModelMessages(messages: ChatMessage[], userContent?: AgentUserContent): V2ModelMessage[] {
   const converted: V2ModelMessage[] = []
   for (const message of messages) {
     if (message.role === 'system' || message.role === 'user') {
@@ -148,21 +161,52 @@ function toModelMessages(messages: ChatMessage[]): V2ModelMessage[] {
       }]
     } as V2ModelMessage)
   }
+  if (userContent !== undefined) {
+    let lastUserIndex = -1
+    for (let index = converted.length - 1; index >= 0; index--) {
+      if (converted[index].role === 'user') {
+        lastUserIndex = index
+        break
+      }
+    }
+    if (lastUserIndex >= 0) {
+      converted[lastUserIndex] = {
+        role: 'user',
+        content: typeof userContent === 'string'
+          ? userContent
+          : userContent.map((part) => part.type === 'text'
+            ? { type: 'text', text: part.text }
+            : { type: 'image', image: part.image, mediaType: part.mediaType })
+      } as V2ModelMessage
+    }
+  }
   return converted
 }
 
-function aiTools(cfg: AgentConfig, ctx: ToolContext): ToolSet {
+function runToolDefs(cfg: AgentConfig, ctx: ToolContext, supplied?: readonly ToolDef[]): ToolDef[] {
   const policy = capabilityPolicy(cfg, 'work')
-  const entries = toolDefsForContract({
+  if (supplied !== undefined) {
+    return supplied.filter((def) => (
+      (policy.allowArbitraryCommands || def.name !== 'run_command') &&
+      !(ctx.safeCommandOnly && def.name === 'get_weather')
+    ))
+  }
+  return toolDefsForContract({
     allowArbitraryCommands: policy.allowArbitraryCommands,
     safeCommandOnly: ctx.safeCommandOnly
-  }).map((def) => [
+  })
+}
+
+function aiTools(cfg: AgentConfig, ctx: ToolContext, supplied?: readonly ToolDef[]): ToolSet {
+  const defs = runToolDefs(cfg, ctx, supplied)
+  const entries = defs.map((def) => [
     def.name,
     tool({
       description: def.description,
       inputSchema: jsonSchema({ ...def.parameters, additionalProperties: false })
     })
   ])
+  // When a run-scoped allowlist is supplied, no global definition is appended.
   return Object.fromEntries(entries) as ToolSet
 }
 
@@ -356,6 +400,15 @@ export async function executeV2ToolCall(
 export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnResult> {
   const { cfg, io } = opts
   const ctx = enforceExternalProviderSafety(cfg, opts.ctx)
+  const userContent = opts.userContent === undefined
+    ? undefined
+    : normalizeAgentUserContent(opts.userContent, opts.userInput)
+  if (opts.toolDefs?.some((def) => def.requiresImage) && !containsAgentImage(userContent)) {
+    throw new Error('画像必須のhostツールはスクリーンショットなしでは利用できません')
+  }
+  if (containsAgentImage(userContent) && cfg.provider !== 'ollama' && cfg.provider !== 'external-openai') {
+    throw new Error('このproviderは画像入力に対応していません。Copilot/v1ではテキストだけを指定してください')
+  }
   assertExternalBoundaryBeforeRequest(cfg, ctx, io)
   if (cfg.provider === 'external-openai') {
     if (Object.prototype.hasOwnProperty.call(cfg, 'apiKey')) throw new Error('provider=external-openai は plaintext apiKey を受け付けません')
@@ -366,11 +419,12 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
   const model = opts.model ?? configuredModel(cfg)
   const messages: ChatMessage[] = [...opts.messages, { role: 'user', content: opts.userInput }]
   const priorSystem = opts.messages.filter((message) => message.role === 'system').map((message) => message.content ?? '').filter(Boolean)
-  const modelMessages = toModelMessages(messages.filter((message) => message.role !== 'system'))
+  const modelMessages = toModelMessages(messages.filter((message) => message.role !== 'system'), userContent)
+  const scopedToolDefs = runToolDefs(cfg, ctx, opts.toolDefs)
   const systemFor = (targetMode: 'work' | 'research' | 'chat'): string => [...new Set([
     ...priorSystem,
     cfg.systemPrompt,
-    buildProtocolRules(targetMode, policy.allowArbitraryCommands, policy.autoApproveCommand, ctx.safeCommandOnly === true)
+    buildProtocolRules(targetMode, policy.allowArbitraryCommands, policy.autoApproveCommand, ctx.safeCommandOnly === true, scopedToolDefs)
   ].filter((value): value is string => typeof value === 'string' && value.length > 0))].join('\n\n')
 
   io.event?.({ type: 'plan.created', summary: mode === 'work' ? 'Runの計画と検証プロファイルを作成しました' : mode === 'research' ? '調査モードを開始しました' : '通常回答モードを開始しました', origin: 'orchestrator', namespace: 'none', authority: 'derived' })
@@ -386,7 +440,8 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
         temperature: cfg.temperature ?? 0.2,
         providerOptions: providerOptionsFor(cfg),
         maxRetries: 0,
-        abortSignal: io.signal
+        abortSignal: io.signal,
+        experimental_include: { requestBody: false, responseBody: false }
       })
       io.event?.({ type: 'model.decision', summary: 'モデルの次の1手を受信しました', metadata: modelUsageMetadata(result.usage), origin: modelEventOrigin(cfg), namespace: 'none', authority: 'claimed' })
       messages.push({ role: 'assistant', content: result.text })
@@ -404,13 +459,14 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
     }
   }
 
-  const tools = aiTools(cfg, ctx)
+  const tools = aiTools(cfg, ctx, scopedToolDefs)
   const actionCounts = new Map<string, number>()
   let executions = 0
   let writes = 0
   let commands = 0
   let noProgress = 0
   let lastResultKey = ''
+  let confirmationOnly = false
 
   for (let iteration = 0; iteration < policy.maxModelDecisions; iteration++) {
     if (shouldCancel(io)) return { reply: '', messages, aborted: true }
@@ -424,10 +480,12 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
         messages: modelMessages,
         system: systemFor('work'),
         tools,
+        ...(confirmationOnly ? { activeTools: [] as string[] } : {}),
         temperature: cfg.temperature ?? 0.2,
         providerOptions: providerOptionsFor(cfg),
         maxRetries: 0,
-        abortSignal: io.signal
+        abortSignal: io.signal,
+        experimental_include: { requestBody: false, responseBody: false }
       })
     } catch (err) {
       io.print(`[error] ${(err as Error).message}`)
@@ -442,7 +500,8 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
     if (calls.length !== 1) return warningResult('1回の判断で複数のhostツールが要求されたため、安全のため停止しました', messages, io)
 
     const call = calls[0]
-    const def = findHostTool(qualifiedToolName(call.toolName))
+    const qualifiedCallName = qualifiedToolName(call.toolName)
+    const def = scopedToolDefs.find((candidate) => qualifiedToolName(candidate.name) === qualifiedCallName)
     if (!def) return warningResult(`許可されていないhostツール ${call.toolName} が要求されたため停止しました`, messages, io)
     if (ctx.safeCommandOnly && bareToolName(def.name) === 'get_weather') return warningResult('この構成ではネットワーク通信を行うhostツールは利用できません', messages, io)
     if (bareToolName(def.name) === 'run_command' && !policy.allowArbitraryCommands) return warningResult('任意コマンド実行は設定で明示的に有効化されていないため停止しました', messages, io)
@@ -467,6 +526,28 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
     const hostResult = formatHostResult(qualifiedToolName(def.name), executed.output, executed.metadata, executed.status, call.toolCallId, ctx.runId)
     modelMessages.push({ role: 'tool', content: [{ type: 'tool-result', toolCallId: call.toolCallId, toolName: call.toolName, output: { type: 'text', value: hostResult } }] } as V2ModelMessage)
     messages.push({ role: 'tool', tool_call_id: call.toolCallId, name: qualifiedToolName(def.name), content: hostResult })
+    if (opts.afterToolObservation && executed.status === 'succeeded') {
+      const observation = await opts.afterToolObservation({
+        toolName: bareToolName(def.name),
+        input: call.input,
+        status: executed.status
+      })
+      if (observation !== undefined) {
+        const normalizedObservation = normalizeAgentUserContent(observation)
+        modelMessages.push({
+          role: 'user',
+          content: typeof normalizedObservation === 'string'
+            ? normalizedObservation
+            : normalizedObservation.map((part) => part.type === 'text'
+              ? { type: 'text', text: part.text }
+              : { type: 'image', image: part.image, mediaType: part.mediaType })
+        } as V2ModelMessage)
+        // A post-action observation is a confirmation step.  Keep the
+        // run-scoped definitions available in this process for validation, but
+        // expose no callable tools on the next model request.
+        confirmationOnly = true
+      }
+    }
     if (noProgress >= policy.maxNoProgress) return warningResult(`hostツール結果に進展がないため停止しました（${policy.maxNoProgress}回連続）`, messages, io)
   }
   return warningResult('最大反復回数に達しました', messages, io)

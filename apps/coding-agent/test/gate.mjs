@@ -11,7 +11,8 @@ const liveConverter = requestedArgs.includes('--live-converter')
 const liveCopilot = requestedArgs.includes('--live-copilot')
 const liveCopilotV2 = requestedArgs.includes('--live-copilot-v2')
 const liveOllama = requestedArgs.includes('--live-ollama')
-const liveCopilotArgs = requestedArgs.filter((arg) => arg !== '--live-converter' && arg !== '--live-copilot' && arg !== '--live-copilot-v2' && arg !== '--live-ollama')
+const liveComputerUse = requestedArgs.includes('--live-computer-use')
+const liveCopilotArgs = requestedArgs.filter((arg) => arg !== '--live-converter' && arg !== '--live-copilot' && arg !== '--live-copilot-v2' && arg !== '--live-ollama' && arg !== '--live-computer-use')
 const nodeCommand = process.execPath
 
 const typecheckCommand = process.platform === 'win32'
@@ -26,6 +27,10 @@ const stages = [
   { name: 'build', command: nodeCommand, args: ['esbuild.config.mjs'] },
   { name: 'smoke', command: nodeCommand, args: ['dist/smoke.js'], requiresBuild: true },
   { name: 'benchmark', command: nodeCommand, args: ['dist/benchmark-test.js'], requiresBuild: true },
+  { name: 'multimodal', command: nodeCommand, args: ['dist/multimodal-test.js'], requiresBuild: true },
+  { name: 'computer-use-demo', command: nodeCommand, args: ['dist/computer-use-demo-test.js'], requiresBuild: true },
+  { name: 'computer-use-safety', command: nodeCommand, args: ['dist/computer-use-safety-test.js'], requiresBuild: true },
+  { name: 'vision-budget', command: nodeCommand, args: ['dist/vision-budget-test.js'], requiresBuild: true },
   { name: 'flex-validate', command: nodeCommand, args: ['dist/flex-harness.js'], requiresBuild: true },
   {
     name: 'live-converter',
@@ -58,6 +63,14 @@ const stages = [
     enabled: liveOllama,
     requiresBuild: true,
     skipReason: 'enable with --live-ollama'
+  },
+  {
+    name: 'live-computer-use',
+    command: nodeCommand,
+    args: ['dist/measure-computer-use-ollama.js', ...liveCopilotArgs],
+    enabled: liveComputerUse,
+    requiresBuild: true,
+    skipReason: 'enable with --live-computer-use'
   }
 ]
 

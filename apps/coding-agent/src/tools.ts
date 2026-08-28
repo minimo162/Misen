@@ -33,6 +33,8 @@ export interface ToolDef {
   name: string
   description: string
   kind: 'read' | 'write' | 'command'
+  /** Fail closed before a model request when the run has no ephemeral image. */
+  requiresImage?: boolean
   parameters: Record<string, unknown>
   run(args: Record<string, unknown>, ctx: ToolContext): Promise<string>
 }

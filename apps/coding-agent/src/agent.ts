@@ -164,7 +164,7 @@ import type { ApprovalBinding } from './approvals'
 import { makeAuditArguments, nullAuditTarget, type AuditApproval, type AuditMetadata, type AuditPermissionDecision, type AuditTarget } from './audit-log'
 import { capabilityPolicy, type AgentConfig, type TurnMode } from './config'
 import { chat, type ChatMessage, type ToolCall } from './llm'
-import { bareToolName, findHostTool, getFilePrecondition, openAITools, parseToolResultMeta, qualifiedToolName, toolDefsForContract, validateToolArgs, type ToolContext } from './tools'
+import { bareToolName, findHostTool, getFilePrecondition, openAITools, parseToolResultMeta, qualifiedToolName, toolDefsForContract, validateToolArgs, type ToolContext, type ToolDef } from './tools'
 
 export type AgentEvent = {
   type: 'model.wait' | 'model.decision' | 'copilot.native.observed' | 'plan.created' | 'step.started' | 'step.completed' | 'step.failed' | 'tool.requested' | 'tool.approved' | 'tool.started' | 'tool.succeeded' | 'tool.failed' | 'tool.denied' | 'approval.requested' | 'approval.resolved' | 'artifact.created' | 'preview.ready' | 'run.warning'
@@ -282,8 +282,8 @@ function pausedResult(messages: ChatMessage[], userInput: string, steps: string[
   }
 }
 
-export function buildProtocolRules(mode: TurnMode = 'work', allowArbitraryCommands = false, autoApproveCommand = false, safeCommandOnly = false): string {
-  const toolDocs = toolDefsForContract({ allowArbitraryCommands, safeCommandOnly }).map((t) => {
+export function buildProtocolRules(mode: TurnMode = 'work', allowArbitraryCommands = false, autoApproveCommand = false, safeCommandOnly = false, availableTools?: readonly ToolDef[]): string {
+  const toolDocs = (availableTools ?? toolDefsForContract({ allowArbitraryCommands, safeCommandOnly })).map((t) => {
     const req = ((t.parameters as { required?: string[] }).required ?? [])
     const props = Object.keys((t.parameters as { properties?: Record<string, unknown> }).properties ?? {})
     return `- ${qualifiedToolName(t.name)}(${props.join(', ')}):${req.length ? ` 必須=${req.join(',')};` : ''} ${t.description}`

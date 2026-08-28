@@ -8206,8 +8206,8 @@ function modelEventOrigin(cfg) {
 function emitModelWait(io, cfg) {
   io.event?.({ type: "model.wait", summary: "AI\u304C\u6B21\u306E\u4F5C\u696D\u3092\u8003\u3048\u3066\u3044\u307E\u3059", origin: modelEventOrigin(cfg), namespace: "none", authority: "derived" });
 }
-function buildProtocolRules(mode = "work", allowArbitraryCommands = false, autoApproveCommand = false, safeCommandOnly = false) {
-  const toolDocs = toolDefsForContract({ allowArbitraryCommands, safeCommandOnly }).map((t) => {
+function buildProtocolRules(mode = "work", allowArbitraryCommands = false, autoApproveCommand = false, safeCommandOnly = false, availableTools) {
+  const toolDocs = (availableTools ?? toolDefsForContract({ allowArbitraryCommands, safeCommandOnly })).map((t) => {
     const req = t.parameters.required ?? [];
     const props = Object.keys(t.parameters.properties ?? {});
     return `- ${qualifiedToolName(t.name)}(${props.join(", ")}):${req.length ? ` \u5FC5\u9808=${req.join(",")};` : ""} ${t.description}`;
@@ -40648,6 +40648,58 @@ function createPermissionHook(rules) {
   };
 }
 
+// src/multimodal.ts
+var AGENT_IMAGE_MEDIA_TYPES = ["image/png", "image/jpeg", "image/webp"];
+function isSupportedMediaType(value) {
+  return typeof value === "string" && AGENT_IMAGE_MEDIA_TYPES.includes(value);
+}
+function containsAgentImage(content) {
+  return Array.isArray(content) && content.some((part) => Boolean(part) && typeof part === "object" && part.type === "image");
+}
+function normalizeAgentUserContent(content, expectedText) {
+  if (typeof content === "string") {
+    if (content.length === 0) throw new Error("userContent \u306B\u306F\u7A7A\u3067\u306A\u3044\u30C6\u30AD\u30B9\u30C8\u304C\u5FC5\u8981\u3067\u3059");
+    if (expectedText !== void 0 && content !== expectedText) {
+      throw new Error("userContent \u306E\u30C6\u30AD\u30B9\u30C8\u304C userInput \u3068\u4E00\u81F4\u3057\u307E\u305B\u3093");
+    }
+    return content;
+  }
+  if (!Array.isArray(content) || content.length === 0) {
+    throw new Error("userContent \u306B\u306F\u30C6\u30AD\u30B9\u30C8\u3092\u542B\u3080\u5185\u5BB9\u304C\u5FC5\u8981\u3067\u3059");
+  }
+  let hasNonEmptyText = false;
+  let text2 = "";
+  const normalized = [];
+  for (const part of content) {
+    if (!part || typeof part !== "object" || Array.isArray(part)) {
+      throw new Error("userContent \u306Epart\u5F62\u5F0F\u304C\u4E0D\u6B63\u3067\u3059");
+    }
+    if (part.type === "text") {
+      if (typeof part.text !== "string") throw new Error("userContent \u306Etext\u304C\u4E0D\u6B63\u3067\u3059");
+      if (part.text.length > 0) hasNonEmptyText = true;
+      text2 += part.text;
+      normalized.push({ type: "text", text: part.text });
+      continue;
+    }
+    if (part.type === "image") {
+      if (!isSupportedMediaType(part.mediaType)) {
+        throw new Error("userContent \u306E\u753B\u50CF\u5F62\u5F0F\u306F PNG / JPEG / WebP \u3060\u3051\u5BFE\u5FDC\u3057\u3066\u3044\u307E\u3059");
+      }
+      if (!(part.image instanceof Uint8Array) || part.image.byteLength === 0) {
+        throw new Error("userContent \u306E\u753B\u50CFbytes\u304C\u4E0D\u6B63\u3067\u3059");
+      }
+      normalized.push({ type: "image", mediaType: part.mediaType, image: new Uint8Array(part.image) });
+      continue;
+    }
+    throw new Error("userContent \u306Epart\u5F62\u5F0F\u304C\u4E0D\u6B63\u3067\u3059");
+  }
+  if (!hasNonEmptyText) throw new Error("userContent \u306B\u306F\u7A7A\u3067\u306A\u3044\u30C6\u30AD\u30B9\u30C8\u304C\u5FC5\u8981\u3067\u3059");
+  if (expectedText !== void 0 && text2 !== expectedText) {
+    throw new Error("userContent \u306E\u30C6\u30AD\u30B9\u30C8\u304C userInput \u3068\u4E00\u81F4\u3057\u307E\u305B\u3093");
+  }
+  return normalized;
+}
+
 // src/agent-v2.ts
 function createOllamaFetch(baseFetch = fetch) {
   return async (input, init) => {
@@ -40690,7 +40742,7 @@ function modelUsageMetadata(usage) {
     }
   };
 }
-function toModelMessages(messages) {
+function toModelMessages(messages, userContent) {
   const converted = [];
   for (const message of messages) {
     if (message.role === "system" || message.role === "user") {
@@ -40725,14 +40777,36 @@ function toModelMessages(messages) {
       }]
     });
   }
+  if (userContent !== void 0) {
+    let lastUserIndex = -1;
+    for (let index = converted.length - 1; index >= 0; index--) {
+      if (converted[index].role === "user") {
+        lastUserIndex = index;
+        break;
+      }
+    }
+    if (lastUserIndex >= 0) {
+      converted[lastUserIndex] = {
+        role: "user",
+        content: typeof userContent === "string" ? userContent : userContent.map((part) => part.type === "text" ? { type: "text", text: part.text } : { type: "image", image: part.image, mediaType: part.mediaType })
+      };
+    }
+  }
   return converted;
 }
-function aiTools(cfg, ctx) {
+function runToolDefs(cfg, ctx, supplied) {
   const policy = capabilityPolicy(cfg, "work");
-  const entries = toolDefsForContract({
+  if (supplied !== void 0) {
+    return supplied.filter((def) => (policy.allowArbitraryCommands || def.name !== "run_command") && !(ctx.safeCommandOnly && def.name === "get_weather"));
+  }
+  return toolDefsForContract({
     allowArbitraryCommands: policy.allowArbitraryCommands,
     safeCommandOnly: ctx.safeCommandOnly
-  }).map((def) => [
+  });
+}
+function aiTools(cfg, ctx, supplied) {
+  const defs = runToolDefs(cfg, ctx, supplied);
+  const entries = defs.map((def) => [
     def.name,
     tool({
       description: def.description,
@@ -40905,6 +40979,13 @@ ${effectiveSummary}`, binding);
 async function runAgentTurnV2(opts) {
   const { cfg, io } = opts;
   const ctx = enforceExternalProviderSafety(cfg, opts.ctx);
+  const userContent = opts.userContent === void 0 ? void 0 : normalizeAgentUserContent(opts.userContent, opts.userInput);
+  if (opts.toolDefs?.some((def) => def.requiresImage) && !containsAgentImage(userContent)) {
+    throw new Error("\u753B\u50CF\u5FC5\u9808\u306Ehost\u30C4\u30FC\u30EB\u306F\u30B9\u30AF\u30EA\u30FC\u30F3\u30B7\u30E7\u30C3\u30C8\u306A\u3057\u3067\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093");
+  }
+  if (containsAgentImage(userContent) && cfg.provider !== "ollama" && cfg.provider !== "external-openai") {
+    throw new Error("\u3053\u306Eprovider\u306F\u753B\u50CF\u5165\u529B\u306B\u5BFE\u5FDC\u3057\u3066\u3044\u307E\u305B\u3093\u3002Copilot/v1\u3067\u306F\u30C6\u30AD\u30B9\u30C8\u3060\u3051\u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
+  }
   assertExternalBoundaryBeforeRequest(cfg, ctx, io);
   if (cfg.provider === "external-openai") {
     if (Object.prototype.hasOwnProperty.call(cfg, "apiKey")) throw new Error("provider=external-openai \u306F plaintext apiKey \u3092\u53D7\u3051\u4ED8\u3051\u307E\u305B\u3093");
@@ -40915,11 +40996,12 @@ async function runAgentTurnV2(opts) {
   const model = opts.model ?? configuredModel(cfg);
   const messages = [...opts.messages, { role: "user", content: opts.userInput }];
   const priorSystem = opts.messages.filter((message) => message.role === "system").map((message) => message.content ?? "").filter(Boolean);
-  const modelMessages = toModelMessages(messages.filter((message) => message.role !== "system"));
+  const modelMessages = toModelMessages(messages.filter((message) => message.role !== "system"), userContent);
+  const scopedToolDefs = runToolDefs(cfg, ctx, opts.toolDefs);
   const systemFor = (targetMode) => [...new Set([
     ...priorSystem,
     cfg.systemPrompt,
-    buildProtocolRules(targetMode, policy.allowArbitraryCommands, policy.autoApproveCommand, ctx.safeCommandOnly === true)
+    buildProtocolRules(targetMode, policy.allowArbitraryCommands, policy.autoApproveCommand, ctx.safeCommandOnly === true, scopedToolDefs)
   ].filter((value) => typeof value === "string" && value.length > 0))].join("\n\n");
   io.event?.({ type: "plan.created", summary: mode === "work" ? "Run\u306E\u8A08\u753B\u3068\u691C\u8A3C\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F" : mode === "research" ? "\u8ABF\u67FB\u30E2\u30FC\u30C9\u3092\u958B\u59CB\u3057\u307E\u3057\u305F" : "\u901A\u5E38\u56DE\u7B54\u30E2\u30FC\u30C9\u3092\u958B\u59CB\u3057\u307E\u3057\u305F", origin: "orchestrator", namespace: "none", authority: "derived" });
   if (mode !== "work") {
@@ -40933,7 +41015,8 @@ async function runAgentTurnV2(opts) {
         temperature: cfg.temperature ?? 0.2,
         providerOptions: providerOptionsFor(cfg),
         maxRetries: 0,
-        abortSignal: io.signal
+        abortSignal: io.signal,
+        experimental_include: { requestBody: false, responseBody: false }
       });
       io.event?.({ type: "model.decision", summary: "\u30E2\u30C7\u30EB\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", metadata: modelUsageMetadata(result.usage), origin: modelEventOrigin(cfg), namespace: "none", authority: "claimed" });
       messages.push({ role: "assistant", content: result.text });
@@ -40950,13 +41033,14 @@ async function runAgentTurnV2(opts) {
       return { reply: "", messages, aborted: true };
     }
   }
-  const tools = aiTools(cfg, ctx);
+  const tools = aiTools(cfg, ctx, scopedToolDefs);
   const actionCounts = /* @__PURE__ */ new Map();
   let executions = 0;
   let writes = 0;
   let commands = 0;
   let noProgress = 0;
   let lastResultKey = "";
+  let confirmationOnly = false;
   for (let iteration = 0; iteration < policy.maxModelDecisions; iteration++) {
     if (shouldCancel(io)) return { reply: "", messages, aborted: true };
     if (io.isPaused?.()) return { reply: "", messages, aborted: true, paused: true };
@@ -40969,10 +41053,12 @@ async function runAgentTurnV2(opts) {
         messages: modelMessages,
         system: systemFor("work"),
         tools,
+        ...confirmationOnly ? { activeTools: [] } : {},
         temperature: cfg.temperature ?? 0.2,
         providerOptions: providerOptionsFor(cfg),
         maxRetries: 0,
-        abortSignal: io.signal
+        abortSignal: io.signal,
+        experimental_include: { requestBody: false, responseBody: false }
       });
     } catch (err) {
       io.print(`[error] ${err.message}`);
@@ -40986,7 +41072,8 @@ async function runAgentTurnV2(opts) {
     if (calls.length === 0) return { reply: result.text, messages, aborted: false };
     if (calls.length !== 1) return warningResult("1\u56DE\u306E\u5224\u65AD\u3067\u8907\u6570\u306Ehost\u30C4\u30FC\u30EB\u304C\u8981\u6C42\u3055\u308C\u305F\u305F\u3081\u3001\u5B89\u5168\u306E\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F", messages, io);
     const call = calls[0];
-    const def = findHostTool(qualifiedToolName(call.toolName));
+    const qualifiedCallName = qualifiedToolName(call.toolName);
+    const def = scopedToolDefs.find((candidate) => qualifiedToolName(candidate.name) === qualifiedCallName);
     if (!def) return warningResult(`\u8A31\u53EF\u3055\u308C\u3066\u3044\u306A\u3044host\u30C4\u30FC\u30EB ${call.toolName} \u304C\u8981\u6C42\u3055\u308C\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`, messages, io);
     if (ctx.safeCommandOnly && bareToolName(def.name) === "get_weather") return warningResult("\u3053\u306E\u69CB\u6210\u3067\u306F\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u901A\u4FE1\u3092\u884C\u3046host\u30C4\u30FC\u30EB\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093", messages, io);
     if (bareToolName(def.name) === "run_command" && !policy.allowArbitraryCommands) return warningResult("\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u8A2D\u5B9A\u3067\u660E\u793A\u7684\u306B\u6709\u52B9\u5316\u3055\u308C\u3066\u3044\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F", messages, io);
@@ -41009,6 +41096,21 @@ async function runAgentTurnV2(opts) {
     const hostResult = formatHostResult(qualifiedToolName(def.name), executed.output, executed.metadata, executed.status, call.toolCallId, ctx.runId);
     modelMessages.push({ role: "tool", content: [{ type: "tool-result", toolCallId: call.toolCallId, toolName: call.toolName, output: { type: "text", value: hostResult } }] });
     messages.push({ role: "tool", tool_call_id: call.toolCallId, name: qualifiedToolName(def.name), content: hostResult });
+    if (opts.afterToolObservation && executed.status === "succeeded") {
+      const observation = await opts.afterToolObservation({
+        toolName: bareToolName(def.name),
+        input: call.input,
+        status: executed.status
+      });
+      if (observation !== void 0) {
+        const normalizedObservation = normalizeAgentUserContent(observation);
+        modelMessages.push({
+          role: "user",
+          content: typeof normalizedObservation === "string" ? normalizedObservation : normalizedObservation.map((part) => part.type === "text" ? { type: "text", text: part.text } : { type: "image", image: part.image, mediaType: part.mediaType })
+        });
+        confirmationOnly = true;
+      }
+    }
     if (noProgress >= policy.maxNoProgress) return warningResult(`host\u30C4\u30FC\u30EB\u7D50\u679C\u306B\u9032\u5C55\u304C\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F\uFF08${policy.maxNoProgress}\u56DE\u9023\u7D9A\uFF09`, messages, io);
   }
   return warningResult("\u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F", messages, io);
@@ -41021,7 +41123,13 @@ function warningResult(message, messages, io) {
 
 // src/agent-loop.ts
 function runConfiguredAgentTurn(opts) {
-  if ((opts.cfg.agentLoop ?? "v1") === "v2") return runAgentTurnV2(opts);
+  const normalizedUserContent = opts.userContent === void 0 ? void 0 : normalizeAgentUserContent(opts.userContent, opts.userInput);
+  if ((opts.cfg.agentLoop ?? "v1") !== "v2" && containsAgentImage(normalizedUserContent)) {
+    throw new Error("\u3053\u306EagentLoop/provider\u306F\u753B\u50CF\u5165\u529B\u306B\u5BFE\u5FDC\u3057\u3066\u3044\u307E\u305B\u3093\u3002v2\u306E\u753B\u50CF\u5BFE\u5FDCprovider\u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
+  }
+  if ((opts.cfg.agentLoop ?? "v1") === "v2") {
+    return runAgentTurnV2({ ...opts, ...normalizedUserContent === void 0 ? {} : { userContent: normalizedUserContent } });
+  }
   return runAgentTurn(opts);
 }
 
