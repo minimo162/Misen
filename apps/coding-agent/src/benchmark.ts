@@ -19,6 +19,7 @@ import {
   type PermissionRule
 } from './config'
 import { TOOL_DEFS } from './tools'
+import { parseRequestTelemetryRecord, type RequestTelemetryRecord } from './request-telemetry'
 
 export const BENCHMARK_SUITE_SCHEMA = 'misen.benchmark-suite/v1' as const
 export const BENCHMARK_TASK_SCHEMA = 'misen.benchmark-task/v1' as const
@@ -123,6 +124,8 @@ export interface BenchmarkRunResult {
   endpoint_category: 'loopback' | 'local' | 'local_bridge' | 'external' | 'unknown'
   configuration: {
     agent_loop: 'v2'
+    /** Added by runner 1.0.0 Issue #56; absent in older v1 JSONL is unknown. */
+    agent_optimization?: 'on' | 'off'
     temperature: number | null
     reasoning_effort: string | null
     max_model_decisions: number | null
@@ -163,6 +166,7 @@ export interface BenchmarkRunResult {
   guard_rejection_count: number | null
   human_intervention_count: number | null
   token_usage: BenchmarkTokenUsage | null
+  request_telemetry: RequestTelemetryRecord[]
   error_category: BenchmarkErrorCategory
 }
 
@@ -171,6 +175,7 @@ export interface BenchmarkAggregate {
   suite_version: string
   provider: string
   model: string
+  agent_optimization: 'on' | 'off' | 'unknown'
   attempted_runs: number
   completed_runs: number
   passed_runs: number
@@ -187,6 +192,15 @@ export interface BenchmarkAggregate {
   average_model_calls: number | null
   average_tool_calls: number | null
   average_retries: number | null
+  request_telemetry: {
+    reported_requests: number
+    average_request_elapsed_ms: number | null
+    average_working_messages: number | null
+    average_exposed_tools: number | null
+    average_tool_schema_bytes: number | null
+    average_tool_result_context_bytes: number | null
+    total_pruned_items: number
+  } | null
   token_usage: {
     reported_runs: number
     input_tokens: number | null
@@ -609,6 +623,15 @@ function usageFromEvents(events: CapturedEvent[]): BenchmarkTokenUsage | null {
   return Object.values(usage).some((value) => value !== null) ? usage : null
 }
 
+export function requestTelemetryFromEvents(events: Array<Pick<CapturedEvent, 'type' | 'metadata'>>): RequestTelemetryRecord[] {
+  return events.flatMap((event) => {
+    if (event.type !== 'model.decision' && event.type !== 'run.warning') return []
+    const candidate = event.metadata?.requestTelemetry
+    if (candidate === undefined) return []
+    return [parseRequestTelemetryRecord(candidate)]
+  })
+}
+
 function safeMetadata(metadata: Record<string, string> | undefined): Record<string, string> {
   if (!metadata) return {}
   const safe: Record<string, string> = {}
@@ -855,6 +878,7 @@ async function runOne(
     endpoint_category: endpointCategory(config),
     configuration: {
       agent_loop: 'v2',
+      agent_optimization: config.agentOptimization === 'off' ? 'off' : 'on',
       temperature: typeof config.temperature === 'number' ? config.temperature : null,
       reasoning_effort: config.reasoningEffort ?? null,
       max_model_decisions: typeof config.maxToolIterations === 'number' ? config.maxToolIterations : null,
@@ -895,6 +919,7 @@ async function runOne(
     guard_rejection_count: guardRejectionCalls.size,
     human_intervention_count: 0,
     token_usage: usageFromEvents(events),
+    request_telemetry: requestTelemetryFromEvents(events),
     error_category: outcome === 'success' ? null : outcome
   }
 
@@ -950,10 +975,16 @@ function median(values: Array<number | null | undefined>): number | null {
 
 const OUTCOMES: BenchmarkOutcome[] = ['success', 'expectation_failure', 'provider_error', 'timeout', 'safety_rejection', 'harness_error', 'skipped', 'unavailable']
 
+function resultOptimization(result: BenchmarkRunResult): BenchmarkAggregate['agent_optimization'] {
+  return result.configuration.agent_optimization === 'on' || result.configuration.agent_optimization === 'off'
+    ? result.configuration.agent_optimization
+    : 'unknown'
+}
+
 export function aggregateBenchmarkResults(results: readonly BenchmarkRunResult[]): BenchmarkAggregate[] {
   const groups = new Map<string, BenchmarkRunResult[]>()
   for (const result of results) {
-    const key = `${result.suite_id}\u0000${result.suite_version}\u0000${result.provider}\u0000${result.model}`
+    const key = `${result.suite_id}\u0000${result.suite_version}\u0000${result.provider}\u0000${result.model}\u0000${resultOptimization(result)}`
     const group = groups.get(key) ?? []
     group.push(result)
     groups.set(key, group)
@@ -972,6 +1003,7 @@ export function aggregateBenchmarkResults(results: readonly BenchmarkRunResult[]
     const approvalCount = observedApprovals.reduce((total, result) => total + (result.approval_count ?? 0), 0)
     const approvalApproved = observedApprovals.reduce((total, result) => total + (result.approval_events.approved ?? 0), 0)
     const reportedUsage = group.filter((result) => result.token_usage !== null)
+    const requestTelemetry = group.flatMap((result) => result.request_telemetry ?? [])
     const tokenSum = (key: keyof BenchmarkTokenUsage): number | null => {
       const values = reportedUsage.map((result) => result.token_usage?.[key]).filter((value): value is number => typeof value === 'number')
       return values.length === 0 ? null : values.reduce((total, value) => total + value, 0)
@@ -982,6 +1014,7 @@ export function aggregateBenchmarkResults(results: readonly BenchmarkRunResult[]
       suite_version: group[0].suite_version,
       provider: group[0].provider,
       model: group[0].model,
+      agent_optimization: resultOptimization(group[0]),
       attempted_runs: attempted,
       completed_runs: completed,
       passed_runs: passed,
@@ -998,6 +1031,15 @@ export function aggregateBenchmarkResults(results: readonly BenchmarkRunResult[]
       average_model_calls: average(group.map((result) => result.model_call_count)),
       average_tool_calls: average(group.map((result) => result.tool_call_count)),
       average_retries: average(group.map((result) => result.retry_count)),
+      request_telemetry: requestTelemetry.length === 0 ? null : {
+        reported_requests: requestTelemetry.length,
+        average_request_elapsed_ms: average(requestTelemetry.map((record) => record.elapsedMs)),
+        average_working_messages: average(requestTelemetry.map((record) => record.workingMessageCount)),
+        average_exposed_tools: average(requestTelemetry.map((record) => record.exposedToolCount)),
+        average_tool_schema_bytes: average(requestTelemetry.map((record) => record.toolSchemaBytes)),
+        average_tool_result_context_bytes: average(requestTelemetry.map((record) => record.toolResultContextBytes)),
+        total_pruned_items: requestTelemetry.reduce((total, record) => total + record.pruning.count, 0)
+      },
       token_usage: reportedUsage.length === 0 ? null : {
         reported_runs: reportedUsage.length,
         input_tokens: tokenSum('input_tokens'),
@@ -1008,7 +1050,7 @@ export function aggregateBenchmarkResults(results: readonly BenchmarkRunResult[]
       },
       outcomes
     }
-  }).sort((left, right) => `${left.suite_id}/${left.suite_version}/${left.provider}/${left.model}`.localeCompare(`${right.suite_id}/${right.suite_version}/${right.provider}/${right.model}`))
+  }).sort((left, right) => `${left.suite_id}/${left.suite_version}/${left.provider}/${left.model}/${left.agent_optimization}`.localeCompare(`${right.suite_id}/${right.suite_version}/${right.provider}/${right.model}/${right.agent_optimization}`))
 }
 
 function formatRate(value: number | null): string {
@@ -1021,36 +1063,41 @@ function formatNumber(value: number | null): string {
 
 function runsCsv(results: readonly BenchmarkRunResult[]): string {
   const headers = [
-    'suite_id', 'suite_version', 'task_id', 'run_id', 'timestamp', 'git_commit_sha', 'provider', 'model', 'endpoint_category', 'repeat_index',
+    'suite_id', 'suite_version', 'task_id', 'run_id', 'timestamp', 'git_commit_sha', 'provider', 'model', 'agent_optimization', 'endpoint_category', 'repeat_index',
     'final_status', 'final_outcome', 'pass', 'expectations_passed', 'expectations_total', 'elapsed_ms', 'time_to_first_action_ms',
     'model_call_count', 'model_response_count', 'tool_call_count', 'tool_succeeded', 'tool_failed', 'tool_rejected', 'tool_invalid',
     'retry_count', 'approval_count', 'approval_result', 'approvals_approved', 'approvals_denied', 'approvals_unknown', 'safety_rejection', 'guard_rejection_count', 'human_intervention_count',
-    'input_tokens', 'output_tokens', 'total_tokens', 'reasoning_tokens', 'cached_input_tokens', 'error_category', 'metadata'
+    'input_tokens', 'output_tokens', 'total_tokens', 'reasoning_tokens', 'cached_input_tokens', 'request_telemetry', 'error_category', 'metadata'
   ]
   const rows = results.map((result) => [
-    result.suite_id, result.suite_version, result.task_id, result.run_id, result.timestamp, result.git_commit_sha, result.provider, result.model, result.endpoint_category,
+    result.suite_id, result.suite_version, result.task_id, result.run_id, result.timestamp, result.git_commit_sha, result.provider, result.model, resultOptimization(result), result.endpoint_category,
     result.repeat_index, result.final_status, result.final_outcome, result.pass, result.expectations.passed, result.expectations.total, result.elapsed_ms,
     result.time_to_first_action_ms, result.model_call_count, result.model_response_count, result.tool_call_count, result.tool_events.succeeded,
     result.tool_events.failed, result.tool_events.rejected, result.tool_events.invalid, result.retry_count, result.approval_count, result.approval_result,
     result.approval_events.approved, result.approval_events.denied, result.approval_events.unknown, result.safety_rejection, result.guard_rejection_count, result.human_intervention_count, result.token_usage?.input_tokens ?? null,
     result.token_usage?.output_tokens ?? null, result.token_usage?.total_tokens ?? null, result.token_usage?.reasoning_tokens ?? null,
-    result.token_usage?.cached_input_tokens ?? null, result.error_category, result.configuration.metadata
+    result.token_usage?.cached_input_tokens ?? null, result.request_telemetry, result.error_category, result.configuration.metadata
   ].map(csvCell).join(','))
   return `${headers.join(',')}\r\n${rows.join('\r\n')}\r\n`
 }
 
 function summaryCsv(aggregates: readonly BenchmarkAggregate[]): string {
   const headers = [
-    'suite_id', 'suite_version', 'provider', 'model', 'attempted_runs', 'completed_runs', 'passed_runs', 'completion_rate', 'pass_rate',
+    'suite_id', 'suite_version', 'provider', 'model', 'agent_optimization', 'attempted_runs', 'completed_runs', 'passed_runs', 'completion_rate', 'pass_rate',
     'expectation_pass_rate', 'tool_validity_rate', 'approval_success_rate', 'safety_rejection_count', 'average_elapsed_ms',
     'median_elapsed_ms', 'average_time_to_first_action_ms', 'median_time_to_first_action_ms', 'average_model_calls',
-    'average_tool_calls', 'average_retries', 'reported_token_runs', 'input_tokens', 'output_tokens', 'total_tokens', 'outcomes'
+    'average_tool_calls', 'average_retries', 'reported_requests', 'average_request_elapsed_ms', 'average_working_messages', 'average_exposed_tools',
+    'average_tool_schema_bytes', 'average_tool_result_context_bytes', 'total_pruned_items', 'reported_token_runs', 'input_tokens', 'output_tokens', 'total_tokens', 'outcomes'
   ]
   const rows = aggregates.map((aggregate) => [
-    aggregate.suite_id, aggregate.suite_version, aggregate.provider, aggregate.model, aggregate.attempted_runs, aggregate.completed_runs, aggregate.passed_runs,
+    aggregate.suite_id, aggregate.suite_version, aggregate.provider, aggregate.model, aggregate.agent_optimization, aggregate.attempted_runs, aggregate.completed_runs, aggregate.passed_runs,
     aggregate.completion_rate, aggregate.pass_rate, aggregate.expectation_pass_rate, aggregate.tool_validity_rate, aggregate.approval_success_rate,
     aggregate.safety_rejection_count, aggregate.average_elapsed_ms, aggregate.median_elapsed_ms, aggregate.average_time_to_first_action_ms,
     aggregate.median_time_to_first_action_ms, aggregate.average_model_calls, aggregate.average_tool_calls, aggregate.average_retries,
+    aggregate.request_telemetry?.reported_requests ?? null, aggregate.request_telemetry?.average_request_elapsed_ms ?? null,
+    aggregate.request_telemetry?.average_working_messages ?? null, aggregate.request_telemetry?.average_exposed_tools ?? null,
+    aggregate.request_telemetry?.average_tool_schema_bytes ?? null, aggregate.request_telemetry?.average_tool_result_context_bytes ?? null,
+    aggregate.request_telemetry?.total_pruned_items ?? null,
     aggregate.token_usage?.reported_runs ?? null, aggregate.token_usage?.input_tokens ?? null, aggregate.token_usage?.output_tokens ?? null,
     aggregate.token_usage?.total_tokens ?? null, aggregate.outcomes
   ].map(csvCell).join(','))
@@ -1063,11 +1110,11 @@ function markdownSummary(aggregates: readonly BenchmarkAggregate[]): string {
     '',
     `Generated: ${new Date().toISOString()}`,
     '',
-    '| Suite | Version | Provider | Model | Attempted | Passed | Pass rate | Expectation pass | Tool validity | Approval success | Safety rejections | Avg elapsed ms | Median TTFA ms | Avg model calls | Avg tool calls |',
-    '|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|'
+    '| Suite | Version | Provider | Model | Optimization | Attempted | Passed | Pass rate | Expectation pass | Tool validity | Approval success | Safety rejections | Avg elapsed ms | Median TTFA ms | Avg model calls | Avg tool calls | Avg exposed tools | Avg schema bytes | Pruned |',
+    '|---|---:|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|'
   ]
   for (const aggregate of aggregates) {
-    lines.push(`| ${aggregate.suite_id} | ${aggregate.suite_version} | ${aggregate.provider} | ${aggregate.model} | ${aggregate.attempted_runs} | ${aggregate.passed_runs} | ${formatRate(aggregate.pass_rate)} | ${formatRate(aggregate.expectation_pass_rate)} | ${formatRate(aggregate.tool_validity_rate)} | ${formatRate(aggregate.approval_success_rate)} | ${aggregate.safety_rejection_count} | ${formatNumber(aggregate.average_elapsed_ms)} | ${formatNumber(aggregate.median_time_to_first_action_ms)} | ${formatNumber(aggregate.average_model_calls)} | ${formatNumber(aggregate.average_tool_calls)} |`)
+    lines.push(`| ${aggregate.suite_id} | ${aggregate.suite_version} | ${aggregate.provider} | ${aggregate.model} | ${aggregate.agent_optimization} | ${aggregate.attempted_runs} | ${aggregate.passed_runs} | ${formatRate(aggregate.pass_rate)} | ${formatRate(aggregate.expectation_pass_rate)} | ${formatRate(aggregate.tool_validity_rate)} | ${formatRate(aggregate.approval_success_rate)} | ${aggregate.safety_rejection_count} | ${formatNumber(aggregate.average_elapsed_ms)} | ${formatNumber(aggregate.median_time_to_first_action_ms)} | ${formatNumber(aggregate.average_model_calls)} | ${formatNumber(aggregate.average_tool_calls)} | ${formatNumber(aggregate.request_telemetry?.average_exposed_tools ?? null)} | ${formatNumber(aggregate.request_telemetry?.average_tool_schema_bytes ?? null)} | ${aggregate.request_telemetry?.total_pruned_items ?? '—'} |`)
   }
   lines.push(
     '',
@@ -1237,7 +1284,7 @@ export async function runBenchmark(options: RunBenchmarkOptions): Promise<RunBen
             provider: options.provider,
             model: options.model,
             endpoint_category: 'unknown',
-            configuration: { agent_loop: 'v2', temperature: null, reasoning_effort: null, max_model_decisions: null, max_host_executions: null, metadata: safeMetadata(options.metadata) },
+            configuration: { agent_loop: 'v2', agent_optimization: options.baseConfig.agentOptimization === 'off' ? 'off' : 'on', temperature: null, reasoning_effort: null, max_model_decisions: null, max_host_executions: null, metadata: safeMetadata(options.metadata) },
             repeat_index: repeatIndex,
             seed: null,
             seed_guaranteed: false,
@@ -1259,6 +1306,7 @@ export async function runBenchmark(options: RunBenchmarkOptions): Promise<RunBen
             guard_rejection_count: null,
             human_intervention_count: null,
             token_usage: null,
+            request_telemetry: [],
             error_category: classifyUnavailable(error) ? 'unavailable' : 'harness_error'
           }
         }

@@ -32,6 +32,7 @@ export interface CapabilityPolicy {
 export type LlmProvider = 'openai' | 'copilot-edge' | 'ollama' | 'external-openai'
 export type AgentLoop = 'v1' | 'v2'
 export type ReasoningEffort = 'high' | 'medium' | 'low' | 'none'
+export type AgentOptimizationMode = 'on' | 'off'
 
 /** Settings for the explicitly opt-in, generic external OpenAI-compatible path. */
 export interface ExternalProviderSettings {
@@ -106,6 +107,8 @@ export interface AgentConfig {
   externalProvider?: ExternalProviderSettings
   /** Optional provider-specific reasoning budget. Ollama sends this as reasoning_effort. */
   reasoningEffort?: ReasoningEffort
+  /** Deterministic v2 prompt/context optimization toggle. Telemetry remains enabled in both modes. */
+  agentOptimization?: AgentOptimizationMode
   copilot?: CopilotSettingsPartial
   localResponseConverter?: LocalResponseConverterSettings
   weather?: WeatherSettings
@@ -129,6 +132,7 @@ const DEFAULT_CONFIG: AgentConfig = {
   maxCommandExecutions: 2,
   maxNoProgress: 2,
   allowArbitraryCommands: false,
+  agentOptimization: 'on',
   permissions: [],
   autoApprove: { write: false, command: false },
   copilot: { displayMode: 'foreground', agentMode: true },
@@ -194,6 +198,9 @@ function parseConfig(found: string): AgentConfig {
   const raw = JSON.parse(fs.readFileSync(found, 'utf8')) as AgentConfig
   if (raw.agentLoop !== undefined && raw.agentLoop !== 'v1' && raw.agentLoop !== 'v2') {
     throw new Error(`agentLoop は v1 または v2 を指定してください: ${found}`)
+  }
+  if (raw.agentOptimization !== undefined && raw.agentOptimization !== 'on' && raw.agentOptimization !== 'off') {
+    throw new Error(`agentOptimization は on または off を指定してください: ${found}`)
   }
   // Existing config files without an explicit provider remain on the generic
   // OpenAI-compatible path. The generated no-config default is still Copilot.

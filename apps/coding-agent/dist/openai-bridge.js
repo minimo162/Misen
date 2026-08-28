@@ -886,6 +886,7 @@ var DEFAULT_CONFIG = {
   maxCommandExecutions: 2,
   maxNoProgress: 2,
   allowArbitraryCommands: false,
+  agentOptimization: "on",
   permissions: [],
   autoApprove: { write: false, command: false },
   copilot: { displayMode: "foreground", agentMode: true },
@@ -952,6 +953,9 @@ function parseConfig(found) {
   const raw = JSON.parse(import_node_fs.default.readFileSync(found, "utf8"));
   if (raw.agentLoop !== void 0 && raw.agentLoop !== "v1" && raw.agentLoop !== "v2") {
     throw new Error(`agentLoop \u306F v1 \u307E\u305F\u306F v2 \u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+  }
+  if (raw.agentOptimization !== void 0 && raw.agentOptimization !== "on" && raw.agentOptimization !== "off") {
+    throw new Error(`agentOptimization \u306F on \u307E\u305F\u306F off \u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
   }
   const provider = validateProviderConfig(raw.provider ?? "openai", raw, found);
   const configuredPermissions = raw.permissions;

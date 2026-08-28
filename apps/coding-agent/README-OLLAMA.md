@@ -54,6 +54,22 @@ npm run flex:measure:ollama
 npm run gate -- --live-ollama
 ```
 
+## 16 GB CPU agent optimisation (Issue #56)
+
+`agentOptimization` defaults to `"on"` for the v2 loop. It applies deterministic
+Active Tools selection, a model-only working-context projection, and a 4096-byte
+model-visible tool-result cap. Session messages keep the existing host-result
+contract independently of that new model cap; the append-only audit keeps its
+existing terminal metadata/evidence contract. Explicit run-scoped Computer Use tools and image context
+are preserved exactly; Active Tools never replaces permission, approval,
+precondition recheck, hard guards, or audit.
+
+Set `"agentOptimization": "off"` for a like-for-like control run. Request
+telemetry remains enabled in both modes and records only elapsed time,
+provider-reported token counts, message/tool counts, approximate byte counts,
+and pruning categories. It never stores prompt text, tool arguments/results,
+reasoning, image/base64 bytes, or credentials.
+
 Use `OLLAMA_LIVE_TASKS=list,read,open,write,search` for the five-task
 acceptance run, or `OLLAMA_LIVE_TASKS=long` to isolate the context-length
 case. `OLLAMA_REASONING_EFFORT=none` is available for an explicit comparison;

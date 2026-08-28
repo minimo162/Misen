@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { generateBenchmarkReports, loadBenchmarkSuite, runBenchmark } from './benchmark'
-import { loadConfig, type AgentConfig, type LlmProvider } from './config'
+import { loadConfig, type AgentConfig, type AgentOptimizationMode, type LlmProvider } from './config'
 
 function value(flag: string): string | undefined {
   const index = process.argv.indexOf(flag)
@@ -36,6 +36,12 @@ function provider(raw: string): LlmProvider {
   if (raw !== 'openai' && raw !== 'copilot-edge' && raw !== 'ollama' && raw !== 'external-openai') {
     throw new Error('--provider は openai / copilot-edge / ollama / external-openai で指定してください')
   }
+  return raw
+}
+
+function optimization(raw: string | undefined): AgentOptimizationMode | undefined {
+  if (raw === undefined) return undefined
+  if (raw !== 'on' && raw !== 'off') throw new Error('--optimization は on または off で指定してください')
   return raw
 }
 
@@ -95,7 +101,7 @@ function printHelp(): void {
     'Regenerate CSV/Markdown from JSONL:',
     '  node dist/benchmark.js --summarize .tmp/benchmark/results.jsonl --output .tmp/benchmark',
     '',
-    'Options: --timeout-ms N, --metadata key=value (repeatable), --auto-approve-synthetic'
+    'Options: --timeout-ms N, --optimization on|off, --metadata key=value (repeatable), --auto-approve-synthetic'
   ].join('\n'))
 }
 
@@ -115,7 +121,11 @@ async function main(): Promise<void> {
   if (mock && selectedProvider !== 'openai') throw new Error('--mock は既存openai providerのloopback fixtureとしてだけ実行できます')
   const configPath = value('--config')
   if (!mock && !configPath) throw new Error('実provider benchmark は --config が必要です')
-  const baseConfig = mock ? mockConfig(selectedModel) : loadConfig(path.resolve(configPath!))
+  const loadedConfig = mock ? mockConfig(selectedModel) : loadConfig(path.resolve(configPath!))
+  const selectedOptimization = optimization(value('--optimization'))
+  const baseConfig = selectedOptimization === undefined
+    ? loadedConfig
+    : { ...loadedConfig, agentOptimization: selectedOptimization }
   const summary = await runBenchmark({
     suite,
     outputDirectory,
