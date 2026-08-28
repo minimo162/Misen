@@ -29,6 +29,14 @@ npm run benchmark:mock -- `
   --metadata quant=fixture
 ```
 
+同一mock条件のOFF/ON比較では、出力先だけを分けて次のように実行します。
+suite version、timeout、expectation、fixtureは変更しません。
+
+```powershell
+npm run benchmark:mock -- --suite synthetic-smoke --repeat 1 --output .tmp/benchmark-off --auto-approve-synthetic --optimization off
+npm run benchmark:mock -- --suite synthetic-smoke --repeat 1 --output .tmp/benchmark-on  --auto-approve-synthetic --optimization on
+```
+
 `--auto-approve-synthetic`はapprovalを無効化しません。marker検証後に既存approval storeへrequestを作成し、policy provenance付きresolveを行い、通常のapproval eventとprecondition再確認を通します。元configの非read permissionが`allow`でもBenchmark内では`ask`へ正規化し、この経路を迂回させません。フラグなしでは要求されたapprovalをpolicy denyし、対話待ちでrunを停止させません。
 
 ## 実provider
@@ -109,7 +117,7 @@ node dist/benchmark.js `
   --output .tmp/benchmark
 ```
 
-- `results.jsonl`: run schema、suite/task/run id、Git SHA、provider/model、non-secret metadata、repeat、outcome、expectation detail、timing、model/tool/approval/retry/guard/token facts
+- `results.jsonl`: run schema、suite/task/run id、Git SHA、provider/model、optimization mode、non-secret metadata、repeat、outcome、expectation detail、timing、model/tool/approval/retry/guard/token facts、request単位telemetry
 - `runs.csv`: run detail
 - `summary.csv`: suite/version/provider/model aggregate（異なるsuite versionを混在させない）
 - `summary.md`: 人が読むaggregate
@@ -142,6 +150,7 @@ node dist/benchmark.js `
 - tool calls: `tool.requested`数
 - retries: Phase 1のv2 requestは`maxRetries: 0`なので0。provider内部の不明な再試行は推測しない
 - token usage: provider/SDKが報告したusageだけを加算。推定しない
+- request telemetry: model request単位のelapsed、provider報告token、working message数、exposed tool数、tool schema/result context概算byte、pruning件数・分類。raw prompt/result/reasoning/image/secretは保存しない
 - human intervention: CLI Phase 1は対話承認を行わないため0。自動承認は別のapproval provenance/metadataで判別
 
 取得不能値はJSONでは`null`、CSV/Markdownでは空欄または`—`です。unknownを0として平均や率の分母へ入れず、分母0を0%と表示しません。seedはprovider保証がない限り`null`、`seed_guaranteed=false`です。

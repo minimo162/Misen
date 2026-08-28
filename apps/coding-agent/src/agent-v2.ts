@@ -22,6 +22,9 @@ import { runToolExecuteBeforeHooks, type ToolExecuteBeforeHook } from './hooks'
 import { createPermissionHook, type PermissionDecision } from './permission-hook'
 import type { ChatMessage, ToolCall } from './llm'
 import { containsAgentImage, normalizeAgentUserContent, type AgentUserContent } from './multimodal'
+import { selectActiveTools, type ActiveToolsSelection } from './active-tools'
+import { createRequestTelemetryCollector, type ProviderReportedTokenUsage, type RequestTelemetryRecord } from './request-telemetry'
+import { buildModelWorkingContext, DEFAULT_TOOL_RESULT_BYTES, type WorkingContextTelemetry } from './working-context'
 import {
   bareToolName,
   parseToolResultMeta,
@@ -34,6 +37,7 @@ import {
 
 type V2ModelMessage = NonNullable<Parameters<typeof generateText>[0]['messages']>[number]
 type FetchImplementation = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+const DEFAULT_MODEL_TOOL_RESULT_BYTES = DEFAULT_TOOL_RESULT_BYTES
 
 /**
  * Ollama's OpenAI-compatible endpoint is local, but Japanese tool arguments
@@ -95,6 +99,43 @@ function modelUsageMetadata(usage: {
       cachedInputTokens: typeof usage.inputTokenDetails?.cacheReadTokens === 'number' ? usage.inputTokenDetails.cacheReadTokens : null
     }
   }
+}
+
+function providerUsage(usage: {
+  inputTokens?: number
+  outputTokens?: number
+  inputTokenDetails?: { cacheReadTokens?: number }
+  outputTokenDetails?: { reasoningTokens?: number }
+}): ProviderReportedTokenUsage {
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    reasoningTokens: usage.outputTokenDetails?.reasoningTokens,
+    cachedInputTokens: usage.inputTokenDetails?.cacheReadTokens
+  }
+}
+
+function utf8Bytes(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength
+}
+
+function toolSchemaBytes(toolDefs: readonly ToolDef[]): number {
+  return utf8Bytes(toolDefs.map((def) => ({ name: def.name, description: def.description, parameters: def.parameters })))
+}
+
+function toolResultContextBytes(messages: readonly V2ModelMessage[]): number {
+  return messages
+    .filter((message) => message.role === 'tool')
+    .reduce((total, message) => total + utf8Bytes(message), 0)
+}
+
+function pruningInput(telemetry: WorkingContextTelemetry | undefined): { count: number; reasons: Record<string, number> } {
+  const reasons = telemetry?.reasons ?? {}
+  return { count: Object.values(reasons).reduce((total, count) => total + count, 0), reasons }
+}
+
+function requestTelemetryMetadata(record: RequestTelemetryRecord, usage?: Parameters<typeof modelUsageMetadata>[0]): Record<string, unknown> {
+  return { ...(usage ? modelUsageMetadata(usage) : {}), requestTelemetry: record }
 }
 
 export interface AgentV2Options {
@@ -521,12 +562,42 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
   const messages: ChatMessage[] = [...opts.messages, { role: 'user', content: opts.userInput }]
   const priorSystem = opts.messages.filter((message) => message.role === 'system').map((message) => message.content ?? '').filter(Boolean)
   const modelMessages = toModelMessages(messages.filter((message) => message.role !== 'system'), userContent)
-  const scopedToolDefs = runToolDefs(cfg, ctx, opts.toolDefs)
-  const systemFor = (targetMode: 'work' | 'research' | 'chat'): string => [...new Set([
+  const policyToolDefs = runToolDefs(cfg, ctx, opts.toolDefs)
+  const optimizationEnabled = cfg.agentOptimization !== 'off'
+  const activeSelection: ActiveToolsSelection = selectActiveTools({
+    toolDefs: policyToolDefs,
+    userInput: opts.userInput,
+    explicitRunScoped: opts.toolDefs !== undefined,
+    optimizationEnabled,
+    mode
+  })
+  const scopedToolDefs = [...activeSelection.toolDefs]
+  // Existing explicit run-scoped/vision paths preserve their exact context
+  // contract. Ordinary text work is the only pruning/capping target.
+  const optimizeWorkingContext = optimizationEnabled && opts.toolDefs === undefined && !containsAgentImage(userContent)
+  const telemetry = createRequestTelemetryCollector()
+  let requestIndex = 0
+  const systemFor = (targetMode: 'work' | 'research' | 'chat', exposedToolDefs: readonly ToolDef[] = scopedToolDefs): string => [...new Set([
     ...priorSystem,
     cfg.systemPrompt,
-    buildProtocolRules(targetMode, policy.allowArbitraryCommands, policy.autoApproveCommand, ctx.safeCommandOnly === true, scopedToolDefs)
+    buildProtocolRules(targetMode, policy.allowArbitraryCommands, policy.autoApproveCommand, ctx.safeCommandOnly === true, exposedToolDefs)
   ].filter((value): value is string => typeof value === 'string' && value.length > 0))].join('\n\n')
+
+  const beginRequestTelemetry = (requestMessages: readonly V2ModelMessage[], exposedToolDefs: readonly ToolDef[], working?: WorkingContextTelemetry) => telemetry.beginRequest({
+    requestIndex: requestIndex++,
+    runId: ctx.runId ?? 'default-run',
+    provider: cfg.provider?.trim() ? cfg.provider : 'openai',
+    model: cfg.model?.trim() ? cfg.model : 'injected-model',
+    workingMessageCount: requestMessages.length,
+    exposedToolDefs: exposedToolDefs.map((def) => ({
+      name: def.name,
+      parameterNames: Object.keys(def.parameters.properties ?? {})
+    })),
+    exposedToolCount: exposedToolDefs.length,
+    toolSchemaBytes: toolSchemaBytes(exposedToolDefs),
+    toolResultContextBytes: toolResultContextBytes(requestMessages),
+    pruning: pruningInput(working)
+  })
 
   assertImageRequestPolicy({
     cfg, messages: modelMessages, system: systemFor(mode), toolDefs: mode === 'work' ? scopedToolDefs : [],
@@ -536,6 +607,8 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
   io.event?.({ type: 'plan.created', summary: mode === 'work' ? 'Runの計画と検証プロファイルを作成しました' : mode === 'research' ? '調査モードを開始しました' : '通常回答モードを開始しました', origin: 'orchestrator', namespace: 'none', authority: 'derived' })
 
   if (mode !== 'work') {
+    const requestTelemetry = beginRequestTelemetry(modelMessages, [])
+    let requestTelemetryFinished = false
     try {
       emitModelWait(io, cfg)
       assertExternalBoundaryBeforeRequest(cfg, ctx, io)
@@ -549,7 +622,9 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
         abortSignal: io.signal,
         experimental_include: { requestBody: false, responseBody: false }
       })
-      io.event?.({ type: 'model.decision', summary: 'モデルの次の1手を受信しました', metadata: modelUsageMetadata(result.usage), origin: modelEventOrigin(cfg), namespace: 'none', authority: 'claimed' })
+      const telemetryRecord = requestTelemetry.finish(providerUsage(result.usage))
+      requestTelemetryFinished = true
+      io.event?.({ type: 'model.decision', summary: 'モデルの次の1手を受信しました', metadata: requestTelemetryMetadata(telemetryRecord, result.usage), origin: modelEventOrigin(cfg), namespace: 'none', authority: 'claimed' })
       messages.push({ role: 'assistant', content: result.text })
       if (mode === 'research') {
         const research = buildResearchBundle(opts.userInput, result.text)
@@ -560,6 +635,10 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
       io.event?.({ type: 'step.completed', summary: '回答を受け取りました', origin: 'orchestrator', namespace: 'none', authority: 'derived' })
       return { reply: result.text, messages, aborted: false }
     } catch (err) {
+      if (!requestTelemetryFinished) {
+        const telemetryRecord = requestTelemetry.finish()
+        io.event?.({ type: 'run.warning', error: 'model request failed', metadata: requestTelemetryMetadata(telemetryRecord), origin: 'orchestrator', namespace: 'none', authority: 'authoritative' })
+      }
       io.print(`[error] ${(err as Error).message}`)
       return { reply: '', messages, aborted: true }
     }
@@ -575,21 +654,36 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
   let confirmationOnly = false
   let activeVisionContent = userContent
 
+  const rejectToolCalls = (reason: string, calls: readonly { toolCallId: string; toolName: string }[]): AgentTurnResult => {
+    for (const call of calls) {
+      const hostResult = formatHostResult(qualifiedToolName(call.toolName), `[orchestrator rejected] ${reason}`, null, 'failed', call.toolCallId, ctx.runId)
+      modelMessages.push({ role: 'tool', content: [{ type: 'tool-result', toolCallId: call.toolCallId, toolName: call.toolName, output: { type: 'text', value: hostResult } }] } as V2ModelMessage)
+      messages.push({ role: 'tool', tool_call_id: call.toolCallId, name: qualifiedToolName(call.toolName), content: hostResult })
+    }
+    return warningResult(reason, messages, io)
+  }
+
   for (let iteration = 0; iteration < policy.maxModelDecisions; iteration++) {
     if (shouldCancel(io)) return { reply: '', messages, aborted: true }
     if (io.isPaused?.()) return { reply: '', messages, aborted: true, paused: true }
-    const workSystem = systemFor('work')
+    const exposedToolDefs = confirmationOnly ? [] : scopedToolDefs
+    const workSystem = systemFor('work', exposedToolDefs)
+    const projected = optimizeWorkingContext
+      ? buildModelWorkingContext(modelMessages, { maxToolResultBytes: DEFAULT_MODEL_TOOL_RESULT_BYTES })
+      : { messages: modelMessages, telemetry: undefined }
+    const requestMessages = projected.messages as V2ModelMessage[]
     assertImageRequestPolicy({
-      cfg, messages: modelMessages, system: workSystem, toolDefs: scopedToolDefs,
+      cfg, messages: requestMessages, system: workSystem, toolDefs: exposedToolDefs,
       activeContent: activeVisionContent, visualTokenBudget, maxContextTokens
     })
     let result: Awaited<ReturnType<typeof generateText>>
+    const requestTelemetry = beginRequestTelemetry(requestMessages, exposedToolDefs, projected.telemetry)
     try {
       emitModelWait(io, cfg)
       assertExternalBoundaryBeforeRequest(cfg, ctx, io)
       result = await generateText({
         model,
-        messages: modelMessages,
+        messages: requestMessages,
         system: workSystem,
         tools,
         ...(confirmationOnly ? { activeTools: [] as string[] } : {}),
@@ -600,30 +694,42 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
         experimental_include: { requestBody: false, responseBody: false }
       })
     } catch (err) {
+      const telemetryRecord = requestTelemetry.finish()
+      io.event?.({ type: 'run.warning', error: 'model request failed', metadata: requestTelemetryMetadata(telemetryRecord), origin: 'orchestrator', namespace: 'none', authority: 'authoritative' })
       io.print(`[error] ${(err as Error).message}`)
       return { reply: '', messages, aborted: true }
     }
-    io.event?.({ type: 'model.decision', summary: 'モデルの次の1手を受信しました', metadata: modelUsageMetadata(result.usage), origin: modelEventOrigin(cfg), namespace: 'none', authority: 'claimed' })
+    const telemetryRecord = requestTelemetry.finish(providerUsage(result.usage))
+    io.event?.({ type: 'model.decision', summary: 'モデルの次の1手を受信しました', metadata: { ...requestTelemetryMetadata(telemetryRecord, result.usage), activeTools: { category: activeSelection.category, conservativeFallback: activeSelection.conservativeFallback } }, origin: modelEventOrigin(cfg), namespace: 'none', authority: 'claimed' })
     modelMessages.push(...result.response.messages as V2ModelMessage[])
     const calls = result.toolCalls
     const legacyCalls: ToolCall[] = calls.map((call) => ({ id: call.toolCallId, type: 'function', function: { name: qualifiedToolName(call.toolName), arguments: JSON.stringify(call.input) } }))
     messages.push({ role: 'assistant', content: result.text, ...(legacyCalls.length ? { tool_calls: legacyCalls } : {}) })
     if (calls.length === 0) return { reply: result.text, messages, aborted: false }
-    if (calls.length !== 1) return warningResult('1回の判断で複数のhostツールが要求されたため、安全のため停止しました', messages, io)
+    if (confirmationOnly && calls.length > 0) {
+      const reason = executions >= policy.maxHostExecutions
+        ? `hostツール実行上限(${policy.maxHostExecutions}回)に達したため停止しました`
+        : '確認専用phaseでhostツールが要求されたため、安全のため停止しました'
+      return rejectToolCalls(reason, calls)
+    }
+    if (calls.length !== 1) return rejectToolCalls('1回の判断で複数のhostツールが要求されたため、安全のため停止しました', calls)
 
     const call = calls[0]
     const qualifiedCallName = qualifiedToolName(call.toolName)
-    const def = scopedToolDefs.find((candidate) => qualifiedToolName(candidate.name) === qualifiedCallName)
-    if (!def) return warningResult(`許可されていないhostツール ${call.toolName} が要求されたため停止しました`, messages, io)
-    if (ctx.safeCommandOnly && bareToolName(def.name) === 'get_weather') return warningResult('この構成ではネットワーク通信を行うhostツールは利用できません', messages, io)
-    if (bareToolName(def.name) === 'run_command' && !policy.allowArbitraryCommands) return warningResult('任意コマンド実行は設定で明示的に有効化されていないため停止しました', messages, io)
-    if (executions >= policy.maxHostExecutions) return warningResult(`hostツール実行上限(${policy.maxHostExecutions}回)に達したため停止しました`, messages, io)
-    if (def.kind === 'write' && writes >= policy.maxWriteExecutions) return warningResult(`書き込み実行上限(${policy.maxWriteExecutions}回)に達したため停止しました`, messages, io)
-    if (def.kind === 'command' && commands >= policy.maxCommandExecutions) return warningResult(`コマンド実行上限(${policy.maxCommandExecutions}回)に達したため停止しました`, messages, io)
+    // Active Tools is a request-size optimisation, never an authorization
+    // boundary. The policy-filtered set remains the execution lookup, followed
+    // by the unchanged hook/permission/approval/guard chain below.
+    const def = policyToolDefs.find((candidate) => qualifiedToolName(candidate.name) === qualifiedCallName)
+    if (!def) return rejectToolCalls(`許可されていないhostツール ${call.toolName} が要求されたため停止しました`, calls)
+    if (ctx.safeCommandOnly && bareToolName(def.name) === 'get_weather') return rejectToolCalls('この構成ではネットワーク通信を行うhostツールは利用できません', calls)
+    if (bareToolName(def.name) === 'run_command' && !policy.allowArbitraryCommands) return rejectToolCalls('任意コマンド実行は設定で明示的に有効化されていないため停止しました', calls)
+    if (executions >= policy.maxHostExecutions) return rejectToolCalls(`hostツール実行上限(${policy.maxHostExecutions}回)に達したため停止しました`, calls)
+    if (def.kind === 'write' && writes >= policy.maxWriteExecutions) return rejectToolCalls(`書き込み実行上限(${policy.maxWriteExecutions}回)に達したため停止しました`, calls)
+    if (def.kind === 'command' && commands >= policy.maxCommandExecutions) return rejectToolCalls(`コマンド実行上限(${policy.maxCommandExecutions}回)に達したため停止しました`, calls)
 
     const keyArgs = call.input && typeof call.input === 'object' && !Array.isArray(call.input) ? call.input as Record<string, unknown> : {}
     const key = toolRequestKey(qualifiedToolName(def.name), keyArgs)
-    if ((actionCounts.get(key) ?? 0) > 0) return warningResult('同じhostツール操作が繰り返されたため停止しました', messages, io)
+    if ((actionCounts.get(key) ?? 0) > 0) return rejectToolCalls('同じhostツール操作が繰り返されたため停止しました', calls)
     actionCounts.set(key, 1)
 
     const executed = await executeV2ToolCall(call, def, cfg, ctx, io, opts.beforeHooks ?? [])
@@ -635,9 +741,12 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
       noProgress = resultKey === lastResultKey ? noProgress + 1 : 0
       lastResultKey = resultKey
     }
-    const hostResult = formatHostResult(qualifiedToolName(def.name), executed.output, executed.metadata, executed.status, call.toolCallId, ctx.runId)
-    modelMessages.push({ role: 'tool', content: [{ type: 'tool-result', toolCallId: call.toolCallId, toolName: call.toolName, output: { type: 'text', value: hostResult } }] } as V2ModelMessage)
-    messages.push({ role: 'tool', tool_call_id: call.toolCallId, name: qualifiedToolName(def.name), content: hostResult })
+    const fullHostResult = formatHostResult(qualifiedToolName(def.name), executed.output, executed.metadata, executed.status, call.toolCallId, ctx.runId)
+    // Keep one canonical sentinel-delimited result. The model-only projection
+    // caps its inner untrusted data without cutting the protocol envelope.
+    const modelHostResult = fullHostResult
+    modelMessages.push({ role: 'tool', content: [{ type: 'tool-result', toolCallId: call.toolCallId, toolName: call.toolName, output: { type: 'text', value: modelHostResult } }] } as V2ModelMessage)
+    messages.push({ role: 'tool', tool_call_id: call.toolCallId, name: qualifiedToolName(def.name), content: fullHostResult })
     if (opts.afterToolObservation && executed.status === 'succeeded') {
       const observation = await opts.afterToolObservation({
         toolName: bareToolName(def.name),
@@ -661,6 +770,12 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
         // expose no callable tools on the next model request.
         confirmationOnly = true
       }
+    }
+    if (optimizeWorkingContext && executed.status === 'succeeded' && executions >= policy.maxHostExecutions) {
+      // Once the configured execution budget is exhausted, close tools and
+      // permit one bounded final response instead of advertising actions the
+      // orchestrator would necessarily reject on the next iteration.
+      confirmationOnly = true
     }
     if (noProgress >= policy.maxNoProgress) return warningResult(`hostツール結果に進展がないため停止しました（${policy.maxNoProgress}回連続）`, messages, io)
   }

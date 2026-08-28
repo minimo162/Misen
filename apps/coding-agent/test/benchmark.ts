@@ -10,11 +10,24 @@ import {
   loadBenchmarkSuite,
   parseBenchmarkSuite,
   readBenchmarkJsonl,
+  requestTelemetryFromEvents,
   runBenchmark,
   type BenchmarkLogger,
   type BenchmarkRunResult
 } from '../src/benchmark'
 import type { AgentConfig } from '../src/config'
+import { createRequestTelemetryRecord } from '../src/request-telemetry'
+
+function testRequestTelemetryEventTrustBoundary(): void {
+  const record = createRequestTelemetryRecord({
+    requestIndex: 0, runId: 'benchmark-run', provider: 'openai', model: 'fixture',
+    workingMessageCount: 1, exposedToolCount: 0, toolSchemaBytes: 0,
+    toolResultContextBytes: 0, pruning: { count: 0, reasons: {} }, elapsedMs: 1
+  })
+  assert.equal(requestTelemetryFromEvents([{ type: 'model.decision', metadata: { requestTelemetry: record } } as never]).length, 1)
+  assert.equal(requestTelemetryFromEvents([{ type: 'tool.succeeded', metadata: { requestTelemetry: { ...record, rawPrompt: 'injected' } } } as never]).length, 0)
+  assert.throws(() => requestTelemetryFromEvents([{ type: 'model.decision', metadata: { requestTelemetry: { ...record, rawPrompt: 'injected' } } } as never]), /unsafe key/u)
+}
 
 function mockConfig(secret: string): AgentConfig {
   return {
@@ -339,9 +352,13 @@ async function testSyntheticE2E(root: string, secret: string): Promise<void> {
   assert.strictEqual(summary.results.filter((result) => result.final_outcome === 'safety_rejection').length, 2)
   assert.strictEqual(summary.results.filter((result) => (result.approval_count ?? 0) > 0).length, 6)
   assert.ok(summary.results.every((result) => result.token_usage?.total_tokens !== null), 'mock usage must be captured without estimation')
+  assert.ok(summary.results.every((result) => result.configuration.agent_optimization === 'on'))
+  assert.ok(summary.results.every((result) => result.request_telemetry.length === result.model_response_count), 'each successful model request must have one safe telemetry record')
+  assert.ok(summary.results.flatMap((result) => result.request_telemetry).every((record) => record.exposedToolCount >= 0 && record.workingMessageCount >= 1))
   assert.strictEqual(readBenchmarkJsonl(summary.jsonlPath).length, 10)
   assert.ok(fs.readFileSync(summary.runsCsvPath, 'utf8').includes('time_to_first_action_ms'))
   assert.ok(fs.readFileSync(summary.summaryCsvPath, 'utf8').includes('approval_success_rate'))
+  assert.ok(fs.readFileSync(summary.summaryCsvPath, 'utf8').includes('average_exposed_tools'))
   assert.ok(fs.readFileSync(summary.markdownPath, 'utf8').includes('Unknown/unreported values'))
   assert.deepStrictEqual(fs.readdirSync(path.join(output, 'workspaces')), [], 'synthetic workspaces must not be retained in results')
 
@@ -448,12 +465,12 @@ async function testUnknownAggregation(): Promise<void> {
     task_schema_version: 'misen.benchmark-task/v1',
     suite_id: 'unknowns', suite_version: '1', task_id: 'x', run_id: 'x', timestamp: new Date(0).toISOString(), git_commit_sha: 'unknown',
     provider: 'openai', model: 'x', endpoint_category: 'loopback',
-    configuration: { agent_loop: 'v2', temperature: null, reasoning_effort: null, max_model_decisions: null, max_host_executions: null, metadata: {} },
+    configuration: { agent_loop: 'v2', agent_optimization: 'on', temperature: null, reasoning_effort: null, max_model_decisions: null, max_host_executions: null, metadata: {} },
     repeat_index: 1, seed: null, seed_guaranteed: false, final_status: 'success', final_outcome: 'success',
     expectations: { passed: 1, total: 1, details: [] }, pass: true, elapsed_ms: 10, time_to_first_action_ms: null,
     model_call_count: 1, model_response_count: 1, tool_call_count: 0, tool_events: { succeeded: 0, failed: 0, rejected: 0, invalid: 0 },
     retry_count: 0, approval_count: 0, approval_result: 'not_required', approval_events: { approved: 0, denied: 0, unknown: 0 }, safety_rejection: false, guard_rejection_count: 0,
-    human_intervention_count: 0, token_usage: null, error_category: null
+    human_intervention_count: 0, token_usage: null, request_telemetry: [], error_category: null
   }
   const aggregate = aggregateBenchmarkResults([template])[0]
   assert.strictEqual(aggregate.average_time_to_first_action_ms, null)
@@ -466,7 +483,7 @@ async function testUnknownAggregation(): Promise<void> {
     model_call_count: null, model_response_count: null, tool_call_count: null,
     tool_events: { succeeded: null, failed: null, rejected: null, invalid: null }, retry_count: null,
     approval_count: null, approval_result: 'unknown', approval_events: { approved: null, denied: null, unknown: null },
-    safety_rejection: null, guard_rejection_count: null, human_intervention_count: null, token_usage: null
+    safety_rejection: null, guard_rejection_count: null, human_intervention_count: null, token_usage: null, request_telemetry: []
   }
   const mixed = aggregateBenchmarkResults([template, harness])[0]
   const outcomes = mixed.outcomes
@@ -481,6 +498,11 @@ async function testUnknownAggregation(): Promise<void> {
   const versioned = aggregateBenchmarkResults([template, versionTwo])
   assert.strictEqual(versioned.length, 2, 'different suite versions must never share an aggregate')
   assert.deepStrictEqual(versioned.map((item) => item.suite_version), ['1', '2.0.0'])
+  const optimizationOff: BenchmarkRunResult = { ...template, run_id: 'off', configuration: { ...template.configuration, agent_optimization: 'off' } }
+  assert.strictEqual(aggregateBenchmarkResults([template, optimizationOff]).length, 2, 'optimization OFF/ON must never share an aggregate')
+  const legacy = structuredClone(template)
+  delete legacy.configuration.agent_optimization
+  assert.strictEqual(aggregateBenchmarkResults([legacy])[0].agent_optimization, 'unknown', 'older v1 JSONL must remain summarizable')
   console.log('PASS benchmark-unit-aggregation-unknown-harness-classification')
 }
 
@@ -490,6 +512,7 @@ async function main(): Promise<void> {
   const previous = process.env.MISEN_BENCH_SECRET_MARKER
   process.env.MISEN_BENCH_SECRET_MARKER = secret
   try {
+    testRequestTelemetryEventTrustBoundary()
     await testSchema()
     await testFailClosedInputs(root, secret)
     await testWorkspaceParentReparse(root, secret)

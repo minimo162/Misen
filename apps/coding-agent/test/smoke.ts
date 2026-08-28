@@ -703,6 +703,7 @@ async function testOllamaProvider(): Promise<void> {
     assert.throws(() => loadConfig(writeConfig('missing.json', { provider: 'ollama', baseURL: 'http://127.0.0.1:11434/v1' })), /baseURL \/ model/u)
     assert.throws(() => loadConfig(writeConfig('remote.json', { provider: 'ollama', baseURL: 'https://example.com/v1', model: 'x' })), /loopback/u)
     assert.throws(() => loadConfig(writeConfig('bad-reasoning.json', { provider: 'ollama', baseURL: 'http://127.0.0.1:11434/v1', model: 'x', reasoningEffort: 'max' })), /reasoningEffort/u)
+    assert.throws(() => loadConfig(writeConfig('bad-optimization.json', { provider: 'ollama', baseURL: 'http://127.0.0.1:11434/v1', model: 'x', agentOptimization: 'maybe' })), /agentOptimization/u)
   } finally {
     fs.rmSync(configDir, { recursive: true, force: true })
   }
@@ -1194,6 +1195,47 @@ async function testV2ToolLoopAndEventContract(): Promise<void> {
   fs.rmSync(root, { recursive: true, force: true })
   console.log('PASS v2-tool-loop')
   console.log('PASS v2-event-contract')
+}
+
+async function testV2OptimizationProjectionAndTelemetry(): Promise<void> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-smoke-v2-optimization-'))
+  const marker = 'END_PRIVATE_TOOL_RESULT_MARKER'
+  fs.writeFileSync(path.join(root, 'large.txt'), `${'日本語😀'.repeat(1_200)}${marker}`, 'utf8')
+  await withServer([
+    { tool_call: { name: 'read_file', args: { path: 'large.txt' } } },
+    { content: 'large.txt を確認しました' }
+  ], async (baseCfg, requestBodies) => {
+    const telemetry: unknown[] = []
+    const result = await runAgentTurnV2({
+      cfg: { ...baseCfg, agentLoop: 'v2', agentOptimization: 'on' },
+      messages: [],
+      userInput: 'large.txt を読んでください',
+      ctx: makeCtx(root),
+      io: {
+        ...ioStub(true),
+        event: (event) => {
+          const record = event.metadata?.requestTelemetry
+          if (record) telemetry.push(record)
+        }
+      }
+    })
+    assert.strictEqual(result.aborted, false)
+    assert.strictEqual(requestBodies.length, 2)
+    const first = JSON.parse(requestBodies[0]) as { tools?: unknown[] }
+    assert.ok((first.tools?.length ?? 0) < TOOL_DEFS.length, 'read intent must expose fewer schemas than the policy set')
+    assert.ok(requestBodies[1].includes('tool-result-truncated'), 'large tool result must be capped for the model')
+    assert.ok(!requestBodies[1].includes(marker), 'the capped model request must omit the tool-result tail')
+    const fullSessionResult = result.messages.find((message) => message.role === 'tool')?.content ?? ''
+    assert.ok(fullSessionResult.includes(marker), 'complete session history must retain the uncapped tool result')
+    assert.strictEqual(telemetry.length, 2)
+    const persisted = JSON.stringify(telemetry)
+    assert.ok(!persisted.includes(marker))
+    assert.ok(!persisted.includes('large.txt を読んでください'))
+    assert.ok(!/(?:prompt|content|rawReasoning|reasoningText|imageBytes)["']?\s*:/iu.test(persisted), 'telemetry must contain no raw prompt/reasoning/image field')
+    assert.ok(!persisted.includes('data:image/'), 'telemetry may count base64 pruning but must not contain image bytes')
+  })
+  fs.rmSync(root, { recursive: true, force: true })
+  console.log('PASS v2-optimization-projection-telemetry')
 }
 
 async function testV2HookDenialPropagation(): Promise<void> {
@@ -2871,6 +2913,7 @@ async function testDemoRecordingContract(): Promise<void> {
   await testAgentLoop()
   await testV2SafeExecutionOrder()
   await testV2ToolLoopAndEventContract()
+  await testV2OptimizationProjectionAndTelemetry()
   await testV2HookDenialPropagation()
   await testV2PermissionActionsLastWins()
   await testV2PermissionNewVsOverwrite()

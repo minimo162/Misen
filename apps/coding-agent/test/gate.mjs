@@ -31,6 +31,9 @@ const stages = [
   { name: 'computer-use-demo', command: nodeCommand, args: ['dist/computer-use-demo-test.js'], requiresBuild: true },
   { name: 'computer-use-safety', command: nodeCommand, args: ['dist/computer-use-safety-test.js'], requiresBuild: true },
   { name: 'vision-budget', command: nodeCommand, args: ['dist/vision-budget-test.js'], requiresBuild: true },
+  { name: 'active-tools', command: nodeCommand, args: ['dist/active-tools-test.js'], requiresBuild: true },
+  { name: 'request-telemetry', command: nodeCommand, args: ['dist/request-telemetry-test.js'], requiresBuild: true },
+  { name: 'working-context', command: nodeCommand, args: ['dist/working-context-test.js'], requiresBuild: true },
   { name: 'flex-validate', command: nodeCommand, args: ['dist/flex-harness.js'], requiresBuild: true },
   {
     name: 'live-converter',

@@ -13,6 +13,7 @@
     "benchmark:mock": "node esbuild.config.mjs && node dist/benchmark.js --mock --provider openai --model benchmark-loopback",
     "test:benchmark": "node esbuild.config.mjs && node dist/benchmark-test.js",
     "test:computer-use": "node esbuild.config.mjs && node dist/multimodal-test.js && node dist/computer-use-demo-test.js && node dist/computer-use-safety-test.js && node dist/vision-budget-test.js",
+    "test:agent-optimization": "node esbuild.config.mjs && node dist/active-tools-test.js && node dist/request-telemetry-test.js && node dist/working-context-test.js",
     "smoke": "node esbuild.config.mjs && node dist/smoke.js",
     "flex:validate": "node esbuild.config.mjs && node dist/flex-harness.js",
     "flex:validate:live": "node esbuild.config.mjs && node dist/flex-harness.js --live",

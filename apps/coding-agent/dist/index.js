@@ -945,8 +945,8 @@ var require_bom_handling = __commonJS({
     "use strict";
     var BOMChar = "\uFEFF";
     exports2.PrependBOM = PrependBOMWrapper;
-    function PrependBOMWrapper(encoder2, options) {
-      this.encoder = encoder2;
+    function PrependBOMWrapper(encoder3, options) {
+      this.encoder = encoder3;
       this.addBOM = true;
     }
     PrependBOMWrapper.prototype.write = function(str) {
@@ -2439,16 +2439,16 @@ var require_dbcs_codec = __commonJS({
     DBCSCodec.prototype.encoder = DBCSEncoder;
     DBCSCodec.prototype.decoder = DBCSDecoder;
     DBCSCodec.prototype._getDecodeTrieNode = function(addr) {
-      var bytes = [];
+      var bytes2 = [];
       for (; addr > 0; addr >>>= 8)
-        bytes.push(addr & 255);
-      if (bytes.length == 0)
-        bytes.push(0);
+        bytes2.push(addr & 255);
+      if (bytes2.length == 0)
+        bytes2.push(0);
       var node = this.decodeTables[0];
-      for (var i2 = bytes.length - 1; i2 > 0; i2--) {
-        var val = node[bytes[i2]];
+      for (var i2 = bytes2.length - 1; i2 > 0; i2--) {
+        var val = node[bytes2[i2]];
         if (val == UNASSIGNED) {
-          node[bytes[i2]] = NODE_START - this.decodeTables.length;
+          node[bytes2[i2]] = NODE_START - this.decodeTables.length;
           this.decodeTables.push(node = UNASSIGNED_NODE.slice(0));
         } else if (val <= NODE_START) {
           node = this.decodeTables[NODE_START - val];
@@ -4399,9 +4399,9 @@ var require_lib = __commonJS({
     iconv2.defaultCharSingleByte = "?";
     iconv2.encode = function encode3(str, encoding, options) {
       str = "" + (str || "");
-      var encoder2 = iconv2.getEncoder(encoding, options);
-      var res = encoder2.write(str);
-      var trail = encoder2.end();
+      var encoder3 = iconv2.getEncoder(encoding, options);
+      var res = encoder3.write(str);
+      var trail = encoder3.end();
       return trail && trail.length > 0 ? Buffer2.concat([res, trail]) : res;
     };
     iconv2.decode = function decode3(buf, encoding, options) {
@@ -4464,10 +4464,10 @@ var require_lib = __commonJS({
       return ("" + encoding).toLowerCase().replace(/:\d{4}$|[^0-9a-z]/g, "");
     };
     iconv2.getEncoder = function getEncoder(encoding, options) {
-      var codec2 = iconv2.getCodec(encoding), encoder2 = new codec2.encoder(options, codec2);
+      var codec2 = iconv2.getCodec(encoding), encoder3 = new codec2.encoder(options, codec2);
       if (codec2.bomAware && options && options.addBOM)
-        encoder2 = new bomHandling.PrependBOM(encoder2, options);
-      return encoder2;
+        encoder3 = new bomHandling.PrependBOM(encoder3, options);
+      return encoder3;
     };
     iconv2.getDecoder = function getDecoder(encoding, options) {
       var codec2 = iconv2.getCodec(encoding), decoder = new codec2.decoder(options, codec2);
@@ -5676,6 +5676,7 @@ var DEFAULT_CONFIG = {
   maxCommandExecutions: 2,
   maxNoProgress: 2,
   allowArbitraryCommands: false,
+  agentOptimization: "on",
   permissions: [],
   autoApprove: { write: false, command: false },
   copilot: { displayMode: "foreground", agentMode: true },
@@ -5685,9 +5686,9 @@ function appDataConfigPath() {
   return import_node_path.default.join(process.env.APPDATA ?? process.env.USERPROFILE ?? ".", "CompanyApps", "coding-agent", "config.json");
 }
 function isLoopbackHostname(hostname3) {
-  const normalized = hostname3.toLowerCase().replace(/^\[|\]$/gu, "");
-  if (normalized === "localhost" || normalized === "::1" || normalized === "0:0:0:0:0:0:0:1") return true;
-  const octets = normalized.split(".");
+  const normalized2 = hostname3.toLowerCase().replace(/^\[|\]$/gu, "");
+  if (normalized2 === "localhost" || normalized2 === "::1" || normalized2 === "0:0:0:0:0:0:0:1") return true;
+  const octets = normalized2.split(".");
   if (octets.length !== 4 || octets.some((octet) => !/^\d{1,3}$/u.test(octet) || Number(octet) > 255)) return false;
   return Number(octets[0]) === 127;
 }
@@ -5742,6 +5743,9 @@ function parseConfig(found) {
   const raw = JSON.parse(import_node_fs.default.readFileSync(found, "utf8"));
   if (raw.agentLoop !== void 0 && raw.agentLoop !== "v1" && raw.agentLoop !== "v2") {
     throw new Error(`agentLoop \u306F v1 \u307E\u305F\u306F v2 \u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+  }
+  if (raw.agentOptimization !== void 0 && raw.agentOptimization !== "on" && raw.agentOptimization !== "off") {
+    throw new Error(`agentOptimization \u306F on \u307E\u305F\u306F off \u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
   }
   const provider = validateProviderConfig(raw.provider ?? "openai", raw, found);
   const configuredPermissions = raw.permissions;
@@ -6390,9 +6394,9 @@ function appendLine(record2, line, stream) {
 }
 function appendChunk(record2, stream, chunk) {
   const combined = record2.pending[stream] + chunk;
-  const parts = combined.split(/\r?\n/);
-  record2.pending[stream] = parts.pop() ?? "";
-  for (const line of parts) appendLine(record2, line, stream);
+  const parts2 = combined.split(/\r?\n/);
+  record2.pending[stream] = parts2.pop() ?? "";
+  for (const line of parts2) appendLine(record2, line, stream);
 }
 function flushPending(record2) {
   for (const stream of ["stdout", "stderr"]) {
@@ -6763,8 +6767,8 @@ function normalizeRunCommand(command) {
     if (pathWords.length === 0 || pathWords.some((word) => /^-/u.test(word))) {
       throw new Error(`Read-Xlsx \u306F ${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
     }
-    const normalized = pathWords.map((word) => word.replaceAll("/", "\\"));
-    const reportPaths = normalized.length > 1 ? normalized.filter((word) => !(import_node_path2.default.win32.dirname(word) === "." && import_node_path2.default.win32.basename(word).toLowerCase() === "\u96C6\u8A08\u53F0\u5E33.xlsx")) : normalized;
+    const normalized2 = pathWords.map((word) => word.replaceAll("/", "\\"));
+    const reportPaths = normalized2.length > 1 ? normalized2.filter((word) => !(import_node_path2.default.win32.dirname(word) === "." && import_node_path2.default.win32.basename(word).toLowerCase() === "\u96C6\u8A08\u53F0\u5E33.xlsx")) : normalized2;
     if (reportPaths.length === 0) throw new Error(`Read-Xlsx \u306F ${READ_XLSX_USAGE} \u306E\u5F62\u5F0F\u3067\u547C\u3093\u3067\u304F\u3060\u3055\u3044`);
     let normalizedPath;
     if (reportPaths.length === 1) {
@@ -6873,16 +6877,16 @@ function normalizeWorkspaceOpenCommand(command, ctx) {
   return `powershell.exe -NoProfile -Command "Invoke-Item -LiteralPath '${absolute}'"`;
 }
 function prepareHostCommand(command, ctx) {
-  const normalized = normalizeRunCommand(command);
-  const safeOpen = normalizeWorkspaceOpenCommand(normalized, ctx);
+  const normalized2 = normalizeRunCommand(command);
+  const safeOpen = normalizeWorkspaceOpenCommand(normalized2, ctx);
   if (ctx.safeCommandOnly && !safeOpen) throw new Error("run_command\u62D2\u5426: \u3053\u306E\u69CB\u6210\u3067\u306F\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5185\u30D5\u30A1\u30A4\u30EB\u3092\u958B\u304F\u660E\u793A\u8A31\u53EF\u5F62\u5F0F\u3060\u3051\u5B9F\u884C\u3067\u304D\u307E\u3059");
-  const prepared = safeOpen ?? normalized;
+  const prepared = safeOpen ?? normalized2;
   assertRunCommandPolicy(prepared, ctx);
   return prepared;
 }
 function formatHostCommandOutput(requested, prepared, stdout, stderr) {
-  const parts = [stdout, stderr].filter((value) => value.trim().length > 0).map((value) => truncate(value));
-  if (parts.length > 0) return parts.join("\n---stderr---\n");
+  const parts2 = [stdout, stderr].filter((value) => value.trim().length > 0).map((value) => truncate(value));
+  if (parts2.length > 0) return parts2.join("\n---stderr---\n");
   if (/\bInvoke-Item\s+-LiteralPath\b/iu.test(prepared)) return `\u30A2\u30D7\u30EA\u8D77\u52D5\u30B3\u30DE\u30F3\u30C9\u6210\u529F: ${requested}`;
   return "(\u51FA\u529B\u306A\u3057)";
 }
@@ -7126,14 +7130,14 @@ function wildcardToRegExp(pattern) {
   return new RegExp(`^${escaped}$`, "i");
 }
 function workspaceGlobToRegExp(pattern) {
-  const normalized = pattern.replaceAll("\\", "/").replace(/^\.\//, "");
+  const normalized2 = pattern.replaceAll("\\", "/").replace(/^\.\//, "");
   let source = "";
-  for (let i = 0; i < normalized.length; i++) {
-    const ch = normalized[i];
+  for (let i = 0; i < normalized2.length; i++) {
+    const ch = normalized2[i];
     if (ch === "*") {
-      if (normalized[i + 1] === "*") {
+      if (normalized2[i + 1] === "*") {
         i++;
-        if (normalized[i + 1] === "/") {
+        if (normalized2[i + 1] === "/") {
           i++;
           source += "(?:.*/)?";
         } else {
@@ -7151,21 +7155,21 @@ function workspaceGlobToRegExp(pattern) {
   return new RegExp(`^${source}$`, "i");
 }
 function normalizeWorkspaceGlob(pattern) {
-  const normalized = pattern.trim().replaceAll("\\", "/").replace(/^\.\//, "");
-  if (!normalized) throw new Error("pattern \u304C\u7A7A\u3067\u3059");
-  if (import_node_path2.default.isAbsolute(normalized) || /^[A-Za-z]:/.test(normalized) || normalized.split("/").includes("..")) {
+  const normalized2 = pattern.trim().replaceAll("\\", "/").replace(/^\.\//, "");
+  if (!normalized2) throw new Error("pattern \u304C\u7A7A\u3067\u3059");
+  if (import_node_path2.default.isAbsolute(normalized2) || /^[A-Za-z]:/.test(normalized2) || normalized2.split("/").includes("..")) {
     throw new Error(`\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u5916\u3092\u6307\u3059pattern\u306F\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093: ${pattern}`);
   }
-  return normalized.endsWith("/") ? `${normalized}*` : normalized;
+  return normalized2.endsWith("/") ? `${normalized2}*` : normalized2;
 }
-function decodeWorkspaceText(bytes) {
-  if (bytes.length >= 3 && bytes[0] === 239 && bytes[1] === 187 && bytes[2] === 191) {
-    return bytes.subarray(3).toString("utf8");
+function decodeWorkspaceText(bytes2) {
+  if (bytes2.length >= 3 && bytes2[0] === 239 && bytes2[1] === 187 && bytes2[2] === 191) {
+    return bytes2.subarray(3).toString("utf8");
   }
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes2);
   } catch {
-    return import_iconv_lite.default.decode(bytes, "cp932");
+    return import_iconv_lite.default.decode(bytes2, "cp932");
   }
 }
 function realPathWithMissingTail(abs) {
@@ -7841,8 +7845,8 @@ function extractReplyAndEnd(raw) {
 }
 function attachFenceContent(raw, end, parsed) {
   if (bareToolName(parsed.tool ?? "") !== "write_file" || typeof parsed.args?.content === "string") return;
-  const normalized = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-  const rest = normalized.slice(end);
+  const normalized2 = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+  const rest = normalized2.slice(end);
   const cm = rest.match(/^\s*(?:CONTENT|内容)\s*[:：]\s*\r?\n?([\s\S]+)$/i);
   if (cm) {
     const body = cm[1].split(END_MARKER)[0].replace(/\s+$/, "").replace(/＜/g, "<").replace(/＞/g, ">").replace(/｀/g, String.fromCharCode(96)).replace(/¶/g, "\n");
@@ -7929,9 +7933,9 @@ function normalizeForKey(value) {
   return value;
 }
 function toolRequestKey(name24, args) {
-  const normalized = normalizeForKey(args);
-  if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) return `${name24}:${JSON.stringify(normalized)}`;
-  const copy = { ...normalized };
+  const normalized2 = normalizeForKey(args);
+  if (!normalized2 || typeof normalized2 !== "object" || Array.isArray(normalized2)) return `${name24}:${JSON.stringify(normalized2)}`;
+  const copy = { ...normalized2 };
   const bare = bareToolName(name24);
   if (typeof copy.path === "string") copy.path = import_node_path3.default.normalize(copy.path).replaceAll("\\", "/");
   if (bare === "list_files") {
@@ -8777,14 +8781,14 @@ var TypeValidationError = class _TypeValidationError extends (_b13 = AISDKError,
     }
     if ((context2 == null ? void 0 : context2.entityName) || (context2 == null ? void 0 : context2.entityId)) {
       contextPrefix += " (";
-      const parts = [];
+      const parts2 = [];
       if (context2.entityName) {
-        parts.push(context2.entityName);
+        parts2.push(context2.entityName);
       }
       if (context2.entityId) {
-        parts.push(`id: "${context2.entityId}"`);
+        parts2.push(`id: "${context2.entityId}"`);
       }
-      contextPrefix += parts.join(", ");
+      contextPrefix += parts2.join(", ");
       contextPrefix += ")";
     }
     super({
@@ -10097,16 +10101,16 @@ function cleanEnum(obj) {
 }
 function base64ToUint8Array(base643) {
   const binaryString = atob(base643);
-  const bytes = new Uint8Array(binaryString.length);
+  const bytes2 = new Uint8Array(binaryString.length);
   for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
+    bytes2[i] = binaryString.charCodeAt(i);
   }
-  return bytes;
+  return bytes2;
 }
-function uint8ArrayToBase64(bytes) {
+function uint8ArrayToBase64(bytes2) {
   let binaryString = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binaryString += String.fromCharCode(bytes[i]);
+  for (let i = 0; i < bytes2.length; i++) {
+    binaryString += String.fromCharCode(bytes2[i]);
   }
   return btoa(binaryString);
 }
@@ -10115,22 +10119,22 @@ function base64urlToUint8Array(base64url3) {
   const padding = "=".repeat((4 - base643.length % 4) % 4);
   return base64ToUint8Array(base643 + padding);
 }
-function uint8ArrayToBase64url(bytes) {
-  return uint8ArrayToBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+function uint8ArrayToBase64url(bytes2) {
+  return uint8ArrayToBase64(bytes2).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }
 function hexToUint8Array(hex3) {
   const cleanHex = hex3.replace(/^0x/, "");
   if (cleanHex.length % 2 !== 0) {
     throw new Error("Invalid hex string length");
   }
-  const bytes = new Uint8Array(cleanHex.length / 2);
+  const bytes2 = new Uint8Array(cleanHex.length / 2);
   for (let i = 0; i < cleanHex.length; i += 2) {
-    bytes[i / 2] = Number.parseInt(cleanHex.slice(i, i + 2), 16);
+    bytes2[i / 2] = Number.parseInt(cleanHex.slice(i, i + 2), 16);
   }
-  return bytes;
+  return bytes2;
 }
-function uint8ArrayToHex(bytes) {
-  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+function uint8ArrayToHex(bytes2) {
+  return Array.from(bytes2).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 var Class = class {
   constructor(..._args) {
@@ -11422,11 +11426,11 @@ var $ZodCIDRv6 = /* @__PURE__ */ $constructor("$ZodCIDRv6", (inst, def) => {
   def.pattern ?? (def.pattern = cidrv6);
   $ZodStringFormat.init(inst, def);
   inst._zod.check = (payload) => {
-    const parts = payload.value.split("/");
+    const parts2 = payload.value.split("/");
     try {
-      if (parts.length !== 2)
+      if (parts2.length !== 2)
         throw new Error();
-      const [address, prefix2] = parts;
+      const [address, prefix2] = parts2;
       if (!prefix2)
         throw new Error();
       const prefixNum = Number(prefix2);
@@ -11921,7 +11925,7 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
   const _normalized = cached(() => normalizeDef(def));
   const generateFastpass = (shape) => {
     const doc = new Doc(["shape", "payload", "ctx"]);
-    const normalized = _normalized.value;
+    const normalized2 = _normalized.value;
     const parseStr = (key) => {
       const k = esc(key);
       return `shape[${k}]._zod.run({ value: input[${k}], issues: [] }, ctx)`;
@@ -11929,11 +11933,11 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
     doc.write(`const input = payload.value;`);
     const ids = /* @__PURE__ */ Object.create(null);
     let counter = 0;
-    for (const key of normalized.keys) {
+    for (const key of normalized2.keys) {
       ids[key] = `key_${counter++}`;
     }
     doc.write(`const newResult = {};`);
-    for (const key of normalized.keys) {
+    for (const key of normalized2.keys) {
       const id = ids[key];
       const k = esc(key);
       const schema = shape[key];
@@ -20083,10 +20087,10 @@ function _readonly(Class2, innerType) {
   });
 }
 // @__NO_SIDE_EFFECTS__
-function _templateLiteral(Class2, parts, params) {
+function _templateLiteral(Class2, parts2, params) {
   return new Class2({
     type: "template_literal",
-    parts,
+    parts: parts2,
     ...normalizeParams(params)
   });
 }
@@ -22714,10 +22718,10 @@ var ZodTemplateLiteral = /* @__PURE__ */ $constructor("ZodTemplateLiteral", (ins
   ZodType.init(inst, def);
   inst._zod.processJSONSchema = (ctx, json3, params) => templateLiteralProcessor(inst, ctx, json3, params);
 });
-function templateLiteral(parts, params) {
+function templateLiteral(parts2, params) {
   return new ZodTemplateLiteral({
     type: "template_literal",
-    parts,
+    parts: parts2,
     ...util_exports.normalizeParams(params)
   });
 }
@@ -23309,23 +23313,23 @@ function fromJSONSchema(schema, params) {
   if (typeof schema === "boolean") {
     return schema ? z.any() : z.never();
   }
-  let normalized;
+  let normalized2;
   try {
-    normalized = JSON.parse(JSON.stringify(schema));
+    normalized2 = JSON.parse(JSON.stringify(schema));
   } catch {
     throw new Error("fromJSONSchema input is not valid JSON (possibly cyclic); use $defs/$ref for recursive schemas");
   }
-  const version2 = detectVersion(normalized, params?.defaultTarget);
-  const defs = normalized.$defs || normalized.definitions || {};
+  const version2 = detectVersion(normalized2, params?.defaultTarget);
+  const defs = normalized2.$defs || normalized2.definitions || {};
   const ctx = {
     version: version2,
     defs,
     refs: /* @__PURE__ */ new Map(),
     processing: /* @__PURE__ */ new Set(),
-    rootSchema: normalized,
+    rootSchema: normalized2,
     registry: params?.registry ?? globalRegistry
   };
-  return convertSchema(normalized, ctx);
+  return convertSchema(normalized2, ctx);
 }
 
 // node_modules/zod/v4/classic/coerce.js
@@ -27612,16 +27616,16 @@ function validateDownloadAddress({
   }
 }
 function isIPv4(hostname3) {
-  const parts = hostname3.split(".");
-  if (parts.length !== 4) return false;
-  return parts.every((part) => {
+  const parts2 = hostname3.split(".");
+  if (parts2.length !== 4) return false;
+  return parts2.every((part) => {
     const num = Number(part);
     return Number.isInteger(num) && num >= 0 && num <= 255 && String(num) === part;
   });
 }
 function isPrivateIPv4(ip) {
-  const parts = ip.split(".").map(Number);
-  const [a, b, c] = parts;
+  const parts2 = ip.split(".").map(Number);
+  const [a, b, c] = parts2;
   if (a === 0) return true;
   if (a === 10) return true;
   if (a === 100 && b >= 64 && b <= 127) return true;
@@ -27645,11 +27649,11 @@ function parseIPv6(ip) {
   const toGroups = (segment) => {
     if (segment === "") return [];
     const groups = [];
-    const parts = segment.split(":");
-    for (let i = 0; i < parts.length; i++) {
-      const part = parts[i];
+    const parts2 = segment.split(":");
+    for (let i = 0; i < parts2.length; i++) {
+      const part = parts2[i];
       if (part.includes(".")) {
-        if (i !== parts.length - 1 || !isIPv4(part)) return null;
+        if (i !== parts2.length - 1 || !isIPv4(part)) return null;
         const [a, b, c, d] = part.split(".").map(Number);
         groups.push(a << 8 | b, c << 8 | d);
         continue;
@@ -28034,10 +28038,10 @@ function normalizeHeaders(headers) {
   if (headers == null) {
     return {};
   }
-  const normalized = {};
+  const normalized2 = {};
   if (headers instanceof Headers) {
     headers.forEach((value, key) => {
-      normalized[key.toLowerCase()] = value;
+      normalized2[key.toLowerCase()] = value;
     });
   } else {
     if (!Array.isArray(headers)) {
@@ -28045,11 +28049,11 @@ function normalizeHeaders(headers) {
     }
     for (const [key, value] of headers) {
       if (value != null) {
-        normalized[key.toLowerCase()] = value;
+        normalized2[key.toLowerCase()] = value;
       }
     }
   }
-  return normalized;
+  return normalized2;
 }
 function withUserAgentSuffix(headers, ...userAgentSuffixParts) {
   const normalizedHeaders = new Headers(normalizeHeaders(headers));
@@ -35393,31 +35397,31 @@ function decodePrefix(data, maxBytes) {
     return data.length > maxBytes ? data.subarray(0, maxBytes) : data;
   }
   const maxChars = Math.ceil(maxBytes / 3) * 4;
-  const bytes = convertBase64ToUint8Array(
+  const bytes2 = convertBase64ToUint8Array(
     data.substring(0, Math.min(data.length, maxChars))
   );
-  return bytes.length > maxBytes ? bytes.subarray(0, maxBytes) : bytes;
+  return bytes2.length > maxBytes ? bytes2.subarray(0, maxBytes) : bytes2;
 }
-function hasID3(bytes) {
-  return bytes.length > 10 && bytes[0] === 73 && // 'I'
-  bytes[1] === 68 && // 'D'
-  bytes[2] === 51;
+function hasID3(bytes2) {
+  return bytes2.length > 10 && bytes2[0] === 73 && // 'I'
+  bytes2[1] === 68 && // 'D'
+  bytes2[2] === 51;
 }
-var stripID3 = (bytes) => {
-  const id3Size = (bytes[6] & 127) << 21 | (bytes[7] & 127) << 14 | (bytes[8] & 127) << 7 | bytes[9] & 127;
-  return bytes.subarray(id3Size + 10);
+var stripID3 = (bytes2) => {
+  const id3Size = (bytes2[6] & 127) << 21 | (bytes2[7] & 127) << 14 | (bytes2[8] & 127) << 7 | bytes2[9] & 127;
+  return bytes2.subarray(id3Size + 10);
 };
 function detectMediaType({
   data,
   signatures
 }) {
-  let bytes = decodePrefix(data, DEFAULT_SNIFF_BYTES);
-  if (hasID3(bytes)) {
-    bytes = stripID3(decodePrefix(data, ID3_SCAN_BYTES));
+  let bytes2 = decodePrefix(data, DEFAULT_SNIFF_BYTES);
+  if (hasID3(bytes2)) {
+    bytes2 = stripID3(decodePrefix(data, ID3_SCAN_BYTES));
   }
   for (const signature of signatures) {
-    if (bytes.length >= signature.bytesPrefix.length && signature.bytesPrefix.every(
-      (byte, index) => byte === null || bytes[index] === byte
+    if (bytes2.length >= signature.bytesPrefix.length && signature.bytesPrefix.every(
+      (byte, index) => byte === null || bytes2[index] === byte
     )) {
       return signature.mediaType;
     }
@@ -37094,19 +37098,19 @@ async function executeToolCall({
   });
 }
 function extractReasoningContent(content) {
-  const parts = content.filter(
+  const parts2 = content.filter(
     (content2) => content2.type === "reasoning"
   );
-  return parts.length === 0 ? void 0 : parts.map((content2) => content2.text).join("\n");
+  return parts2.length === 0 ? void 0 : parts2.map((content2) => content2.text).join("\n");
 }
 function extractTextContent(content) {
-  const parts = content.filter(
+  const parts2 = content.filter(
     (content2) => content2.type === "text"
   );
-  if (parts.length === 0) {
+  if (parts2.length === 0) {
     return void 0;
   }
-  return parts.map((content2) => content2.text).join("");
+  return parts2.map((content2) => content2.text).join("");
 }
 function filterActiveTools({
   tools,
@@ -37184,8 +37188,8 @@ function canonicalJSON(value) {
   );
   return `{${entries.join(",")}}`;
 }
-function toBase64url(bytes) {
-  return convertUint8ArrayToBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+function toBase64url(bytes2) {
+  return convertUint8ArrayToBase64(bytes2).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 function fromBase64url(str) {
   return convertBase64ToUint8Array(str);
@@ -39237,13 +39241,13 @@ var DefaultGenerateTextResult = class {
   }
 };
 function asToolCalls(content) {
-  const parts = content.filter(
+  const parts2 = content.filter(
     (part) => part.type === "tool-call"
   );
-  if (parts.length === 0) {
+  if (parts2.length === 0) {
     return void 0;
   }
-  return parts.map((toolCall) => ({
+  return parts2.map((toolCall) => ({
     toolCallId: toolCall.toolCallId,
     toolName: toolCall.toolName,
     input: toolCall.input
@@ -39887,10 +39891,10 @@ var import_shell_quote = __toESM(require_shell_quote());
 
 // src/vendor/opencode-permission/wildcard.ts
 function match(input, pattern) {
-  const normalized = input.replaceAll("\\", "/");
+  const normalized2 = input.replaceAll("\\", "/");
   let escaped = pattern.replaceAll("\\", "/").replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
   if (escaped.endsWith(" .*")) escaped = escaped.slice(0, -3) + "( .*)?";
-  return new RegExp("^" + escaped + "$", process.platform === "win32" ? "si" : "s").test(normalized);
+  return new RegExp("^" + escaped + "$", process.platform === "win32" ? "si" : "s").test(normalized2);
 }
 
 // src/vendor/opencode-permission/evaluate.ts
@@ -40333,7 +40337,7 @@ function normalizeAgentUserContent(content, expectedText) {
   }
   let hasNonEmptyText = false;
   let text2 = "";
-  const normalized = [];
+  const normalized2 = [];
   for (const part of content) {
     if (!part || typeof part !== "object" || Array.isArray(part)) {
       throw new Error("userContent \u306Epart\u5F62\u5F0F\u304C\u4E0D\u6B63\u3067\u3059");
@@ -40342,7 +40346,7 @@ function normalizeAgentUserContent(content, expectedText) {
       if (typeof part.text !== "string") throw new Error("userContent \u306Etext\u304C\u4E0D\u6B63\u3067\u3059");
       if (part.text.length > 0) hasNonEmptyText = true;
       text2 += part.text;
-      normalized.push({ type: "text", text: part.text });
+      normalized2.push({ type: "text", text: part.text });
       continue;
     }
     if (part.type === "image") {
@@ -40355,7 +40359,7 @@ function normalizeAgentUserContent(content, expectedText) {
       if (part.estimatedVisualTokens !== void 0 && (!Number.isSafeInteger(part.estimatedVisualTokens) || part.estimatedVisualTokens <= 0 || part.estimatedVisualTokens > 1024)) {
         throw new Error("userContent \u306E estimatedVisualTokens \u306F1\u304B\u30891024\u306E\u6574\u6570\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
       }
-      normalized.push({
+      normalized2.push({
         type: "image",
         mediaType: part.mediaType,
         image: new Uint8Array(part.image),
@@ -40369,10 +40373,853 @@ function normalizeAgentUserContent(content, expectedText) {
   if (expectedText !== void 0 && text2 !== expectedText) {
     throw new Error("userContent \u306E\u30C6\u30AD\u30B9\u30C8\u304C userInput \u3068\u4E00\u81F4\u3057\u307E\u305B\u3093");
   }
-  return normalized;
+  return normalized2;
+}
+
+// src/active-tools.ts
+var READ_SIGNAL_PATTERNS = [
+  /\bread\b/u,
+  /\blist\b/u,
+  /\bsearch\b/u,
+  /\bfind\b/u,
+  /\blook\s*up\b/u,
+  /\blookup\b/u,
+  /\binspect\b/u,
+  /\bexamine\b/u,
+  /\bshow\b/u,
+  /\bview\b/u,
+  /\bopen\b/u,
+  /\bcheck\b/u,
+  /\bscan\b/u,
+  /\bget\b/u,
+  /\bweather\b/u,
+  /読む/u,
+  /読み/u,
+  /一覧/u,
+  /列挙/u,
+  /検索/u,
+  /探(?:す|して|したい)/u,
+  /調べ/u,
+  /確認/u,
+  /表示/u,
+  /閲覧/u,
+  /開(?:く|いて|けて)/u,
+  /見(?:る|せて|たい)/u,
+  /天気/u
+];
+var WRITE_SIGNAL_PATTERNS = [
+  /\bwrite\b/u,
+  /\bcreate\b/u,
+  /\bmake\b/u,
+  /\bedit\b/u,
+  /\bupdate\b/u,
+  /\bmodify\b/u,
+  /\bsave\b/u,
+  /\bdelete\b/u,
+  /\bremove\b/u,
+  /\bappend\b/u,
+  /\badd\b/u,
+  /\bgenerate\b/u,
+  /\bimplement\b/u,
+  /\bfix\b/u,
+  /\bpatch\b/u,
+  /\brefactor\b/u,
+  /\bbuild\b/u,
+  /\bartifact\b/u,
+  /\breport\b/u,
+  /\bdraft\b/u,
+  /\boverwrite\b/u,
+  /\brename\b/u,
+  /書(?:く|き|いて|け)/u,
+  /作(?:成|る|って|りたい)/u,
+  /生成/u,
+  /編集/u,
+  /更新/u,
+  /修正/u,
+  /変更/u,
+  /保存/u,
+  /削除/u,
+  /追加/u,
+  /実装/u,
+  /直して/u
+];
+var COMMAND_SIGNAL_PATTERNS = [
+  /\bopen\b/u,
+  /\brun\b/u,
+  /\bexecute\b/u,
+  /\bexec\b/u,
+  /\bcommand\b/u,
+  /\bshell\b/u,
+  /\bterminal\b/u,
+  /\bprocess\b/u,
+  /\bstart\b/u,
+  /\bstop\b/u,
+  /\bkill\b/u,
+  /\blaunch\b/u,
+  /\bspawn\b/u,
+  /\bnetwork\b/u,
+  /\bfetch\b/u,
+  /\bdownload\b/u,
+  /\binstall\b/u,
+  /\bfix\b/u,
+  /\bimplement\b/u,
+  /\brefactor\b/u,
+  /\bbuild\b/u,
+  /\bcurl\b/u,
+  /\bwget\b/u,
+  /\bnpm\b/u,
+  /\bpnpm\b/u,
+  /\byarn\b/u,
+  /\bbun\b/u,
+  /\bgit\b/u,
+  /\bhttps?\b/u,
+  /\burl\b/u,
+  /実行/u,
+  /コマンド/u,
+  /シェル/u,
+  /ターミナル/u,
+  /プロセス/u,
+  /起動/u,
+  /停止/u,
+  /終了/u,
+  /ネットワーク/u,
+  /接続/u,
+  /ダウンロード/u,
+  /インストール/u,
+  /実装/u,
+  /バグ(?:を)?修正/u,
+  /リファクタ/u,
+  /ビルド/u,
+  /外部(?:サイト|URL|サービス)/u,
+  /ウェブ/u,
+  /ブラウザ/u,
+  /開(?:く|いて|けて)/u,
+  /curl/u,
+  /天気(?:を)?(?:取得|確認)/u
+];
+var NETWORK_SIGNAL_PATTERNS = [
+  /\bnetwork\b/u,
+  /\bfetch\b/u,
+  /\bdownload\b/u,
+  /\bhttps?\b/u,
+  /\burl\b/u,
+  /\bweb(?:site)?\b/u,
+  /\bbrowser\b/u,
+  /\bweather\b/u,
+  /\bget\s+weather\b/u,
+  /ネットワーク/u,
+  /接続/u,
+  /ダウンロード/u,
+  /外部(?:サイト|URL|サービス)/u,
+  /ウェブ/u,
+  /ブラウザ/u,
+  /URL/u,
+  /天気/u
+];
+var NETWORK_TOOL_NAME_PATTERN = /(?:^|[_-])(?:fetch|request|http|https|url|web|browser|browse|download|network|weather)(?:$|[_-])/u;
+var NETWORK_TOOL_DESCRIPTION_PATTERN = /(?:\b(?:https?|url|network|external|download|weather|open[- ]?meteo)\b|ネットワーク|外部(?:サイト|URL|サービス)|ダウンロード|天気)/u;
+function normalize(value) {
+  return value.normalize("NFKC").toLowerCase();
+}
+function hasAnySignal(text2, patterns) {
+  return patterns.some((pattern) => pattern.test(text2));
+}
+function classifyIntent(userInput) {
+  const text2 = normalize(userInput);
+  return {
+    read: hasAnySignal(text2, READ_SIGNAL_PATTERNS),
+    write: hasAnySignal(text2, WRITE_SIGNAL_PATTERNS),
+    command: hasAnySignal(text2, COMMAND_SIGNAL_PATTERNS),
+    network: hasAnySignal(text2, NETWORK_SIGNAL_PATTERNS)
+  };
+}
+var CLAUSE_SEPARATOR = /(?:\b(?:and|then|also|but|plus|afterwards?|followed\s+by)\b|[,&;|]+|\r?\n|、|。|(?:してから|した後|その後|さらに|また|および|及び|ならびに|かつ))/u;
+function hasUnrecognizedMixedClause(request, toolDefs) {
+  const clauses = normalize(request).split(CLAUSE_SEPARATOR).map((clause) => clause.trim()).filter(Boolean);
+  if (clauses.length < 2) return false;
+  return clauses.some((clause) => {
+    const intent = inferIntentFromToolNames(clause, toolDefs, classifyIntent(clause));
+    return !intent.read && !intent.write && !intent.command;
+  });
+}
+function inferIntentFromToolNames(request, toolDefs, intent) {
+  const inferred = { ...intent };
+  for (const def of toolDefs) {
+    if (!toolNameMentioned(request, def.name)) continue;
+    if (def.kind === "read") inferred.read = true;
+    if (def.kind === "write") inferred.write = true;
+    if (def.kind === "command") inferred.command = true;
+    if (isNetworkTool(def)) inferred.network = true;
+  }
+  return inferred;
+}
+function normalizeToolName(value) {
+  const normalized2 = normalize(value).trim();
+  return normalized2.startsWith("host__") ? normalized2.slice("host__".length) : normalized2;
+}
+function toolNameMentioned(request, toolName) {
+  const normalizedName = normalizeToolName(toolName);
+  if (!normalizedName) return false;
+  if (request.includes(normalizedName)) return true;
+  const spacedName = normalizedName.replace(/[_-]+/gu, " ").trim();
+  return spacedName.length > 0 && request.includes(spacedName);
+}
+function isNetworkTool(def) {
+  const name24 = normalizeToolName(def.name);
+  const description = normalize(def.description);
+  return NETWORK_TOOL_NAME_PATTERN.test(name24) || NETWORK_TOOL_DESCRIPTION_PATTERN.test(description);
+}
+function networkToolRelevant(def, request, intent) {
+  const named = toolNameMentioned(request, def.name);
+  if (named) return true;
+  if (!intent.network) return false;
+  if (/weather|天気/u.test(request)) {
+    const toolText = `${normalizeToolName(def.name)} ${normalize(def.description)}`;
+    return /weather|open[- ]?meteo|天気/u.test(toolText);
+  }
+  return true;
+}
+function categoryForIntent(intent) {
+  if (intent.read && intent.write && intent.command) return "read-write-command";
+  if (intent.read && intent.write) return "read-write";
+  if (intent.read && intent.command) return "read-command";
+  if (intent.write && intent.command) return "write-command";
+  if (intent.read) return "read";
+  if (intent.write) return "write";
+  return "command";
+}
+function selectByIntent(toolDefs, request, intent) {
+  return toolDefs.filter((def) => {
+    if (def.kind === "read") {
+      if (!intent.read && !intent.write && !intent.command) return false;
+      if (isNetworkTool(def) && !networkToolRelevant(def, request, intent)) return false;
+      return true;
+    }
+    if (def.kind === "write") return intent.write;
+    if (def.kind === "command") return intent.command;
+    return false;
+  });
+}
+function allSelection(toolDefs, category, conservativeFallback, reason) {
+  return { toolDefs, category, conservativeFallback, reason };
+}
+function selectActiveTools(first, second, third) {
+  const options = "toolDefs" in first ? first : { ...third ?? {}, toolDefs: first, userInput: second ?? "" };
+  const toolDefs = Array.isArray(options.toolDefs) ? options.toolDefs : [];
+  const request = typeof options.userInput === "string" ? normalize(options.userInput) : "";
+  if (options.explicitRunScoped === true) {
+    return allSelection(toolDefs, "explicit-run-scoped", false, "explicit run-scoped tool definitions preserved");
+  }
+  if (options.optimizationEnabled === false) {
+    return allSelection(toolDefs, "full", false, "active-tools optimization disabled; all supplied policy-filtered tools retained");
+  }
+  if (options.mode !== void 0 && options.mode !== "work") {
+    return allSelection(toolDefs, "full", false, "active-tools applies only to work turns; all supplied policy-filtered tools retained");
+  }
+  if (/^(?:open|開く|開いて|開けて)$/u.test(request.trim())) {
+    return allSelection(toolDefs, "uncertain", true, "bare open intent is ambiguous; all supplied policy-filtered tools retained conservatively");
+  }
+  if (hasUnrecognizedMixedClause(request, toolDefs)) {
+    return allSelection(toolDefs, "uncertain", true, "a mixed request contains an unrecognized clause; all supplied policy-filtered tools retained conservatively");
+  }
+  const intent = inferIntentFromToolNames(request, toolDefs, classifyIntent(request));
+  if (!intent.read && !intent.write && !intent.command) {
+    return allSelection(toolDefs, "uncertain", true, "intent was not recognized; all supplied policy-filtered tools retained conservatively");
+  }
+  const selected = selectByIntent(toolDefs, request, intent);
+  const category = categoryForIntent(intent);
+  const suffix = intent.network ? "network indication present" : "command/process/network tools withheld unless indicated";
+  return {
+    toolDefs: selected,
+    category,
+    conservativeFallback: false,
+    reason: `${category} intent; ${suffix}`
+  };
+}
+
+// src/request-telemetry.ts
+var REQUEST_TELEMETRY_SCHEMA_VERSION = "misen.request-telemetry/v1";
+var PRUNING_REASON_CATEGORIES = [
+  "reasoning",
+  "largeToolResults",
+  "images",
+  "oldImages",
+  "oldMessages",
+  // Context-pruner implementations may report these more granular buckets.
+  // They are labels only; no content may be attached to a reason.
+  "assistant",
+  "toolPairs",
+  "toolResults",
+  "protocol",
+  "base64"
+];
+var IDENTIFIER_MAX_LENGTH = 256;
+var PARAMETER_MAX_COUNT = 256;
+var TOOL_MAX_COUNT = 256;
+var RESULT_CONTEXT_MAX_COUNT = 256;
+var METADATA_KEY_MAX_COUNT = 128;
+var MAX_SAFE_METADATA_STRING_LENGTH = 160;
+var FORBIDDEN_KEY_RE = /^(?:prompt|reason(?:ing)?|thought|analysis|chain[_-]?of[_-]?thought|credential|secret|password|passwd|api[_-]?key|authorization|cookie|image|base64|raw|message|content|completion|response|argument|input[_-]?text|output[_-]?text)(?:$|[_-])/iu;
+var FORBIDDEN_VALUE_RE = /(?:data:image\/[a-z0-9.+-]+;base64,|-----BEGIN [^-]+-----|(?:^|\b)(?:sk-[a-z0-9]|pk-[a-z0-9]|ghp_[a-z0-9]|github_pat_|xox[baprs]-|bearer\s+|AIza[0-9a-z_-]|(?:secret|credential|password|authorization)[_-]?))/iu;
+var CONTROL_RE = /[\u0000-\u001f\u007f]/u;
+function looksLikeEncodedBlob(value) {
+  if (value.length < 32 || !/^[A-Za-z0-9+/=_-]+$/u.test(value)) return false;
+  if (/^[0-9a-f-]+$/iu.test(value)) return false;
+  if (value.includes("-")) return false;
+  return value.length >= 32;
+}
+function isPlainObject2(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+function ownKeys(value) {
+  if (Object.getOwnPropertySymbols(value).length > 0) throw new TypeError("telemetry metadata cannot contain symbol keys");
+  return Object.keys(value);
+}
+function rejectUnknownKeys(value, allowed, label) {
+  const allowedSet = new Set(allowed);
+  for (const key of ownKeys(value)) {
+    if (!allowedSet.has(key) || FORBIDDEN_KEY_RE.test(key)) {
+      throw new TypeError(`${label} contains an unsafe key: ${key}`);
+    }
+  }
+}
+function safeString(value, label, maxLength = IDENTIFIER_MAX_LENGTH) {
+  if (typeof value !== "string" || value.length === 0 || value.length > maxLength) {
+    throw new TypeError(`${label} must be a non-empty bounded string`);
+  }
+  if (CONTROL_RE.test(value) || FORBIDDEN_VALUE_RE.test(value) || looksLikeEncodedBlob(value)) {
+    throw new TypeError(`${label} contains forbidden or secret-like content`);
+  }
+  return value;
+}
+function safeMetadataKey(value, label) {
+  return safeString(value, label, MAX_SAFE_METADATA_STRING_LENGTH);
+}
+function safeCount(value, label, max = Number.MAX_SAFE_INTEGER) {
+  if (!Number.isSafeInteger(value) || value < 0 || value > max) {
+    throw new RangeError(`${label} must be a non-negative safe integer`);
+  }
+  return value;
+}
+function safeElapsed(value) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new RangeError("elapsedMs must be a non-negative finite number");
+  }
+  return value;
+}
+function safeToken(value, label) {
+  if (value === void 0 || value === null) return null;
+  return safeCount(value, label);
+}
+function safeTokenUsage(value) {
+  if (value === void 0) {
+    return { inputTokens: null, outputTokens: null, reasoningTokens: null, cachedInputTokens: null };
+  }
+  if (!isPlainObject2(value)) throw new TypeError("provider usage must be a plain metadata object");
+  rejectUnknownKeys(value, ["inputTokens", "outputTokens", "reasoningTokens", "cachedInputTokens"], "provider usage");
+  return {
+    inputTokens: safeToken(value.inputTokens, "inputTokens"),
+    outputTokens: safeToken(value.outputTokens, "outputTokens"),
+    reasoningTokens: safeToken(value.reasoningTokens, "reasoningTokens"),
+    cachedInputTokens: safeToken(value.cachedInputTokens, "cachedInputTokens")
+  };
+}
+function safeToolDefinition(value, index) {
+  if (!isPlainObject2(value)) throw new TypeError(`exposedToolDefs[${index}] must be a plain metadata object`);
+  rejectUnknownKeys(value, ["name", "parameterNames", "parameterCount"], `exposedToolDefs[${index}]`);
+  const name24 = safeString(value.name, `exposedToolDefs[${index}].name`);
+  let parameterNames;
+  if (value.parameterNames !== void 0) {
+    if (!Array.isArray(value.parameterNames) || value.parameterNames.length > PARAMETER_MAX_COUNT) {
+      throw new RangeError(`exposedToolDefs[${index}].parameterNames exceeds the safe bound`);
+    }
+    parameterNames = value.parameterNames.map(
+      (parameter, parameterIndex) => safeMetadataKey(parameter, `exposedToolDefs[${index}].parameterNames[${parameterIndex}]`)
+    );
+    if (new Set(parameterNames).size !== parameterNames.length) {
+      throw new TypeError(`exposedToolDefs[${index}].parameterNames must be unique`);
+    }
+  }
+  const parameterCount = value.parameterCount === void 0 ? parameterNames?.length : safeCount(value.parameterCount, `exposedToolDefs[${index}].parameterCount`, PARAMETER_MAX_COUNT);
+  if (parameterNames !== void 0 && parameterCount !== parameterNames.length) {
+    throw new RangeError(`exposedToolDefs[${index}] parameterCount does not match parameterNames`);
+  }
+  return Object.freeze({
+    name: name24,
+    ...parameterNames !== void 0 ? { parameterNames: Object.freeze(parameterNames.slice()) } : {},
+    ...parameterCount !== void 0 ? { parameterCount } : {}
+  });
+}
+function safeToolDefinitions(value) {
+  if (value === void 0) return void 0;
+  if (!Array.isArray(value) || value.length > TOOL_MAX_COUNT) throw new RangeError("exposedToolDefs exceeds the safe bound");
+  return value.map((item, index) => safeToolDefinition(item, index));
+}
+function safeResultContext(value, index) {
+  if (!isPlainObject2(value)) throw new TypeError(`toolResultContext[${index}] must be a plain metadata object`);
+  rejectUnknownKeys(value, ["toolName", "status", "resultChars", "metadataKeys"], `toolResultContext[${index}]`);
+  const toolName = safeString(value.toolName, `toolResultContext[${index}].toolName`);
+  if (value.status !== "succeeded" && value.status !== "failed" && value.status !== "denied" && value.status !== "unknown") {
+    throw new TypeError(`toolResultContext[${index}].status is not a supported status`);
+  }
+  const resultChars = value.resultChars === void 0 || value.resultChars === null ? null : safeCount(value.resultChars, `toolResultContext[${index}].resultChars`, Number.MAX_SAFE_INTEGER);
+  let metadataKeys;
+  if (value.metadataKeys !== void 0) {
+    if (!Array.isArray(value.metadataKeys) || value.metadataKeys.length > METADATA_KEY_MAX_COUNT) {
+      throw new RangeError(`toolResultContext[${index}].metadataKeys exceeds the safe bound`);
+    }
+    metadataKeys = value.metadataKeys.map((key, keyIndex) => safeMetadataKey(key, `toolResultContext[${index}].metadataKeys[${keyIndex}]`));
+    if (new Set(metadataKeys).size !== metadataKeys.length) {
+      throw new TypeError(`toolResultContext[${index}].metadataKeys must be unique`);
+    }
+  }
+  return Object.freeze({
+    toolName,
+    status: value.status,
+    resultChars,
+    ...metadataKeys !== void 0 ? { metadataKeys: Object.freeze(metadataKeys.slice()) } : {}
+  });
+}
+function safeResultContexts(value) {
+  if (value === void 0) return void 0;
+  if (!Array.isArray(value) || value.length > RESULT_CONTEXT_MAX_COUNT) throw new RangeError("toolResultContext exceeds the safe bound");
+  return value.map((item, index) => safeResultContext(item, index));
+}
+function zeroPruningReasons() {
+  return {
+    reasoning: 0,
+    largeToolResults: 0,
+    images: 0,
+    oldImages: 0,
+    oldMessages: 0,
+    assistant: 0,
+    toolPairs: 0,
+    toolResults: 0,
+    protocol: 0,
+    base64: 0
+  };
+}
+var PRUNING_REASON_SET = new Set(PRUNING_REASON_CATEGORIES);
+var PRUNING_REASON_KEY_RE = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/u;
+function safePruningReasonKey(value) {
+  if (!PRUNING_REASON_KEY_RE.test(value) || FORBIDDEN_KEY_RE.test(value) && !PRUNING_REASON_SET.has(value)) {
+    throw new TypeError(`pruning.reasons contains an unsafe category: ${value}`);
+  }
+  return value;
+}
+function safePruning(value) {
+  if (value === void 0) return Object.freeze({ count: 0, reasons: Object.freeze(zeroPruningReasons()) });
+  if (!isPlainObject2(value)) throw new TypeError("pruning must be a plain metadata object");
+  rejectUnknownKeys(value, ["count", "reasons"], "pruning");
+  const reasons = zeroPruningReasons();
+  if (value.reasons !== void 0) {
+    if (!isPlainObject2(value.reasons)) throw new TypeError("pruning.reasons must be a plain metadata object");
+    for (const key of ownKeys(value.reasons)) {
+      const reason = safePruningReasonKey(key);
+      const count2 = safeCount(value.reasons[key], `pruning.reasons.${reason}`);
+      reasons[reason] = count2;
+    }
+  }
+  const calculatedCount = Object.values(reasons).reduce((sum, count2) => sum + count2, 0);
+  const count = value.count === void 0 ? calculatedCount : safeCount(value.count, "pruning.count");
+  if (count !== calculatedCount) throw new RangeError("pruning.count must equal the sum of pruning.reasons");
+  return Object.freeze({ count, reasons: Object.freeze(reasons) });
+}
+function utf8Bytes(value) {
+  const serialized = JSON.stringify(value);
+  if (serialized === void 0) throw new TypeError("telemetry metadata is not JSON serializable");
+  return new TextEncoder().encode(serialized).byteLength;
+}
+function approximateToolSchemaBytes(definitions) {
+  const sanitized = safeToolDefinitions(definitions);
+  return utf8Bytes(sanitized?.map((definition) => ({
+    name: definition.name,
+    ...definition.parameterNames !== void 0 ? { parameterNames: [...definition.parameterNames] } : {},
+    ...definition.parameterCount !== void 0 ? { parameterCount: definition.parameterCount } : {}
+  })) ?? []);
+}
+function approximateToolResultContextBytes(context2) {
+  const sanitized = safeResultContexts(context2);
+  return utf8Bytes(sanitized?.map((result) => ({
+    toolName: result.toolName,
+    status: result.status,
+    resultChars: result.resultChars,
+    ...result.metadataKeys !== void 0 ? { metadataKeys: [...result.metadataKeys] } : {}
+  })) ?? []);
+}
+function safeBeginInput(input) {
+  if (!isPlainObject2(input)) throw new TypeError("request telemetry input must be a plain metadata object");
+  rejectUnknownKeys(input, ["requestIndex", "runId", "provider", "model", "workingMessageCount", "exposedToolDefs", "exposedToolCount", "toolSchemaBytes", "toolResultContext", "toolResultContextBytes", "pruning"], "request telemetry input");
+  const requestIndex = safeCount(input.requestIndex, "requestIndex");
+  const runId = safeString(input.runId, "runId");
+  const provider = safeString(input.provider, "provider");
+  const model = safeString(input.model, "model");
+  const workingMessageCount = safeCount(input.workingMessageCount, "workingMessageCount");
+  const toolDefs = safeToolDefinitions(input.exposedToolDefs);
+  const resultContext = safeResultContexts(input.toolResultContext);
+  const exposedToolCount = input.exposedToolCount === void 0 ? toolDefs?.length ?? 0 : safeCount(input.exposedToolCount, "exposedToolCount", TOOL_MAX_COUNT);
+  if (toolDefs !== void 0 && exposedToolCount !== toolDefs.length) {
+    throw new RangeError("exposedToolCount must equal exposedToolDefs.length");
+  }
+  const toolSchemaBytes2 = input.toolSchemaBytes === void 0 || input.toolSchemaBytes === null ? input.toolSchemaBytes : safeCount(input.toolSchemaBytes, "toolSchemaBytes");
+  const toolResultContextBytes2 = input.toolResultContextBytes === void 0 || input.toolResultContextBytes === null ? input.toolResultContextBytes : safeCount(input.toolResultContextBytes, "toolResultContextBytes");
+  const pruning = safePruning(input.pruning);
+  return {
+    input: Object.freeze({ requestIndex, runId, provider, model, workingMessageCount, exposedToolCount, toolSchemaBytes: toolSchemaBytes2, toolResultContextBytes: toolResultContextBytes2 }),
+    toolDefs,
+    resultContext,
+    toolSchemaBytes: toolSchemaBytes2,
+    toolResultContextBytes: toolResultContextBytes2,
+    pruning
+  };
+}
+function safeClock(now2) {
+  const value = now2();
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new RangeError("telemetry clock must return a finite number");
+  return value;
+}
+function freezeRecord(record2) {
+  return Object.freeze({
+    ...record2,
+    tokenUsage: Object.freeze({ ...record2.tokenUsage }),
+    pruning: Object.freeze({ count: record2.pruning.count, reasons: Object.freeze({ ...record2.pruning.reasons }) })
+  });
+}
+var RequestTelemetryCollector = class {
+  #now;
+  #records = [];
+  constructor(options = {}) {
+    this.#now = options.now ?? (() => Date.now());
+  }
+  /** Start one model request; no input or raw content is retained. */
+  beginRequest(input) {
+    const safe = safeBeginInput(input);
+    const startedAt = safeClock(this.#now);
+    let finished = false;
+    const finish = (usage) => {
+      if (finished) throw new Error("request telemetry cannot be finished twice");
+      const tokenUsage = safeTokenUsage(usage);
+      const elapsedMs = safeElapsed(Math.max(0, safeClock(this.#now) - startedAt));
+      const record2 = freezeRecord({
+        schemaVersion: REQUEST_TELEMETRY_SCHEMA_VERSION,
+        requestIndex: safe.input.requestIndex,
+        runId: safe.input.runId,
+        provider: safe.input.provider,
+        model: safe.input.model,
+        elapsedMs,
+        tokenUsage,
+        workingMessageCount: safe.input.workingMessageCount,
+        exposedToolCount: safe.input.exposedToolCount ?? (safe.toolDefs?.length ?? 0),
+        toolSchemaBytes: safe.toolSchemaBytes !== void 0 ? safe.toolSchemaBytes : safe.toolDefs === void 0 ? null : approximateToolSchemaBytes(safe.toolDefs),
+        toolResultContextBytes: safe.toolResultContextBytes !== void 0 ? safe.toolResultContextBytes : safe.resultContext === void 0 ? null : approximateToolResultContextBytes(safe.resultContext),
+        pruning: safe.pruning
+      });
+      finished = true;
+      this.#records.push(record2);
+      return record2;
+    };
+    return Object.freeze({ finish });
+  }
+  /** Convenience for callers that do not need to retain a request handle. */
+  finishRequest(request, usage) {
+    if (!request || typeof request.finish !== "function") throw new TypeError("request handle is invalid");
+    return request.finish(usage);
+  }
+  /** Read-only insertion-order snapshot; records are frozen at completion. */
+  records() {
+    return this.#records.slice();
+  }
+  clear() {
+    this.#records.length = 0;
+  }
+};
+function createRequestTelemetryCollector(options = {}) {
+  return new RequestTelemetryCollector(options);
+}
+
+// src/working-context.ts
+var DEFAULT_TOOL_RESULT_BYTES = 4096;
+var DEFAULT_KEEP_RECENT_MESSAGES = 6;
+var DEFAULT_KEEP_RECENT_TOOL_PAIRS = 3;
+var TRUNCATION_MARKER = "tool-result-truncated";
+var encoder2 = new TextEncoder();
+var SECRET_FACT_KEY = /(?:secret|token|password|passwd|api[_-]?key|authorization|cookie|credential|base64|image|screenshot|reasoning|thought|analysis)/iu;
+var SAFE_FACT_KEYS = [
+  "status",
+  "outcome",
+  "success",
+  "approved",
+  "approval",
+  "permission",
+  "precondition",
+  "before_sha256",
+  "after_sha256",
+  "beforeHash",
+  "afterHash",
+  "path",
+  "exitCode",
+  "exit_code",
+  "changed",
+  "error"
+];
+function bytes(value) {
+  return encoder2.encode(value).byteLength;
+}
+function utf8Prefix(value, maxBytes) {
+  let size = 0;
+  let output = "";
+  for (const character of Array.from(value)) {
+    const next = bytes(character);
+    if (size + next > maxBytes) break;
+    output += character;
+    size += next;
+  }
+  return output;
+}
+function assertByteLimit(value, name24) {
+  if (!Number.isSafeInteger(value) || value < 128) throw new RangeError(`${name24} must be an integer of at least 128 bytes`);
+}
+function parseJson(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return void 0;
+  }
+}
+function asRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : void 0;
+}
+function safeScalar(value) {
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") return value.slice(0, 160);
+  return void 0;
+}
+function jsonFacts(value) {
+  const record2 = asRecord(value);
+  const facts = {};
+  if (record2) {
+    for (const key of SAFE_FACT_KEYS) {
+      const fact = safeScalar(record2[key]);
+      if (fact !== void 0) facts[key] = fact;
+    }
+  }
+  return {
+    facts,
+    keys: record2 ? Object.keys(record2).filter((key) => !SECRET_FACT_KEY.test(key)).slice(0, 24) : []
+  };
+}
+function boundedJsonEnvelope(parsed, originalBytes, maxBytes) {
+  const summary = jsonFacts(parsed);
+  const candidates = [
+    { truncated: true, marker: TRUNCATION_MARKER, originalBytes, summary },
+    { truncated: true, marker: TRUNCATION_MARKER, originalBytes, summary: { facts: summary.facts } },
+    { truncated: true, marker: TRUNCATION_MARKER, originalBytes }
+  ];
+  for (const candidate of candidates) {
+    const serialized = JSON.stringify(candidate);
+    if (bytes(serialized) <= maxBytes) return serialized;
+  }
+  throw new RangeError("maxBytes is too small for a valid JSON truncation envelope");
+}
+function textChunks(value, maxBytes) {
+  const chunks = [];
+  let rest = value;
+  while (rest.length > 0) {
+    const chunk = utf8Prefix(rest, maxBytes);
+    if (!chunk) break;
+    chunks.push(chunk);
+    rest = rest.slice(chunk.length);
+  }
+  return chunks.length ? chunks : [""];
+}
+function capToolResultForModel(value, options = {}) {
+  const maxBytes = options.maxBytes ?? DEFAULT_TOOL_RESULT_BYTES;
+  const chunkBytes = options.chunkBytes ?? maxBytes;
+  assertByteLimit(maxBytes, "maxBytes");
+  assertByteLimit(chunkBytes, "chunkBytes");
+  const original = typeof value === "string" ? value : JSON.stringify(value);
+  const originalBytes = bytes(original);
+  const parsed = parseJson(original);
+  const format = parsed === void 0 ? "text" : "json";
+  if (originalBytes <= maxBytes) {
+    return { content: original, chunks: [original], originalBytes, retainedBytes: originalBytes, omittedBytes: 0, truncated: false, format };
+  }
+  const content = format === "json" ? boundedJsonEnvelope(parsed, originalBytes, maxBytes) : (() => {
+    const marker24 = `
+[${TRUNCATION_MARKER}; originalBytes=${originalBytes}]`;
+    return `${utf8Prefix(original, Math.max(0, maxBytes - bytes(marker24)))}${marker24}`;
+  })();
+  const chunks = textChunks(original, chunkBytes);
+  const retainedBytes = bytes(content);
+  return { content, chunks, originalBytes, retainedBytes, omittedBytes: Math.max(0, originalBytes - retainedBytes), truncated: true, format };
+}
+function parts(content) {
+  return Array.isArray(content) ? content.filter((part) => part !== null && typeof part === "object") : [];
+}
+function normalized(message, index) {
+  const contentParts = parts(message.content);
+  const callIds = contentParts.filter((part) => part.type === "tool-call" && typeof part.toolCallId === "string").map((part) => part.toolCallId);
+  const resultIds = contentParts.filter((part) => part.type === "tool-result" && typeof part.toolCallId === "string").map((part) => part.toolCallId);
+  return {
+    index,
+    message,
+    callIds,
+    resultIds,
+    isTool: message.role === "tool" || resultIds.length > 0,
+    isUser: message.role === "user",
+    reasoningParts: contentParts.filter((part) => part.type === "reasoning" || part.type === "analysis").length,
+    imageParts: contentParts.filter((part) => part.type === "image").length
+  };
+}
+function sanitizedMessage(item, maxToolResultBytes, matchedToolCallIds) {
+  if (!Array.isArray(item.message.content)) return { message: { ...item.message }, reasoning: 0, images: 0, capped: 0 };
+  let capped = 0;
+  const content = parts(item.message.content).flatMap((part) => {
+    if (part.type === "reasoning" || part.type === "analysis" || part.type === "image") return [];
+    if ((part.type === "tool-call" || part.type === "tool-result") && (typeof part.toolCallId !== "string" || !matchedToolCallIds.has(part.toolCallId))) return [];
+    if (part.type !== "tool-result") return [{ ...part }];
+    const output = asRecord(part.output);
+    const raw = output?.type === "text" ? output.value : part.output ?? "";
+    const result = capProtocolSafeToolResult(raw, maxToolResultBytes);
+    if (result.truncated) capped++;
+    return [{ ...part, output: { type: "text", value: result.content } }];
+  });
+  return { message: { ...item.message, content }, reasoning: item.reasoningParts, images: item.imageParts, capped };
+}
+var HOST_RESULT_BEGIN = "[BEGIN_UNTRUSTED_HOST_RESULT]";
+var HOST_RESULT_END = "[END_UNTRUSTED_HOST_RESULT]";
+function parseHostResult(value) {
+  const prefix2 = `${HOST_RESULT_BEGIN}
+`;
+  const suffix = `
+${HOST_RESULT_END}`;
+  if (!value.startsWith(prefix2) || !value.endsWith(suffix)) return void 0;
+  return asRecord(parseJson(value.slice(prefix2.length, -suffix.length)));
+}
+function serializeHostResult(payload) {
+  return `${HOST_RESULT_BEGIN}
+${JSON.stringify(payload)}
+${HOST_RESULT_END}`;
+}
+function capProtocolSafeToolResult(value, maxBytes) {
+  const raw = typeof value === "string" ? value : JSON.stringify(value);
+  const payload = parseHostResult(raw);
+  if (!payload || bytes(raw) <= maxBytes) return capToolResultForModel(raw, { maxBytes });
+  const data = asRecord(payload.data);
+  const summary = typeof data?.summary === "string" ? data.summary : "";
+  let low = 128;
+  let high = Math.max(128, maxBytes);
+  let best;
+  while (low <= high) {
+    const budget = Math.floor((low + high) / 2);
+    const cappedSummary = capToolResultForModel(summary, { maxBytes: budget }).content;
+    const candidate = serializeHostResult({
+      ...payload,
+      data: { ...data ?? {}, summary: cappedSummary },
+      truncation: { ...asRecord(payload.truncation) ?? {}, truncated: true }
+    });
+    if (bytes(candidate) <= maxBytes) {
+      best = candidate;
+      low = budget + 1;
+    } else {
+      high = budget - 1;
+    }
+  }
+  if (!best) {
+    const minimal = serializeHostResult({
+      kind: payload.kind ?? "host_result",
+      schemaVersion: payload.schemaVersion ?? "1",
+      ...typeof payload.runId === "string" ? { runId: payload.runId } : {},
+      ...typeof payload.callId === "string" ? { callId: payload.callId } : {},
+      tool: payload.tool ?? "host.unknown",
+      status: payload.status ?? "failed",
+      data: { summary: `[${TRUNCATION_MARKER}]` },
+      sideEffectState: payload.sideEffectState ?? "unknown",
+      truncation: { truncated: true },
+      security: { contentIsUntrusted: true }
+    });
+    if (bytes(minimal) > maxBytes) throw new RangeError("maxToolResultBytes is too small for the host-result protocol envelope");
+    best = minimal;
+  }
+  return {
+    content: best,
+    chunks: [best],
+    originalBytes: bytes(raw),
+    retainedBytes: bytes(best),
+    omittedBytes: Math.max(0, bytes(raw) - bytes(best)),
+    truncated: true,
+    format: "json"
+  };
+}
+function buildModelWorkingContext(history, options = {}) {
+  const keepRecentMessages = options.keepRecentMessages ?? DEFAULT_KEEP_RECENT_MESSAGES;
+  const keepRecentToolPairs = options.keepRecentToolPairs ?? DEFAULT_KEEP_RECENT_TOOL_PAIRS;
+  const maxToolResultBytes = options.maxToolResultBytes ?? DEFAULT_TOOL_RESULT_BYTES;
+  if (!Number.isSafeInteger(keepRecentMessages) || keepRecentMessages < 1) throw new RangeError("keepRecentMessages must be a positive integer");
+  if (!Number.isSafeInteger(keepRecentToolPairs) || keepRecentToolPairs < 0) throw new RangeError("keepRecentToolPairs must be a non-negative integer");
+  assertByteLimit(maxToolResultBytes, "maxToolResultBytes");
+  const input = history.map(normalized);
+  const resultOwner = /* @__PURE__ */ new Map();
+  for (const item of input) for (const id of item.resultIds) resultOwner.set(id, item.index);
+  const pairUnits = [];
+  const paired = /* @__PURE__ */ new Set();
+  const matchedToolCallIds = /* @__PURE__ */ new Set();
+  for (const item of input) {
+    if (!item.callIds.length) continue;
+    for (const id of item.callIds) {
+      const resultIndex = resultOwner.get(id);
+      if (resultIndex === void 0) continue;
+      matchedToolCallIds.add(id);
+      const indexes = [item.index, resultIndex].sort((a, b) => a - b);
+      indexes.forEach((value) => paired.add(value));
+      pairUnits.push({ indexes, last: Math.max(...indexes) });
+    }
+  }
+  const selected = /* @__PURE__ */ new Set();
+  const retainedPairs = pairUnits;
+  for (const pair of retainedPairs) pair.indexes.forEach((index) => selected.add(index));
+  for (const item of input) if (item.isUser || item.message.role === "system") selected.add(item.index);
+  const ordinary = input.filter((item) => !paired.has(item.index) && !item.isTool && !item.isUser && item.message.role !== "system" && item.callIds.length === 0 && item.resultIds.length === 0);
+  for (const item of ordinary.slice(-keepRecentMessages)) selected.add(item.index);
+  let reasoning = 0;
+  let images = 0;
+  let capped = 0;
+  const output = input.filter((item) => selected.has(item.index)).map((item) => {
+    const result = sanitizedMessage(item, maxToolResultBytes, matchedToolCallIds);
+    reasoning += result.reasoning;
+    images += result.images;
+    capped += result.capped;
+    return result.message;
+  });
+  const orphanToolCalls = input.reduce((count, item) => count + item.callIds.filter((id) => !matchedToolCallIds.has(id)).length, 0);
+  const orphanToolResults = input.reduce((count, item) => count + item.resultIds.filter((id) => !matchedToolCallIds.has(id)).length, 0);
+  const droppedToolPairs = 0;
+  const droppedMessages = history.length - output.length;
+  const reasons = {};
+  if (droppedMessages) reasons.oldMessages = droppedMessages;
+  if (droppedToolPairs) reasons.toolPairs = droppedToolPairs;
+  if (orphanToolCalls || orphanToolResults) reasons.protocol = orphanToolCalls + orphanToolResults;
+  if (reasoning) reasons.reasoning = reasoning;
+  if (images) reasons.images = images;
+  if (capped) reasons.largeToolResults = capped;
+  return {
+    messages: output,
+    telemetry: {
+      inputMessages: history.length,
+      outputMessages: output.length,
+      inputBytes: bytes(JSON.stringify(history)),
+      outputBytes: bytes(JSON.stringify(output)),
+      dropped: { reasoning, images, oldMessages: droppedMessages, toolPairs: droppedToolPairs, orphanToolCalls, orphanToolResults, cappedToolResults: capped },
+      reasons
+    }
+  };
 }
 
 // src/agent-v2.ts
+var DEFAULT_MODEL_TOOL_RESULT_BYTES = DEFAULT_TOOL_RESULT_BYTES;
 function createOllamaFetch(baseFetch = fetch) {
   return async (input, init) => {
     const headers = new Headers(typeof input === "object" && input !== null && "headers" in input ? input.headers : void 0);
@@ -40413,6 +41260,30 @@ function modelUsageMetadata(usage) {
       cachedInputTokens: typeof usage.inputTokenDetails?.cacheReadTokens === "number" ? usage.inputTokenDetails.cacheReadTokens : null
     }
   };
+}
+function providerUsage(usage) {
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    reasoningTokens: usage.outputTokenDetails?.reasoningTokens,
+    cachedInputTokens: usage.inputTokenDetails?.cacheReadTokens
+  };
+}
+function utf8Bytes2(value) {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}
+function toolSchemaBytes(toolDefs) {
+  return utf8Bytes2(toolDefs.map((def) => ({ name: def.name, description: def.description, parameters: def.parameters })));
+}
+function toolResultContextBytes(messages) {
+  return messages.filter((message) => message.role === "tool").reduce((total, message) => total + utf8Bytes2(message), 0);
+}
+function pruningInput(telemetry) {
+  const reasons = telemetry?.reasons ?? {};
+  return { count: Object.values(reasons).reduce((total, count) => total + count, 0), reasons };
+}
+function requestTelemetryMetadata(record2, usage) {
+  return { ...usage ? modelUsageMetadata(usage) : {}, requestTelemetry: record2 };
 }
 function toModelMessages(messages, userContent) {
   const converted = [];
@@ -40743,12 +41614,39 @@ async function runAgentTurnV2(opts) {
   const messages = [...opts.messages, { role: "user", content: opts.userInput }];
   const priorSystem = opts.messages.filter((message) => message.role === "system").map((message) => message.content ?? "").filter(Boolean);
   const modelMessages = toModelMessages(messages.filter((message) => message.role !== "system"), userContent);
-  const scopedToolDefs = runToolDefs(cfg, ctx, opts.toolDefs);
-  const systemFor = (targetMode) => [...new Set([
+  const policyToolDefs = runToolDefs(cfg, ctx, opts.toolDefs);
+  const optimizationEnabled = cfg.agentOptimization !== "off";
+  const activeSelection = selectActiveTools({
+    toolDefs: policyToolDefs,
+    userInput: opts.userInput,
+    explicitRunScoped: opts.toolDefs !== void 0,
+    optimizationEnabled,
+    mode
+  });
+  const scopedToolDefs = [...activeSelection.toolDefs];
+  const optimizeWorkingContext = optimizationEnabled && opts.toolDefs === void 0 && !containsAgentImage(userContent);
+  const telemetry = createRequestTelemetryCollector();
+  let requestIndex = 0;
+  const systemFor = (targetMode, exposedToolDefs = scopedToolDefs) => [...new Set([
     ...priorSystem,
     cfg.systemPrompt,
-    buildProtocolRules(targetMode, policy.allowArbitraryCommands, policy.autoApproveCommand, ctx.safeCommandOnly === true, scopedToolDefs)
+    buildProtocolRules(targetMode, policy.allowArbitraryCommands, policy.autoApproveCommand, ctx.safeCommandOnly === true, exposedToolDefs)
   ].filter((value) => typeof value === "string" && value.length > 0))].join("\n\n");
+  const beginRequestTelemetry = (requestMessages, exposedToolDefs, working) => telemetry.beginRequest({
+    requestIndex: requestIndex++,
+    runId: ctx.runId ?? "default-run",
+    provider: cfg.provider?.trim() ? cfg.provider : "openai",
+    model: cfg.model?.trim() ? cfg.model : "injected-model",
+    workingMessageCount: requestMessages.length,
+    exposedToolDefs: exposedToolDefs.map((def) => ({
+      name: def.name,
+      parameterNames: Object.keys(def.parameters.properties ?? {})
+    })),
+    exposedToolCount: exposedToolDefs.length,
+    toolSchemaBytes: toolSchemaBytes(exposedToolDefs),
+    toolResultContextBytes: toolResultContextBytes(requestMessages),
+    pruning: pruningInput(working)
+  });
   assertImageRequestPolicy({
     cfg,
     messages: modelMessages,
@@ -40760,6 +41658,8 @@ async function runAgentTurnV2(opts) {
   });
   io.event?.({ type: "plan.created", summary: mode === "work" ? "Run\u306E\u8A08\u753B\u3068\u691C\u8A3C\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F" : mode === "research" ? "\u8ABF\u67FB\u30E2\u30FC\u30C9\u3092\u958B\u59CB\u3057\u307E\u3057\u305F" : "\u901A\u5E38\u56DE\u7B54\u30E2\u30FC\u30C9\u3092\u958B\u59CB\u3057\u307E\u3057\u305F", origin: "orchestrator", namespace: "none", authority: "derived" });
   if (mode !== "work") {
+    const requestTelemetry = beginRequestTelemetry(modelMessages, []);
+    let requestTelemetryFinished = false;
     try {
       emitModelWait(io, cfg);
       assertExternalBoundaryBeforeRequest(cfg, ctx, io);
@@ -40773,7 +41673,9 @@ async function runAgentTurnV2(opts) {
         abortSignal: io.signal,
         experimental_include: { requestBody: false, responseBody: false }
       });
-      io.event?.({ type: "model.decision", summary: "\u30E2\u30C7\u30EB\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", metadata: modelUsageMetadata(result.usage), origin: modelEventOrigin(cfg), namespace: "none", authority: "claimed" });
+      const telemetryRecord = requestTelemetry.finish(providerUsage(result.usage));
+      requestTelemetryFinished = true;
+      io.event?.({ type: "model.decision", summary: "\u30E2\u30C7\u30EB\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", metadata: requestTelemetryMetadata(telemetryRecord, result.usage), origin: modelEventOrigin(cfg), namespace: "none", authority: "claimed" });
       messages.push({ role: "assistant", content: result.text });
       if (mode === "research") {
         const research = buildResearchBundle(opts.userInput, result.text);
@@ -40784,6 +41686,10 @@ async function runAgentTurnV2(opts) {
       io.event?.({ type: "step.completed", summary: "\u56DE\u7B54\u3092\u53D7\u3051\u53D6\u308A\u307E\u3057\u305F", origin: "orchestrator", namespace: "none", authority: "derived" });
       return { reply: result.text, messages, aborted: false };
     } catch (err) {
+      if (!requestTelemetryFinished) {
+        const telemetryRecord = requestTelemetry.finish();
+        io.event?.({ type: "run.warning", error: "model request failed", metadata: requestTelemetryMetadata(telemetryRecord), origin: "orchestrator", namespace: "none", authority: "authoritative" });
+      }
       io.print(`[error] ${err.message}`);
       return { reply: "", messages, aborted: true };
     }
@@ -40797,26 +41703,38 @@ async function runAgentTurnV2(opts) {
   let lastResultKey = "";
   let confirmationOnly = false;
   let activeVisionContent = userContent;
+  const rejectToolCalls = (reason, calls) => {
+    for (const call of calls) {
+      const hostResult = formatHostResult(qualifiedToolName(call.toolName), `[orchestrator rejected] ${reason}`, null, "failed", call.toolCallId, ctx.runId);
+      modelMessages.push({ role: "tool", content: [{ type: "tool-result", toolCallId: call.toolCallId, toolName: call.toolName, output: { type: "text", value: hostResult } }] });
+      messages.push({ role: "tool", tool_call_id: call.toolCallId, name: qualifiedToolName(call.toolName), content: hostResult });
+    }
+    return warningResult(reason, messages, io);
+  };
   for (let iteration = 0; iteration < policy.maxModelDecisions; iteration++) {
     if (shouldCancel(io)) return { reply: "", messages, aborted: true };
     if (io.isPaused?.()) return { reply: "", messages, aborted: true, paused: true };
-    const workSystem = systemFor("work");
+    const exposedToolDefs = confirmationOnly ? [] : scopedToolDefs;
+    const workSystem = systemFor("work", exposedToolDefs);
+    const projected = optimizeWorkingContext ? buildModelWorkingContext(modelMessages, { maxToolResultBytes: DEFAULT_MODEL_TOOL_RESULT_BYTES }) : { messages: modelMessages, telemetry: void 0 };
+    const requestMessages = projected.messages;
     assertImageRequestPolicy({
       cfg,
-      messages: modelMessages,
+      messages: requestMessages,
       system: workSystem,
-      toolDefs: scopedToolDefs,
+      toolDefs: exposedToolDefs,
       activeContent: activeVisionContent,
       visualTokenBudget,
       maxContextTokens
     });
     let result;
+    const requestTelemetry = beginRequestTelemetry(requestMessages, exposedToolDefs, projected.telemetry);
     try {
       emitModelWait(io, cfg);
       assertExternalBoundaryBeforeRequest(cfg, ctx, io);
       result = await generateText({
         model,
-        messages: modelMessages,
+        messages: requestMessages,
         system: workSystem,
         tools,
         ...confirmationOnly ? { activeTools: [] } : {},
@@ -40827,28 +41745,35 @@ async function runAgentTurnV2(opts) {
         experimental_include: { requestBody: false, responseBody: false }
       });
     } catch (err) {
+      const telemetryRecord2 = requestTelemetry.finish();
+      io.event?.({ type: "run.warning", error: "model request failed", metadata: requestTelemetryMetadata(telemetryRecord2), origin: "orchestrator", namespace: "none", authority: "authoritative" });
       io.print(`[error] ${err.message}`);
       return { reply: "", messages, aborted: true };
     }
-    io.event?.({ type: "model.decision", summary: "\u30E2\u30C7\u30EB\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", metadata: modelUsageMetadata(result.usage), origin: modelEventOrigin(cfg), namespace: "none", authority: "claimed" });
+    const telemetryRecord = requestTelemetry.finish(providerUsage(result.usage));
+    io.event?.({ type: "model.decision", summary: "\u30E2\u30C7\u30EB\u306E\u6B21\u306E1\u624B\u3092\u53D7\u4FE1\u3057\u307E\u3057\u305F", metadata: { ...requestTelemetryMetadata(telemetryRecord, result.usage), activeTools: { category: activeSelection.category, conservativeFallback: activeSelection.conservativeFallback } }, origin: modelEventOrigin(cfg), namespace: "none", authority: "claimed" });
     modelMessages.push(...result.response.messages);
     const calls = result.toolCalls;
     const legacyCalls = calls.map((call2) => ({ id: call2.toolCallId, type: "function", function: { name: qualifiedToolName(call2.toolName), arguments: JSON.stringify(call2.input) } }));
     messages.push({ role: "assistant", content: result.text, ...legacyCalls.length ? { tool_calls: legacyCalls } : {} });
     if (calls.length === 0) return { reply: result.text, messages, aborted: false };
-    if (calls.length !== 1) return warningResult("1\u56DE\u306E\u5224\u65AD\u3067\u8907\u6570\u306Ehost\u30C4\u30FC\u30EB\u304C\u8981\u6C42\u3055\u308C\u305F\u305F\u3081\u3001\u5B89\u5168\u306E\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F", messages, io);
+    if (confirmationOnly && calls.length > 0) {
+      const reason = executions >= policy.maxHostExecutions ? `host\u30C4\u30FC\u30EB\u5B9F\u884C\u4E0A\u9650(${policy.maxHostExecutions}\u56DE)\u306B\u9054\u3057\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F` : "\u78BA\u8A8D\u5C02\u7528phase\u3067host\u30C4\u30FC\u30EB\u304C\u8981\u6C42\u3055\u308C\u305F\u305F\u3081\u3001\u5B89\u5168\u306E\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F";
+      return rejectToolCalls(reason, calls);
+    }
+    if (calls.length !== 1) return rejectToolCalls("1\u56DE\u306E\u5224\u65AD\u3067\u8907\u6570\u306Ehost\u30C4\u30FC\u30EB\u304C\u8981\u6C42\u3055\u308C\u305F\u305F\u3081\u3001\u5B89\u5168\u306E\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F", calls);
     const call = calls[0];
     const qualifiedCallName = qualifiedToolName(call.toolName);
-    const def = scopedToolDefs.find((candidate) => qualifiedToolName(candidate.name) === qualifiedCallName);
-    if (!def) return warningResult(`\u8A31\u53EF\u3055\u308C\u3066\u3044\u306A\u3044host\u30C4\u30FC\u30EB ${call.toolName} \u304C\u8981\u6C42\u3055\u308C\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`, messages, io);
-    if (ctx.safeCommandOnly && bareToolName(def.name) === "get_weather") return warningResult("\u3053\u306E\u69CB\u6210\u3067\u306F\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u901A\u4FE1\u3092\u884C\u3046host\u30C4\u30FC\u30EB\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093", messages, io);
-    if (bareToolName(def.name) === "run_command" && !policy.allowArbitraryCommands) return warningResult("\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u8A2D\u5B9A\u3067\u660E\u793A\u7684\u306B\u6709\u52B9\u5316\u3055\u308C\u3066\u3044\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F", messages, io);
-    if (executions >= policy.maxHostExecutions) return warningResult(`host\u30C4\u30FC\u30EB\u5B9F\u884C\u4E0A\u9650(${policy.maxHostExecutions}\u56DE)\u306B\u9054\u3057\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`, messages, io);
-    if (def.kind === "write" && writes >= policy.maxWriteExecutions) return warningResult(`\u66F8\u304D\u8FBC\u307F\u5B9F\u884C\u4E0A\u9650(${policy.maxWriteExecutions}\u56DE)\u306B\u9054\u3057\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`, messages, io);
-    if (def.kind === "command" && commands >= policy.maxCommandExecutions) return warningResult(`\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u4E0A\u9650(${policy.maxCommandExecutions}\u56DE)\u306B\u9054\u3057\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`, messages, io);
+    const def = policyToolDefs.find((candidate) => qualifiedToolName(candidate.name) === qualifiedCallName);
+    if (!def) return rejectToolCalls(`\u8A31\u53EF\u3055\u308C\u3066\u3044\u306A\u3044host\u30C4\u30FC\u30EB ${call.toolName} \u304C\u8981\u6C42\u3055\u308C\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`, calls);
+    if (ctx.safeCommandOnly && bareToolName(def.name) === "get_weather") return rejectToolCalls("\u3053\u306E\u69CB\u6210\u3067\u306F\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u901A\u4FE1\u3092\u884C\u3046host\u30C4\u30FC\u30EB\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093", calls);
+    if (bareToolName(def.name) === "run_command" && !policy.allowArbitraryCommands) return rejectToolCalls("\u4EFB\u610F\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u306F\u8A2D\u5B9A\u3067\u660E\u793A\u7684\u306B\u6709\u52B9\u5316\u3055\u308C\u3066\u3044\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F", calls);
+    if (executions >= policy.maxHostExecutions) return rejectToolCalls(`host\u30C4\u30FC\u30EB\u5B9F\u884C\u4E0A\u9650(${policy.maxHostExecutions}\u56DE)\u306B\u9054\u3057\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`, calls);
+    if (def.kind === "write" && writes >= policy.maxWriteExecutions) return rejectToolCalls(`\u66F8\u304D\u8FBC\u307F\u5B9F\u884C\u4E0A\u9650(${policy.maxWriteExecutions}\u56DE)\u306B\u9054\u3057\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`, calls);
+    if (def.kind === "command" && commands >= policy.maxCommandExecutions) return rejectToolCalls(`\u30B3\u30DE\u30F3\u30C9\u5B9F\u884C\u4E0A\u9650(${policy.maxCommandExecutions}\u56DE)\u306B\u9054\u3057\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F`, calls);
     const keyArgs = call.input && typeof call.input === "object" && !Array.isArray(call.input) ? call.input : {};
     const key = toolRequestKey(qualifiedToolName(def.name), keyArgs);
-    if ((actionCounts.get(key) ?? 0) > 0) return warningResult("\u540C\u3058host\u30C4\u30FC\u30EB\u64CD\u4F5C\u304C\u7E70\u308A\u8FD4\u3055\u308C\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F", messages, io);
+    if ((actionCounts.get(key) ?? 0) > 0) return rejectToolCalls("\u540C\u3058host\u30C4\u30FC\u30EB\u64CD\u4F5C\u304C\u7E70\u308A\u8FD4\u3055\u308C\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F", calls);
     actionCounts.set(key, 1);
     const executed = await executeV2ToolCall(call, def, cfg, ctx, io, opts.beforeHooks ?? []);
     if (executed.executed) {
@@ -40859,9 +41784,10 @@ async function runAgentTurnV2(opts) {
       noProgress = resultKey === lastResultKey ? noProgress + 1 : 0;
       lastResultKey = resultKey;
     }
-    const hostResult = formatHostResult(qualifiedToolName(def.name), executed.output, executed.metadata, executed.status, call.toolCallId, ctx.runId);
-    modelMessages.push({ role: "tool", content: [{ type: "tool-result", toolCallId: call.toolCallId, toolName: call.toolName, output: { type: "text", value: hostResult } }] });
-    messages.push({ role: "tool", tool_call_id: call.toolCallId, name: qualifiedToolName(def.name), content: hostResult });
+    const fullHostResult = formatHostResult(qualifiedToolName(def.name), executed.output, executed.metadata, executed.status, call.toolCallId, ctx.runId);
+    const modelHostResult = fullHostResult;
+    modelMessages.push({ role: "tool", content: [{ type: "tool-result", toolCallId: call.toolCallId, toolName: call.toolName, output: { type: "text", value: modelHostResult } }] });
+    messages.push({ role: "tool", tool_call_id: call.toolCallId, name: qualifiedToolName(def.name), content: fullHostResult });
     if (opts.afterToolObservation && executed.status === "succeeded") {
       const observation = await opts.afterToolObservation({
         toolName: bareToolName(def.name),
@@ -40878,6 +41804,9 @@ async function runAgentTurnV2(opts) {
         activeVisionContent = normalizedObservation;
         confirmationOnly = true;
       }
+    }
+    if (optimizeWorkingContext && executed.status === "succeeded" && executions >= policy.maxHostExecutions) {
+      confirmationOnly = true;
     }
     if (noProgress >= policy.maxNoProgress) return warningResult(`host\u30C4\u30FC\u30EB\u7D50\u679C\u306B\u9032\u5C55\u304C\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F\uFF08${policy.maxNoProgress}\u56DE\u9023\u7D9A\uFF09`, messages, io);
   }
@@ -40918,9 +41847,9 @@ function selectBrowserProcessId(processInfo) {
 var RESPONSE_STABILITY_MS = 1e3;
 var VISIBLE_SESSION_MARKER_PREFIX = "company-apps-coding-agent:";
 function makeVisibleSessionMarker(sessionId) {
-  const normalized = sessionId.trim();
-  if (!/^[a-z0-9_-]{6,80}$/i.test(normalized)) throw new Error("\u8868\u793A\u30BB\u30C3\u30B7\u30E7\u30F3ID\u304C\u4E0D\u6B63\u3067\u3059");
-  return VISIBLE_SESSION_MARKER_PREFIX + normalized;
+  const normalized2 = sessionId.trim();
+  if (!/^[a-z0-9_-]{6,80}$/i.test(normalized2)) throw new Error("\u8868\u793A\u30BB\u30C3\u30B7\u30E7\u30F3ID\u304C\u4E0D\u6B63\u3067\u3059");
+  return VISIBLE_SESSION_MARKER_PREFIX + normalized2;
 }
 function assertResponseDeadline(deadlineMs, responseTimeoutSec, nowMs = Date.now()) {
   if (nowMs >= deadlineMs) throw new Error(`Copilot \u306E\u5FDC\u7B54\u304C\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8\u3057\u307E\u3057\u305F (${responseTimeoutSec}\u79D2)`);
@@ -41337,9 +42266,9 @@ function profileIsInUse(profileDir) {
       `Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Select-Object -ExpandProperty CommandLine`
     ], { encoding: "utf8", timeout: 3e3, windowsHide: true });
     return output.split(/\r?\n/).some((line) => {
-      const normalized = line.toLowerCase().replaceAll('"', "");
-      const index = normalized.indexOf(marker24);
-      return index >= 0 && (index + marker24.length === normalized.length || /\s/.test(normalized[index + marker24.length]));
+      const normalized2 = line.toLowerCase().replaceAll('"', "");
+      const index = normalized2.indexOf(marker24);
+      return index >= 0 && (index + marker24.length === normalized2.length || /\s/.test(normalized2[index + marker24.length]));
     });
   } catch {
     return true;
