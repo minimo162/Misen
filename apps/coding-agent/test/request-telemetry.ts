@@ -6,6 +6,7 @@ import {
   createRequestTelemetryCollector,
   createRequestTelemetryRecord,
   parseRequestTelemetryRecord,
+  type RequestTelemetryGenerationPhase,
   type RequestTelemetryBeginInput,
   type RequestTelemetryToolDefinition,
   type RequestTelemetryToolResultContext
@@ -92,6 +93,24 @@ function testUnknownTokensStayNull(): void {
   assert.equal(record.exposedToolCount, 0)
 }
 
+function testGenerationPhaseAndRequestedCap(): void {
+  const phase: RequestTelemetryGenerationPhase = 'work-read-tool'
+  const record = createRequestTelemetryRecord({
+    ...beginInput({ exposedToolDefs: [], toolResultContext: [], generationPhase: phase, requestedMaxOutputTokens: 256 }),
+    elapsedMs: 2
+  }, { outputTokens: 17 })
+  assert.equal(record.generationPhase, 'work-read-tool')
+  assert.equal(record.requestedMaxOutputTokens, 256)
+  assert.equal(record.tokenUsage.outputTokens, 17)
+  assert.notEqual(record.requestedMaxOutputTokens, record.tokenUsage.outputTokens)
+  assert.throws(() => createRequestTelemetryRecord({ ...beginInput({ generationPhase: 'bad-phase' as RequestTelemetryGenerationPhase }), elapsedMs: 1 }), /generationPhase/u)
+  for (const value of [-1, 1.5, '256']) {
+    assert.throws(() => createRequestTelemetryRecord({ ...beginInput({ requestedMaxOutputTokens: value as number }), elapsedMs: 1 }), /requestedMaxOutputTokens/u)
+  }
+  const persisted = JSON.stringify(parseRequestTelemetryRecord(JSON.parse(JSON.stringify(record))))
+  assert.ok(!persisted.includes('prompt') && !persisted.includes('raw') && !persisted.includes('secret'))
+}
+
 function testCallerComputedSizesAreAcceptedWithoutRetainingInputs(): void {
   const record = createRequestTelemetryRecord({
     ...beginInput({ exposedToolDefs: undefined, toolResultContext: undefined, toolSchemaBytes: 901, toolResultContextBytes: 73 }),
@@ -162,6 +181,7 @@ function testClockGoingBackwardsClampsElapsed(): void {
 testDeterministicRequestAndProviderUsage()
 testPersistenceRevalidation()
 testUnknownTokensStayNull()
+testGenerationPhaseAndRequestedCap()
 testCallerComputedSizesAreAcceptedWithoutRetainingInputs()
 testSizesAreDeterministicAndUtf8Aware()
 testPruningReasonsAndInputBounds()

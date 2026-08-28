@@ -4,6 +4,11 @@
   "baseURL": "http://127.0.0.1:11434/v1",
   "model": "ornith-1.5:9b",
   "agentOptimization": "on",
+  "generationLimits": {
+    "readToolRequestMaxOutputTokens": 256,
+    "actionToolRequestMaxOutputTokens": 1024,
+    "finalResponseMaxOutputTokens": 192
+  },
   "temperature": 0.2,
   "maxToolIterations": 10,
   "maxToolExecutions": 8,

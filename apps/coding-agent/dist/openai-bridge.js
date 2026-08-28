@@ -949,6 +949,29 @@ function validateProviderConfig(provider, raw, found) {
   }
   return provider;
 }
+function validateGenerationLimits(raw, found) {
+  const configured = raw.generationLimits;
+  if (configured === void 0) return void 0;
+  if (!configured || typeof configured !== "object" || Array.isArray(configured)) {
+    throw new Error(`generationLimits \u306F\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+  }
+  const candidate = configured;
+  const keys = [
+    "readToolRequestMaxOutputTokens",
+    "actionToolRequestMaxOutputTokens",
+    "finalResponseMaxOutputTokens"
+  ];
+  const normalized = {};
+  for (const key of keys) {
+    const value = candidate[key];
+    if (value === void 0) continue;
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 32 || value > 4096) {
+      throw new Error(`generationLimits.${key} \u306F32\u4EE5\u4E0A4096\u4EE5\u4E0B\u306E\u6574\u6570\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+    }
+    normalized[key] = value;
+  }
+  return normalized;
+}
 function parseConfig(found) {
   const raw = JSON.parse(import_node_fs.default.readFileSync(found, "utf8"));
   if (raw.agentLoop !== void 0 && raw.agentLoop !== "v1" && raw.agentLoop !== "v2") {
@@ -958,6 +981,7 @@ function parseConfig(found) {
     throw new Error(`agentOptimization \u306F on \u307E\u305F\u306F off \u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
   }
   const provider = validateProviderConfig(raw.provider ?? "openai", raw, found);
+  const generationLimits = validateGenerationLimits(raw, found);
   const configuredPermissions = raw.permissions;
   let permissions;
   if (configuredPermissions !== void 0) {
@@ -985,6 +1009,7 @@ function parseConfig(found) {
     autoApprove: { ...DEFAULT_CONFIG.autoApprove, ...raw.autoApprove ?? {} },
     copilot: { ...DEFAULT_CONFIG.copilot, ...raw.copilot ?? {} },
     localResponseConverter: { ...DEFAULT_CONFIG.localResponseConverter, ...raw.localResponseConverter ?? {} },
+    ...generationLimits !== void 0 ? { generationLimits } : {},
     configPath: import_node_path.default.resolve(found)
   };
 }

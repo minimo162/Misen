@@ -101,6 +101,20 @@ function safeToken(value, label) {
   if (value === void 0 || value === null) return null;
   return safeCount(value, label);
 }
+function safeRequestedMaxOutputTokens(value) {
+  if (value === void 0) return void 0;
+  if (value === null) return null;
+  const count = safeCount(value, "requestedMaxOutputTokens");
+  if (count < 32 || count > 4096) throw new RangeError("requestedMaxOutputTokens must be between 32 and 4096");
+  return count;
+}
+function safeGenerationPhase(value) {
+  if (value === void 0) return void 0;
+  if (value !== "work-read-tool" && value !== "work-action-tool" && value !== "work-final") {
+    throw new TypeError("generationPhase is not a supported phase");
+  }
+  return value;
+}
 function safeTokenUsage(value) {
   if (value === void 0) {
     return { inputTokens: null, outputTokens: null, reasoningTokens: null, cachedInputTokens: null };
@@ -239,7 +253,7 @@ function approximateToolResultContextBytes(context) {
 }
 function safeBeginInput(input) {
   if (!isPlainObject(input)) throw new TypeError("request telemetry input must be a plain metadata object");
-  rejectUnknownKeys(input, ["requestIndex", "runId", "provider", "model", "workingMessageCount", "exposedToolDefs", "exposedToolCount", "toolSchemaBytes", "toolResultContext", "toolResultContextBytes", "pruning"], "request telemetry input");
+  rejectUnknownKeys(input, ["requestIndex", "runId", "provider", "model", "workingMessageCount", "exposedToolDefs", "exposedToolCount", "toolSchemaBytes", "toolResultContext", "toolResultContextBytes", "pruning", "generationPhase", "requestedMaxOutputTokens"], "request telemetry input");
   const requestIndex = safeCount(input.requestIndex, "requestIndex");
   const runId = safeString(input.runId, "runId");
   const provider = safeString(input.provider, "provider");
@@ -254,13 +268,17 @@ function safeBeginInput(input) {
   const toolSchemaBytes = input.toolSchemaBytes === void 0 || input.toolSchemaBytes === null ? input.toolSchemaBytes : safeCount(input.toolSchemaBytes, "toolSchemaBytes");
   const toolResultContextBytes = input.toolResultContextBytes === void 0 || input.toolResultContextBytes === null ? input.toolResultContextBytes : safeCount(input.toolResultContextBytes, "toolResultContextBytes");
   const pruning = safePruning(input.pruning);
+  const generationPhase = safeGenerationPhase(input.generationPhase);
+  const requestedMaxOutputTokens = safeRequestedMaxOutputTokens(input.requestedMaxOutputTokens);
   return {
     input: Object.freeze({ requestIndex, runId, provider, model, workingMessageCount, exposedToolCount, toolSchemaBytes, toolResultContextBytes }),
     toolDefs,
     resultContext,
     toolSchemaBytes,
     toolResultContextBytes,
-    pruning
+    pruning,
+    generationPhase,
+    requestedMaxOutputTokens
   };
 }
 function safeClock(now) {
@@ -302,7 +320,9 @@ var RequestTelemetryCollector = class {
         exposedToolCount: safe.input.exposedToolCount ?? (safe.toolDefs?.length ?? 0),
         toolSchemaBytes: safe.toolSchemaBytes !== void 0 ? safe.toolSchemaBytes : safe.toolDefs === void 0 ? null : approximateToolSchemaBytes(safe.toolDefs),
         toolResultContextBytes: safe.toolResultContextBytes !== void 0 ? safe.toolResultContextBytes : safe.resultContext === void 0 ? null : approximateToolResultContextBytes(safe.resultContext),
-        pruning: safe.pruning
+        pruning: safe.pruning,
+        ...safe.generationPhase !== void 0 ? { generationPhase: safe.generationPhase } : {},
+        ...safe.requestedMaxOutputTokens !== void 0 ? { requestedMaxOutputTokens: safe.requestedMaxOutputTokens } : {}
       });
       finished = true;
       this.#records.push(record);
@@ -343,7 +363,9 @@ function createRequestTelemetryRecord(input, usage) {
     exposedToolCount: safe.input.exposedToolCount ?? (safe.toolDefs?.length ?? 0),
     toolSchemaBytes: safe.toolSchemaBytes !== void 0 ? safe.toolSchemaBytes : safe.toolDefs === void 0 ? null : approximateToolSchemaBytes(safe.toolDefs),
     toolResultContextBytes: safe.toolResultContextBytes !== void 0 ? safe.toolResultContextBytes : safe.resultContext === void 0 ? null : approximateToolResultContextBytes(safe.resultContext),
-    pruning: safe.pruning
+    pruning: safe.pruning,
+    ...safe.generationPhase !== void 0 ? { generationPhase: safe.generationPhase } : {},
+    ...safe.requestedMaxOutputTokens !== void 0 ? { requestedMaxOutputTokens: safe.requestedMaxOutputTokens } : {}
   });
 }
 function parseRequestTelemetryRecord(value) {
@@ -362,10 +384,12 @@ function parseRequestTelemetryRecord(value) {
     "toolResultContextBytes",
     "pruning"
   ];
-  rejectUnknownKeys(value, requiredKeys, "request telemetry record");
+  rejectUnknownKeys(value, [...requiredKeys, "generationPhase", "requestedMaxOutputTokens"], "request telemetry record");
   for (const key of requiredKeys) if (!Object.hasOwn(value, key)) throw new TypeError(`request telemetry record is missing ${key}`);
   if (value.schemaVersion !== REQUEST_TELEMETRY_SCHEMA_VERSION) throw new TypeError("request telemetry schemaVersion is unsupported");
   const nullableCount = (candidate, label) => candidate === null ? null : safeCount(candidate, label);
+  const generationPhase = safeGenerationPhase(value.generationPhase);
+  const requestedMaxOutputTokens = safeRequestedMaxOutputTokens(value.requestedMaxOutputTokens);
   return freezeRecord({
     schemaVersion: REQUEST_TELEMETRY_SCHEMA_VERSION,
     requestIndex: safeCount(value.requestIndex, "requestIndex"),
@@ -378,7 +402,9 @@ function parseRequestTelemetryRecord(value) {
     exposedToolCount: safeCount(value.exposedToolCount, "exposedToolCount", TOOL_MAX_COUNT),
     toolSchemaBytes: nullableCount(value.toolSchemaBytes, "toolSchemaBytes"),
     toolResultContextBytes: nullableCount(value.toolResultContextBytes, "toolResultContextBytes"),
-    pruning: safePruning(value.pruning)
+    pruning: safePruning(value.pruning),
+    ...generationPhase !== void 0 ? { generationPhase } : {},
+    ...requestedMaxOutputTokens !== void 0 ? { requestedMaxOutputTokens } : {}
   });
 }
 
@@ -459,6 +485,23 @@ function testUnknownTokensStayNull() {
   import_strict.default.equal(record.toolResultContextBytes, null);
   import_strict.default.equal(record.exposedToolCount, 0);
 }
+function testGenerationPhaseAndRequestedCap() {
+  const phase = "work-read-tool";
+  const record = createRequestTelemetryRecord({
+    ...beginInput({ exposedToolDefs: [], toolResultContext: [], generationPhase: phase, requestedMaxOutputTokens: 256 }),
+    elapsedMs: 2
+  }, { outputTokens: 17 });
+  import_strict.default.equal(record.generationPhase, "work-read-tool");
+  import_strict.default.equal(record.requestedMaxOutputTokens, 256);
+  import_strict.default.equal(record.tokenUsage.outputTokens, 17);
+  import_strict.default.notEqual(record.requestedMaxOutputTokens, record.tokenUsage.outputTokens);
+  import_strict.default.throws(() => createRequestTelemetryRecord({ ...beginInput({ generationPhase: "bad-phase" }), elapsedMs: 1 }), /generationPhase/u);
+  for (const value of [-1, 1.5, "256"]) {
+    import_strict.default.throws(() => createRequestTelemetryRecord({ ...beginInput({ requestedMaxOutputTokens: value }), elapsedMs: 1 }), /requestedMaxOutputTokens/u);
+  }
+  const persisted = JSON.stringify(parseRequestTelemetryRecord(JSON.parse(JSON.stringify(record))));
+  import_strict.default.ok(!persisted.includes("prompt") && !persisted.includes("raw") && !persisted.includes("secret"));
+}
 function testCallerComputedSizesAreAcceptedWithoutRetainingInputs() {
   const record = createRequestTelemetryRecord({
     ...beginInput({ exposedToolDefs: void 0, toolResultContext: void 0, toolSchemaBytes: 901, toolResultContextBytes: 73 }),
@@ -523,6 +566,7 @@ function testClockGoingBackwardsClampsElapsed() {
 testDeterministicRequestAndProviderUsage();
 testPersistenceRevalidation();
 testUnknownTokensStayNull();
+testGenerationPhaseAndRequestedCap();
 testCallerComputedSizesAreAcceptedWithoutRetainingInputs();
 testSizesAreDeterministicAndUtf8Aware();
 testPruningReasonsAndInputBounds();

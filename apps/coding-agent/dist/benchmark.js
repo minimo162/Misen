@@ -6511,6 +6511,29 @@ function validateProviderConfig(provider2, raw, found) {
   }
   return provider2;
 }
+function validateGenerationLimits(raw, found) {
+  const configured = raw.generationLimits;
+  if (configured === void 0) return void 0;
+  if (!configured || typeof configured !== "object" || Array.isArray(configured)) {
+    throw new Error(`generationLimits \u306F\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+  }
+  const candidate = configured;
+  const keys = [
+    "readToolRequestMaxOutputTokens",
+    "actionToolRequestMaxOutputTokens",
+    "finalResponseMaxOutputTokens"
+  ];
+  const normalized2 = {};
+  for (const key of keys) {
+    const value2 = candidate[key];
+    if (value2 === void 0) continue;
+    if (typeof value2 !== "number" || !Number.isInteger(value2) || value2 < 32 || value2 > 4096) {
+      throw new Error(`generationLimits.${key} \u306F32\u4EE5\u4E0A4096\u4EE5\u4E0B\u306E\u6574\u6570\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
+    }
+    normalized2[key] = value2;
+  }
+  return normalized2;
+}
 function parseConfig(found) {
   const raw = JSON.parse(import_node_fs2.default.readFileSync(found, "utf8"));
   if (raw.agentLoop !== void 0 && raw.agentLoop !== "v1" && raw.agentLoop !== "v2") {
@@ -6520,6 +6543,7 @@ function parseConfig(found) {
     throw new Error(`agentOptimization \u306F on \u307E\u305F\u306F off \u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044: ${found}`);
   }
   const provider2 = validateProviderConfig(raw.provider ?? "openai", raw, found);
+  const generationLimits = validateGenerationLimits(raw, found);
   const configuredPermissions = raw.permissions;
   let permissions;
   if (configuredPermissions !== void 0) {
@@ -6547,6 +6571,7 @@ function parseConfig(found) {
     autoApprove: { ...DEFAULT_CONFIG.autoApprove, ...raw.autoApprove ?? {} },
     copilot: { ...DEFAULT_CONFIG.copilot, ...raw.copilot ?? {} },
     localResponseConverter: { ...DEFAULT_CONFIG.localResponseConverter, ...raw.localResponseConverter ?? {} },
+    ...generationLimits !== void 0 ? { generationLimits } : {},
     configPath: import_node_path2.default.resolve(found)
   };
 }
@@ -40745,6 +40770,7 @@ var READ_SIGNAL_PATTERNS = [
   /\bweather\b/u,
   /読む/u,
   /読み/u,
+  /読んで/u,
   /一覧/u,
   /列挙/u,
   /検索/u,
@@ -40866,6 +40892,15 @@ var NETWORK_SIGNAL_PATTERNS = [
   /URL/u,
   /天気/u
 ];
+var RESPONSE_ONLY_PATTERNS = [
+  /(?:教えて|答えて|回答して|報告して|説明して|要約して|短くまとめて|日本語で返して|結果だけ知らせて)ください/u,
+  /\btell\s+me\b/u,
+  /\banswer\s+briefly\b/u,
+  /\breport\s+the\s+result\b/u,
+  /\bsummarize\s+it\b/u,
+  /\bexplain\s+the\s+result\b/u,
+  /\brespond\s+in\s+japanese\b/u
+];
 var NETWORK_TOOL_NAME_PATTERN = /(?:^|[_-])(?:fetch|request|http|https|url|web|browser|browse|download|network|weather)(?:$|[_-])/u;
 var NETWORK_TOOL_DESCRIPTION_PATTERN = /(?:\b(?:https?|url|network|external|download|weather|open[- ]?meteo)\b|ネットワーク|外部(?:サイト|URL|サービス)|ダウンロード|天気)/u;
 function normalize(value2) {
@@ -40874,13 +40909,17 @@ function normalize(value2) {
 function hasAnySignal(text2, patterns) {
   return patterns.some((pattern) => pattern.test(text2));
 }
+function stripResponseOnlyDirectives(text2) {
+  return RESPONSE_ONLY_PATTERNS.reduce((remaining, pattern) => remaining.replace(pattern, " "), text2);
+}
 function classifyIntent(userInput) {
   const text2 = normalize(userInput);
+  const hostText = stripResponseOnlyDirectives(text2);
   return {
-    read: hasAnySignal(text2, READ_SIGNAL_PATTERNS),
-    write: hasAnySignal(text2, WRITE_SIGNAL_PATTERNS),
-    command: hasAnySignal(text2, COMMAND_SIGNAL_PATTERNS),
-    network: hasAnySignal(text2, NETWORK_SIGNAL_PATTERNS)
+    read: hasAnySignal(hostText, READ_SIGNAL_PATTERNS),
+    write: hasAnySignal(hostText, WRITE_SIGNAL_PATTERNS),
+    command: hasAnySignal(hostText, COMMAND_SIGNAL_PATTERNS),
+    network: hasAnySignal(hostText, NETWORK_SIGNAL_PATTERNS)
   };
 }
 var CLAUSE_SEPARATOR = /(?:\b(?:and|then|also|but|plus|afterwards?|followed\s+by)\b|[,&;|]+|\r?\n|、|。|(?:してから|した後|その後|さらに|また|および|及び|ならびに|かつ))/u;
@@ -40889,7 +40928,8 @@ function hasUnrecognizedMixedClause(request, toolDefs) {
   if (clauses.length < 2) return false;
   return clauses.some((clause) => {
     const intent = inferIntentFromToolNames(clause, toolDefs, classifyIntent(clause));
-    return !intent.read && !intent.write && !intent.command;
+    if (intent.read || intent.write || intent.command || intent.network) return false;
+    return !hasAnySignal(clause, RESPONSE_ONLY_PATTERNS);
   });
 }
 function inferIntentFromToolNames(request, toolDefs, intent) {
@@ -41063,6 +41103,20 @@ function safeToken(value2, label) {
   if (value2 === void 0 || value2 === null) return null;
   return safeCount(value2, label);
 }
+function safeRequestedMaxOutputTokens(value2) {
+  if (value2 === void 0) return void 0;
+  if (value2 === null) return null;
+  const count = safeCount(value2, "requestedMaxOutputTokens");
+  if (count < 32 || count > 4096) throw new RangeError("requestedMaxOutputTokens must be between 32 and 4096");
+  return count;
+}
+function safeGenerationPhase(value2) {
+  if (value2 === void 0) return void 0;
+  if (value2 !== "work-read-tool" && value2 !== "work-action-tool" && value2 !== "work-final") {
+    throw new TypeError("generationPhase is not a supported phase");
+  }
+  return value2;
+}
 function safeTokenUsage(value2) {
   if (value2 === void 0) {
     return { inputTokens: null, outputTokens: null, reasoningTokens: null, cachedInputTokens: null };
@@ -41201,7 +41255,7 @@ function approximateToolResultContextBytes(context2) {
 }
 function safeBeginInput(input) {
   if (!isPlainObject2(input)) throw new TypeError("request telemetry input must be a plain metadata object");
-  rejectUnknownKeys(input, ["requestIndex", "runId", "provider", "model", "workingMessageCount", "exposedToolDefs", "exposedToolCount", "toolSchemaBytes", "toolResultContext", "toolResultContextBytes", "pruning"], "request telemetry input");
+  rejectUnknownKeys(input, ["requestIndex", "runId", "provider", "model", "workingMessageCount", "exposedToolDefs", "exposedToolCount", "toolSchemaBytes", "toolResultContext", "toolResultContextBytes", "pruning", "generationPhase", "requestedMaxOutputTokens"], "request telemetry input");
   const requestIndex = safeCount(input.requestIndex, "requestIndex");
   const runId = safeString(input.runId, "runId");
   const provider2 = safeString(input.provider, "provider");
@@ -41216,13 +41270,17 @@ function safeBeginInput(input) {
   const toolSchemaBytes2 = input.toolSchemaBytes === void 0 || input.toolSchemaBytes === null ? input.toolSchemaBytes : safeCount(input.toolSchemaBytes, "toolSchemaBytes");
   const toolResultContextBytes2 = input.toolResultContextBytes === void 0 || input.toolResultContextBytes === null ? input.toolResultContextBytes : safeCount(input.toolResultContextBytes, "toolResultContextBytes");
   const pruning = safePruning(input.pruning);
+  const generationPhase = safeGenerationPhase(input.generationPhase);
+  const requestedMaxOutputTokens = safeRequestedMaxOutputTokens(input.requestedMaxOutputTokens);
   return {
     input: Object.freeze({ requestIndex, runId, provider: provider2, model, workingMessageCount, exposedToolCount, toolSchemaBytes: toolSchemaBytes2, toolResultContextBytes: toolResultContextBytes2 }),
     toolDefs,
     resultContext,
     toolSchemaBytes: toolSchemaBytes2,
     toolResultContextBytes: toolResultContextBytes2,
-    pruning
+    pruning,
+    generationPhase,
+    requestedMaxOutputTokens
   };
 }
 function safeClock(now2) {
@@ -41264,7 +41322,9 @@ var RequestTelemetryCollector = class {
         exposedToolCount: safe.input.exposedToolCount ?? (safe.toolDefs?.length ?? 0),
         toolSchemaBytes: safe.toolSchemaBytes !== void 0 ? safe.toolSchemaBytes : safe.toolDefs === void 0 ? null : approximateToolSchemaBytes(safe.toolDefs),
         toolResultContextBytes: safe.toolResultContextBytes !== void 0 ? safe.toolResultContextBytes : safe.resultContext === void 0 ? null : approximateToolResultContextBytes(safe.resultContext),
-        pruning: safe.pruning
+        pruning: safe.pruning,
+        ...safe.generationPhase !== void 0 ? { generationPhase: safe.generationPhase } : {},
+        ...safe.requestedMaxOutputTokens !== void 0 ? { requestedMaxOutputTokens: safe.requestedMaxOutputTokens } : {}
       });
       finished = true;
       this.#records.push(record2);
@@ -41304,10 +41364,12 @@ function parseRequestTelemetryRecord(value2) {
     "toolResultContextBytes",
     "pruning"
   ];
-  rejectUnknownKeys(value2, requiredKeys, "request telemetry record");
+  rejectUnknownKeys(value2, [...requiredKeys, "generationPhase", "requestedMaxOutputTokens"], "request telemetry record");
   for (const key of requiredKeys) if (!Object.hasOwn(value2, key)) throw new TypeError(`request telemetry record is missing ${key}`);
   if (value2.schemaVersion !== REQUEST_TELEMETRY_SCHEMA_VERSION) throw new TypeError("request telemetry schemaVersion is unsupported");
   const nullableCount = (candidate, label) => candidate === null ? null : safeCount(candidate, label);
+  const generationPhase = safeGenerationPhase(value2.generationPhase);
+  const requestedMaxOutputTokens = safeRequestedMaxOutputTokens(value2.requestedMaxOutputTokens);
   return freezeRecord({
     schemaVersion: REQUEST_TELEMETRY_SCHEMA_VERSION,
     requestIndex: safeCount(value2.requestIndex, "requestIndex"),
@@ -41320,7 +41382,9 @@ function parseRequestTelemetryRecord(value2) {
     exposedToolCount: safeCount(value2.exposedToolCount, "exposedToolCount", TOOL_MAX_COUNT),
     toolSchemaBytes: nullableCount(value2.toolSchemaBytes, "toolSchemaBytes"),
     toolResultContextBytes: nullableCount(value2.toolResultContextBytes, "toolResultContextBytes"),
-    pruning: safePruning(value2.pruning)
+    pruning: safePruning(value2.pruning),
+    ...generationPhase !== void 0 ? { generationPhase } : {},
+    ...requestedMaxOutputTokens !== void 0 ? { requestedMaxOutputTokens } : {}
   });
 }
 
@@ -41635,6 +41699,14 @@ function providerOptionsFor(cfg) {
   if (cfg.provider !== "ollama" || cfg.reasoningEffort === void 0) return void 0;
   return { ollama: { reasoningEffort: cfg.reasoningEffort } };
 }
+function generationMaxOutputTokensFor(cfg, phase, ordinaryTextWork) {
+  if (!ordinaryTextWork || cfg.provider !== "ollama" || cfg.agentLoop !== "v2") return void 0;
+  const limits = cfg.generationLimits;
+  if (!limits) return void 0;
+  if (phase === "final") return limits.finalResponseMaxOutputTokens;
+  if (phase === "action-tool") return limits.actionToolRequestMaxOutputTokens;
+  return limits.readToolRequestMaxOutputTokens;
+}
 function modelUsageMetadata(usage) {
   return {
     usage: {
@@ -41658,6 +41730,7 @@ function utf8Bytes2(value2) {
   return new TextEncoder().encode(JSON.stringify(value2)).byteLength;
 }
 function toolSchemaBytes(toolDefs) {
+  if (toolDefs.length === 0) return 0;
   return utf8Bytes2(toolDefs.map((def) => ({ name: def.name, description: def.description, parameters: def.parameters })));
 }
 function toolResultContextBytes(messages) {
@@ -42010,6 +42083,7 @@ async function runAgentTurnV2(opts) {
   });
   const scopedToolDefs = [...activeSelection.toolDefs];
   const optimizeWorkingContext = optimizationEnabled && opts.toolDefs === void 0 && !containsAgentImage(userContent);
+  const ordinaryTextWork = mode === "work" && opts.toolDefs === void 0 && !containsAgentImage(userContent);
   const telemetry = createRequestTelemetryCollector();
   let requestIndex = 0;
   const systemFor = (targetMode, exposedToolDefs = scopedToolDefs) => [...new Set([
@@ -42017,7 +42091,7 @@ async function runAgentTurnV2(opts) {
     cfg.systemPrompt,
     buildProtocolRules(targetMode, policy.allowArbitraryCommands, policy.autoApproveCommand, ctx.safeCommandOnly === true, exposedToolDefs)
   ].filter((value2) => typeof value2 === "string" && value2.length > 0))].join("\n\n");
-  const beginRequestTelemetry = (requestMessages, exposedToolDefs, working) => telemetry.beginRequest({
+  const beginRequestTelemetry = (requestMessages, exposedToolDefs, working, generationPhase, requestedMaxOutputTokens) => telemetry.beginRequest({
     requestIndex: requestIndex++,
     runId: ctx.runId ?? "default-run",
     provider: cfg.provider?.trim() ? cfg.provider : "openai",
@@ -42030,7 +42104,11 @@ async function runAgentTurnV2(opts) {
     exposedToolCount: exposedToolDefs.length,
     toolSchemaBytes: toolSchemaBytes(exposedToolDefs),
     toolResultContextBytes: toolResultContextBytes(requestMessages),
-    pruning: pruningInput(working)
+    pruning: pruningInput(working),
+    ...generationPhase !== void 0 ? {
+      generationPhase,
+      requestedMaxOutputTokens: requestedMaxOutputTokens ?? null
+    } : {}
   });
   assertImageRequestPolicy({
     cfg,
@@ -42079,7 +42157,6 @@ async function runAgentTurnV2(opts) {
       return { reply: "", messages, aborted: true };
     }
   }
-  const tools = aiTools(cfg, ctx, scopedToolDefs);
   const actionCounts = /* @__PURE__ */ new Map();
   let executions = 0;
   let writes = 0;
@@ -42088,6 +42165,7 @@ async function runAgentTurnV2(opts) {
   let lastResultKey = "";
   let confirmationOnly = false;
   let activeVisionContent = userContent;
+  const autoCloseEligible = ordinaryTextWork && optimizationEnabled && !activeSelection.conservativeFallback && (activeSelection.category === "read" || activeSelection.category === "write" || activeSelection.category === "read-write");
   const rejectToolCalls = (reason, calls) => {
     for (const call of calls) {
       const hostResult = formatHostResult(qualifiedToolName(call.toolName), `[orchestrator rejected] ${reason}`, null, "failed", call.toolCallId, ctx.runId);
@@ -42103,6 +42181,8 @@ async function runAgentTurnV2(opts) {
     const workSystem = systemFor("work", exposedToolDefs);
     const projected = optimizeWorkingContext ? buildModelWorkingContext(modelMessages, { maxToolResultBytes: DEFAULT_MODEL_TOOL_RESULT_BYTES }) : { messages: modelMessages, telemetry: void 0 };
     const requestMessages = projected.messages;
+    const generationPhase = confirmationOnly ? "final" : exposedToolDefs.some((def2) => def2.kind === "write" || def2.kind === "command") ? "action-tool" : "read-tool";
+    const maxOutputTokens = generationMaxOutputTokensFor(cfg, generationPhase, ordinaryTextWork);
     assertImageRequestPolicy({
       cfg,
       messages: requestMessages,
@@ -42113,7 +42193,9 @@ async function runAgentTurnV2(opts) {
       maxContextTokens
     });
     let result;
-    const requestTelemetry = beginRequestTelemetry(requestMessages, exposedToolDefs, projected.telemetry);
+    const telemetryPhase = generationPhase === "read-tool" ? "work-read-tool" : generationPhase === "action-tool" ? "work-action-tool" : "work-final";
+    const requestTelemetry = beginRequestTelemetry(requestMessages, exposedToolDefs, projected.telemetry, telemetryPhase, maxOutputTokens);
+    const requestTools = exposedToolDefs.length > 0 ? aiTools(cfg, ctx, exposedToolDefs) : void 0;
     try {
       emitModelWait(io, cfg);
       assertExternalBoundaryBeforeRequest(cfg, ctx, io);
@@ -42121,9 +42203,9 @@ async function runAgentTurnV2(opts) {
         model,
         messages: requestMessages,
         system: workSystem,
-        tools,
-        ...confirmationOnly ? { activeTools: [] } : {},
+        ...requestTools !== void 0 ? { tools: requestTools } : {},
         temperature: cfg.temperature ?? 0.2,
+        ...maxOutputTokens !== void 0 ? { maxOutputTokens } : {},
         providerOptions: providerOptionsFor(cfg),
         maxRetries: 0,
         abortSignal: io.signal,
@@ -42190,7 +42272,12 @@ async function runAgentTurnV2(opts) {
         confirmationOnly = true;
       }
     }
-    if (optimizeWorkingContext && executed.status === "succeeded" && executions >= policy.maxHostExecutions) {
+    const closeAfterSuccessfulRead = autoCloseEligible && activeSelection.category === "read" && def.kind === "read" && executed.status === "succeeded";
+    const closeAfterSuccessfulWrite = autoCloseEligible && (activeSelection.category === "write" || activeSelection.category === "read-write") && def.kind === "write" && executed.status === "succeeded";
+    if (closeAfterSuccessfulRead || closeAfterSuccessfulWrite) {
+      confirmationOnly = true;
+    }
+    if (autoCloseEligible && optimizeWorkingContext && executed.status === "succeeded" && executions >= policy.maxHostExecutions) {
       confirmationOnly = true;
     }
     if (noProgress >= policy.maxNoProgress) return warningResult(`host\u30C4\u30FC\u30EB\u7D50\u679C\u306B\u9032\u5C55\u304C\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F\uFF08${policy.maxNoProgress}\u56DE\u9023\u7D9A\uFF09`, messages, io);

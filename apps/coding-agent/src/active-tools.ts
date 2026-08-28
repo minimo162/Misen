@@ -66,6 +66,7 @@ const READ_SIGNAL_PATTERNS: readonly RegExp[] = [
   /\bweather\b/u,
   /読む/u,
   /読み/u,
+  /読んで/u,
   /一覧/u,
   /列挙/u,
   /検索/u,
@@ -191,6 +192,22 @@ const NETWORK_SIGNAL_PATTERNS: readonly RegExp[] = [
   /天気/u
 ]
 
+/**
+ * Directives that ask only for the model's reply.  They are deliberately
+ * kept separate from host-capability signals: a clause such as
+ * "概要.txtを読んで、色を教えてください" contains a read action followed
+ * by a response-only clause, not an unknown host operation.
+ */
+const RESPONSE_ONLY_PATTERNS: readonly RegExp[] = [
+  /(?:教えて|答えて|回答して|報告して|説明して|要約して|短くまとめて|日本語で返して|結果だけ知らせて)ください/u,
+  /\btell\s+me\b/u,
+  /\banswer\s+briefly\b/u,
+  /\breport\s+the\s+result\b/u,
+  /\bsummarize\s+it\b/u,
+  /\bexplain\s+the\s+result\b/u,
+  /\brespond\s+in\s+japanese\b/u
+]
+
 /*
  * A read-kind tool can still be an external/network capability (for example
  * fetch_url or get_weather).  Such tools remain hidden during a local file
@@ -209,13 +226,21 @@ function hasAnySignal(text: string, patterns: readonly RegExp[]): boolean {
   return patterns.some((pattern) => pattern.test(text))
 }
 
+function stripResponseOnlyDirectives(text: string): string {
+  return RESPONSE_ONLY_PATTERNS.reduce((remaining, pattern) => remaining.replace(pattern, ' '), text)
+}
+
 function classifyIntent(userInput: string): Intent {
   const text = normalize(userInput)
+  // Response-only wording must not turn a read/report request into a write
+  // capability.  Strip only the known directives; all other wording remains
+  // subject to the normal intent signals and conservative fallback.
+  const hostText = stripResponseOnlyDirectives(text)
   return {
-    read: hasAnySignal(text, READ_SIGNAL_PATTERNS),
-    write: hasAnySignal(text, WRITE_SIGNAL_PATTERNS),
-    command: hasAnySignal(text, COMMAND_SIGNAL_PATTERNS),
-    network: hasAnySignal(text, NETWORK_SIGNAL_PATTERNS)
+    read: hasAnySignal(hostText, READ_SIGNAL_PATTERNS),
+    write: hasAnySignal(hostText, WRITE_SIGNAL_PATTERNS),
+    command: hasAnySignal(hostText, COMMAND_SIGNAL_PATTERNS),
+    network: hasAnySignal(hostText, NETWORK_SIGNAL_PATTERNS)
   }
 }
 
@@ -226,7 +251,10 @@ function hasUnrecognizedMixedClause(request: string, toolDefs: readonly ToolDef[
   if (clauses.length < 2) return false
   return clauses.some((clause) => {
     const intent = inferIntentFromToolNames(clause, toolDefs, classifyIntent(clause))
-    return !intent.read && !intent.write && !intent.command
+    if (intent.read || intent.write || intent.command || intent.network) return false
+    // A response-only directive (for example, "色を教えてください") is not
+    // an additional host action and therefore must not trigger fallback.
+    return !hasAnySignal(clause, RESPONSE_ONLY_PATTERNS)
   })
 }
 

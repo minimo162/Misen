@@ -23,7 +23,7 @@ import { createPermissionHook, type PermissionDecision } from './permission-hook
 import type { ChatMessage, ToolCall } from './llm'
 import { containsAgentImage, normalizeAgentUserContent, type AgentUserContent } from './multimodal'
 import { selectActiveTools, type ActiveToolsSelection } from './active-tools'
-import { createRequestTelemetryCollector, type ProviderReportedTokenUsage, type RequestTelemetryRecord } from './request-telemetry'
+import { createRequestTelemetryCollector, type ProviderReportedTokenUsage, type RequestTelemetryGenerationPhase, type RequestTelemetryRecord } from './request-telemetry'
 import { buildModelWorkingContext, DEFAULT_TOOL_RESULT_BYTES, type WorkingContextTelemetry } from './working-context'
 import {
   bareToolName,
@@ -83,6 +83,22 @@ function providerOptionsFor(cfg: AgentConfig): { ollama: { reasoningEffort: stri
   return { ollama: { reasoningEffort: cfg.reasoningEffort } }
 }
 
+type WorkGenerationPhase = 'read-tool' | 'action-tool' | 'final'
+
+/** Opt-in Ollama/v2 ordinary-work generation cap; other providers stay unchanged. */
+function generationMaxOutputTokensFor(
+  cfg: AgentConfig,
+  phase: WorkGenerationPhase,
+  ordinaryTextWork: boolean
+): number | undefined {
+  if (!ordinaryTextWork || cfg.provider !== 'ollama' || cfg.agentLoop !== 'v2') return undefined
+  const limits = cfg.generationLimits
+  if (!limits) return undefined
+  if (phase === 'final') return limits.finalResponseMaxOutputTokens
+  if (phase === 'action-tool') return limits.actionToolRequestMaxOutputTokens
+  return limits.readToolRequestMaxOutputTokens
+}
+
 function modelUsageMetadata(usage: {
   inputTokens?: number
   outputTokens?: number
@@ -120,6 +136,7 @@ function utf8Bytes(value: unknown): number {
 }
 
 function toolSchemaBytes(toolDefs: readonly ToolDef[]): number {
+  if (toolDefs.length === 0) return 0
   return utf8Bytes(toolDefs.map((def) => ({ name: def.name, description: def.description, parameters: def.parameters })))
 }
 
@@ -575,6 +592,7 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
   // Existing explicit run-scoped/vision paths preserve their exact context
   // contract. Ordinary text work is the only pruning/capping target.
   const optimizeWorkingContext = optimizationEnabled && opts.toolDefs === undefined && !containsAgentImage(userContent)
+  const ordinaryTextWork = mode === 'work' && opts.toolDefs === undefined && !containsAgentImage(userContent)
   const telemetry = createRequestTelemetryCollector()
   let requestIndex = 0
   const systemFor = (targetMode: 'work' | 'research' | 'chat', exposedToolDefs: readonly ToolDef[] = scopedToolDefs): string => [...new Set([
@@ -583,7 +601,13 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
     buildProtocolRules(targetMode, policy.allowArbitraryCommands, policy.autoApproveCommand, ctx.safeCommandOnly === true, exposedToolDefs)
   ].filter((value): value is string => typeof value === 'string' && value.length > 0))].join('\n\n')
 
-  const beginRequestTelemetry = (requestMessages: readonly V2ModelMessage[], exposedToolDefs: readonly ToolDef[], working?: WorkingContextTelemetry) => telemetry.beginRequest({
+  const beginRequestTelemetry = (
+    requestMessages: readonly V2ModelMessage[],
+    exposedToolDefs: readonly ToolDef[],
+    working?: WorkingContextTelemetry,
+    generationPhase?: RequestTelemetryGenerationPhase,
+    requestedMaxOutputTokens?: number
+  ) => telemetry.beginRequest({
     requestIndex: requestIndex++,
     runId: ctx.runId ?? 'default-run',
     provider: cfg.provider?.trim() ? cfg.provider : 'openai',
@@ -596,7 +620,11 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
     exposedToolCount: exposedToolDefs.length,
     toolSchemaBytes: toolSchemaBytes(exposedToolDefs),
     toolResultContextBytes: toolResultContextBytes(requestMessages),
-    pruning: pruningInput(working)
+    pruning: pruningInput(working),
+    ...(generationPhase !== undefined ? {
+      generationPhase,
+      requestedMaxOutputTokens: requestedMaxOutputTokens ?? null
+    } : {})
   })
 
   assertImageRequestPolicy({
@@ -644,7 +672,6 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
     }
   }
 
-  const tools = aiTools(cfg, ctx, scopedToolDefs)
   const actionCounts = new Map<string, number>()
   let executions = 0
   let writes = 0
@@ -653,6 +680,13 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
   let lastResultKey = ''
   let confirmationOnly = false
   let activeVisionContent = userContent
+  // Automatic close is intentionally narrow: ordinary, non-fallback text
+  // work where the selected capability is read/write.  Command, coding,
+  // uncertain, explicit run-scoped, and vision flows keep their existing
+  // multi-step behaviour and safety checks.
+  const autoCloseEligible = ordinaryTextWork && optimizationEnabled && !activeSelection.conservativeFallback && (
+    activeSelection.category === 'read' || activeSelection.category === 'write' || activeSelection.category === 'read-write'
+  )
 
   const rejectToolCalls = (reason: string, calls: readonly { toolCallId: string; toolName: string }[]): AgentTurnResult => {
     for (const call of calls) {
@@ -672,12 +706,24 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
       ? buildModelWorkingContext(modelMessages, { maxToolResultBytes: DEFAULT_MODEL_TOOL_RESULT_BYTES })
       : { messages: modelMessages, telemetry: undefined }
     const requestMessages = projected.messages as V2ModelMessage[]
+    const generationPhase: WorkGenerationPhase = confirmationOnly
+      ? 'final'
+      : exposedToolDefs.some((def) => def.kind === 'write' || def.kind === 'command')
+        ? 'action-tool'
+        : 'read-tool'
+    const maxOutputTokens = generationMaxOutputTokensFor(cfg, generationPhase, ordinaryTextWork)
     assertImageRequestPolicy({
       cfg, messages: requestMessages, system: workSystem, toolDefs: exposedToolDefs,
       activeContent: activeVisionContent, visualTokenBudget, maxContextTokens
     })
     let result: Awaited<ReturnType<typeof generateText>>
-    const requestTelemetry = beginRequestTelemetry(requestMessages, exposedToolDefs, projected.telemetry)
+    const telemetryPhase: RequestTelemetryGenerationPhase = generationPhase === 'read-tool'
+      ? 'work-read-tool'
+      : generationPhase === 'action-tool'
+        ? 'work-action-tool'
+        : 'work-final'
+    const requestTelemetry = beginRequestTelemetry(requestMessages, exposedToolDefs, projected.telemetry, telemetryPhase, maxOutputTokens)
+    const requestTools = exposedToolDefs.length > 0 ? aiTools(cfg, ctx, exposedToolDefs) : undefined
     try {
       emitModelWait(io, cfg)
       assertExternalBoundaryBeforeRequest(cfg, ctx, io)
@@ -685,9 +731,9 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
         model,
         messages: requestMessages,
         system: workSystem,
-        tools,
-        ...(confirmationOnly ? { activeTools: [] as string[] } : {}),
+        ...(requestTools !== undefined ? { tools: requestTools } : {}),
         temperature: cfg.temperature ?? 0.2,
+        ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
         providerOptions: providerOptionsFor(cfg),
         maxRetries: 0,
         abortSignal: io.signal,
@@ -771,7 +817,12 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
         confirmationOnly = true
       }
     }
-    if (optimizeWorkingContext && executed.status === 'succeeded' && executions >= policy.maxHostExecutions) {
+    const closeAfterSuccessfulRead = autoCloseEligible && activeSelection.category === 'read' && def.kind === 'read' && executed.status === 'succeeded'
+    const closeAfterSuccessfulWrite = autoCloseEligible && (activeSelection.category === 'write' || activeSelection.category === 'read-write') && def.kind === 'write' && executed.status === 'succeeded'
+    if (closeAfterSuccessfulRead || closeAfterSuccessfulWrite) {
+      confirmationOnly = true
+    }
+    if (autoCloseEligible && optimizeWorkingContext && executed.status === 'succeeded' && executions >= policy.maxHostExecutions) {
       // Once the configured execution budget is exhausted, close tools and
       // permit one bounded final response instead of advertising actions the
       // orchestrator would necessarily reject on the next iteration.

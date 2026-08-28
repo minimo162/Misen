@@ -44,6 +44,7 @@ var READ_SIGNAL_PATTERNS = [
   /\bweather\b/u,
   /読む/u,
   /読み/u,
+  /読んで/u,
   /一覧/u,
   /列挙/u,
   /検索/u,
@@ -165,6 +166,15 @@ var NETWORK_SIGNAL_PATTERNS = [
   /URL/u,
   /天気/u
 ];
+var RESPONSE_ONLY_PATTERNS = [
+  /(?:教えて|答えて|回答して|報告して|説明して|要約して|短くまとめて|日本語で返して|結果だけ知らせて)ください/u,
+  /\btell\s+me\b/u,
+  /\banswer\s+briefly\b/u,
+  /\breport\s+the\s+result\b/u,
+  /\bsummarize\s+it\b/u,
+  /\bexplain\s+the\s+result\b/u,
+  /\brespond\s+in\s+japanese\b/u
+];
 var NETWORK_TOOL_NAME_PATTERN = /(?:^|[_-])(?:fetch|request|http|https|url|web|browser|browse|download|network|weather)(?:$|[_-])/u;
 var NETWORK_TOOL_DESCRIPTION_PATTERN = /(?:\b(?:https?|url|network|external|download|weather|open[- ]?meteo)\b|ネットワーク|外部(?:サイト|URL|サービス)|ダウンロード|天気)/u;
 function normalize(value) {
@@ -173,13 +183,17 @@ function normalize(value) {
 function hasAnySignal(text, patterns) {
   return patterns.some((pattern) => pattern.test(text));
 }
+function stripResponseOnlyDirectives(text) {
+  return RESPONSE_ONLY_PATTERNS.reduce((remaining, pattern) => remaining.replace(pattern, " "), text);
+}
 function classifyIntent(userInput) {
   const text = normalize(userInput);
+  const hostText = stripResponseOnlyDirectives(text);
   return {
-    read: hasAnySignal(text, READ_SIGNAL_PATTERNS),
-    write: hasAnySignal(text, WRITE_SIGNAL_PATTERNS),
-    command: hasAnySignal(text, COMMAND_SIGNAL_PATTERNS),
-    network: hasAnySignal(text, NETWORK_SIGNAL_PATTERNS)
+    read: hasAnySignal(hostText, READ_SIGNAL_PATTERNS),
+    write: hasAnySignal(hostText, WRITE_SIGNAL_PATTERNS),
+    command: hasAnySignal(hostText, COMMAND_SIGNAL_PATTERNS),
+    network: hasAnySignal(hostText, NETWORK_SIGNAL_PATTERNS)
   };
 }
 var CLAUSE_SEPARATOR = /(?:\b(?:and|then|also|but|plus|afterwards?|followed\s+by)\b|[,&;|]+|\r?\n|、|。|(?:してから|した後|その後|さらに|また|および|及び|ならびに|かつ))/u;
@@ -188,7 +202,8 @@ function hasUnrecognizedMixedClause(request, toolDefs) {
   if (clauses.length < 2) return false;
   return clauses.some((clause) => {
     const intent = inferIntentFromToolNames(clause, toolDefs, classifyIntent(clause));
-    return !intent.read && !intent.write && !intent.command;
+    if (intent.read || intent.write || intent.command || intent.network) return false;
+    return !hasAnySignal(clause, RESPONSE_ONLY_PATTERNS);
   });
 }
 function inferIntentFromToolNames(request, toolDefs, intent) {
@@ -425,6 +440,24 @@ function testUncertainAndPolicyInput() {
   import_strict.default.equal(nonWork.category, "full");
   import_strict.default.strictEqual(nonWork.toolDefs, tools);
 }
+function testResponseOnlyClauses() {
+  const japanese = selectActiveTools({ toolDefs: tools, userInput: "\u6982\u8981_\u65E5\u672C\u8A9E.txt\u3092\u8AAD\u3093\u3067\u3001\u8272\u3092\u6559\u3048\u3066\u304F\u3060\u3055\u3044\u3002" });
+  import_strict.default.equal(japanese.category, "read");
+  import_strict.default.equal(japanese.conservativeFallback, false);
+  import_strict.default.deepEqual(names(japanese), ["list_files", "read_file", "search_files"]);
+  const english = selectActiveTools({ toolDefs: tools, userInput: "Read README and tell me the color." });
+  import_strict.default.equal(english.category, "read");
+  import_strict.default.equal(english.conservativeFallback, false);
+  import_strict.default.deepEqual(names(english), ["list_files", "read_file", "search_files"]);
+  const unknownAction = selectActiveTools({ toolDefs: tools, userInput: "Read README and perform an unknown operation." });
+  import_strict.default.equal(unknownAction.category, "uncertain");
+  import_strict.default.equal(unknownAction.conservativeFallback, true);
+  import_strict.default.strictEqual(unknownAction.toolDefs, tools);
+  const mixedAction = selectActiveTools({ toolDefs: tools, userInput: "Read README, tell me the result, then update it." });
+  import_strict.default.equal(mixedAction.category, "read-write");
+  import_strict.default.equal(mixedAction.conservativeFallback, false);
+  import_strict.default.deepEqual(names(mixedAction), ["list_files", "read_file", "search_files", "write_file", "edit_file"]);
+}
 function testExplicitRunScopedAndMissingToolFailSafe() {
   const scoped = [tools[0], tools[7]];
   const explicit = selectActiveTools({
@@ -464,6 +497,7 @@ function main() {
   testWriteRequestsExposeReadAndWrite();
   testCommandAndNetworkSignals();
   testUncertainAndPolicyInput();
+  testResponseOnlyClauses();
   testExplicitRunScopedAndMissingToolFailSafe();
   testExplicitToolNameIsNeverDropped();
   console.log("PASS active-tools");

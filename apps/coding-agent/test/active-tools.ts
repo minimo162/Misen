@@ -133,6 +133,28 @@ function testUncertainAndPolicyInput(): void {
   assert.strictEqual(nonWork.toolDefs, tools)
 }
 
+function testResponseOnlyClauses(): void {
+  const japanese = selectActiveTools({ toolDefs: tools, userInput: '概要_日本語.txtを読んで、色を教えてください。' })
+  assert.equal(japanese.category, 'read')
+  assert.equal(japanese.conservativeFallback, false)
+  assert.deepEqual(names(japanese), ['list_files', 'read_file', 'search_files'])
+
+  const english = selectActiveTools({ toolDefs: tools, userInput: 'Read README and tell me the color.' })
+  assert.equal(english.category, 'read')
+  assert.equal(english.conservativeFallback, false)
+  assert.deepEqual(names(english), ['list_files', 'read_file', 'search_files'])
+
+  const unknownAction = selectActiveTools({ toolDefs: tools, userInput: 'Read README and perform an unknown operation.' })
+  assert.equal(unknownAction.category, 'uncertain')
+  assert.equal(unknownAction.conservativeFallback, true)
+  assert.strictEqual(unknownAction.toolDefs, tools)
+
+  const mixedAction = selectActiveTools({ toolDefs: tools, userInput: 'Read README, tell me the result, then update it.' })
+  assert.equal(mixedAction.category, 'read-write')
+  assert.equal(mixedAction.conservativeFallback, false)
+  assert.deepEqual(names(mixedAction), ['list_files', 'read_file', 'search_files', 'write_file', 'edit_file'])
+}
+
 function testExplicitRunScopedAndMissingToolFailSafe(): void {
   const scoped = [tools[0], tools[7]] as const
   const explicit = selectActiveTools({
@@ -178,6 +200,7 @@ function main(): void {
   testWriteRequestsExposeReadAndWrite()
   testCommandAndNetworkSignals()
   testUncertainAndPolicyInput()
+  testResponseOnlyClauses()
   testExplicitRunScopedAndMissingToolFailSafe()
   testExplicitToolNameIsNeverDropped()
   console.log('PASS active-tools')
