@@ -354,8 +354,10 @@ async function testEphemeralImageReasoningAndAuditRedaction(): Promise<void> {
       userInput: '画面の FOCUS 会社を開く',
       userContent: [
         { type: 'text', text: '画面の FOCUS 会社を開く' },
-        { type: 'image', mediaType: 'image/png', image: imageBytes }
+        { type: 'image', mediaType: 'image/png', image: imageBytes, estimatedVisualTokens: 256 }
       ],
+      visualTokenBudget: 512,
+      maxContextTokens: 4096,
       ctx: context(workspace),
       io: recorded.io,
       toolDefs: [createOpenCompanyTool(screen, initial.stateFingerprint)],
@@ -366,7 +368,7 @@ async function testEphemeralImageReasoningAndAuditRedaction(): Promise<void> {
         const after = screen.captureScreenshot()
         return [
           { type: 'text', text: '操作後の画面を確認する' },
-          { type: 'image', mediaType: after.mediaType, image: after.bytes }
+          { type: 'image', mediaType: after.mediaType, image: after.bytes, estimatedVisualTokens: 256 }
         ]
       }
     })

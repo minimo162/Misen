@@ -89,6 +89,7 @@ async function testScopedToolsAndObservation(): Promise<void> {
     name: 'open_company',
     description: 'Open a company',
     kind: 'read',
+    requiresImage: true,
     parameters: { type: 'object', properties: {}, required: [] },
     run: async () => 'open_company succeeded'
   }
@@ -107,6 +108,12 @@ async function testScopedToolsAndObservation(): Promise<void> {
     cfg: { agentLoop: 'v2', provider: 'ollama', baseURL: '', model: '' },
     messages: [],
     userInput: '会社を開いて',
+    userContent: [
+      { type: 'text', text: '会社を開いて' },
+      { type: 'image', mediaType: 'image/png', image: new Uint8Array([9]), estimatedVisualTokens: 64 }
+    ],
+    visualTokenBudget: 512,
+    maxContextTokens: 4096,
     ctx,
     io: io(),
     model: fake.model,
@@ -115,7 +122,7 @@ async function testScopedToolsAndObservation(): Promise<void> {
       requests.push(`${toolName}:${status}`)
       return [
         { type: 'text', text: '画面を再確認' },
-        { type: 'image', mediaType: 'image/png', image: new Uint8Array([1, 2, 3]) }
+        { type: 'image', mediaType: 'image/png', image: new Uint8Array([1, 2, 3]), estimatedVisualTokens: 64 }
       ]
     }
   })
@@ -126,6 +133,11 @@ async function testScopedToolsAndObservation(): Promise<void> {
   assert.equal((secondTools ?? []).length, 0)
   const secondPrompt = fake.requests[1].prompt as Array<{ role: string; content: unknown }>
   assert.ok(secondPrompt.some((message) => message.role === 'user' && Array.isArray(message.content)))
+  const imageParts = (prompt: Array<{ content: unknown }>) => prompt.flatMap((message) => Array.isArray(message.content) ? message.content : []).filter((part) => Boolean(part) && typeof part === 'object' && (part as { type?: unknown }).type === 'file')
+  const firstPrompt = fake.requests[0].prompt as Array<{ role: string; content: unknown }>
+  assert.equal(imageParts(firstPrompt).length, 1)
+  assert.equal(imageParts(secondPrompt).length, 1, 'the post-action request must discard the initial screenshot')
+  assert.deepEqual((imageParts(secondPrompt)[0] as { data: Uint8Array }).data, new Uint8Array([1, 2, 3]))
   assert.equal(JSON.stringify(result.messages).includes('画面を再確認'), false)
   assert.equal(JSON.stringify(result.messages).includes('list_files'), false)
 }
@@ -160,12 +172,64 @@ async function testImageRequiredToolFailsBeforeModel(): Promise<void> {
   assert.equal(modelCalls, 0)
 }
 
+async function testExternalVisionRejectedBeforeModel(): Promise<void> {
+  let modelCalls = 0
+  const imageRequired: ToolDef = {
+    name: 'image_required', description: 'visual action', kind: 'write', requiresImage: true,
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+    async run() { return 'unreachable' }
+  }
+  await assert.rejects(() => runAgentTurnV2({
+    cfg: {
+      agentLoop: 'v2', provider: 'external-openai', baseURL: 'http://127.0.0.1:1/v1', model: 'external',
+      externalProvider: { enabled: true, syntheticWorkspace: process.cwd() }
+    },
+    messages: [], userInput: '画像', userContent: [
+      { type: 'text', text: '画像' },
+      { type: 'image', mediaType: 'image/png', image: new Uint8Array([1]), estimatedVisualTokens: 1 }
+    ],
+    visualTokenBudget: 512, maxContextTokens: 4096, ctx, io: io(), toolDefs: [imageRequired],
+    model: { specificationVersion: 'v3', provider: 'test', modelId: 'no-call', supportedUrls: {}, doGenerate: async () => { modelCalls++; throw new Error('must not run') } } as never
+  }), /local Ollama専用/u)
+  assert.equal(modelCalls, 0)
+}
+
+async function testVisionRequestBudgetFailsBeforeModel(): Promise<void> {
+  let modelCalls = 0
+  const imageRequired: ToolDef = {
+    name: 'image_required', description: 'visual action', kind: 'read', requiresImage: true,
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+    async run() { return 'unreachable' }
+  }
+  const model = { specificationVersion: 'v3', provider: 'test', modelId: 'no-call', supportedUrls: {}, doGenerate: async () => { modelCalls++; throw new Error('must not run') } } as never
+  await assert.rejects(() => runAgentTurnV2({
+    cfg: { agentLoop: 'v2', provider: 'ollama', baseURL: '', model: '' },
+    messages: [], userInput: '画像', userContent: [
+      { type: 'text', text: '画像' },
+      { type: 'image', mediaType: 'image/png', image: new Uint8Array([1]), estimatedVisualTokens: 300 },
+      { type: 'image', mediaType: 'image/png', image: new Uint8Array([2]), estimatedVisualTokens: 300 }
+    ],
+    visualTokenBudget: 512, maxContextTokens: 4096, ctx, io: io(), toolDefs: [imageRequired], model
+  }), /visualTokenBudget/u)
+  await assert.rejects(() => runAgentTurnV2({
+    cfg: { agentLoop: 'v2', provider: 'ollama', baseURL: '', model: '', systemPrompt: '長'.repeat(4096) },
+    messages: [], userInput: '画像', userContent: [
+      { type: 'text', text: '画像' },
+      { type: 'image', mediaType: 'image/png', image: new Uint8Array([1]), estimatedVisualTokens: 64 }
+    ],
+    visualTokenBudget: 512, maxContextTokens: 4096, ctx, io: io(), toolDefs: [imageRequired], model
+  }), /4K context budget/u)
+  assert.equal(modelCalls, 0)
+}
+
 async function main(): Promise<void> {
   await testContentContract()
   await testImageBoundaryAndRedaction()
   await testScopedToolsAndObservation()
   await testV1ImageRejection()
   await testImageRequiredToolFailsBeforeModel()
+  await testExternalVisionRejectedBeforeModel()
+  await testVisionRequestBudgetFailsBeforeModel()
   console.log('multimodal tests passed')
 }
 

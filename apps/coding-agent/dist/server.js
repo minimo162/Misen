@@ -40697,7 +40697,15 @@ function normalizeAgentUserContent(content, expectedText) {
       if (!(part.image instanceof Uint8Array) || part.image.byteLength === 0) {
         throw new Error("userContent \u306E\u753B\u50CFbytes\u304C\u4E0D\u6B63\u3067\u3059");
       }
-      normalized.push({ type: "image", mediaType: part.mediaType, image: new Uint8Array(part.image) });
+      if (part.estimatedVisualTokens !== void 0 && (!Number.isSafeInteger(part.estimatedVisualTokens) || part.estimatedVisualTokens <= 0 || part.estimatedVisualTokens > 1024)) {
+        throw new Error("userContent \u306E estimatedVisualTokens \u306F1\u304B\u30891024\u306E\u6574\u6570\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
+      }
+      normalized.push({
+        type: "image",
+        mediaType: part.mediaType,
+        image: new Uint8Array(part.image),
+        ...part.estimatedVisualTokens === void 0 ? {} : { estimatedVisualTokens: part.estimatedVisualTokens }
+      });
       continue;
     }
     throw new Error("userContent \u306Epart\u5F62\u5F0F\u304C\u4E0D\u6B63\u3067\u3059");
@@ -40802,6 +40810,57 @@ function toModelMessages(messages, userContent) {
     }
   }
   return converted;
+}
+function imageEstimate(content) {
+  if (!Array.isArray(content)) return { images: 0, tokens: 0 };
+  let images = 0;
+  let tokens = 0;
+  for (const part of content) {
+    if (part.type !== "image") continue;
+    images++;
+    if (!Number.isSafeInteger(part.estimatedVisualTokens) || (part.estimatedVisualTokens ?? 0) <= 0) {
+      throw new Error("\u753B\u50CF\u5FC5\u9808\u306Ehost\u30C4\u30FC\u30EB\u306B\u306F estimatedVisualTokens \u304C\u5FC5\u8981\u3067\u3059");
+    }
+    tokens += part.estimatedVisualTokens;
+  }
+  return { images, tokens };
+}
+function modelImageCount(messages) {
+  let count = 0;
+  for (const message of messages) {
+    const content = message.content;
+    if (!Array.isArray(content)) continue;
+    count += content.filter((part) => Boolean(part) && typeof part === "object" && part.type === "image").length;
+  }
+  return count;
+}
+function discardHistoricalImages(messages) {
+  for (let index = 0; index < messages.length; index++) {
+    const message = messages[index];
+    if (message.role !== "user" || !Array.isArray(message.content)) continue;
+    const content = message.content.filter((part) => !(Boolean(part) && typeof part === "object" && part.type === "image"));
+    messages[index] = { ...message, content };
+  }
+}
+function assertBoundedVisionRequest(options) {
+  if (!Number.isSafeInteger(options.visualTokenBudget) || options.visualTokenBudget <= 0 || options.visualTokenBudget > 1024) {
+    throw new Error("visualTokenBudget \u306F1\u304B\u30891024\u306E\u6574\u6570\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
+  }
+  if (!Number.isSafeInteger(options.maxContextTokens) || options.maxContextTokens <= 0 || options.maxContextTokens > 4096) {
+    throw new Error("maxContextTokens \u306F1\u304B\u30894096\u306E\u6574\u6570\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
+  }
+  const visual = imageEstimate(options.activeContent);
+  if (visual.tokens > options.visualTokenBudget) throw new Error("\u753B\u50CF\u5165\u529B\u304C visualTokenBudget \u3092\u8D85\u3048\u3066\u3044\u307E\u3059");
+  if (modelImageCount(options.messages) !== visual.images) throw new Error("model request \u306B\u53E4\u3044\u753B\u50CF\u5165\u529B\u304C\u6B8B\u3063\u3066\u3044\u307E\u3059");
+  const serialized = JSON.stringify({
+    system: options.system,
+    messages: options.messages,
+    tools: options.toolDefs.map((def) => ({ name: def.name, description: def.description, parameters: def.parameters }))
+  }, (_key, value) => value instanceof Uint8Array ? "[ephemeral image bytes omitted]" : value);
+  const conservativeTextTokens = Array.from(serialized).length;
+  if (conservativeTextTokens + visual.tokens > options.maxContextTokens) {
+    throw new Error("model request \u304C4K context budget\u3092\u8D85\u3048\u308B\u305F\u3081\u9001\u4FE1\u3057\u307E\u305B\u3093");
+  }
 }
 function runToolDefs(cfg2, ctx2, supplied) {
   const policy = capabilityPolicy(cfg2, "work");
@@ -40989,11 +41048,17 @@ async function runAgentTurnV2(opts) {
   const { cfg: cfg2, io } = opts;
   const ctx2 = enforceExternalProviderSafety(cfg2, opts.ctx);
   const userContent = opts.userContent === void 0 ? void 0 : normalizeAgentUserContent(opts.userContent, opts.userInput);
-  if (opts.toolDefs?.some((def) => def.requiresImage) && !containsAgentImage(userContent)) {
+  const requiresImage = opts.toolDefs?.some((def) => def.requiresImage) === true;
+  if (requiresImage && !containsAgentImage(userContent)) {
     throw new Error("\u753B\u50CF\u5FC5\u9808\u306Ehost\u30C4\u30FC\u30EB\u306F\u30B9\u30AF\u30EA\u30FC\u30F3\u30B7\u30E7\u30C3\u30C8\u306A\u3057\u3067\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093");
   }
-  if (containsAgentImage(userContent) && cfg2.provider !== "ollama" && cfg2.provider !== "external-openai") {
-    throw new Error("\u3053\u306Eprovider\u306F\u753B\u50CF\u5165\u529B\u306B\u5BFE\u5FDC\u3057\u3066\u3044\u307E\u305B\u3093\u3002Copilot/v1\u3067\u306F\u30C6\u30AD\u30B9\u30C8\u3060\u3051\u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044");
+  if (containsAgentImage(userContent) && cfg2.provider !== "ollama") {
+    throw new Error("\u753B\u50CF\u5165\u529B\u306Flocal Ollama\u5C02\u7528\u3067\u3059\u3002Copilot/external provider\u3067\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093");
+  }
+  const visualTokenBudget = requiresImage ? opts.visualTokenBudget : void 0;
+  const maxContextTokens = requiresImage ? opts.maxContextTokens : void 0;
+  if (requiresImage && (visualTokenBudget === void 0 || maxContextTokens === void 0)) {
+    throw new Error("\u753B\u50CF\u5FC5\u9808\u306Ehost\u30C4\u30FC\u30EB\u306B\u306F visualTokenBudget \u3068 maxContextTokens \u304C\u5FC5\u8981\u3067\u3059");
   }
   assertExternalBoundaryBeforeRequest(cfg2, ctx2, io);
   if (cfg2.provider === "external-openai") {
@@ -41050,6 +41115,15 @@ async function runAgentTurnV2(opts) {
   let noProgress = 0;
   let lastResultKey = "";
   let confirmationOnly = false;
+  let activeVisionContent = userContent;
+  if (requiresImage) assertBoundedVisionRequest({
+    messages: modelMessages,
+    system: systemFor("work"),
+    toolDefs: scopedToolDefs,
+    activeContent: activeVisionContent,
+    visualTokenBudget,
+    maxContextTokens
+  });
   for (let iteration = 0; iteration < policy.maxModelDecisions; iteration++) {
     if (shouldCancel(io)) return { reply: "", messages, aborted: true };
     if (io.isPaused?.()) return { reply: "", messages, aborted: true, paused: true };
@@ -41057,10 +41131,19 @@ async function runAgentTurnV2(opts) {
     try {
       emitModelWait(io, cfg2);
       assertExternalBoundaryBeforeRequest(cfg2, ctx2, io);
+      const workSystem = systemFor("work");
+      if (requiresImage) assertBoundedVisionRequest({
+        messages: modelMessages,
+        system: workSystem,
+        toolDefs: scopedToolDefs,
+        activeContent: activeVisionContent,
+        visualTokenBudget,
+        maxContextTokens
+      });
       result = await generateText({
         model,
         messages: modelMessages,
-        system: systemFor("work"),
+        system: workSystem,
         tools,
         ...confirmationOnly ? { activeTools: [] } : {},
         temperature: cfg2.temperature ?? 0.2,
@@ -41113,10 +41196,12 @@ async function runAgentTurnV2(opts) {
       });
       if (observation !== void 0) {
         const normalizedObservation = normalizeAgentUserContent(observation);
+        discardHistoricalImages(modelMessages);
         modelMessages.push({
           role: "user",
           content: typeof normalizedObservation === "string" ? normalizedObservation : normalizedObservation.map((part) => part.type === "text" ? { type: "text", text: part.text } : { type: "image", image: part.image, mediaType: part.mediaType })
         });
+        activeVisionContent = normalizedObservation;
         confirmationOnly = true;
       }
     }

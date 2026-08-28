@@ -107,6 +107,10 @@ export interface AgentV2Options {
   io: AgentIO
   /** Optional run-scoped host tool allowlist. An empty list exposes no tools. */
   toolDefs?: readonly ToolDef[]
+  /** Aggregate visual-token ceiling for each image-required model request. */
+  visualTokenBudget?: number
+  /** Complete request budget for the narrow Vision path. Maximum is 4096. */
+  maxContextTokens?: number
   /**
    * Produce ephemeral model-only context after a host-tool observation. The
    * callback may be async; returned image content is never persisted.
@@ -181,6 +185,71 @@ function toModelMessages(messages: ChatMessage[], userContent?: AgentUserContent
     }
   }
   return converted
+}
+
+function imageEstimate(content: AgentUserContent | undefined): { images: number; tokens: number } {
+  if (!Array.isArray(content)) return { images: 0, tokens: 0 }
+  let images = 0
+  let tokens = 0
+  for (const part of content) {
+    if (part.type !== 'image') continue
+    images++
+    if (!Number.isSafeInteger(part.estimatedVisualTokens) || (part.estimatedVisualTokens ?? 0) <= 0) {
+      throw new Error('画像必須のhostツールには estimatedVisualTokens が必要です')
+    }
+    tokens += part.estimatedVisualTokens as number
+  }
+  return { images, tokens }
+}
+
+function modelImageCount(messages: readonly V2ModelMessage[]): number {
+  let count = 0
+  for (const message of messages) {
+    const content = (message as { content?: unknown }).content
+    if (!Array.isArray(content)) continue
+    count += content.filter((part) => Boolean(part) && typeof part === 'object' && (part as { type?: unknown }).type === 'image').length
+  }
+  return count
+}
+
+function discardHistoricalImages(messages: V2ModelMessage[]): void {
+  for (let index = 0; index < messages.length; index++) {
+    const message = messages[index] as { role?: unknown; content?: unknown }
+    if (message.role !== 'user' || !Array.isArray(message.content)) continue
+    const content = message.content.filter((part) => !(Boolean(part) && typeof part === 'object' && (part as { type?: unknown }).type === 'image'))
+    messages[index] = { ...message, content } as V2ModelMessage
+  }
+}
+
+function assertBoundedVisionRequest(options: {
+  messages: readonly V2ModelMessage[]
+  system: string
+  toolDefs: readonly ToolDef[]
+  activeContent: AgentUserContent | undefined
+  visualTokenBudget: number
+  maxContextTokens: number
+}): void {
+  if (!Number.isSafeInteger(options.visualTokenBudget) || options.visualTokenBudget <= 0 || options.visualTokenBudget > 1024) {
+    throw new Error('visualTokenBudget は1から1024の整数で指定してください')
+  }
+  if (!Number.isSafeInteger(options.maxContextTokens) || options.maxContextTokens <= 0 || options.maxContextTokens > 4096) {
+    throw new Error('maxContextTokens は1から4096の整数で指定してください')
+  }
+  const visual = imageEstimate(options.activeContent)
+  if (visual.tokens > options.visualTokenBudget) throw new Error('画像入力が visualTokenBudget を超えています')
+  if (modelImageCount(options.messages) !== visual.images) throw new Error('model request に古い画像入力が残っています')
+  const serialized = JSON.stringify({
+    system: options.system,
+    messages: options.messages,
+    tools: options.toolDefs.map((def) => ({ name: def.name, description: def.description, parameters: def.parameters }))
+  }, (_key, value) => value instanceof Uint8Array ? '[ephemeral image bytes omitted]' : value)
+  // One Unicode code point per token is deliberately conservative for the
+  // short Japanese/ASCII synthetic flow. Provider-reported usage remains the
+  // authoritative post-request measurement.
+  const conservativeTextTokens = Array.from(serialized).length
+  if (conservativeTextTokens + visual.tokens > options.maxContextTokens) {
+    throw new Error('model request が4K context budgetを超えるため送信しません')
+  }
 }
 
 function runToolDefs(cfg: AgentConfig, ctx: ToolContext, supplied?: readonly ToolDef[]): ToolDef[] {
@@ -403,11 +472,17 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
   const userContent = opts.userContent === undefined
     ? undefined
     : normalizeAgentUserContent(opts.userContent, opts.userInput)
-  if (opts.toolDefs?.some((def) => def.requiresImage) && !containsAgentImage(userContent)) {
+  const requiresImage = opts.toolDefs?.some((def) => def.requiresImage) === true
+  if (requiresImage && !containsAgentImage(userContent)) {
     throw new Error('画像必須のhostツールはスクリーンショットなしでは利用できません')
   }
-  if (containsAgentImage(userContent) && cfg.provider !== 'ollama' && cfg.provider !== 'external-openai') {
-    throw new Error('このproviderは画像入力に対応していません。Copilot/v1ではテキストだけを指定してください')
+  if (containsAgentImage(userContent) && cfg.provider !== 'ollama') {
+    throw new Error('画像入力はlocal Ollama専用です。Copilot/external providerでは利用できません')
+  }
+  const visualTokenBudget = requiresImage ? opts.visualTokenBudget : undefined
+  const maxContextTokens = requiresImage ? opts.maxContextTokens : undefined
+  if (requiresImage && (visualTokenBudget === undefined || maxContextTokens === undefined)) {
+    throw new Error('画像必須のhostツールには visualTokenBudget と maxContextTokens が必要です')
   }
   assertExternalBoundaryBeforeRequest(cfg, ctx, io)
   if (cfg.provider === 'external-openai') {
@@ -467,6 +542,13 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
   let noProgress = 0
   let lastResultKey = ''
   let confirmationOnly = false
+  let activeVisionContent = userContent
+  if (requiresImage) assertBoundedVisionRequest({
+    messages: modelMessages, system: systemFor('work'), toolDefs: scopedToolDefs,
+    activeContent: activeVisionContent,
+    visualTokenBudget: visualTokenBudget as number,
+    maxContextTokens: maxContextTokens as number
+  })
 
   for (let iteration = 0; iteration < policy.maxModelDecisions; iteration++) {
     if (shouldCancel(io)) return { reply: '', messages, aborted: true }
@@ -475,10 +557,17 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
     try {
       emitModelWait(io, cfg)
       assertExternalBoundaryBeforeRequest(cfg, ctx, io)
+      const workSystem = systemFor('work')
+      if (requiresImage) assertBoundedVisionRequest({
+        messages: modelMessages, system: workSystem, toolDefs: scopedToolDefs,
+        activeContent: activeVisionContent,
+        visualTokenBudget: visualTokenBudget as number,
+        maxContextTokens: maxContextTokens as number
+      })
       result = await generateText({
         model,
         messages: modelMessages,
-        system: systemFor('work'),
+        system: workSystem,
         tools,
         ...(confirmationOnly ? { activeTools: [] as string[] } : {}),
         temperature: cfg.temperature ?? 0.2,
@@ -534,6 +623,7 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
       })
       if (observation !== undefined) {
         const normalizedObservation = normalizeAgentUserContent(observation)
+        discardHistoricalImages(modelMessages)
         modelMessages.push({
           role: 'user',
           content: typeof normalizedObservation === 'string'
@@ -542,6 +632,7 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
               ? { type: 'text', text: part.text }
               : { type: 'image', image: part.image, mediaType: part.mediaType })
         } as V2ModelMessage)
+        activeVisionContent = normalizedObservation
         // A post-action observation is a confirmation step.  Keep the
         // run-scoped definitions available in this process for validation, but
         // expose no callable tools on the next model request.

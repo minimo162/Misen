@@ -119,19 +119,20 @@ async function main(): Promise<void> {
       ? COMPUTER_USE_DEMO_PROMPT
       : [
           { type: 'text' as const, text: COMPUTER_USE_DEMO_PROMPT },
-          { type: 'image' as const, mediaType: initial.mediaType, image: initial.bytes }
+          { type: 'image' as const, mediaType: initial.mediaType, image: initial.bytes, estimatedVisualTokens: dimensions.estimatedVisualTokens }
         ]
     let result: Awaited<ReturnType<typeof runAgentTurnV2>>
     try {
       result = await runAgentTurnV2({
         cfg, messages: [], userInput: COMPUTER_USE_DEMO_PROMPT, userContent, ctx, io,
+        visualTokenBudget: dimensions.maxVisualTokens, maxContextTokens: 4096,
         toolDefs: [createOpenCompanyTool(screen, initial.stateFingerprint)],
         afterToolObservation: async () => {
           post = await surface.capture()
           await saveScreenshot(runDirectory, 'after', post)
           return [
             { type: 'text', text: '操作後の新しいスクリーンショットだけを確認し、会社の詳細画面が表示されたか短く答えてください。' },
-            { type: 'image', mediaType: post.mediaType, image: post.bytes }
+            { type: 'image', mediaType: post.mediaType, image: post.bytes, estimatedVisualTokens: dimensions.estimatedVisualTokens }
           ]
         }
       })

@@ -18,6 +18,8 @@ export interface AgentImagePart {
   type: 'image'
   mediaType: AgentImageMediaType
   image: Uint8Array
+  /** Host-computed visual-token estimate used only for bounded Vision runs. */
+  estimatedVisualTokens?: number
 }
 
 export type AgentUserContent = string | readonly (AgentTextPart | AgentImagePart)[]
@@ -77,7 +79,13 @@ export function normalizeAgentUserContent(content: AgentUserContent, expectedTex
       }
       // Snapshot the bytes so the caller cannot mutate the in-flight model
       // input after validation.  This copy remains ephemeral to the request.
-      normalized.push({ type: 'image', mediaType: part.mediaType, image: new Uint8Array(part.image) })
+      if (part.estimatedVisualTokens !== undefined && (!Number.isSafeInteger(part.estimatedVisualTokens) || part.estimatedVisualTokens <= 0 || part.estimatedVisualTokens > 1024)) {
+        throw new Error('userContent の estimatedVisualTokens は1から1024の整数で指定してください')
+      }
+      normalized.push({
+        type: 'image', mediaType: part.mediaType, image: new Uint8Array(part.image),
+        ...(part.estimatedVisualTokens === undefined ? {} : { estimatedVisualTokens: part.estimatedVisualTokens })
+      })
       continue
     }
     throw new Error('userContent のpart形式が不正です')
