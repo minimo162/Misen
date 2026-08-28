@@ -21,9 +21,9 @@ import { assertSyntheticWorkspaceBoundary, capabilityPolicy, resolveApiKey, type
 import { runToolExecuteBeforeHooks, type ToolExecuteBeforeHook } from './hooks'
 import { createPermissionHook, type PermissionDecision } from './permission-hook'
 import type { ChatMessage, ToolCall } from './llm'
+import { containsAgentImage, normalizeAgentUserContent, type AgentUserContent } from './multimodal'
 import {
   bareToolName,
-  findHostTool,
   parseToolResultMeta,
   qualifiedToolName,
   toolDefsForContract,
@@ -101,8 +101,25 @@ export interface AgentV2Options {
   cfg: AgentConfig
   messages: ChatMessage[]
   userInput: string
+  /** Ephemeral text/image content for the model; never returned in messages. */
+  userContent?: AgentUserContent
   ctx: ToolContext
   io: AgentIO
+  /** Optional run-scoped host tool allowlist. An empty list exposes no tools. */
+  toolDefs?: readonly ToolDef[]
+  /** Aggregate visual-token ceiling for each image-required model request. */
+  visualTokenBudget?: number
+  /** Complete request budget for the narrow Vision path. Maximum is 4096. */
+  maxContextTokens?: number
+  /**
+   * Produce ephemeral model-only context after a host-tool observation. The
+   * callback may be async; returned image content is never persisted.
+   */
+  afterToolObservation?: (observation: {
+    toolName: string
+    input: unknown
+    status: ExecutedToolCall['status']
+  }) => AgentUserContent | undefined | PromiseLike<AgentUserContent | undefined>
   /** Per-run hooks are primarily a deterministic test seam. */
   beforeHooks?: readonly ToolExecuteBeforeHook[]
   /** A model override keeps smoke tests entirely local and deterministic. */
@@ -116,7 +133,7 @@ export interface ExecutedToolCall {
   metadata: Record<string, unknown> | null
 }
 
-function toModelMessages(messages: ChatMessage[]): V2ModelMessage[] {
+function toModelMessages(messages: ChatMessage[], userContent?: AgentUserContent): V2ModelMessage[] {
   const converted: V2ModelMessage[] = []
   for (const message of messages) {
     if (message.role === 'system' || message.role === 'user') {
@@ -148,21 +165,143 @@ function toModelMessages(messages: ChatMessage[]): V2ModelMessage[] {
       }]
     } as V2ModelMessage)
   }
+  if (userContent !== undefined) {
+    let lastUserIndex = -1
+    for (let index = converted.length - 1; index >= 0; index--) {
+      if (converted[index].role === 'user') {
+        lastUserIndex = index
+        break
+      }
+    }
+    if (lastUserIndex >= 0) {
+      converted[lastUserIndex] = {
+        role: 'user',
+        content: typeof userContent === 'string'
+          ? userContent
+          : userContent.map((part) => part.type === 'text'
+            ? { type: 'text', text: part.text }
+            : { type: 'image', image: part.image, mediaType: part.mediaType })
+      } as V2ModelMessage
+    }
+  }
   return converted
 }
 
-function aiTools(cfg: AgentConfig, ctx: ToolContext): ToolSet {
+function imageEstimate(content: AgentUserContent | undefined): { images: number; tokens: number } {
+  if (!Array.isArray(content)) return { images: 0, tokens: 0 }
+  let images = 0
+  let tokens = 0
+  for (const part of content) {
+    if (part.type !== 'image') continue
+    images++
+    if (!Number.isSafeInteger(part.estimatedVisualTokens) || (part.estimatedVisualTokens ?? 0) <= 0) {
+      throw new Error('画像必須のhostツールには estimatedVisualTokens が必要です')
+    }
+    tokens += part.estimatedVisualTokens as number
+  }
+  return { images, tokens }
+}
+
+function modelImageCount(messages: readonly V2ModelMessage[]): number {
+  let count = 0
+  for (const message of messages) {
+    const content = (message as { content?: unknown }).content
+    if (!Array.isArray(content)) continue
+    count += content.filter((part) => Boolean(part) && typeof part === 'object' && (part as { type?: unknown }).type === 'image').length
+  }
+  return count
+}
+
+function discardHistoricalImages(messages: V2ModelMessage[]): void {
+  for (let index = 0; index < messages.length; index++) {
+    const message = messages[index] as { role?: unknown; content?: unknown }
+    if (message.role !== 'user' || !Array.isArray(message.content)) continue
+    const content = message.content.filter((part) => !(Boolean(part) && typeof part === 'object' && (part as { type?: unknown }).type === 'image'))
+    messages[index] = { ...message, content } as V2ModelMessage
+  }
+}
+
+function assertBoundedVisionRequest(options: {
+  messages: readonly V2ModelMessage[]
+  system: string
+  toolDefs: readonly ToolDef[]
+  activeContent: AgentUserContent | undefined
+  visualTokenBudget: number
+  maxContextTokens: number
+}): void {
+  if (!Number.isSafeInteger(options.visualTokenBudget) || options.visualTokenBudget <= 0 || options.visualTokenBudget > 1024) {
+    throw new Error('visualTokenBudget は1から1024の整数で指定してください')
+  }
+  if (!Number.isSafeInteger(options.maxContextTokens) || options.maxContextTokens <= 0 || options.maxContextTokens > 4096) {
+    throw new Error('maxContextTokens は1から4096の整数で指定してください')
+  }
+  const visual = imageEstimate(options.activeContent)
+  if (visual.tokens > options.visualTokenBudget) throw new Error('画像入力が visualTokenBudget を超えています')
+  if (modelImageCount(options.messages) !== visual.images) throw new Error('model request に古い画像入力が残っています')
+  const serialized = JSON.stringify({
+    system: options.system,
+    messages: options.messages,
+    tools: options.toolDefs.map((def) => ({ name: def.name, description: def.description, parameters: def.parameters }))
+  }, (_key, value) => value instanceof Uint8Array ? '[ephemeral image bytes omitted]' : value)
+  // One Unicode code point per token is deliberately conservative for the
+  // short Japanese/ASCII synthetic flow. Provider-reported usage remains the
+  // authoritative post-request measurement.
+  const conservativeTextTokens = Array.from(serialized).length
+  if (conservativeTextTokens + visual.tokens > options.maxContextTokens) {
+    throw new Error('model request が4K context budgetを超えるため送信しません')
+  }
+}
+
+function assertImageRequestPolicy(options: {
+  cfg: AgentConfig
+  messages: readonly V2ModelMessage[]
+  system: string
+  toolDefs: readonly ToolDef[]
+  activeContent: AgentUserContent | undefined
+  visualTokenBudget: number | undefined
+  maxContextTokens: number | undefined
+}): void {
+  if (!containsAgentImage(options.activeContent)) return
+  if (options.cfg.provider !== 'ollama') {
+    throw new Error('画像入力はlocal Ollama専用です。Copilot/external providerでは利用できません')
+  }
+  if (options.visualTokenBudget === undefined || options.maxContextTokens === undefined) {
+    throw new Error('画像入力には visualTokenBudget と maxContextTokens が必要です')
+  }
+  assertBoundedVisionRequest({
+    messages: options.messages,
+    system: options.system,
+    toolDefs: options.toolDefs,
+    activeContent: options.activeContent,
+    visualTokenBudget: options.visualTokenBudget,
+    maxContextTokens: options.maxContextTokens
+  })
+}
+
+function runToolDefs(cfg: AgentConfig, ctx: ToolContext, supplied?: readonly ToolDef[]): ToolDef[] {
   const policy = capabilityPolicy(cfg, 'work')
-  const entries = toolDefsForContract({
+  if (supplied !== undefined) {
+    return supplied.filter((def) => (
+      (policy.allowArbitraryCommands || def.name !== 'run_command') &&
+      !(ctx.safeCommandOnly && def.name === 'get_weather')
+    ))
+  }
+  return toolDefsForContract({
     allowArbitraryCommands: policy.allowArbitraryCommands,
     safeCommandOnly: ctx.safeCommandOnly
-  }).map((def) => [
+  })
+}
+
+function aiTools(cfg: AgentConfig, ctx: ToolContext, supplied?: readonly ToolDef[]): ToolSet {
+  const defs = runToolDefs(cfg, ctx, supplied)
+  const entries = defs.map((def) => [
     def.name,
     tool({
       description: def.description,
       inputSchema: jsonSchema({ ...def.parameters, additionalProperties: false })
     })
   ])
+  // When a run-scoped allowlist is supplied, no global definition is appended.
   return Object.fromEntries(entries) as ToolSet
 }
 
@@ -356,6 +495,21 @@ export async function executeV2ToolCall(
 export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnResult> {
   const { cfg, io } = opts
   const ctx = enforceExternalProviderSafety(cfg, opts.ctx)
+  const userContent = opts.userContent === undefined
+    ? undefined
+    : normalizeAgentUserContent(opts.userContent, opts.userInput)
+  const requiresImage = opts.toolDefs?.some((def) => def.requiresImage) === true
+  if (requiresImage && !containsAgentImage(userContent)) {
+    throw new Error('画像必須のhostツールはスクリーンショットなしでは利用できません')
+  }
+  if (containsAgentImage(userContent) && cfg.provider !== 'ollama') {
+    throw new Error('画像入力はlocal Ollama専用です。Copilot/external providerでは利用できません')
+  }
+  const visualTokenBudget = opts.visualTokenBudget
+  const maxContextTokens = opts.maxContextTokens
+  if (requiresImage && (visualTokenBudget === undefined || maxContextTokens === undefined)) {
+    throw new Error('画像必須のhostツールには visualTokenBudget と maxContextTokens が必要です')
+  }
   assertExternalBoundaryBeforeRequest(cfg, ctx, io)
   if (cfg.provider === 'external-openai') {
     if (Object.prototype.hasOwnProperty.call(cfg, 'apiKey')) throw new Error('provider=external-openai は plaintext apiKey を受け付けません')
@@ -366,12 +520,18 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
   const model = opts.model ?? configuredModel(cfg)
   const messages: ChatMessage[] = [...opts.messages, { role: 'user', content: opts.userInput }]
   const priorSystem = opts.messages.filter((message) => message.role === 'system').map((message) => message.content ?? '').filter(Boolean)
-  const modelMessages = toModelMessages(messages.filter((message) => message.role !== 'system'))
+  const modelMessages = toModelMessages(messages.filter((message) => message.role !== 'system'), userContent)
+  const scopedToolDefs = runToolDefs(cfg, ctx, opts.toolDefs)
   const systemFor = (targetMode: 'work' | 'research' | 'chat'): string => [...new Set([
     ...priorSystem,
     cfg.systemPrompt,
-    buildProtocolRules(targetMode, policy.allowArbitraryCommands, policy.autoApproveCommand, ctx.safeCommandOnly === true)
+    buildProtocolRules(targetMode, policy.allowArbitraryCommands, policy.autoApproveCommand, ctx.safeCommandOnly === true, scopedToolDefs)
   ].filter((value): value is string => typeof value === 'string' && value.length > 0))].join('\n\n')
+
+  assertImageRequestPolicy({
+    cfg, messages: modelMessages, system: systemFor(mode), toolDefs: mode === 'work' ? scopedToolDefs : [],
+    activeContent: userContent, visualTokenBudget, maxContextTokens
+  })
 
   io.event?.({ type: 'plan.created', summary: mode === 'work' ? 'Runの計画と検証プロファイルを作成しました' : mode === 'research' ? '調査モードを開始しました' : '通常回答モードを開始しました', origin: 'orchestrator', namespace: 'none', authority: 'derived' })
 
@@ -386,7 +546,8 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
         temperature: cfg.temperature ?? 0.2,
         providerOptions: providerOptionsFor(cfg),
         maxRetries: 0,
-        abortSignal: io.signal
+        abortSignal: io.signal,
+        experimental_include: { requestBody: false, responseBody: false }
       })
       io.event?.({ type: 'model.decision', summary: 'モデルの次の1手を受信しました', metadata: modelUsageMetadata(result.usage), origin: modelEventOrigin(cfg), namespace: 'none', authority: 'claimed' })
       messages.push({ role: 'assistant', content: result.text })
@@ -404,17 +565,24 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
     }
   }
 
-  const tools = aiTools(cfg, ctx)
+  const tools = aiTools(cfg, ctx, scopedToolDefs)
   const actionCounts = new Map<string, number>()
   let executions = 0
   let writes = 0
   let commands = 0
   let noProgress = 0
   let lastResultKey = ''
+  let confirmationOnly = false
+  let activeVisionContent = userContent
 
   for (let iteration = 0; iteration < policy.maxModelDecisions; iteration++) {
     if (shouldCancel(io)) return { reply: '', messages, aborted: true }
     if (io.isPaused?.()) return { reply: '', messages, aborted: true, paused: true }
+    const workSystem = systemFor('work')
+    assertImageRequestPolicy({
+      cfg, messages: modelMessages, system: workSystem, toolDefs: scopedToolDefs,
+      activeContent: activeVisionContent, visualTokenBudget, maxContextTokens
+    })
     let result: Awaited<ReturnType<typeof generateText>>
     try {
       emitModelWait(io, cfg)
@@ -422,12 +590,14 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
       result = await generateText({
         model,
         messages: modelMessages,
-        system: systemFor('work'),
+        system: workSystem,
         tools,
+        ...(confirmationOnly ? { activeTools: [] as string[] } : {}),
         temperature: cfg.temperature ?? 0.2,
         providerOptions: providerOptionsFor(cfg),
         maxRetries: 0,
-        abortSignal: io.signal
+        abortSignal: io.signal,
+        experimental_include: { requestBody: false, responseBody: false }
       })
     } catch (err) {
       io.print(`[error] ${(err as Error).message}`)
@@ -442,7 +612,8 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
     if (calls.length !== 1) return warningResult('1回の判断で複数のhostツールが要求されたため、安全のため停止しました', messages, io)
 
     const call = calls[0]
-    const def = findHostTool(qualifiedToolName(call.toolName))
+    const qualifiedCallName = qualifiedToolName(call.toolName)
+    const def = scopedToolDefs.find((candidate) => qualifiedToolName(candidate.name) === qualifiedCallName)
     if (!def) return warningResult(`許可されていないhostツール ${call.toolName} が要求されたため停止しました`, messages, io)
     if (ctx.safeCommandOnly && bareToolName(def.name) === 'get_weather') return warningResult('この構成ではネットワーク通信を行うhostツールは利用できません', messages, io)
     if (bareToolName(def.name) === 'run_command' && !policy.allowArbitraryCommands) return warningResult('任意コマンド実行は設定で明示的に有効化されていないため停止しました', messages, io)
@@ -467,6 +638,30 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
     const hostResult = formatHostResult(qualifiedToolName(def.name), executed.output, executed.metadata, executed.status, call.toolCallId, ctx.runId)
     modelMessages.push({ role: 'tool', content: [{ type: 'tool-result', toolCallId: call.toolCallId, toolName: call.toolName, output: { type: 'text', value: hostResult } }] } as V2ModelMessage)
     messages.push({ role: 'tool', tool_call_id: call.toolCallId, name: qualifiedToolName(def.name), content: hostResult })
+    if (opts.afterToolObservation && executed.status === 'succeeded') {
+      const observation = await opts.afterToolObservation({
+        toolName: bareToolName(def.name),
+        input: call.input,
+        status: executed.status
+      })
+      if (observation !== undefined) {
+        const normalizedObservation = normalizeAgentUserContent(observation)
+        discardHistoricalImages(modelMessages)
+        modelMessages.push({
+          role: 'user',
+          content: typeof normalizedObservation === 'string'
+            ? normalizedObservation
+            : normalizedObservation.map((part) => part.type === 'text'
+              ? { type: 'text', text: part.text }
+              : { type: 'image', image: part.image, mediaType: part.mediaType })
+        } as V2ModelMessage)
+        activeVisionContent = normalizedObservation
+        // A post-action observation is a confirmation step.  Keep the
+        // run-scoped definitions available in this process for validation, but
+        // expose no callable tools on the next model request.
+        confirmationOnly = true
+      }
+    }
     if (noProgress >= policy.maxNoProgress) return warningResult(`hostツール結果に進展がないため停止しました（${policy.maxNoProgress}回連続）`, messages, io)
   }
   return warningResult('最大反復回数に達しました', messages, io)

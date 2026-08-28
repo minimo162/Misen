@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>業務会社一覧（合成デモ）</title>
+  <style>
+    :root {
+      color: #172033;
+      background: #f4f7fb;
+      font-family: "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: linear-gradient(135deg, #f8fafc, #e7edf7); }
+    main { width: min(1080px, 100%); margin: 0 auto; padding: 30px 34px 42px; }
+    header { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+    h1 { margin: 0; font-size: clamp(1.5rem, 2.5vw, 2rem); letter-spacing: .03em; }
+    .subtitle { margin: 9px 0 0; color: #58657a; }
+    .route { color: #73819a; font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .notice { margin: 24px 0 18px; padding: 15px 17px; border: 1px solid #d4ddeb; border-radius: 12px; background: #fff; box-shadow: 0 8px 20px #51648612; }
+    .company-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 17px; }
+    .company-card { position: relative; min-height: 205px; padding: 20px 21px; border: 2px solid #d7dfec; border-radius: 15px; background: #fff; box-shadow: 0 9px 20px #51648618; }
+    .company-card.attention { border-color: #dc2626; box-shadow: 0 0 0 5px #fecaca80, 0 12px 24px #51648622; }
+    .company-card.opened { border-color: #15803d; background: #f0fdf4; }
+    .card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .company-id { color: #5c6980; font: 600 12px ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .badge { padding: 5px 9px; border-radius: 999px; color: #fff; font-size: 12px; font-weight: 800; letter-spacing: .08em; white-space: nowrap; }
+    .badge.attention { background: #dc2626; }
+    .badge.done { background: #15803d; }
+    .warning-icon { display: inline-grid; place-items: center; width: 31px; height: 31px; margin: 21px 0 6px; border-radius: 50%; background: #fee2e2; color: #b91c1c; font-size: 20px; font-weight: 900; }
+    .company-card h2 { margin: 0; font-size: clamp(1.45rem, 2.3vw, 1.8rem); }
+    .company-card p { margin: 5px 0 0; color: #64748b; }
+    .action-hint { display: inline-block; margin-top: 20px; padding: 8px 12px; border: 1px solid #c8d3e4; border-radius: 8px; background: #f8fafc; color: #64748b; font: 600 11px ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .card-state { float: right; margin-top: 28px; color: #64748b; font: 700 11px ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .status { margin-top: 18px; padding: 12px 15px; border-radius: 10px; background: #172033; color: #fff; font: 600 13px ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .detail-panel { margin-top: 20px; padding: 22px 24px; border-left: 8px solid #dc2626; border-radius: 14px; background: #172033; color: #fff; box-shadow: 0 11px 25px #17203338; }
+    .detail-kicker { margin: 0; color: #fca5a5; font: 800 12px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .16em; }
+    .detail-panel h2 { margin: 8px 0 2px; font-size: clamp(1.7rem, 3vw, 2.3rem); }
+    .detail-id { margin: 0 0 16px; color: #cbd5e1; font: 600 12px ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 0; }
+    .detail-grid div { padding: 10px 13px; border-radius: 9px; background: #24314a; }
+    .detail-grid dt { color: #cbd5e1; font-size: 12px; }
+    .detail-grid dd { margin: 3px 0 0; color: #fecaca; font-size: 1.1rem; font-weight: 800; }
+    @media (max-width: 700px) { main { padding: 23px 18px 34px; } header { display: block; } .route { display: block; margin-top: 8px; } .company-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main id="computer-use-demo" data-route="/computer-use-demo.html" data-synthetic="true">
+    <header>
+      <div><h1>業務会社一覧</h1><p class="subtitle">提出状況を確認する合成デモ画面</p></div>
+      <span class="route">/computer-use-demo.html</span>
+    </header>
+    <div class="notice">スクリーンショットで対応が必要な会社を確認してください。</div>
+    <section id="company-grid" class="company-grid" aria-label="会社一覧"></section>
+    <div id="screen-status" class="status" role="status" aria-live="polite">画面の準備ができました</div>
+    <section id="company-detail" class="detail-panel" hidden aria-live="polite"></section>
+  </main>
+  <script>
+    (() => {
+      const base = [
+        { id: 'co-amber-17', name: 'A社', sector: '小売', attention: false },
+        { id: 'co-bronze-29', name: 'B社', sector: '製造', attention: false },
+        { id: 'co-cobalt-41', name: 'C社', sector: '物流', attention: false },
+        { id: 'co-delta-53', name: 'D社', sector: 'サービス', attention: false }
+      ];
+      const params = new URLSearchParams(location.search);
+      const parsedSeed = Number(params.get('seed'));
+      const seed = Number.isFinite(parsedSeed) ? Math.trunc(parsedSeed) : 53028;
+      const positiveModulo = (value, divisor) => ((value % divisor) + divisor) % divisor;
+      const mix = (input) => {
+        let value = input | 0;
+        value = Math.imul(value ^ (value >>> 16), 0x45d9f3b);
+        value = Math.imul(value ^ (value >>> 16), 0x45d9f3b);
+        return (value ^ (value >>> 16)) | 0;
+      };
+      const ordered = base.map((company) => ({ ...company }));
+      let state = mix(seed);
+      for (let index = ordered.length - 1; index > 0; index -= 1) {
+        state = Math.imul(state ^ (state >>> 13), 0x5bd1e995) | 0;
+        const swap = positiveModulo(state, index + 1);
+        [ordered[index], ordered[swap]] = [ordered[swap], ordered[index]];
+      }
+      const targetIndex = positiveModulo(mix(seed ^ 0x530f), ordered.length);
+      ordered[targetIndex].attention = true;
+      let openedId = null;
+
+      const grid = document.getElementById('company-grid');
+      const status = document.getElementById('screen-status');
+      const detail = document.getElementById('company-detail');
+      const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+      const render = () => {
+        grid.innerHTML = ordered.map((company) => {
+          const opened = openedId === company.id;
+          const attention = company.attention && !opened;
+          const badge = attention ? '<span class="badge attention">要確認</span>' : '<span class="badge done">完了</span>';
+          const warning = attention ? '<span class="warning-icon" aria-label="警告">!</span>' : '<span class="warning-icon" aria-hidden="true" style="visibility:hidden">!</span>';
+          return `<article class="company-card ${attention ? 'attention' : ''} ${opened ? 'opened' : ''}" data-company-id="${escapeHtml(company.id)}"><div class="card-top"><span class="company-id">${escapeHtml(company.id)}</span>${badge}</div>${warning}<h2>${escapeHtml(company.name)}</h2><p>${escapeHtml(company.sector)}</p><span class="action-hint">構造化操作: open_company</span><span class="card-state">${opened ? 'OPEN' : attention ? '要確認' : '完了'}</span></article>`;
+        }).join('');
+        status.textContent = openedId ? `開いた会社: ${openedId}` : '画面の準備ができました';
+        const opened = ordered.find((company) => company.id === openedId);
+        detail.hidden = !opened;
+        if (opened) {
+          detail.innerHTML = `<p class="detail-kicker">COMPANY DETAIL</p><h2>${escapeHtml(opened.name)} 詳細</h2><p class="detail-id">${escapeHtml(opened.id)}</p><dl class="detail-grid"><div><dt>状態</dt><dd>要確認</dd></div><div><dt>理由</dt><dd>添付資料未提出</dd></div></dl>`;
+        }
+      };
+      const openCompany = (companyId) => {
+        if (openedId !== null) return { ok: false, code: 'duplicate_action' };
+        const company = ordered.find((candidate) => candidate.id === String(companyId).trim());
+        if (!company) return { ok: false, code: 'company_not_visible' };
+        if (!company.attention) return { ok: false, code: 'wrong_target' };
+        openedId = company.id;
+        render();
+        return { ok: true, companyId: openedId };
+      };
+      render();
+      // Host-side CDP tests can call this structured state action after the
+      // server-side safety chain approves open_company.  It does not expose
+      // target metadata to the model.
+      window.__computerUseDemo = Object.freeze({
+        render,
+        openCompany,
+        snapshot: () => ({ route: '/computer-use-demo.html', openedCompanyId: openedId, revision: openedId ? 1 : 0, companies: ordered.map(({ id, name, sector, attention }) => ({ id, name, sector, status: openedId === id ? 'opened' : 'available', attention })) })
+      });
+    })();
+  </script>
+</body>
+</html>

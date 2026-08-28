@@ -67,3 +67,29 @@ model available.
 
 The Issue #41 preparation-PC measurements and the selected 8K rationale are
 recorded in [`OLLAMA-VALIDATION.md`](./OLLAMA-VALIDATION.md).
+
+## Computer Use Vision demo (Issue #53)
+
+The opt-in Computer Use harness launches a dedicated headed Edge profile on a
+random loopback CDP port. It captures the synthetic business screen, sends only
+the PNG bytes and user text to Ornith, exposes only the run-scoped
+`open_company` tool, uses the normal permission/approval/guard/audit path, then
+captures the changed page for Vision confirmation. It never attaches to an
+existing browser profile or tab and it does not use pixel clicks.
+
+```powershell
+npm run computer-use:measure:ollama -- --seed 53028 --budget 512
+npm run gate -- --live-computer-use --seed 53028 --budget 512
+```
+
+Supported visual-budget tiers are 512, 768, and 1024 estimated Qwen grid
+tokens; 512 is the default. The estimate uses the factor-32 grid and is not a
+processor-reported token count. `reasoningEffort="none"`, a 4K model context,
+and exactly one active tool are intentional for this narrow demo. Screenshots
+and temporary Edge profiles are disposable; result logs retain dimensions and
+hashes, never image bytes. A run without a screenshot fails before the model or
+approval is called.
+
+This command is a bounded synthetic demo, not authorization for general UI
+automation or Excel fine-formatting. Actual 16 GB suitability must be measured
+on a 16 GB machine; do not infer it from a larger machine's run.
