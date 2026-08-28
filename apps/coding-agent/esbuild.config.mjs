@@ -35,6 +35,7 @@ await build({ ...testCommon, entryPoints: ['./test/computer-use-demo.ts'], outfi
 await build({ ...testCommon, entryPoints: ['./test/computer-use-safety.ts'], outfile: 'dist/computer-use-safety-test.js' })
 await build({ ...testCommon, entryPoints: ['./test/vision-budget.ts'], outfile: 'dist/vision-budget-test.js' })
 await build({ ...testCommon, entryPoints: ['./test/active-tools.ts'], outfile: 'dist/active-tools-test.js' })
+await build({ ...testCommon, entryPoints: ['./test/completion-policy.ts'], outfile: 'dist/completion-policy-test.js' })
 await build({ ...testCommon, entryPoints: ['./test/request-telemetry.ts'], outfile: 'dist/request-telemetry-test.js' })
 await build({ ...testCommon, entryPoints: ['./test/working-context.ts'], outfile: 'dist/working-context-test.js' })
 await build({ ...testCommon, entryPoints: ['./test/measure-computer-use-ollama.ts'], outfile: 'dist/measure-computer-use-ollama.js' })

@@ -12,6 +12,30 @@ ollama serve
 npm run serve -- --config .\config.json --workspace .
 ```
 
+### Q6_K / reasoning none profile
+
+For an explicit quality-first Q6 development run, copy the separate profile
+below. It keeps the Q4-compatible `config.ollama.json` fallback unchanged and
+does not enable production preload or `keep_alive` behavior.
+
+```powershell
+Copy-Item config.ollama.q6.json config.json
+ollama serve
+npm run serve -- --config .\config.json --workspace .
+```
+
+The Q6 profile uses the official
+`hf.co/ornith-ai/Ornith-1.5-9B-GGUF:Q6_K` model, sends
+`reasoning_effort="none"`, and uses phase caps of read `128`, action `1024`,
+and final `192` tokens. The read cap is a measured development-profile choice;
+rerun the documented cold comparison before changing it. `context 4096` is a
+model/server-side Ollama condition, not a portable OpenAI-compatible request
+field, so this profile deliberately does not send `num_ctx`.
+
+同条件のcold比較を再測定する場合は、アプリの作業ディレクトリで
+`node test/measure-q6-caps.mjs` を実行します。測定はread cap 128/256を各3回、
+選択capのwarm readと承認付きwriteを各1回実行し、結果を`.tmp/`へ保存します。
+
 `provider="ollama"` requires a model and a loopback `baseURL`; remote URLs and
 unknown providers are rejected while loading configuration. No
 `COMPANY_LLM_API_KEY` is read or sent on this path. Copilot/OpenAI-compatible

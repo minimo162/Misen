@@ -175,6 +175,9 @@ var RESPONSE_ONLY_PATTERNS = [
   /\bexplain\s+the\s+result\b/u,
   /\brespond\s+in\s+japanese\b/u
 ];
+var RESPONSE_PATH_PATTERN = /(?:^|[\s"'`([{、。！？])(?:\.{0,2}[\\/])?[^\s"'`()[\],;:！？。]*\.(?:txt|json|csv|md|xlsx|xlsm|pdf|html|js|ts|tsx|jsx|ps1|cmd|bat|yaml|yml|xml|toml|log|xls)(?=$|[\s"'`)、。！？,;:をのがはへにでとやも])/iu;
+var RESPONSE_URL_PATTERN = /(?:https?:\/\/|www\.)/iu;
+var RESPONSE_DESTINATION_PATTERN = /(?:\b(?:to|into|onto|save\s+to|write\s+to|report\s+to)\b|へ(?:保存|出力|反映|報告)?|に(?:保存|出力|反映|報告)?)/iu;
 var NETWORK_TOOL_NAME_PATTERN = /(?:^|[_-])(?:fetch|request|http|https|url|web|browser|browse|download|network|weather)(?:$|[_-])/u;
 var NETWORK_TOOL_DESCRIPTION_PATTERN = /(?:\b(?:https?|url|network|external|download|weather|open[- ]?meteo)\b|ネットワーク|外部(?:サイト|URL|サービス)|ダウンロード|天気)/u;
 function normalize(value) {
@@ -185,6 +188,13 @@ function hasAnySignal(text, patterns) {
 }
 function stripResponseOnlyDirectives(text) {
   return RESPONSE_ONLY_PATTERNS.reduce((remaining, pattern) => remaining.replace(pattern, " "), text);
+}
+function isResponseOnlyClause(clause) {
+  const intent = classifyIntent(clause);
+  if (intent.read || intent.write || intent.command || intent.network) return false;
+  if (RESPONSE_PATH_PATTERN.test(clause) || RESPONSE_URL_PATTERN.test(clause) || /[\\/]/u.test(clause)) return false;
+  if (RESPONSE_DESTINATION_PATTERN.test(clause)) return false;
+  return hasAnySignal(clause, RESPONSE_ONLY_PATTERNS);
 }
 function classifyIntent(userInput) {
   const text = normalize(userInput);
@@ -203,7 +213,7 @@ function hasUnrecognizedMixedClause(request, toolDefs) {
   return clauses.some((clause) => {
     const intent = inferIntentFromToolNames(clause, toolDefs, classifyIntent(clause));
     if (intent.read || intent.write || intent.command || intent.network) return false;
-    return !hasAnySignal(clause, RESPONSE_ONLY_PATTERNS);
+    return !isResponseOnlyClause(clause);
   });
 }
 function inferIntentFromToolNames(request, toolDefs, intent) {
@@ -457,6 +467,18 @@ function testResponseOnlyClauses() {
   import_strict.default.equal(mixedAction.category, "read-write");
   import_strict.default.equal(mixedAction.conservativeFallback, false);
   import_strict.default.deepEqual(names(mixedAction), ["list_files", "read_file", "search_files", "write_file", "edit_file"]);
+  for (const request of [
+    "Read README and report the result to output.txt.",
+    "README\u3092\u8AAD\u3093\u3067\u3001\u7D50\u679C\u3092output.txt\u306B\u5831\u544A\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+    "README\u3092\u8AAD\u3093\u3067\u3001\u7D50\u679C\u3092\u5171\u6709\u30D5\u30A9\u30EB\u30C0\u3078\u5831\u544A\u3057\u3066\u304F\u3060\u3055\u3044\u3002"
+  ]) {
+    const guarded = selectActiveTools({ toolDefs: tools, userInput: request });
+    import_strict.default.equal(guarded.conservativeFallback, true, `${request} must retain the conservative fallback`);
+    import_strict.default.strictEqual(guarded.toolDefs, tools);
+  }
+  const unknownDestination = selectActiveTools({ toolDefs: tools, userInput: "\u7D50\u679C\u3092/to/output.txt\u3078\u8EE2\u9001\u3057\u3066\u304F\u3060\u3055\u3044" });
+  import_strict.default.equal(unknownDestination.conservativeFallback, true);
+  import_strict.default.strictEqual(unknownDestination.toolDefs, tools);
 }
 function testExplicitRunScopedAndMissingToolFailSafe() {
   const scoped = [tools[0], tools[7]];

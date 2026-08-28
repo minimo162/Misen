@@ -1,0 +1,38 @@
+{
+  "agentLoop": "v2",
+  "provider": "ollama",
+  "baseURL": "http://127.0.0.1:11434/v1",
+  "model": "hf.co/ornith-ai/Ornith-1.5-9B-GGUF:Q6_K",
+  "agentOptimization": "on",
+  "reasoningEffort": "none",
+  "generationLimits": {
+    "readToolRequestMaxOutputTokens": 128,
+    "actionToolRequestMaxOutputTokens": 1024,
+    "finalResponseMaxOutputTokens": 192
+  },
+  "temperature": 0.2,
+  "maxToolIterations": 10,
+  "maxToolExecutions": 8,
+  "maxWriteExecutions": 3,
+  "maxCommandExecutions": 2,
+  "maxNoProgress": 2,
+  "allowArbitraryCommands": false,
+  "safeCommandOnly": true,
+  "restrictToWorkspace": true,
+  "autoApprove": { "write": false, "command": false },
+  "permissions": [
+    { "permission": "list_files", "pattern": "*", "action": "allow" },
+    { "permission": "read_file", "pattern": "*", "action": "allow" },
+    { "permission": "read_files", "pattern": "*", "action": "allow" },
+    { "permission": "read_xlsx", "pattern": "*", "action": "allow" },
+    { "permission": "search_files", "pattern": "*", "action": "allow" },
+    { "permission": "write_file", "pattern": "*", "action": "ask" },
+    { "permission": "write_file.overwrite", "pattern": "*", "action": "ask" },
+    { "permission": "start_process", "pattern": "*", "action": "ask" },
+    { "permission": "run_command", "pattern": "*", "action": "ask" }
+  ],
+  "_comment_model": "Q6_Kの公式HF配布モデル。Ollamaで事前に取得してください。",
+  "_comment_context": "context 4096はOpenAI互換requestではなくOllamaモデル／サーバー側の条件です。",
+  "_comment_readCap": "read capは同条件のcold比較で選定します。productionのpreload／keep_aliveは設定しません。",
+  "_comment_num_ctx": "Ollama OpenAI互換エンドポイントへnum_ctxを偽装追加しません。"
+}
