@@ -23,6 +23,7 @@ import { createPermissionHook, type PermissionDecision } from './permission-hook
 import type { ChatMessage, ToolCall } from './llm'
 import { containsAgentImage, normalizeAgentUserContent, type AgentUserContent } from './multimodal'
 import { selectActiveTools, type ActiveToolsSelection } from './active-tools'
+import { deriveCompletionPolicy, recordToolOutcome, shouldEnterToolsClosedFinal, type CompletionPolicyState } from './completion-policy'
 import { createRequestTelemetryCollector, type ProviderReportedTokenUsage, type RequestTelemetryGenerationPhase, type RequestTelemetryRecord } from './request-telemetry'
 import { buildModelWorkingContext, DEFAULT_TOOL_RESULT_BYTES, type WorkingContextTelemetry } from './working-context'
 import {
@@ -593,6 +594,10 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
   // contract. Ordinary text work is the only pruning/capping target.
   const optimizeWorkingContext = optimizationEnabled && opts.toolDefs === undefined && !containsAgentImage(userContent)
   const ordinaryTextWork = mode === 'work' && opts.toolDefs === undefined && !containsAgentImage(userContent)
+  // Completion is limited to ordinary text work.  Explicit run-scoped and
+  // image flows keep their existing loop contract even when optimisation is
+  // globally enabled.
+  let completionPolicy: CompletionPolicyState = deriveCompletionPolicy(opts.userInput, activeSelection, { optimizationEnabled: optimizationEnabled && ordinaryTextWork })
   const telemetry = createRequestTelemetryCollector()
   let requestIndex = 0
   const systemFor = (targetMode: 'work' | 'research' | 'chat', exposedToolDefs: readonly ToolDef[] = scopedToolDefs): string => [...new Set([
@@ -680,14 +685,6 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
   let lastResultKey = ''
   let confirmationOnly = false
   let activeVisionContent = userContent
-  // Automatic close is intentionally narrow: ordinary, non-fallback text
-  // work where the selected capability is read/write.  Command, coding,
-  // uncertain, explicit run-scoped, and vision flows keep their existing
-  // multi-step behaviour and safety checks.
-  const autoCloseEligible = ordinaryTextWork && optimizationEnabled && !activeSelection.conservativeFallback && (
-    activeSelection.category === 'read' || activeSelection.category === 'write' || activeSelection.category === 'read-write'
-  )
-
   const rejectToolCalls = (reason: string, calls: readonly { toolCallId: string; toolName: string }[]): AgentTurnResult => {
     for (const call of calls) {
       const hostResult = formatHostResult(qualifiedToolName(call.toolName), `[orchestrator rejected] ${reason}`, null, 'failed', call.toolCallId, ctx.runId)
@@ -779,6 +776,7 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
     actionCounts.set(key, 1)
 
     const executed = await executeV2ToolCall(call, def, cfg, ctx, io, opts.beforeHooks ?? [])
+    completionPolicy = recordToolOutcome(completionPolicy, def.name, keyArgs, executed.status)
     if (executed.executed) {
       executions++
       if (def.kind === 'write') writes++
@@ -817,17 +815,11 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
         confirmationOnly = true
       }
     }
-    const closeAfterSuccessfulRead = autoCloseEligible && activeSelection.category === 'read' && def.kind === 'read' && executed.status === 'succeeded'
-    const closeAfterSuccessfulWrite = autoCloseEligible && (activeSelection.category === 'write' || activeSelection.category === 'read-write') && def.kind === 'write' && executed.status === 'succeeded'
-    if (closeAfterSuccessfulRead || closeAfterSuccessfulWrite) {
-      confirmationOnly = true
-    }
-    if (autoCloseEligible && optimizeWorkingContext && executed.status === 'succeeded' && executions >= policy.maxHostExecutions) {
-      // Once the configured execution budget is exhausted, close tools and
-      // permit one bounded final response instead of advertising actions the
-      // orchestrator would necessarily reject on the next iteration.
-      confirmationOnly = true
-    }
+    // Enter the zero-tool final phase only after the pure policy proves that
+    // every statically identified target/action succeeded.  A failure,
+    // denial, ambiguous target, discovery chain, command, or multi-target
+    // request therefore keeps the normal loop (or fails closed) unchanged.
+    if (shouldEnterToolsClosedFinal(completionPolicy)) confirmationOnly = true
     if (noProgress >= policy.maxNoProgress) return warningResult(`hostツール結果に進展がないため停止しました（${policy.maxNoProgress}回連続）`, messages, io)
   }
   return warningResult('最大反復回数に達しました', messages, io)

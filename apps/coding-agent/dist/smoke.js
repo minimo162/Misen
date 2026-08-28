@@ -40887,6 +40887,9 @@ var RESPONSE_ONLY_PATTERNS = [
   /\bexplain\s+the\s+result\b/u,
   /\brespond\s+in\s+japanese\b/u
 ];
+var RESPONSE_PATH_PATTERN = /(?:^|[\s"'`([{、。！？])(?:\.{0,2}[\\/])?[^\s"'`()[\],;:！？。]*\.(?:txt|json|csv|md|xlsx|xlsm|pdf|html|js|ts|tsx|jsx|ps1|cmd|bat|yaml|yml|xml|toml|log|xls)(?=$|[\s"'`)、。！？,;:をのがはへにでとやも])/iu;
+var RESPONSE_URL_PATTERN = /(?:https?:\/\/|www\.)/iu;
+var RESPONSE_DESTINATION_PATTERN = /(?:\b(?:to|into|onto|save\s+to|write\s+to|report\s+to)\b|へ(?:保存|出力|反映|報告)?|に(?:保存|出力|反映|報告)?)/iu;
 var NETWORK_TOOL_NAME_PATTERN = /(?:^|[_-])(?:fetch|request|http|https|url|web|browser|browse|download|network|weather)(?:$|[_-])/u;
 var NETWORK_TOOL_DESCRIPTION_PATTERN = /(?:\b(?:https?|url|network|external|download|weather|open[- ]?meteo)\b|ネットワーク|外部(?:サイト|URL|サービス)|ダウンロード|天気)/u;
 function normalize(value) {
@@ -40897,6 +40900,13 @@ function hasAnySignal(text2, patterns) {
 }
 function stripResponseOnlyDirectives(text2) {
   return RESPONSE_ONLY_PATTERNS.reduce((remaining, pattern) => remaining.replace(pattern, " "), text2);
+}
+function isResponseOnlyClause(clause) {
+  const intent = classifyIntent(clause);
+  if (intent.read || intent.write || intent.command || intent.network) return false;
+  if (RESPONSE_PATH_PATTERN.test(clause) || RESPONSE_URL_PATTERN.test(clause) || /[\\/]/u.test(clause)) return false;
+  if (RESPONSE_DESTINATION_PATTERN.test(clause)) return false;
+  return hasAnySignal(clause, RESPONSE_ONLY_PATTERNS);
 }
 function classifyIntent(userInput) {
   const text2 = normalize(userInput);
@@ -40915,7 +40925,7 @@ function hasUnrecognizedMixedClause(request, toolDefs) {
   return clauses.some((clause) => {
     const intent = inferIntentFromToolNames(clause, toolDefs, classifyIntent(clause));
     if (intent.read || intent.write || intent.command || intent.network) return false;
-    return !hasAnySignal(clause, RESPONSE_ONLY_PATTERNS);
+    return !isResponseOnlyClause(clause);
   });
 }
 function inferIntentFromToolNames(request, toolDefs, intent) {
@@ -41011,6 +41021,228 @@ function selectActiveTools(first, second, third) {
     conservativeFallback: false,
     reason: `${category} intent; ${suffix}`
   };
+}
+
+// src/completion-policy.ts
+var PATH_EXTENSIONS = [
+  "xlsx",
+  "xlsm",
+  "json",
+  "html",
+  "jsx",
+  "tsx",
+  "yaml",
+  "toml",
+  "xml",
+  "log",
+  "text",
+  "csv",
+  "md",
+  "pdf",
+  "js",
+  "ts",
+  "ps1",
+  "cmd",
+  "bat",
+  "yml",
+  "txt",
+  "xls"
+];
+var PATH_EXTENSION_PATTERN = new RegExp(`\\.(${PATH_EXTENSIONS.join("|")})(?![A-Za-z0-9_-])`, "giu");
+var ASCII_PATH_SUFFIX_PATTERN = new RegExp(
+  `(?:\\.{0,2}[\\\\/])?[A-Za-z0-9_*.-]+(?:[\\\\/][A-Za-z0-9_*.-]+)*\\.(?:${PATH_EXTENSIONS.join("|")})$`,
+  "iu"
+);
+var READ_CONTENT_PATTERN = /(?:\bread\b|inspect|examine|view|open\s+(?:the\s+)?(?:file|document|workbook|README)|check\s+(?:the\s+)?(?:file|document|content)|読む|読み|読んで|閲覧|比較)/iu;
+var LIST_PATTERN = /(?:\blist\b|enumerate|一覧|列挙)/iu;
+var SEARCH_PATTERN = /(?:\bsearch\b|\bfind\b|look\s*up|lookup|検索|探(?:す|して|したい))/iu;
+var WRITE_PATTERN = /(?:\bwrite\b|\bcreate\b|\bmake\b|\bedit\b|\bupdate\b|\bmodify\b|\bsave\b|\bdelete\b|\bremove\b|\bappend\b|\badd\b|\bgenerate\b|\bdraft\b|\boverwrite\b|\brename\b|作(?:成|る|って|りたい)|書(?:く|き|いて|け)|生成|編集|更新|変更|保存|削除|追加|報告|出力|反映)/iu;
+var MULTI_ACTION_PATTERN = /(?:\band\b|\bthen\b|\balso\b|\bafter\b|\bfollowed\s+by\b|と|や|および|及び|ならびに|かつ|してから|した後|その後|さらに|また|、)/iu;
+var COMMAND_PATTERN = /(?:\brun\b|\bexecute\b|\bexec\b|\bcommand\b|\bshell\b|\bterminal\b|\bprocess\b|\bstart\b|\bstop\b|\bkill\b|\blaunch\b|\bspawn\b|\bnetwork\b|\bfetch\b|\bdownload\b|\binstall\b|\bcurl\b|\bwget\b|\bnpm\b|\bpnpm\b|\byarn\b|\bbun\b|\bgit\b|実行|コマンド|シェル|ターミナル|プロセス|起動|停止|終了|ネットワーク|接続|ダウンロード|インストール|ブラウザ|外部(?:サイト|URL|サービス)|リファクタ|ビルド)/iu;
+var VERIFICATION_PATTERN = /(?:\b(?:verify|verification|test|testing|build|coding|implement|refactor)\b|検証|テスト|実装|リファクタ|ビルド|動作確認)/iu;
+var DESTINATION_BEFORE_PATTERN = /(?:\b(?:to|into|onto|save\s+to|write\s+to|report\s+to)\b)\s*$/iu;
+var DESTINATION_AFTER_PATTERN = /^(?:へ|に)(?:保存|出力|反映|報告)?/u;
+function normalize2(value) {
+  return value.normalize("NFKC").toLowerCase();
+}
+function canonicalPath(value) {
+  return value.trim().replaceAll("\\", "/").replace(/^\.\//u, "").replace(/\/+/gu, "/").replace(/\/$/u, "").toLowerCase();
+}
+function unique(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+function extractPathTokens(text2) {
+  const tokens = [];
+  PATH_EXTENSION_PATTERN.lastIndex = 0;
+  for (const match2 of text2.matchAll(PATH_EXTENSION_PATTERN)) {
+    const extensionStart = match2.index ?? 0;
+    const extensionLength = match2[0].length;
+    let boundary = extensionStart - 1;
+    while (boundary >= 0 && !/[\s"'`([{、。！？]/u.test(text2[boundary] ?? "")) boundary--;
+    let start = boundary + 1;
+    const prefix2 = text2.slice(start, extensionStart);
+    const particle = prefix2.match(/[をにへとやのがはもで](?=[A-Za-z0-9_*?.-])/gu);
+    if (particle?.length) {
+      const last = particle[particle.length - 1];
+      const particleIndex = prefix2.lastIndexOf(last);
+      if (particleIndex >= 0) start += particleIndex + last.length;
+    }
+    const value = text2.slice(start, extensionStart + extensionLength).replace(/[),;:!?。！？]+$/u, "");
+    if (!value) continue;
+    const guarded = value.match(ASCII_PATH_SUFFIX_PATTERN)?.[0] ?? value;
+    const index = extensionStart + extensionLength - guarded.length;
+    tokens.push({ value: canonicalPath(guarded), index, length: guarded.length, pattern: /[*?]/u.test(guarded) });
+  }
+  return tokens;
+}
+function splitClauses(text2) {
+  return text2.split(/(?:\b(?:and|then|also|but|plus|afterwards?|followed\s+by)\b|[,&;|]+|\r?\n|、|。|(?:してから|した後|その後|さらに|また|および|及び|ならびに|かつ))/u).map((clause) => clause.trim()).filter(Boolean);
+}
+function clauseForToken(text2, token) {
+  const clauses = splitClauses(text2);
+  let offset = 0;
+  for (const clause of clauses) {
+    const index = text2.indexOf(clause, offset);
+    if (index >= 0 && token.index >= index && token.index <= index + clause.length) return clause;
+    offset = Math.max(offset, index + clause.length);
+  }
+  return text2;
+}
+function isDestination(text2, token) {
+  const before = text2.slice(Math.max(0, token.index - 80), token.index);
+  const after = text2.slice(token.index + token.length, token.index + token.length + 24);
+  return DESTINATION_BEFORE_PATTERN.test(before) || DESTINATION_AFTER_PATTERN.test(after);
+}
+function classifyRoles(text2, tokens) {
+  const sources = [];
+  const outputs = [];
+  for (const token of tokens) {
+    const clause = clauseForToken(text2, token);
+    const clauseReads = READ_CONTENT_PATTERN.test(clause);
+    const clauseWrites = WRITE_PATTERN.test(clause);
+    if (isDestination(text2, token) || clauseWrites && !clauseReads) outputs.push(token.value);
+    else if (clauseReads && !clauseWrites) sources.push(token.value);
+  }
+  const assigned = /* @__PURE__ */ new Set([...sources, ...outputs]);
+  return { sources: unique(sources), outputs: unique(outputs), complete: assigned.size === unique(tokens.map((token) => token.value)).length };
+}
+function baseState(mode, reason, requiredReadTargets = [], requiredWriteTargets = [], enabled = true) {
+  return {
+    enabled,
+    mode,
+    reason,
+    requiredReadTargets: unique(requiredReadTargets),
+    requiredWriteTargets: unique(requiredWriteTargets),
+    successfulReadTargets: [],
+    successfulWriteTargets: [],
+    successfulList: false,
+    successfulSearch: false,
+    failedOrDenied: false
+  };
+}
+function disabled(reason) {
+  return baseState("disabled", reason, [], [], false);
+}
+function categoryHas(category, value) {
+  return category === value || category.includes(value);
+}
+function deriveCompletionPolicy(userInput, activeSelection, options = {}) {
+  if (options.optimizationEnabled === false) return disabled("disabled-optimization");
+  if (activeSelection.category === "explicit-run-scoped") return disabled("disabled-explicit-run-scoped");
+  if (activeSelection.conservativeFallback || activeSelection.category === "uncertain" || activeSelection.category === "full") {
+    return disabled("disabled-uncertain");
+  }
+  const text2 = normalize2(userInput);
+  const category = activeSelection.category;
+  const hasCommand = categoryHas(category, "command") || COMMAND_PATTERN.test(text2);
+  if (hasCommand) return disabled("disabled-command");
+  if (VERIFICATION_PATTERN.test(text2)) return disabled("disabled-verification");
+  const tokens = extractPathTokens(text2);
+  const targets = unique(tokens.map((token) => token.value));
+  const hasList = LIST_PATTERN.test(text2);
+  const hasSearch = SEARCH_PATTERN.test(text2);
+  const hasContentRead = READ_CONTENT_PATTERN.test(text2);
+  const hasWrite = categoryHas(category, "write") || WRITE_PATTERN.test(text2);
+  const hasRead = hasContentRead || categoryHas(category, "read") && !hasList && !hasSearch;
+  if (hasList && !hasSearch && !hasContentRead && !hasWrite) return baseState("pure-list", "list-complete");
+  if (hasSearch && !hasList && !hasContentRead && !hasWrite) return baseState("pure-search", "search-complete");
+  if ((hasList || hasSearch) && (hasContentRead || hasWrite)) return disabled("disabled-discovery-chain");
+  if (hasList && hasSearch) return disabled("disabled-uncertain");
+  if (hasRead && hasWrite) {
+    const roles = classifyRoles(text2, tokens);
+    if (roles.complete && roles.sources.length === 1 && roles.outputs.length === 1 && !roles.sources.some((source) => roles.outputs.includes(source))) {
+      return baseState("read-write", "read-write-complete", roles.sources, roles.outputs);
+    }
+    return disabled("disabled-ambiguous-target");
+  }
+  if (hasWrite) {
+    if (targets.length === 1 && !tokens.some((token) => token.pattern)) return baseState("single-write", "single-write-complete", [], targets);
+    if (targets.length >= 2 && !tokens.some((token) => token.pattern)) return baseState("multi-write", "disabled-multi-target", [], targets);
+    if (targets.length === 0 && !MULTI_ACTION_PATTERN.test(text2) && !hasRead && !hasList && !hasSearch) {
+      return baseState("single-write", "single-write-complete");
+    }
+    return disabled("disabled-uncertain");
+  }
+  if (hasRead) {
+    if (targets.length >= 2 || tokens.some((token) => token.pattern)) return baseState("multi-read", "disabled-multi-target", targets, []);
+    if (targets.length === 1) return baseState("single-read", "single-read-complete", targets, []);
+    return disabled("disabled-uncertain");
+  }
+  return disabled("disabled-unknown");
+}
+function bareToolName2(name24) {
+  const normalized2 = normalize2(name24).trim();
+  const marker24 = normalized2.lastIndexOf("__");
+  return marker24 >= 0 ? normalized2.slice(marker24 + 2) : normalized2.replace(/^host[.:]/u, "");
+}
+function explicitReadTargets(args) {
+  if (typeof args.path === "string" && args.path.trim()) return [canonicalPath(args.path)];
+  if (Array.isArray(args.paths)) return args.paths.filter((value) => typeof value === "string" && value.trim().length > 0).map(canonicalPath);
+  return [];
+}
+function explicitWriteTargets(args) {
+  return typeof args.path === "string" && args.path.trim() ? [canonicalPath(args.path)] : [];
+}
+function mergeState(state, patch) {
+  return { ...state, ...patch };
+}
+function recordToolOutcome(state, toolName, args, status) {
+  if (status !== "succeeded") return mergeState(state, { failedOrDenied: true });
+  const bare = bareToolName2(toolName);
+  if (bare === "list_files") return mergeState(state, { successfulList: true });
+  if (bare === "search_files") return mergeState(state, { successfulSearch: true });
+  const safeArgs = args ?? {};
+  if (bare === "read_file" || bare === "read_xlsx" || bare === "read_files") {
+    return mergeState(state, { successfulReadTargets: unique([...state.successfulReadTargets, ...explicitReadTargets(safeArgs)]) });
+  }
+  if (bare === "write_file" || bare === "edit_file") {
+    return mergeState(state, { successfulWriteTargets: unique([...state.successfulWriteTargets, ...explicitWriteTargets(safeArgs)]) });
+  }
+  return state;
+}
+function includesAll(have, required2) {
+  const set2 = new Set(have);
+  return required2.every((target) => set2.has(target));
+}
+function shouldEnterToolsClosedFinal(state) {
+  if (!state.enabled || state.failedOrDenied) return false;
+  switch (state.mode) {
+    case "single-read":
+    case "multi-read":
+      return includesAll(state.successfulReadTargets, state.requiredReadTargets);
+    case "pure-list":
+      return state.successfulList;
+    case "pure-search":
+      return state.successfulSearch;
+    case "single-write":
+      return state.requiredWriteTargets.length > 0 ? includesAll(state.successfulWriteTargets, state.requiredWriteTargets) : state.successfulWriteTargets.length === 1;
+    case "multi-write":
+      return includesAll(state.successfulWriteTargets, state.requiredWriteTargets);
+    case "read-write":
+      return includesAll(state.successfulReadTargets, state.requiredReadTargets) && includesAll(state.successfulWriteTargets, state.requiredWriteTargets);
+    default:
+      return false;
+  }
 }
 
 // src/request-telemetry.ts
@@ -42031,6 +42263,7 @@ async function runAgentTurnV2(opts) {
   const scopedToolDefs = [...activeSelection.toolDefs];
   const optimizeWorkingContext = optimizationEnabled && opts.toolDefs === void 0 && !containsAgentImage(userContent);
   const ordinaryTextWork = mode === "work" && opts.toolDefs === void 0 && !containsAgentImage(userContent);
+  let completionPolicy = deriveCompletionPolicy(opts.userInput, activeSelection, { optimizationEnabled: optimizationEnabled && ordinaryTextWork });
   const telemetry = createRequestTelemetryCollector();
   let requestIndex = 0;
   const systemFor = (targetMode, exposedToolDefs = scopedToolDefs) => [...new Set([
@@ -42112,7 +42345,6 @@ async function runAgentTurnV2(opts) {
   let lastResultKey = "";
   let confirmationOnly = false;
   let activeVisionContent = userContent;
-  const autoCloseEligible = ordinaryTextWork && optimizationEnabled && !activeSelection.conservativeFallback && (activeSelection.category === "read" || activeSelection.category === "write" || activeSelection.category === "read-write");
   const rejectToolCalls = (reason, calls) => {
     for (const call of calls) {
       const hostResult = formatHostResult(qualifiedToolName(call.toolName), `[orchestrator rejected] ${reason}`, null, "failed", call.toolCallId, ctx.runId);
@@ -42190,6 +42422,7 @@ async function runAgentTurnV2(opts) {
     if ((actionCounts.get(key) ?? 0) > 0) return rejectToolCalls("\u540C\u3058host\u30C4\u30FC\u30EB\u64CD\u4F5C\u304C\u7E70\u308A\u8FD4\u3055\u308C\u305F\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F", calls);
     actionCounts.set(key, 1);
     const executed = await executeV2ToolCall(call, def, cfg, ctx, io, opts.beforeHooks ?? []);
+    completionPolicy = recordToolOutcome(completionPolicy, def.name, keyArgs, executed.status);
     if (executed.executed) {
       executions++;
       if (def.kind === "write") writes++;
@@ -42219,14 +42452,7 @@ async function runAgentTurnV2(opts) {
         confirmationOnly = true;
       }
     }
-    const closeAfterSuccessfulRead = autoCloseEligible && activeSelection.category === "read" && def.kind === "read" && executed.status === "succeeded";
-    const closeAfterSuccessfulWrite = autoCloseEligible && (activeSelection.category === "write" || activeSelection.category === "read-write") && def.kind === "write" && executed.status === "succeeded";
-    if (closeAfterSuccessfulRead || closeAfterSuccessfulWrite) {
-      confirmationOnly = true;
-    }
-    if (autoCloseEligible && optimizeWorkingContext && executed.status === "succeeded" && executions >= policy.maxHostExecutions) {
-      confirmationOnly = true;
-    }
+    if (shouldEnterToolsClosedFinal(completionPolicy)) confirmationOnly = true;
     if (noProgress >= policy.maxNoProgress) return warningResult(`host\u30C4\u30FC\u30EB\u7D50\u679C\u306B\u9032\u5C55\u304C\u306A\u3044\u305F\u3081\u505C\u6B62\u3057\u307E\u3057\u305F\uFF08${policy.maxNoProgress}\u56DE\u9023\u7D9A\uFF09`, messages, io);
   }
   return warningResult("\u6700\u5927\u53CD\u5FA9\u56DE\u6570\u306B\u9054\u3057\u307E\u3057\u305F", messages, io);

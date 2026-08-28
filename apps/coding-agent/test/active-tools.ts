@@ -153,6 +153,20 @@ function testResponseOnlyClauses(): void {
   assert.equal(mixedAction.category, 'read-write')
   assert.equal(mixedAction.conservativeFallback, false)
   assert.deepEqual(names(mixedAction), ['list_files', 'read_file', 'search_files', 'write_file', 'edit_file'])
+
+  for (const request of [
+    'Read README and report the result to output.txt.',
+    'READMEを読んで、結果をoutput.txtに報告してください。',
+    'READMEを読んで、結果を共有フォルダへ報告してください。'
+  ]) {
+    const guarded = selectActiveTools({ toolDefs: tools, userInput: request })
+    assert.equal(guarded.conservativeFallback, true, `${request} must retain the conservative fallback`)
+    assert.strictEqual(guarded.toolDefs, tools)
+  }
+
+  const unknownDestination = selectActiveTools({ toolDefs: tools, userInput: '結果を/to/output.txtへ転送してください' })
+  assert.equal(unknownDestination.conservativeFallback, true)
+  assert.strictEqual(unknownDestination.toolDefs, tools)
 }
 
 function testExplicitRunScopedAndMissingToolFailSafe(): void {

@@ -208,6 +208,14 @@ const RESPONSE_ONLY_PATTERNS: readonly RegExp[] = [
   /\brespond\s+in\s+japanese\b/u
 ]
 
+// Response-only wording is safe to strip only when the entire clause has no
+// path/destination residue. Keep this deliberately conservative: a slash,
+// URL, or destination particle may describe a host-side output action even if
+// the clause also contains words such as "report" or "tell me".
+const RESPONSE_PATH_PATTERN = /(?:^|[\s"'`([{、。！？])(?:\.{0,2}[\\/])?[^\s"'`()[\],;:！？。]*\.(?:txt|json|csv|md|xlsx|xlsm|pdf|html|js|ts|tsx|jsx|ps1|cmd|bat|yaml|yml|xml|toml|log|xls)(?=$|[\s"'`)、。！？,;:をのがはへにでとやも])/iu
+const RESPONSE_URL_PATTERN = /(?:https?:\/\/|www\.)/iu
+const RESPONSE_DESTINATION_PATTERN = /(?:\b(?:to|into|onto|save\s+to|write\s+to|report\s+to)\b|へ(?:保存|出力|反映|報告)?|に(?:保存|出力|反映|報告)?)/iu
+
 /*
  * A read-kind tool can still be an external/network capability (for example
  * fetch_url or get_weather).  Such tools remain hidden during a local file
@@ -228,6 +236,15 @@ function hasAnySignal(text: string, patterns: readonly RegExp[]): boolean {
 
 function stripResponseOnlyDirectives(text: string): string {
   return RESPONSE_ONLY_PATTERNS.reduce((remaining, pattern) => remaining.replace(pattern, ' '), text)
+}
+
+function isResponseOnlyClause(clause: string): boolean {
+  const intent = classifyIntent(clause)
+  // Known host intent always wins over response-only wording.
+  if (intent.read || intent.write || intent.command || intent.network) return false
+  if (RESPONSE_PATH_PATTERN.test(clause) || RESPONSE_URL_PATTERN.test(clause) || /[\\/]/u.test(clause)) return false
+  if (RESPONSE_DESTINATION_PATTERN.test(clause)) return false
+  return hasAnySignal(clause, RESPONSE_ONLY_PATTERNS)
 }
 
 function classifyIntent(userInput: string): Intent {
@@ -254,7 +271,7 @@ function hasUnrecognizedMixedClause(request: string, toolDefs: readonly ToolDef[
     if (intent.read || intent.write || intent.command || intent.network) return false
     // A response-only directive (for example, "色を教えてください") is not
     // an additional host action and therefore must not trigger fallback.
-    return !hasAnySignal(clause, RESPONSE_ONLY_PATTERNS)
+    return !isResponseOnlyClause(clause)
   })
 }
 
