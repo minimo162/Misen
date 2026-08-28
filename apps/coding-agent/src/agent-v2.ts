@@ -252,6 +252,32 @@ function assertBoundedVisionRequest(options: {
   }
 }
 
+function assertImageRequestPolicy(options: {
+  cfg: AgentConfig
+  messages: readonly V2ModelMessage[]
+  system: string
+  toolDefs: readonly ToolDef[]
+  activeContent: AgentUserContent | undefined
+  visualTokenBudget: number | undefined
+  maxContextTokens: number | undefined
+}): void {
+  if (!containsAgentImage(options.activeContent)) return
+  if (options.cfg.provider !== 'ollama') {
+    throw new Error('画像入力はlocal Ollama専用です。Copilot/external providerでは利用できません')
+  }
+  if (options.visualTokenBudget === undefined || options.maxContextTokens === undefined) {
+    throw new Error('画像入力には visualTokenBudget と maxContextTokens が必要です')
+  }
+  assertBoundedVisionRequest({
+    messages: options.messages,
+    system: options.system,
+    toolDefs: options.toolDefs,
+    activeContent: options.activeContent,
+    visualTokenBudget: options.visualTokenBudget,
+    maxContextTokens: options.maxContextTokens
+  })
+}
+
 function runToolDefs(cfg: AgentConfig, ctx: ToolContext, supplied?: readonly ToolDef[]): ToolDef[] {
   const policy = capabilityPolicy(cfg, 'work')
   if (supplied !== undefined) {
@@ -479,8 +505,8 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
   if (containsAgentImage(userContent) && cfg.provider !== 'ollama') {
     throw new Error('画像入力はlocal Ollama専用です。Copilot/external providerでは利用できません')
   }
-  const visualTokenBudget = requiresImage ? opts.visualTokenBudget : undefined
-  const maxContextTokens = requiresImage ? opts.maxContextTokens : undefined
+  const visualTokenBudget = opts.visualTokenBudget
+  const maxContextTokens = opts.maxContextTokens
   if (requiresImage && (visualTokenBudget === undefined || maxContextTokens === undefined)) {
     throw new Error('画像必須のhostツールには visualTokenBudget と maxContextTokens が必要です')
   }
@@ -501,6 +527,11 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
     cfg.systemPrompt,
     buildProtocolRules(targetMode, policy.allowArbitraryCommands, policy.autoApproveCommand, ctx.safeCommandOnly === true, scopedToolDefs)
   ].filter((value): value is string => typeof value === 'string' && value.length > 0))].join('\n\n')
+
+  assertImageRequestPolicy({
+    cfg, messages: modelMessages, system: systemFor(mode), toolDefs: mode === 'work' ? scopedToolDefs : [],
+    activeContent: userContent, visualTokenBudget, maxContextTokens
+  })
 
   io.event?.({ type: 'plan.created', summary: mode === 'work' ? 'Runの計画と検証プロファイルを作成しました' : mode === 'research' ? '調査モードを開始しました' : '通常回答モードを開始しました', origin: 'orchestrator', namespace: 'none', authority: 'derived' })
 
@@ -543,27 +574,19 @@ export async function runAgentTurnV2(opts: AgentV2Options): Promise<AgentTurnRes
   let lastResultKey = ''
   let confirmationOnly = false
   let activeVisionContent = userContent
-  if (requiresImage) assertBoundedVisionRequest({
-    messages: modelMessages, system: systemFor('work'), toolDefs: scopedToolDefs,
-    activeContent: activeVisionContent,
-    visualTokenBudget: visualTokenBudget as number,
-    maxContextTokens: maxContextTokens as number
-  })
 
   for (let iteration = 0; iteration < policy.maxModelDecisions; iteration++) {
     if (shouldCancel(io)) return { reply: '', messages, aborted: true }
     if (io.isPaused?.()) return { reply: '', messages, aborted: true, paused: true }
+    const workSystem = systemFor('work')
+    assertImageRequestPolicy({
+      cfg, messages: modelMessages, system: workSystem, toolDefs: scopedToolDefs,
+      activeContent: activeVisionContent, visualTokenBudget, maxContextTokens
+    })
     let result: Awaited<ReturnType<typeof generateText>>
     try {
       emitModelWait(io, cfg)
       assertExternalBoundaryBeforeRequest(cfg, ctx, io)
-      const workSystem = systemFor('work')
-      if (requiresImage) assertBoundedVisionRequest({
-        messages: modelMessages, system: workSystem, toolDefs: scopedToolDefs,
-        activeContent: activeVisionContent,
-        visualTokenBudget: visualTokenBudget as number,
-        maxContextTokens: maxContextTokens as number
-      })
       result = await generateText({
         model,
         messages: modelMessages,

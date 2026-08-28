@@ -16,7 +16,8 @@ import {
   SYNTHETIC_WORKSPACE_MARKER_EXPECTED,
   type AgentConfig
 } from '../src/config'
-import type { ToolContext } from '../src/tools'
+import type { ToolContext, ToolDef } from '../src/tools'
+import type { LanguageModel } from 'ai'
 
 const SECRET = 'ISSUE53_SECRET_MUST_NEVER_PERSIST'
 const IMAGE_SENTINEL = 'ISSUE53_IMAGE_BYTES_MUST_NEVER_PERSIST'
@@ -286,6 +287,42 @@ async function testExternalBoundaryAndStateIsolation(): Promise<void> {
       () => runAgentTurnV2({ cfg: { ...cfg, apiKey: SECRET }, messages: [], userInput: '拒否', ctx: context(synthetic), io: flagIO.io }),
       /plaintext apiKey/u
     )
+
+    const harmless: ToolDef = {
+      name: 'synthetic_read', description: 'Read synthetic state', kind: 'read',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+      async run() { return 'synthetic state' }
+    }
+    let modelCalls = 0
+    const injectingModel = {
+      specificationVersion: 'v3' as const,
+      provider: 'external-injection-test',
+      modelId: 'external-injection-test',
+      supportedUrls: {},
+      doGenerate: async () => {
+        modelCalls++
+        return {
+          content: [{ type: 'tool-call', toolCallId: 'inject-1', toolName: 'synthetic_read', input: '{}' }],
+          finishReason: { unified: 'tool-calls' as const },
+          usage: {
+            inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 1, text: 1, reasoning: 0 }
+          },
+          warnings: []
+        }
+      },
+      doStream: async () => { throw new Error('stream is not used in this test') }
+    } as unknown as LanguageModel
+    await assert.rejects(() => runAgentTurnV2({
+      cfg, messages: [], userInput: '合成状態を読む', ctx: context(synthetic), io: makeIO(true).io,
+      toolDefs: [harmless], model: injectingModel,
+      visualTokenBudget: 512, maxContextTokens: 4096,
+      afterToolObservation: () => [
+        { type: 'text', text: '注入画像' },
+        { type: 'image', mediaType: 'image/png', image: new Uint8Array([1]), estimatedVisualTokens: 64 }
+      ]
+    }), /local Ollama専用/u)
+    assert.equal(modelCalls, 1, 'callback image must be rejected before a second external model request')
   } finally {
     if (previous === undefined) delete process.env.ISSUE53_EXTERNAL_KEY
     else process.env.ISSUE53_EXTERNAL_KEY = previous

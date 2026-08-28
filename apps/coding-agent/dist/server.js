@@ -40862,6 +40862,23 @@ function assertBoundedVisionRequest(options) {
     throw new Error("model request \u304C4K context budget\u3092\u8D85\u3048\u308B\u305F\u3081\u9001\u4FE1\u3057\u307E\u305B\u3093");
   }
 }
+function assertImageRequestPolicy(options) {
+  if (!containsAgentImage(options.activeContent)) return;
+  if (options.cfg.provider !== "ollama") {
+    throw new Error("\u753B\u50CF\u5165\u529B\u306Flocal Ollama\u5C02\u7528\u3067\u3059\u3002Copilot/external provider\u3067\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093");
+  }
+  if (options.visualTokenBudget === void 0 || options.maxContextTokens === void 0) {
+    throw new Error("\u753B\u50CF\u5165\u529B\u306B\u306F visualTokenBudget \u3068 maxContextTokens \u304C\u5FC5\u8981\u3067\u3059");
+  }
+  assertBoundedVisionRequest({
+    messages: options.messages,
+    system: options.system,
+    toolDefs: options.toolDefs,
+    activeContent: options.activeContent,
+    visualTokenBudget: options.visualTokenBudget,
+    maxContextTokens: options.maxContextTokens
+  });
+}
 function runToolDefs(cfg2, ctx2, supplied) {
   const policy = capabilityPolicy(cfg2, "work");
   if (supplied !== void 0) {
@@ -41055,8 +41072,8 @@ async function runAgentTurnV2(opts) {
   if (containsAgentImage(userContent) && cfg2.provider !== "ollama") {
     throw new Error("\u753B\u50CF\u5165\u529B\u306Flocal Ollama\u5C02\u7528\u3067\u3059\u3002Copilot/external provider\u3067\u306F\u5229\u7528\u3067\u304D\u307E\u305B\u3093");
   }
-  const visualTokenBudget = requiresImage ? opts.visualTokenBudget : void 0;
-  const maxContextTokens = requiresImage ? opts.maxContextTokens : void 0;
+  const visualTokenBudget = opts.visualTokenBudget;
+  const maxContextTokens = opts.maxContextTokens;
   if (requiresImage && (visualTokenBudget === void 0 || maxContextTokens === void 0)) {
     throw new Error("\u753B\u50CF\u5FC5\u9808\u306Ehost\u30C4\u30FC\u30EB\u306B\u306F visualTokenBudget \u3068 maxContextTokens \u304C\u5FC5\u8981\u3067\u3059");
   }
@@ -41077,6 +41094,15 @@ async function runAgentTurnV2(opts) {
     cfg2.systemPrompt,
     buildProtocolRules(targetMode, policy.allowArbitraryCommands, policy.autoApproveCommand, ctx2.safeCommandOnly === true, scopedToolDefs)
   ].filter((value) => typeof value === "string" && value.length > 0))].join("\n\n");
+  assertImageRequestPolicy({
+    cfg: cfg2,
+    messages: modelMessages,
+    system: systemFor(mode),
+    toolDefs: mode === "work" ? scopedToolDefs : [],
+    activeContent: userContent,
+    visualTokenBudget,
+    maxContextTokens
+  });
   io.event?.({ type: "plan.created", summary: mode === "work" ? "Run\u306E\u8A08\u753B\u3068\u691C\u8A3C\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB\u3092\u4F5C\u6210\u3057\u307E\u3057\u305F" : mode === "research" ? "\u8ABF\u67FB\u30E2\u30FC\u30C9\u3092\u958B\u59CB\u3057\u307E\u3057\u305F" : "\u901A\u5E38\u56DE\u7B54\u30E2\u30FC\u30C9\u3092\u958B\u59CB\u3057\u307E\u3057\u305F", origin: "orchestrator", namespace: "none", authority: "derived" });
   if (mode !== "work") {
     try {
@@ -41116,30 +41142,23 @@ async function runAgentTurnV2(opts) {
   let lastResultKey = "";
   let confirmationOnly = false;
   let activeVisionContent = userContent;
-  if (requiresImage) assertBoundedVisionRequest({
-    messages: modelMessages,
-    system: systemFor("work"),
-    toolDefs: scopedToolDefs,
-    activeContent: activeVisionContent,
-    visualTokenBudget,
-    maxContextTokens
-  });
   for (let iteration = 0; iteration < policy.maxModelDecisions; iteration++) {
     if (shouldCancel(io)) return { reply: "", messages, aborted: true };
     if (io.isPaused?.()) return { reply: "", messages, aborted: true, paused: true };
+    const workSystem = systemFor("work");
+    assertImageRequestPolicy({
+      cfg: cfg2,
+      messages: modelMessages,
+      system: workSystem,
+      toolDefs: scopedToolDefs,
+      activeContent: activeVisionContent,
+      visualTokenBudget,
+      maxContextTokens
+    });
     let result;
     try {
       emitModelWait(io, cfg2);
       assertExternalBoundaryBeforeRequest(cfg2, ctx2, io);
-      const workSystem = systemFor("work");
-      if (requiresImage) assertBoundedVisionRequest({
-        messages: modelMessages,
-        system: workSystem,
-        toolDefs: scopedToolDefs,
-        activeContent: activeVisionContent,
-        visualTokenBudget,
-        maxContextTokens
-      });
       result = await generateText({
         model,
         messages: modelMessages,

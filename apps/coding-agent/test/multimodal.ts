@@ -60,7 +60,7 @@ async function testImageBoundaryAndRedaction(): Promise<void> {
   const marker = new Uint8Array([0x53, 0x45, 0x43, 0x52, 0x45, 0x54, 0x2d, 0x49, 0x4d, 0x47])
   const userContent: AgentUserContent = [
     { type: 'text', text: '画像を確認' },
-    { type: 'image', mediaType: 'image/png', image: marker }
+    { type: 'image', mediaType: 'image/png', image: marker, estimatedVisualTokens: 64 }
   ]
   const fake = fakeModel([{ content: [{ type: 'text', text: '確認しました' }] }])
   const events: unknown[] = []
@@ -69,8 +69,11 @@ async function testImageBoundaryAndRedaction(): Promise<void> {
     messages: [],
     userInput: '画像を確認',
     userContent,
+    visualTokenBudget: 512,
+    maxContextTokens: 4096,
     ctx,
     io: { ...io(), event: (event) => events.push(event) },
+    toolDefs: [],
     model: fake.model
   })
   const prompt = fake.requests[0].prompt as Array<{ role: string; content: unknown }>
@@ -81,6 +84,20 @@ async function testImageBoundaryAndRedaction(): Promise<void> {
   assert.deepEqual(image?.data, marker)
   assert.equal(result.messages.some((message) => JSON.stringify(message).includes('SECRET-IMG')), false)
   assert.equal(JSON.stringify(events).includes('SECRET-IMG'), false)
+}
+
+async function testImageWithoutRequiredToolStillNeedsBudgets(): Promise<void> {
+  let modelCalls = 0
+  await assert.rejects(() => runAgentTurnV2({
+    cfg: { agentLoop: 'v2', provider: 'ollama', baseURL: '', model: '' },
+    messages: [], userInput: '画像', userContent: [
+      { type: 'text', text: '画像' },
+      { type: 'image', mediaType: 'image/png', image: new Uint8Array([1]), estimatedVisualTokens: 64 }
+    ],
+    ctx, io: io(), toolDefs: [],
+    model: { specificationVersion: 'v3', provider: 'test', modelId: 'no-call', supportedUrls: {}, doGenerate: async () => { modelCalls++; throw new Error('must not run') } } as never
+  }), /visualTokenBudget/u)
+  assert.equal(modelCalls, 0)
 }
 
 async function testScopedToolsAndObservation(): Promise<void> {
@@ -225,6 +242,7 @@ async function testVisionRequestBudgetFailsBeforeModel(): Promise<void> {
 async function main(): Promise<void> {
   await testContentContract()
   await testImageBoundaryAndRedaction()
+  await testImageWithoutRequiredToolStillNeedsBudgets()
   await testScopedToolsAndObservation()
   await testV1ImageRejection()
   await testImageRequiredToolFailsBeforeModel()
