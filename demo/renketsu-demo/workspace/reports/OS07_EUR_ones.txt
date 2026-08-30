@@ -1,7 +1,0 @@
-﻿Company: OS07 / 架空OS子会社07
-Currency: EUR; Unit: EUR
-Revenue: 90000000 EUR EUR
-Operating Profit: 11500000 EUR EUR
-Net Income: 7200000 EUR EUR
-Total Assets: 165000000 EUR EUR
-Employees: 430 persons EUR

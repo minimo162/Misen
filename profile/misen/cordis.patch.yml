@@ -1,0 +1,83 @@
+# Misen v3 initial PoC profile. Each override replaces the target row's
+# complete config; keep every key required by the pinned DSH alpha.2 schema.
+
+- id: system-prompt
+  config:
+    persona: ''
+
+- id: tools
+  config:
+    mode: native
+
+- id: llm-pi-ai
+  config:
+    providers:
+      misen-ollama:
+        apiKeyEnv: MISEN_LLM_API_KEY
+        api: openai-completions
+        baseURL: http://127.0.0.1:11434/v1
+        reasoning: 'off'
+        models:
+          - id: ornith-1.5:9b
+            contextWindow: 4096
+            input: [text, image]
+            reasoningEfforts: false
+
+- id: agent-default-model
+  config:
+    provider: misen-ollama
+    model: ornith-1.5:9b
+
+- id: sandbox-policy
+  config:
+    mode: read-only
+    workspaceRoot: !!js process.cwd()
+
+- id: approval
+  config:
+    policy: ask
+
+- id: web-runtime
+  config:
+    openBrowser: !!js ctx.webStartup.openBrowser
+    printUrl: true
+    surfaceContext: false
+    trustedHosts: !!js ctx.webStartup.trustedHosts
+
+- id: agent-presets
+  config:
+    default: misen-file
+    roots:
+      - path: !!js dshHomePath('misen-agent-presets')
+        trust: system
+    includeShippedRoot: false
+    includeUserRoot: false
+
+- id: llm-deepseek
+  disabled: true
+- id: settings
+  disabled: true
+- id: session-title-llm
+  disabled: true
+- id: permission
+  disabled: true
+- id: agent-instructions
+  disabled: true
+- id: command-feedback
+  disabled: true
+- id: ui-settings-general
+  disabled: true
+- id: ui-settings-models
+  disabled: true
+- id: ui-settings-plugin-inventory
+  disabled: true
+- id: ui-settings-plugins
+  disabled: true
+- id: ui-agent-preset
+  disabled: true
+- id: ui-model-selection
+  disabled: true
+- id: ui-permission
+  disabled: true
+- id: ui-message-feedback
+  disabled: true

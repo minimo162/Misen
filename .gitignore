@@ -1,9 +1,2 @@
 node_modules/
-packages/
-.tmp/
-config.json
-runtime/**/node.exe
-runtime/llama-cpp/
-runtime/models/*.gguf
 *.log
-startup-log.txt

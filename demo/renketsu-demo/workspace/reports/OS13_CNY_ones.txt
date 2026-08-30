@@ -1,7 +1,0 @@
-﻿Company: OS13 / 架空OS子会社13
-Currency: CNY; Unit: CNY
-Revenue: 720000000 CNY CNY
-Operating Profit: 88000000 CNY CNY
-Net Income: 61000000 CNY CNY
-Total Assets: 1300000000 CNY CNY
-Employees: 1380 persons CNY

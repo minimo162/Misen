@@ -1,11 +1,18 @@
 # Misen
 
-広島・宮島の弥山（みせん）に由来する、社内向けAIエージェントプロジェクトです。
+Misen は DeepSeek Harness (DSH) の profile / preset だけを管理する社内向け AI エージェント構成です。Misen 固有の実行ループは持たず、固定した DSH 構成を起動します。
 
-## coding-agent の起動
+## 起動
 
-リポジトリの `コーディングエージェント起動.cmd` をダブルクリックすると、既定の workspace として `%USERPROFILE%\Documents\エージェント作業場` を作成・使用します。作成できない場合は日本語のエラーを表示して停止します。
+```powershell
+npm ci
+npm start
+```
 
-別の既存フォルダーを workspace にする場合は、そのフォルダーを `コーディングエージェント起動.cmd` へドラッグ＆ドロップします。先頭のフォルダーを workspace として使い、2 個目以降のコマンドライン引数は coding-agent に透過します。指定先が存在するフォルダーでない場合は起動しません。
+初回は [セットアップ手順](docs/setup.md) に従って profile と preset を DSH home に配置してください。実行には Windows の Ollama、`ornith-1.5:9b`、DSH の `@deepseek-ai/dsh@0.1.2-alpha.2` が必要です。
 
-起動時は `launcher\launch.cmd` が共有 `apps\coding-agent` の版を確認します。初回または更新時にはローカルの版別領域へ取得し、manifest に記載された各ファイルの SHA-256 を検証してから current 版を有効化します。その後、検証済み版のサーバーを起動してブラウザーを開きます。
+Misen profile は `misen-ollama` / `ornith-1.5:9b`、context window 4096、reasoning 無効、read-only sandbox、approval ask を固定します。agent preset の model-facing tools は `read`、`read_image`、`write`、`edit`、`glob`、`grep` のみです。
+
+## 検証
+
+Windows 実機での Ollama / Ornith acceptance は [v3 initial PoC acceptance](docs/acceptance/v3-initial-poc.md) の手順と結果を記録します。

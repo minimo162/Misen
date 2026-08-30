@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "scripts": {
+    "start": "dsh --profile misen"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.1.2-alpha.2"
+  }
+}
