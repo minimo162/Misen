@@ -284,11 +284,11 @@ Get-Process node,ollama -ErrorAction SilentlyContinue |
 
 | ID | Mandatory result | Evidence / notes |
 | --- | --- | --- |
-| A01 | NOT RUN | |
-| A02 | NOT RUN | |
-| A03 | NOT RUN | |
-| A04 | NOT RUN | |
-| A05 | NOT RUN | |
+| A01 | PASS | DSH Web listened on `127.0.0.1:3080`; the standard DeepSeek Harness UI opened without an additional Misen auth layer, selected `misen-v3-acceptance` through the Project picker, and created a new session with an enabled Chat input. |
+| A02 | FAIL | Exact prompt run on 2026-08-31 JST. Trajectory showed `glob` plus reads of all three text files and the answer correctly reported `draft`, `open`, `closed`, and total `42`, but no required `grep` call occurred. Visible `Think` blocks with reasoning content also appeared during the real DSH/Ollama request despite the frozen thinking-OFF declaration. Acceptance stopped at this failure. |
+| A03 | NOT RUN | Stopped after A02 failure. |
+| A04 | NOT RUN | Stopped after A02 failure. |
+| A05 | NOT RUN | Stopped after A02 failure. |
 | A06 | NOT RUN | |
 | A07 | NOT RUN | |
 | A08 | NOT RUN | |
@@ -301,12 +301,12 @@ Get-Process node,ollama -ErrorAction SilentlyContinue |
 | A15 | NOT RUN | |
 | A16 | NOT RUN | |
 | A17 | NOT RUN | |
-| A18 | NOT RUN | |
+| A18 | NOT RUN | PID-scoped monitor completed from `2026-08-31T10:30:47+09:00` through `10:35:16+09:00`, with `BEFORE_FLOW`, `FLOW_ACTIVE`, and `FLOW_END` samples, zero monitor failures, and zero non-loopback DSH-tree connections. The mandatory A02-A05 representative flow was incomplete because Acceptance stopped at A02, so this is not a pass. Raw CSV remains outside Git. |
 
-Tester: `TBD`
-Date/time and timezone: `TBD`
-Windows build / CPU / RAM: `TBD`
-Node / npm / Ollama / model digest: `TBD`
-Draft PR commit: `TBD`
+Tester: `Codex coordinator with human Web UI operator`
+Date/time and timezone: `2026-08-31, Asia/Tokyo`
+Windows build / CPU / RAM: `Windows 11 Pro 10.0.26200 (x64) / Intel Core Ultra 5 228V / 33,847,832,576 bytes`
+Node / npm / Ollama / model digest: `Node 24.18.1 / npm 11.16.0 / Ollama 0.33.2 / ornith-1.5:9b e5df7dcdd8a2 (Q4_K_M)`
+Draft PR commit: `947a758039ee4bc078dd412cc138ba47a170f734` (Acceptance candidate before this record-only update)
 
 Overall status: `READY_FOR_WINDOWS_ACCEPTANCE` only after mechanical implementation, deterministic verification, both independent reviews, and Draft PR creation. Change this to `WINDOWS_ACCEPTANCE_PASS` only when every A01–A18 row is `PASS`. Any `FAIL`, `NOT RUN`, inferred result, or missing evidence blocks Ready and merge.
