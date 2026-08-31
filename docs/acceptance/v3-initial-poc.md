@@ -4,19 +4,21 @@ This is the version-controlled record for the mandatory real-machine gate. Stati
 
 ## Frozen baseline
 
-| Item | Required value |
+| Item | Acceptance requirement / tested candidate |
 | --- | --- |
 | OS | Windows x64 |
-| Node.js | `22.19.0` |
-| npm | bundled with the tested Node installation; record the exact version |
+| Node.js | pinned DSH supported range `^22.19.0 || >=24.0.0`; current tested candidate `24.18.1`; record the actual version |
+| npm | record the actual version; clean `npm ci` must pass |
 | DSH package | `@deepseek-ai/dsh@0.1.2-alpha.2` |
 | DSH tag / commit | `dsh-v0.1.2-alpha.2` / `0a53fb55bea101816fa226bb964ae2bed71c343b` |
-| Ollama | `0.33.1` |
+| Ollama | current tested candidate `0.33.2`; record the actual version |
 | model | stock `ornith-1.5:9b` Q4_K_M |
 | endpoint | `http://127.0.0.1:11434/v1` |
 | Ollama and DSH context | `4096` |
 | thinking | OFF |
 | DSH Web | standard `127.0.0.1:3080` |
+
+Node and npm are not exact-version equality gates beyond the pinned DSH compatibility contract and the required clean install. Passing this Acceptance on Ollama `0.33.2` establishes `0.33.2` as the tested baseline for this initial PoC; it does not guarantee compatibility with arbitrary future Ollama versions.
 
 Record the date, tester, PC/Windows build, and exact command output. Store raw logs outside Git when they contain session data; commit only redacted conclusions and small synthetic evidence.
 
