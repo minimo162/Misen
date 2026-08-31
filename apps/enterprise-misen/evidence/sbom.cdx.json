@@ -1,0 +1,1255 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:c046ee66-49d3-76b4-bd84-58af7cad5286",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "application",
+      "bom-ref": "pkg:npm/%40misen%2Fenterprise-runtime-poc@0.1.0",
+      "name": "@misen/enterprise-runtime-poc",
+      "version": "0.1.0",
+      "purl": "pkg:npm/%40misen%2Fenterprise-runtime-poc@0.1.0"
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40deepseek-ai/cordis@4.0.2",
+      "name": "@deepseek-ai/cordis",
+      "version": "4.0.2",
+      "purl": "pkg:npm/%40deepseek-ai/cordis@4.0.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "6AC3A75CFD53CC54854251DBD627A00D9A74CFFF160F573B60DAF0251FD3C766F336E3177DC7A413F23AEC8BFA4905DE2C1E1CB31A829E0CD028034FEE0770D2"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@deepseek-ai/cordis/-/cordis-4.0.2.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40deepseek-ai/cosmokit@1.8.3",
+      "name": "@deepseek-ai/cosmokit",
+      "version": "1.8.3",
+      "purl": "pkg:npm/%40deepseek-ai/cosmokit@1.8.3",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "A81A3EAE89D533A12ED963552578BC25C322A99D7D4FD05122957EE6A25414F5E3187FD9D1029C40C0BF21927B2F7F786133AD260728BDB93DA8FD30D86B015D"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@deepseek-ai/cosmokit/-/cosmokit-1.8.3.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40deepseek-ai/dsh-agent-loop@0.1.2-alpha.2",
+      "name": "@deepseek-ai/dsh-agent-loop",
+      "version": "0.1.2-alpha.2",
+      "purl": "pkg:npm/%40deepseek-ai/dsh-agent-loop@0.1.2-alpha.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "514D62FAB4EE415DD0E4F198E2A165A2327419BB6189BDB6A6275AE5E959960DBC75DF20B58D9DD54E55F6ADBEACA2BFE3AF423B6F6B933E9358C5A4D20F7726"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@deepseek-ai/dsh-agent-loop/-/dsh-agent-loop-0.1.2-alpha.2.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40deepseek-ai/dsh-agent@0.1.2-alpha.2",
+      "name": "@deepseek-ai/dsh-agent",
+      "version": "0.1.2-alpha.2",
+      "purl": "pkg:npm/%40deepseek-ai/dsh-agent@0.1.2-alpha.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "2BB0795D243B6F207F2283468FB9FE9418070A954F26A10FBE91A81CA7357414BC7CFA36C98A7F00B15A83860E7EB5D53F78D0F40F1D8B6D016EF225A7BF52A0"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@deepseek-ai/dsh-agent/-/dsh-agent-0.1.2-alpha.2.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40deepseek-ai/dsh-brand@0.1.2-alpha.2",
+      "name": "@deepseek-ai/dsh-brand",
+      "version": "0.1.2-alpha.2",
+      "purl": "pkg:npm/%40deepseek-ai/dsh-brand@0.1.2-alpha.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "B1615B4A109EF0B34BBAA0F781D41E9DE506C45B59FEBCB07BA4E68B67AD7810EE6DE7079DFD385EEAED177F04A67A38D9B9CD4CC616B8AC2DD5C8A171B1CBDC"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@deepseek-ai/dsh-brand/-/dsh-brand-0.1.2-alpha.2.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40deepseek-ai/dsh-code-runtime@0.1.2-alpha.2",
+      "name": "@deepseek-ai/dsh-code-runtime",
+      "version": "0.1.2-alpha.2",
+      "purl": "pkg:npm/%40deepseek-ai/dsh-code-runtime@0.1.2-alpha.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "286530726E2C4878ECA5062BD8A8F50F271AC673F3C60DB9B24DF2721A9B146E1C2DC500F16E9EA90244A445209A708E903071FE3F685EFCCDC69ED718CB11A1"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@deepseek-ai/dsh-code-runtime/-/dsh-code-runtime-0.1.2-alpha.2.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40deepseek-ai/dsh-invariants@0.1.2-alpha.2",
+      "name": "@deepseek-ai/dsh-invariants",
+      "version": "0.1.2-alpha.2",
+      "purl": "pkg:npm/%40deepseek-ai/dsh-invariants@0.1.2-alpha.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "D5EC14782CD41DB6AA86D5B9AC6D7F7AE8C85D7CF2D95870BCC6B5E91A5C4EE269E6A714D4DB407FFF823A49AF23BAAD932358EB5BD6835133E6A2FD84A214A5"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@deepseek-ai/dsh-invariants/-/dsh-invariants-0.1.2-alpha.2.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40deepseek-ai/dsh-llm@0.1.2-alpha.2",
+      "name": "@deepseek-ai/dsh-llm",
+      "version": "0.1.2-alpha.2",
+      "purl": "pkg:npm/%40deepseek-ai/dsh-llm@0.1.2-alpha.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "8A9EB2331C07BA0C509B85426F05FF1439E54DE78133D5419089F4FBBE22B72432ED9DF2291109D4EBFC674E25E06DDDB91CDE191B10E33B4E159D35A0D7CA23"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@deepseek-ai/dsh-llm/-/dsh-llm-0.1.2-alpha.2.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40deepseek-ai/dsh-scope@0.1.2-alpha.2",
+      "name": "@deepseek-ai/dsh-scope",
+      "version": "0.1.2-alpha.2",
+      "purl": "pkg:npm/%40deepseek-ai/dsh-scope@0.1.2-alpha.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "8DE59F4277ED41E64E5AE8F19DD814EA48E816E5C65AA985AE4580C655A6C9EA232BF8B266A0316B258FBA1554120C1E8781162669FAAD6E475771380D75AE5B"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@deepseek-ai/dsh-scope/-/dsh-scope-0.1.2-alpha.2.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40deepseek-ai/dsh-session-persistence@0.1.2-alpha.2",
+      "name": "@deepseek-ai/dsh-session-persistence",
+      "version": "0.1.2-alpha.2",
+      "purl": "pkg:npm/%40deepseek-ai/dsh-session-persistence@0.1.2-alpha.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "81A3E2FFC6320C1E582E0C56393431498442FE85B61D32345724679381C243665CD6FF6870F5FB09D80DE7FB6E8589CE2302BB3CD191407546E4A4F63FD6B61C"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@deepseek-ai/dsh-session-persistence/-/dsh-session-persistence-0.1.2-alpha.2.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40deepseek-ai/dsh-session-projection@0.1.2-alpha.2",
+      "name": "@deepseek-ai/dsh-session-projection",
+      "version": "0.1.2-alpha.2",
+      "purl": "pkg:npm/%40deepseek-ai/dsh-session-projection@0.1.2-alpha.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "139358440390C22618BB9E964874E59C8D8C932AB39C0E1E3E539D390BE917DEDAED91B606445F7E5C2F43934720FBFC14005E9A848218C888DFFD0649FAAF06"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@deepseek-ai/dsh-session-projection/-/dsh-session-projection-0.1.2-alpha.2.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40deepseek-ai/dsh-session@0.1.2-alpha.2",
+      "name": "@deepseek-ai/dsh-session",
+      "version": "0.1.2-alpha.2",
+      "purl": "pkg:npm/%40deepseek-ai/dsh-session@0.1.2-alpha.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "45F8A45EC7184C35C3AFB083EC2FFCA06259687F0481C963EE999746D77DD10701E4BF11210EF4EBDC6B1D98DDB3C3A336B168EBDA90C0D2B78182D4559CBD3C"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@deepseek-ai/dsh-session/-/dsh-session-0.1.2-alpha.2.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40deepseek-ai/dsh-settings@0.1.2-alpha.2",
+      "name": "@deepseek-ai/dsh-settings",
+      "version": "0.1.2-alpha.2",
+      "purl": "pkg:npm/%40deepseek-ai/dsh-settings@0.1.2-alpha.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "AD63C7FCB7C353D48215AA27A9FC423239C3E2090EDF50E54151CBF4B232EF01FF155AA7049EAFD7760DEF4169A1FD8A28FC8BD9885CC0E38F41BBACC65CD20F"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@deepseek-ai/dsh-settings/-/dsh-settings-0.1.2-alpha.2.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40deepseek-ai/dsh-system-prompt@0.1.2-alpha.2",
+      "name": "@deepseek-ai/dsh-system-prompt",
+      "version": "0.1.2-alpha.2",
+      "purl": "pkg:npm/%40deepseek-ai/dsh-system-prompt@0.1.2-alpha.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "A93F4F64454C01BB33B20D54554BEEA2F7D6152E6E9E3CB4F0A574AE739CF3D4C90A091BD829E59274B2210B3495773F522A93E99439F62E0294016B5E1C5FC5"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@deepseek-ai/dsh-system-prompt/-/dsh-system-prompt-0.1.2-alpha.2.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40deepseek-ai/dsh-timeout@0.1.2-alpha.2",
+      "name": "@deepseek-ai/dsh-timeout",
+      "version": "0.1.2-alpha.2",
+      "purl": "pkg:npm/%40deepseek-ai/dsh-timeout@0.1.2-alpha.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "F2AE5C779E5A3283AFACF6AA4B0B3FDF18B2CC786CD5B7E376D02CE181D68A642031DFB232B0E796EF22FB314E916A12734036C0F917702611F31A2097881EAC"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@deepseek-ai/dsh-timeout/-/dsh-timeout-0.1.2-alpha.2.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40deepseek-ai/dsh-tools@0.1.2-alpha.2",
+      "name": "@deepseek-ai/dsh-tools",
+      "version": "0.1.2-alpha.2",
+      "purl": "pkg:npm/%40deepseek-ai/dsh-tools@0.1.2-alpha.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "B6B9347E49820E9EB8A6A75CAFCBBBAC2711AF0362FBDDC52AECE74E7083F98B0F185CA07121BFEA7F96B21E3EF40EA82357CCE3F11CABA05A6BDBEAD6C36126"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@deepseek-ai/dsh-tools/-/dsh-tools-0.1.2-alpha.2.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40deepseek-ai/dsh-typert-protocol@0.1.2-alpha.2",
+      "name": "@deepseek-ai/dsh-typert-protocol",
+      "version": "0.1.2-alpha.2",
+      "purl": "pkg:npm/%40deepseek-ai/dsh-typert-protocol@0.1.2-alpha.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "5378FFBAC58746595A24C753AF81AE5649147221D6CAAD359AF32D59E193F9163685BFB2B13C5EB8B1225742E1E44C9549C8057432DB7BF1AD4D9D8E906B06C1"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@deepseek-ai/dsh-typert-protocol/-/dsh-typert-protocol-0.1.2-alpha.2.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40deepseek-ai/dsh-user-approval@0.1.2-alpha.2",
+      "name": "@deepseek-ai/dsh-user-approval",
+      "version": "0.1.2-alpha.2",
+      "purl": "pkg:npm/%40deepseek-ai/dsh-user-approval@0.1.2-alpha.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "09C57785FD90D0D63145B9E513E232B1A524ABF86F9A396F4BD386887A40459558E159627656519ACCB98392F5EEF0E8C62AD7F96049F4273955C24C7233EB52"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@deepseek-ai/dsh-user-approval/-/dsh-user-approval-0.1.2-alpha.2.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40deepseek-ai/dsh-util-crypto@0.1.2-alpha.2",
+      "name": "@deepseek-ai/dsh-util-crypto",
+      "version": "0.1.2-alpha.2",
+      "purl": "pkg:npm/%40deepseek-ai/dsh-util-crypto@0.1.2-alpha.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "D37595CE580B12B25144632A68C771E6E7C4A0DDD272976C9DDD1FF2F5CC85C6DE133299EB595B23CCFF9BA66DB4CFCB869CCF00BB85B43739BBE3792C53FC16"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@deepseek-ai/dsh-util-crypto/-/dsh-util-crypto-0.1.2-alpha.2.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40deepseek-ai/dsh-util-values@0.1.2-alpha.2",
+      "name": "@deepseek-ai/dsh-util-values",
+      "version": "0.1.2-alpha.2",
+      "purl": "pkg:npm/%40deepseek-ai/dsh-util-values@0.1.2-alpha.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "6726474EA190FFC4B96587E54E4BA26463F1864B876BD532E46FAD7849A79A792188DFD454F190BC8FFF09744D9B1A532A37F1FAA715566AF9C7A6E886996C42"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@deepseek-ai/dsh-util-values/-/dsh-util-values-0.1.2-alpha.2.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40deepseek-ai/schemastery@3.18.2",
+      "name": "@deepseek-ai/schemastery",
+      "version": "3.18.2",
+      "purl": "pkg:npm/%40deepseek-ai/schemastery@3.18.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "9E30ED66CCE78D8C6893B28B2E51CE3F2BAFD9E7DD5956D27E5007833B527DB32C83E095ADA12845ED838CE0A00A562FDD90929BB597A1A5246C1FFE458EED59"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@deepseek-ai/schemastery/-/schemastery-3.18.2.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40nodable/entities@3.0.0",
+      "name": "@nodable/entities",
+      "version": "3.0.0",
+      "purl": "pkg:npm/%40nodable/entities@3.0.0",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "F0BF7115E4D82A19B8F717C8CA9A1ED96E705759BFDD9E7C913FBB911F40F0EC85C5C3DDB88E159B1694310C8A62B4635282CB497BFA10A2880F94EF8FD71457"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@nodable/entities/-/entities-3.0.0.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40office-kit/xlsx@0.9.0",
+      "name": "@office-kit/xlsx",
+      "version": "0.9.0",
+      "purl": "pkg:npm/%40office-kit/xlsx@0.9.0",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "E299515A655E0C81525B31297B1EFFF33CED8DAACE16BF73B96FDBCAB85B15274CB0723CFD1701DD279A84088877CAD05C933A9EAC3EA62A81C2EACFA9E99E3C"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@office-kit/xlsx/-/xlsx-0.9.0.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40standard-schema/spec@1.1.0",
+      "name": "@standard-schema/spec",
+      "version": "1.1.0",
+      "purl": "pkg:npm/%40standard-schema/spec@1.1.0",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "976685CB98C02E19E21B91E0AAB0FA8D72E2FEB516ACABEA37FA89C7ACA826C80A85B95577E8AAA94E110976AF9BF8CF8ADC83A394C2BCA327A632A73AB8B2D3"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@standard-schema/spec/-/spec-1.1.0.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/anynum@1.0.1",
+      "name": "anynum",
+      "version": "1.0.1",
+      "purl": "pkg:npm/anynum@1.0.1",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "37AFFF14B113FED5D834CFC5E8005C6B5A07E9F581F8A953B7DD3D2DEDBC58C0C193CA1A4F8BD8D7B0C2AF083632F9AEA942ADDCD8B837974627F12806070EE8"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/anynum/-/anynum-1.0.1.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/fast-xml-builder@1.3.1",
+      "name": "fast-xml-builder",
+      "version": "1.3.1",
+      "purl": "pkg:npm/fast-xml-builder@1.3.1",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "A4833FD67DE7B455CA62B519C16ED008AD20016ED763EC338F560C215DED2C3BCF8FF57ECD31892B97B7FF85897F08F4A96C361253578938B175AFD1FB7612BA"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/fast-xml-builder/-/fast-xml-builder-1.3.1.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/fast-xml-parser@5.11.1",
+      "name": "fast-xml-parser",
+      "version": "5.11.1",
+      "purl": "pkg:npm/fast-xml-parser@5.11.1",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "4C1C3A2BF7F1A101868C29990F0F70FD9C0FDEE0DC9D3338607FE0F8F1515ABF2C6DEE62757B7134DEAF213878FB5AEE0996A1A3AB8116EAC496C03B174CF383"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/fast-xml-parser/-/fast-xml-parser-5.11.1.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/fflate@0.8.3",
+      "name": "fflate",
+      "version": "0.8.3",
+      "purl": "pkg:npm/fflate@0.8.3",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "B5B64DB89ACBC06529DF3B2106D772E16F8E47166E221F1AE629722044030B9AD8D5FDD4DB424CAF2D0B977581CD4E7C1192AC12E2455E16F9830BFC0AC3EF80"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/fflate/-/fflate-0.8.3.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/is-unsafe@2.0.2",
+      "name": "is-unsafe",
+      "version": "2.0.2",
+      "purl": "pkg:npm/is-unsafe@2.0.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "1E06C81CF047D0A1C709C8CB7C6B02BE1B4F4D5C636806655E3C1DCFBFC6402E344A349EE2C7D0B1AAFC279545A3C24E49B6AB92957438B1BDE5B6DA35DF5A01"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/is-unsafe/-/is-unsafe-2.0.2.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/path-expression-matcher@1.6.2",
+      "name": "path-expression-matcher",
+      "version": "1.6.2",
+      "purl": "pkg:npm/path-expression-matcher@1.6.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "7A74A56A26ADD3989AB27CE680DC518FCADE15D8F7A6E6364293603F568F21A55F4FA9E7F480AE3E816528793C10DDB61DCC1EC2C84EFA63760C66E40843ADA9"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/path-expression-matcher/-/path-expression-matcher-1.6.2.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/saxes@6.0.0",
+      "name": "saxes",
+      "version": "6.0.0",
+      "purl": "pkg:npm/saxes@6.0.0",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "ISC"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "C4083B48E9C486B9B9CC8DE9B8E38ACB2D4E31C32520965834963BC4B0704B37B452384F2E759F8F6185D84A53D239B368928858A1CBB1A4926A37F7E5B7189C"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/saxes/-/saxes-6.0.0.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/strnum@2.4.2",
+      "name": "strnum",
+      "version": "2.4.2",
+      "purl": "pkg:npm/strnum@2.4.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "AC31B7021E13574935856BCB4B3919B4C98B37DF9E4BE877927AB830FE80E36637621E6A18D9CE52CD63264A12AFC146E5DB0BDBC73B2A0908073484CA4AADBB"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/strnum/-/strnum-2.4.2.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/xml-naming@0.3.0",
+      "name": "xml-naming",
+      "version": "0.3.0",
+      "purl": "pkg:npm/xml-naming@0.3.0",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "8218A0D93044FC7D7568E56099A840DCC8629AF901AFA2486249C7FC385D935D275F075B22A049B1B7CCC69BC53C6F1B030EFB80DDBD6905AF2A9995A0F96F3D"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/xml-naming/-/xml-naming-0.3.0.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/xmlchars@2.2.0",
+      "name": "xmlchars",
+      "version": "2.2.0",
+      "purl": "pkg:npm/xmlchars@2.2.0",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "2599C328AF01D11083C3CE0535D0C022964AF89B89C3EB3B2F3F2792C23B488B94DD45C926C954B61B22FAE5815183B03C5C16ED6ECF44B45F50AA718ED8C50B"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/xmlchars/-/xmlchars-2.2.0.tgz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/zod@4.5.4",
+      "name": "zod",
+      "version": "4.5.4",
+      "purl": "pkg:npm/zod@4.5.4",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "B02F79B53E621C71FD82DA63E80F35921F8D11A44050537EAA550F0D46D17CE32F35FE50081AAC6F75A0BE7A55B4AE58FB851F03A2AAB9FA2DB93BCC1A24E5B0"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/zod/-/zod-4.5.4.tgz"
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "pkg:npm/%40deepseek-ai/cordis@4.0.2",
+      "dependsOn": [
+        "pkg:npm/%40deepseek-ai/cosmokit@1.8.3",
+        "pkg:npm/%40standard-schema/spec@1.1.0"
+      ]
+    },
+    {
+      "ref": "pkg:npm/%40deepseek-ai/cosmokit@1.8.3",
+      "dependsOn": []
+    },
+    {
+      "ref": "pkg:npm/%40deepseek-ai/dsh-agent-loop@0.1.2-alpha.2",
+      "dependsOn": [
+        "pkg:npm/%40deepseek-ai/cordis@4.0.2",
+        "pkg:npm/%40deepseek-ai/dsh-agent@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-brand@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-invariants@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-llm@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-scope@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-session-persistence@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-session-projection@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-session@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-settings@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-system-prompt@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-tools@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-util-values@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/schemastery@3.18.2",
+        "pkg:npm/zod@4.5.4"
+      ]
+    },
+    {
+      "ref": "pkg:npm/%40deepseek-ai/dsh-agent@0.1.2-alpha.2",
+      "dependsOn": [
+        "pkg:npm/%40deepseek-ai/cordis@4.0.2",
+        "pkg:npm/%40deepseek-ai/dsh-invariants@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-llm@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-scope@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-session-projection@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-session@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-system-prompt@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-typert-protocol@0.1.2-alpha.2"
+      ]
+    },
+    {
+      "ref": "pkg:npm/%40deepseek-ai/dsh-brand@0.1.2-alpha.2",
+      "dependsOn": [
+        "pkg:npm/%40deepseek-ai/cordis@4.0.2",
+        "pkg:npm/%40deepseek-ai/dsh-invariants@0.1.2-alpha.2"
+      ]
+    },
+    {
+      "ref": "pkg:npm/%40deepseek-ai/dsh-code-runtime@0.1.2-alpha.2",
+      "dependsOn": [
+        "pkg:npm/%40deepseek-ai/cordis@4.0.2",
+        "pkg:npm/%40deepseek-ai/dsh-invariants@0.1.2-alpha.2"
+      ]
+    },
+    {
+      "ref": "pkg:npm/%40deepseek-ai/dsh-invariants@0.1.2-alpha.2",
+      "dependsOn": [
+        "pkg:npm/%40deepseek-ai/cordis@4.0.2",
+        "pkg:npm/%40deepseek-ai/schemastery@3.18.2"
+      ]
+    },
+    {
+      "ref": "pkg:npm/%40deepseek-ai/dsh-llm@0.1.2-alpha.2",
+      "dependsOn": [
+        "pkg:npm/%40deepseek-ai/cordis@4.0.2",
+        "pkg:npm/%40deepseek-ai/dsh-brand@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-timeout@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-typert-protocol@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-util-crypto@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-util-values@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/schemastery@3.18.2",
+        "pkg:npm/zod@4.5.4"
+      ]
+    },
+    {
+      "ref": "pkg:npm/%40deepseek-ai/dsh-scope@0.1.2-alpha.2",
+      "dependsOn": [
+        "pkg:npm/%40deepseek-ai/cordis@4.0.2",
+        "pkg:npm/%40deepseek-ai/dsh-invariants@0.1.2-alpha.2"
+      ]
+    },
+    {
+      "ref": "pkg:npm/%40deepseek-ai/dsh-session-persistence@0.1.2-alpha.2",
+      "dependsOn": [
+        "pkg:npm/%40deepseek-ai/cordis@4.0.2",
+        "pkg:npm/%40deepseek-ai/dsh-brand@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-invariants@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-session@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-timeout@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-util-values@0.1.2-alpha.2"
+      ]
+    },
+    {
+      "ref": "pkg:npm/%40deepseek-ai/dsh-session-projection@0.1.2-alpha.2",
+      "dependsOn": [
+        "pkg:npm/%40deepseek-ai/cordis@4.0.2",
+        "pkg:npm/%40deepseek-ai/dsh-invariants@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-session@0.1.2-alpha.2",
+        "pkg:npm/zod@4.5.4"
+      ]
+    },
+    {
+      "ref": "pkg:npm/%40deepseek-ai/dsh-session@0.1.2-alpha.2",
+      "dependsOn": [
+        "pkg:npm/%40deepseek-ai/cordis@4.0.2",
+        "pkg:npm/%40deepseek-ai/dsh-brand@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-llm@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-scope@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-util-values@0.1.2-alpha.2"
+      ]
+    },
+    {
+      "ref": "pkg:npm/%40deepseek-ai/dsh-settings@0.1.2-alpha.2",
+      "dependsOn": [
+        "pkg:npm/%40deepseek-ai/cordis@4.0.2",
+        "pkg:npm/%40deepseek-ai/dsh-brand@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-invariants@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-session@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-util-values@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/schemastery@3.18.2"
+      ]
+    },
+    {
+      "ref": "pkg:npm/%40deepseek-ai/dsh-system-prompt@0.1.2-alpha.2",
+      "dependsOn": [
+        "pkg:npm/%40deepseek-ai/cordis@4.0.2",
+        "pkg:npm/%40deepseek-ai/dsh-invariants@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-llm@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-scope@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/schemastery@3.18.2"
+      ]
+    },
+    {
+      "ref": "pkg:npm/%40deepseek-ai/dsh-timeout@0.1.2-alpha.2",
+      "dependsOn": [
+        "pkg:npm/%40deepseek-ai/cordis@4.0.2",
+        "pkg:npm/%40deepseek-ai/dsh-invariants@0.1.2-alpha.2"
+      ]
+    },
+    {
+      "ref": "pkg:npm/%40deepseek-ai/dsh-tools@0.1.2-alpha.2",
+      "dependsOn": [
+        "pkg:npm/%40deepseek-ai/cordis@4.0.2",
+        "pkg:npm/%40deepseek-ai/dsh-agent@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-brand@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-code-runtime@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-invariants@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-llm@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-scope@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-session@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-system-prompt@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-user-approval@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-util-values@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/schemastery@3.18.2"
+      ]
+    },
+    {
+      "ref": "pkg:npm/%40deepseek-ai/dsh-typert-protocol@0.1.2-alpha.2",
+      "dependsOn": [
+        "pkg:npm/%40deepseek-ai/cordis@4.0.2",
+        "pkg:npm/%40deepseek-ai/dsh-invariants@0.1.2-alpha.2"
+      ]
+    },
+    {
+      "ref": "pkg:npm/%40deepseek-ai/dsh-user-approval@0.1.2-alpha.2",
+      "dependsOn": [
+        "pkg:npm/%40deepseek-ai/cordis@4.0.2",
+        "pkg:npm/%40deepseek-ai/dsh-agent@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-brand@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-invariants@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-llm@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-scope@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-session@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-system-prompt@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/schemastery@3.18.2"
+      ]
+    },
+    {
+      "ref": "pkg:npm/%40deepseek-ai/dsh-util-crypto@0.1.2-alpha.2",
+      "dependsOn": [
+        "pkg:npm/%40deepseek-ai/cordis@4.0.2",
+        "pkg:npm/%40deepseek-ai/dsh-invariants@0.1.2-alpha.2"
+      ]
+    },
+    {
+      "ref": "pkg:npm/%40deepseek-ai/dsh-util-values@0.1.2-alpha.2",
+      "dependsOn": [
+        "pkg:npm/%40deepseek-ai/cordis@4.0.2",
+        "pkg:npm/%40deepseek-ai/dsh-invariants@0.1.2-alpha.2"
+      ]
+    },
+    {
+      "ref": "pkg:npm/%40deepseek-ai/schemastery@3.18.2",
+      "dependsOn": [
+        "pkg:npm/%40deepseek-ai/cosmokit@1.8.3",
+        "pkg:npm/%40standard-schema/spec@1.1.0"
+      ]
+    },
+    {
+      "ref": "pkg:npm/%40misen%2Fenterprise-runtime-poc@0.1.0",
+      "dependsOn": [
+        "pkg:npm/%40deepseek-ai/cordis@4.0.2",
+        "pkg:npm/%40deepseek-ai/dsh-agent-loop@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-agent@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-llm@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-session-projection@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-session@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-system-prompt@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-tools@0.1.2-alpha.2",
+        "pkg:npm/%40deepseek-ai/dsh-util-values@0.1.2-alpha.2",
+        "pkg:npm/%40office-kit/xlsx@0.9.0"
+      ]
+    },
+    {
+      "ref": "pkg:npm/%40nodable/entities@3.0.0",
+      "dependsOn": []
+    },
+    {
+      "ref": "pkg:npm/%40office-kit/xlsx@0.9.0",
+      "dependsOn": [
+        "pkg:npm/fast-xml-parser@5.11.1",
+        "pkg:npm/fflate@0.8.3",
+        "pkg:npm/saxes@6.0.0"
+      ]
+    },
+    {
+      "ref": "pkg:npm/%40standard-schema/spec@1.1.0",
+      "dependsOn": []
+    },
+    {
+      "ref": "pkg:npm/anynum@1.0.1",
+      "dependsOn": []
+    },
+    {
+      "ref": "pkg:npm/fast-xml-builder@1.3.1",
+      "dependsOn": [
+        "pkg:npm/path-expression-matcher@1.6.2",
+        "pkg:npm/xml-naming@0.3.0"
+      ]
+    },
+    {
+      "ref": "pkg:npm/fast-xml-parser@5.11.1",
+      "dependsOn": [
+        "pkg:npm/%40nodable/entities@3.0.0",
+        "pkg:npm/fast-xml-builder@1.3.1",
+        "pkg:npm/is-unsafe@2.0.2",
+        "pkg:npm/path-expression-matcher@1.6.2",
+        "pkg:npm/strnum@2.4.2",
+        "pkg:npm/xml-naming@0.3.0"
+      ]
+    },
+    {
+      "ref": "pkg:npm/fflate@0.8.3",
+      "dependsOn": []
+    },
+    {
+      "ref": "pkg:npm/is-unsafe@2.0.2",
+      "dependsOn": []
+    },
+    {
+      "ref": "pkg:npm/path-expression-matcher@1.6.2",
+      "dependsOn": []
+    },
+    {
+      "ref": "pkg:npm/saxes@6.0.0",
+      "dependsOn": [
+        "pkg:npm/xmlchars@2.2.0"
+      ]
+    },
+    {
+      "ref": "pkg:npm/strnum@2.4.2",
+      "dependsOn": [
+        "pkg:npm/anynum@1.0.1"
+      ]
+    },
+    {
+      "ref": "pkg:npm/xml-naming@0.3.0",
+      "dependsOn": []
+    },
+    {
+      "ref": "pkg:npm/xmlchars@2.2.0",
+      "dependsOn": []
+    },
+    {
+      "ref": "pkg:npm/zod@4.5.4",
+      "dependsOn": []
+    }
+  ]
+}

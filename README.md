@@ -2,6 +2,14 @@
 
 広島・宮島の弥山（みせん）に由来する、社内向けAIエージェントプロジェクトです。
 
+## Enterprise Misen initial PoC (Decision 427)
+
+The capability-constrained DSH + Spreadsheet research baseline lives in
+[`apps/enterprise-misen`](apps/enterprise-misen/README.md). It is isolated from
+the historical Home PoC and legacy coding-agent runtime. It proves a modular
+DSH Agent Loop and dummy two-month Excel vertical slice; it does not claim live
+GPT-5.6 Luna, corporate-device approval, or Enterprise production readiness.
+
 ## coding-agent の起動
 
 リポジトリの `コーディングエージェント起動.cmd` をダブルクリックすると、既定の workspace として `%USERPROFILE%\Documents\エージェント作業場` を作成・使用します。作成できない場合は日本語のエラーを表示して停止します。

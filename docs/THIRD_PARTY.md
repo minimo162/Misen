@@ -84,6 +84,16 @@ Get-FileHash (Join-Path $vendor 'ImportExcel\7.8.10\ImportExcel.psd1') -Algorith
 ## 現時点の未確定事項
 
 - Windows 実機の EDR canary、Excel Desktop、Copilot Edge、共有フォルダー local-copy は、明朝のチェックリストが pass するまで未確認です。
+
+## Enterprise Misen initial PoC (Decision 427)
+
+新しいNode-only Enterprise research baselineのDSH modular packages、
+`@office-kit/xlsx`、resolved transitives、license、provenance、runtime境界は
+[`apps/enterprise-misen/THIRD_PARTY_NOTICES.md`](../apps/enterprise-misen/THIRD_PARTY_NOTICES.md)
+に分離して記録します。production CycloneDX inventoryは
+[`apps/enterprise-misen/evidence/sbom.cdx.json`](../apps/enterprise-misen/evidence/sbom.cdx.json)、
+registry integrityとexact resolutionは同packageの`package-lock.json`がauthorityです。
+
 # Flex runtime (optional Release assets)
 
 - **llama.cpp** — official `ggml-org` unified Windows CPU binary `b10612` for detected CPU feature code `qrkkk`; complete executable SHA-256 `9bef3d41385f98a5b8eb0ffd621310a377670725bf6c4bbff23335f45c223157`; MIT License. The pinned official source is `https://huggingface.co/buckets/ggml-org/install.sh/resolve/b10612/x86_64/windows/cpu/qrkkk/llama-app.exe.zst` (compressed SHA-256 `70a611b512a2155abf8580f15b506f53bae8ca48f16eddd3f56018e6735e5746`), decompressed with the same official bucket's `unzstd.exe` (SHA-256 `d845a5b17c7b5f7e8421f32d8e981b0092c4b262e9dba7f370f38bb24470a6f3`). `llama.exe serve` is the single-binary `llama-server` entry point. The executable is an optional `flex-runtime-v1` GitHub Release asset and is not stored in Git history. The preparation PC rejected the nightly ZIP's separate unsigned `ggml.dll` with Code Integrity events 3033/3077 and status `0xC0E90002`; the pinned unified binary passed `llama.exe version` without loading that DLL.

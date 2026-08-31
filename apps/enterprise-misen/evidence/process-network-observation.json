@@ -1,0 +1,23 @@
+{
+  "Schema": "misen.decision-427.process-network-observation.v1",
+  "StartedAt": "2026-08-31T23:47:28.9481664+09:00",
+  "FinishedAt": "2026-08-31T23:47:42.0356359+09:00",
+  "NodeVersion": "v24.18.1",
+  "Command": "node --input-type=module --eval <import Phase D; hold 12000ms>",
+  "HoldMilliseconds": 12000,
+  "SampleIntervalMilliseconds": 250,
+  "RootPID": 23984,
+  "ExitCode": 0,
+  "Samples": 11,
+  "ChildProcesses": [
+    {
+      "Timestamp": "2026-08-31T23:47:29.1912629+09:00",
+      "PID": 26400,
+      "ParentPID": 23984,
+      "Name": "conhost.exe"
+    }
+  ],
+  "TcpConnections": [],
+  "Stdout": "DECISION_427_VERTICAL_SLICE_METRICS [{\"month\":\"7月\",\"elapsedMs\":138.28429999999997,\"spreadsheetProcessingMs\":87,\"llmRequestCount\":10,\"toolCallCount\":9,\"modelVisibleInputBytes\":49027,\"toolResultBytes\":22296,\"memoryBytes\":103628800,\"outputBytes\":3216},{\"month\":\"8月\",\"elapsedMs\":96.88650000000001,\"spreadsheetProcessingMs\":66,\"llmRequestCount\":10,\"toolCallCount\":9,\"modelVisibleInputBytes\":49036,\"toolResultBytes\":22301,\"memoryBytes\":97406976,\"outputBytes\":3211}]\n✔ Phase D mechanical slice drives the real DSH Agent Loop and capabilities for both months (312.2695ms)\nℹ tests 1\nℹ suites 0\nℹ pass 1\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 12012.7865\n",
+  "Stderr": null
+}
