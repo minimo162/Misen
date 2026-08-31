@@ -21,7 +21,9 @@
           - id: ornith-1.5:9b
             contextWindow: 4096
             input: [text, image]
-            reasoningEfforts: false
+            reasoningEfforts:
+              'off': none
+              high: high
 
 - id: agent-default-model
   config:

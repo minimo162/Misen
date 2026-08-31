@@ -83,7 +83,7 @@ Confirm Web opens only on `127.0.0.1:3080`, no Misen login/auth layer appears, t
 
 ### A02 — Text read, glob, grep, and representative multi-tool completion
 
-Ask: `Find every txt file, read them, report each status and the sum of all totals. Do not modify files.` Confirm real `glob`, `grep`, and `read` calls are visible and the answer is `42`, with `open` and `closed` correctly associated.
+Ask: ``Find every txt file. You must use `glob` to enumerate the txt files, `grep` to locate the `status` and `total` lines, and `read` to read the files and verify the values. Report each status and the sum of all totals. Do not modify files.`` Confirm real `glob`, `grep`, and `read` calls are visible, `alpha` is `open`, `beta` is `closed`, the sum is `42`, no file is mutated, and no Think/reasoning content is displayed.
 
 ### A03 — Chat attachment image understanding
 
