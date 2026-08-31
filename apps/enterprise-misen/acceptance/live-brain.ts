@@ -47,6 +47,8 @@ export interface ReportingPeriod {
   readonly month: number
 }
 
+export type CompanyValueTriple = readonly [company: string, revenue: number, cost: number]
+
 interface UsageTotals {
   inputTokens?: number
   outputTokens?: number
@@ -122,6 +124,9 @@ interface SpreadsheetUpdateDiagnostic {
 interface OutputDiagnosis {
   readonly actualA2?: unknown
   readonly actualB2?: unknown
+  readonly actualRows?: readonly unknown[][]
+  readonly expectedSourceRows?: readonly CompanyValueTriple[]
+  readonly rowSetMatches?: boolean
   readonly checks: Readonly<Record<
     'SHEET' | 'MONTH' | 'ROWS' | 'PROFIT_FORMULAS' | 'STATUS' | 'TOTAL' | 'FOOTER' | 'FORMAT',
     'PASS' | 'FAIL'
@@ -319,6 +324,39 @@ export async function deriveSourceReportingPeriod(root: string, month: string): 
   return deriveUniqueReportingPeriod(asOfValues)
 }
 
+export async function deriveSourceTriples(root: string, month: string): Promise<CompanyValueTriple[]> {
+  const fixture = SYNTHETIC_MONTHS.find(candidate => candidate.month === month)
+  if (fixture === undefined) throw new Error(`unknown synthetic month: ${month}`)
+  const triples: CompanyValueTriple[] = []
+  for (const company of fixture.companies) {
+    const workbook = await openSpreadsheet(join(root, month, `${company.company}.xlsx`))
+    const sourceCompany = readCell(workbook, 'Actuals', 'B1')
+    const revenue = readCell(workbook, 'Actuals', 'B2')
+    const cost = readCell(workbook, 'Actuals', 'B3')
+    if (typeof sourceCompany !== 'string' || typeof revenue !== 'number' || typeof cost !== 'number') {
+      throw new Error(`source company/value triple is invalid: ${company.company}`)
+    }
+    triples.push([sourceCompany, revenue, cost])
+  }
+  return triples.sort((left, right) => left[0].localeCompare(right[0]))
+}
+
+export function rowTriplesMatchAsSet(
+  actualRows: readonly (readonly unknown[])[],
+  expectedRows: readonly CompanyValueTriple[],
+): boolean {
+  if (actualRows.length !== expectedRows.length) return false
+  const actualKeys = actualRows.map(row => {
+    if (row.length !== 3 || typeof row[0] !== 'string' || typeof row[1] !== 'number' || typeof row[2] !== 'number') return undefined
+    return JSON.stringify([row[0], row[1], row[2]])
+  })
+  if (actualKeys.some(key => key === undefined)) return false
+  const expectedKeys = expectedRows.map(row => JSON.stringify(row))
+  return new Set(actualKeys).size === actualKeys.length &&
+    new Set(expectedKeys).size === expectedKeys.length &&
+    actualKeys.every(key => key !== undefined && expectedKeys.includes(key))
+}
+
 async function hashPaths(paths: readonly string[]): Promise<Record<string, string>> {
   const result: Record<string, string> = {}
   for (const path of paths) {
@@ -447,16 +485,21 @@ function diagnoseOutput(
   workbook: Awaited<ReturnType<typeof openSpreadsheet>>,
   month: string,
   expectedPeriod: ReportingPeriod,
+  expectedSourceRows: readonly CompanyValueTriple[],
 ): OutputDiagnosis {
   const fixture = SYNTHETIC_MONTHS.find(candidate => candidate.month === month)
   const hasReport = listWorksheetTitles(workbook).length === 1 && listWorksheetTitles(workbook)[0] === 'Report'
   const actualA2 = hasReport ? diagnosticCellValue(readCell(workbook, 'Report', 'A2')) : undefined
   const actualB2 = hasReport ? diagnosticCellValue(readCell(workbook, 'Report', 'B2')) : undefined
+  const actualRows = hasReport ? readRange(workbook, 'Report', 'A5:C7') : undefined
   const sorted = fixture === undefined ? [] : [...fixture.companies].sort((left, right) => left.company.localeCompare(right.company))
 
   return {
     ...(actualA2 === undefined ? {} : { actualA2 }),
     ...(actualB2 === undefined ? {} : { actualB2 }),
+    ...(actualRows === undefined ? {} : { actualRows }),
+    expectedSourceRows,
+    ...(actualRows === undefined ? {} : { rowSetMatches: rowTriplesMatchAsSet(actualRows, expectedSourceRows) }),
     checks: {
       SHEET: hasReport ? 'PASS' : 'FAIL',
       MONTH: hasReport && reportingPeriodMatches(actualB2, expectedPeriod) ? 'PASS' : 'FAIL',
@@ -739,6 +782,8 @@ async function runMonth(month: string): Promise<MonthResult> {
     const inputPaths = await fixtureInputPaths(root, month)
     stage = 'source-period-derive'
     const expectedPeriod = await deriveSourceReportingPeriod(root, month)
+    stage = 'source-triples-derive'
+    const expectedSourceRows = await deriveSourceTriples(root, month)
     stage = 'input-hash-before'
     const inputBefore = await hashPaths(inputPaths)
     stage = 'brain-mount'
@@ -797,7 +842,7 @@ async function runMonth(month: string): Promise<MonthResult> {
       outputBytes = (await stat(outputPath)).size
       try {
         const workbook = await openSpreadsheet(outputPath)
-        terminal.outputDiagnosis = diagnoseOutput(workbook, month, expectedPeriod)
+        terminal.outputDiagnosis = diagnoseOutput(workbook, month, expectedPeriod, expectedSourceRows)
         validateOutput(workbook, month, expectedPeriod)
       } catch (error) {
         // Session/tool evidence was collected before touching the deliverable.
@@ -937,11 +982,9 @@ export async function runLiveAcceptance(): Promise<LiveAcceptanceResult> {
   return result
 }
 
-/**
- * Decision 428 diagnosis-only entry point. It performs exactly one July run
- * and cannot advance to August, even if the rerun happens to pass.
- */
-export async function runJulyMonthDiagnosis(): Promise<LiveAcceptanceResult> {
+async function runSingleJulyDiagnosis(
+  outputLabel: 'DECISION_428_DIAGNOSIS' | 'DECISION_430_ROWS_DIAGNOSIS',
+): Promise<LiveAcceptanceResult> {
   if (typeof process.env.OPENAI_API_KEY !== 'string' || process.env.OPENAI_API_KEY.trim().length === 0) {
     console.log('NOT RUN — OPENAI_API_KEY unavailable')
     return { status: 'NOT RUN', reason: 'OPENAI_API_KEY unavailable', provider: LIVE_PROVIDER, model: LIVE_MODEL, months: [] }
@@ -975,7 +1018,7 @@ export async function runJulyMonthDiagnosis(): Promise<LiveAcceptanceResult> {
     model: LIVE_MODEL,
     months: [monthResult],
   }
-  console.log(`DECISION_428_DIAGNOSIS ${JSON.stringify({
+  console.log(`${outputLabel} ${JSON.stringify({
     status: result.status,
     provider: result.provider,
     model: result.model,
@@ -994,6 +1037,16 @@ export async function runJulyMonthDiagnosis(): Promise<LiveAcceptanceResult> {
     ...(monthResult.turnEnd === undefined ? {} : { turnEnd: monthResult.turnEnd }),
   })}`)
   return result
+}
+
+/** Decision 428 historical diagnosis entry point; exactly one July run. */
+export function runJulyMonthDiagnosis(): Promise<LiveAcceptanceResult> {
+  return runSingleJulyDiagnosis('DECISION_428_DIAGNOSIS')
+}
+
+/** Decision 430 diagnosis-only entry point; exactly one July run, never August. */
+export function runJulyRowsDiagnosis(): Promise<LiveAcceptanceResult> {
+  return runSingleJulyDiagnosis('DECISION_430_ROWS_DIAGNOSIS')
 }
 
 async function main(): Promise<void> {

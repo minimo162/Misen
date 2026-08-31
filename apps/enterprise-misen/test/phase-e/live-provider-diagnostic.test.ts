@@ -9,6 +9,7 @@ import {
   createLivePrompt,
   createLiveSessionId,
   runJulyMonthDiagnosis,
+  runJulyRowsDiagnosis,
   runLiveAcceptance,
 } from '../../acceptance/live-brain.js'
 import { createPhaseAContext } from '../../src/runtime/phase-a.js'
@@ -114,6 +115,22 @@ test('Decision 428 July diagnosis reports NOT RUN without a credential and does 
   delete process.env.OPENAI_API_KEY
   try {
     const result = await runJulyMonthDiagnosis()
+    assert.equal(result.status, 'NOT RUN')
+    assert.equal(result.reason, 'OPENAI_API_KEY unavailable')
+    assert.equal(result.provider, 'openai')
+    assert.equal(result.model, 'gpt-5.6-luna')
+    assert.deepEqual(result.months, [])
+  } finally {
+    if (previous === undefined) delete process.env.OPENAI_API_KEY
+    else process.env.OPENAI_API_KEY = previous
+  }
+})
+
+test('Decision 430 July rows diagnosis reports NOT RUN without a credential and does not fall back', async () => {
+  const previous = process.env.OPENAI_API_KEY
+  delete process.env.OPENAI_API_KEY
+  try {
+    const result = await runJulyRowsDiagnosis()
     assert.equal(result.status, 'NOT RUN')
     assert.equal(result.reason, 'OPENAI_API_KEY unavailable')
     assert.equal(result.provider, 'openai')

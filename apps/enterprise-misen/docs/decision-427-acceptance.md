@@ -26,7 +26,7 @@ Acceptance candidate provenance:
 | B — commodity Spreadsheet engine | PASS | `@office-kit/xlsx@0.9.0` opens, reads, batch-writes, saves, and reopens both synthetic templates and an independently generated EPPlus workbook while preserving checked values/styles/dimensions and input hashes. |
 | C — File + Spreadsheet capability integration | PASS | Exact five-tool roster; non-recursive listing; workspace-relative reads; symlink/traversal/absolute/hardlink denial; safe local formula subset applied to model-authored and carried formulas; output-only `.xlsx` writes. |
 | D — two-month mechanical vertical slice | PASS (mechanical only) | A scripted test adapter drives the real DSH Agent Loop and production Tools to create independently checked July and August deliverables without production month/company hard-coding or input mutation. Live-model July ran separately and failed independent `MONTH` validation; August was not run. |
-| E — independent deterministic acceptance | PASS (deterministic); live FAIL | 42 tests: 41 PASS, 0 FAIL, 1 host-permission SKIP. Decision 429 semantic-period, overwrite, external-relationship, credential, ASCII session-id, observer correlation, provider failure/retry, supply-chain, and boundary evidence passed. The bounded Decision 429 July live run passed `MONTH` but failed `ROWS`; August was not run. |
+| E — independent deterministic acceptance | PASS (deterministic); live FAIL | Decision 430 pre-live regression: 46 tests: 45 PASS, 0 FAIL, 1 host-permission SKIP. Decision 429's bounded July run remains historical `FAIL — ROWS`; the one Decision 430 diagnosis rerun passed current `ROWS`, so the result is classified as run-to-run variance rather than remediation. August was not run. |
 
 ## Capability roster
 
@@ -170,6 +170,66 @@ Per the first-failure rule, August is `NOT RUN` and the current
 **Live Brain Gate is FAIL**. No additional live run or business failure repair
 was performed.
 
+### Decision 430 ROWS diagnosis-only rerun
+
+The Decision 429 record above remains historical evidence: that July run failed
+the unchanged fixed-order `ROWS` validator, and its actual row range was not
+retained. Existing safe evidence was therefore insufficient to distinguish a
+company/value error from a row-order-only mismatch. Decision 430 added only an
+Acceptance observer and tests. Production behavior, the fixed-order `ROWS`
+validator, model/provider/reasoning, persona, prompt, handoff, fixtures, and the
+five Tool contracts were unchanged.
+
+One authorized July diagnosis rerun used the exact prompt
+`7月の3社実績を取りまとめて、月次管理レポートを完成させて`. The independently reopened
+output contained:
+
+```text
+Report!A5:C7 actual:
+Alpha / 1200 / 700
+Beta  / 950  / 500
+Gamma / 1100 / 650
+
+Source-workbook triples:
+Alpha / 1200 / 700
+Beta  / 950  / 500
+Gamma / 1100 / 650
+```
+
+The strict set comparison passed, and the current fixed-order `ROWS` validation
+also passed. The overlapping update sequence was: sequence 19 attempted
+`Report!A5:E8` with the correct three company/value associations but formula
+objects and received a Tool validation error; sequence 20 repeated the same
+range and values with formula strings and succeeded. This was an Agent Tool
+correction inside the single turn, not another live run or provider retry.
+
+Read-only output diagnosis was:
+
+```text
+SHEET             PASS
+MONTH             PASS
+ROWS              PASS
+PROFIT_FORMULAS   PASS
+STATUS            PASS
+TOTAL             PASS
+FOOTER            PASS
+FORMAT            PASS
+```
+
+The single turn completed with 13 LLM requests, 22 Tool calls and 22 Tool
+results in 33,960.775 ms. Provider usage reported 3,100 input tokens, 2,120
+output tokens, 6,204 cache-write tokens, 37,100 cache-read tokens, and 48,524
+total tokens. RSS was 106,536,960 B and the output was 3,227 B. Inputs were
+unchanged, no forbidden Tool or reasoning block appeared, and provider retry
+count was zero. API cost was not calculated.
+
+Because the previous failing run's `A5:C7` values cannot be reconstructed and
+this diagnosis rerun passed the unchanged criterion, the Decision 430 result is
+**run-to-run variance / nondeterministic live behavior**. It does not resolve or
+retroactively reclassify the earlier failure. No second rerun, Acceptance
+change, prompt hint, fallback, August run, or remediation followed. The API key
+and raw reasoning/provider payload were not collected or retained.
+
 ## Process and network observation
 
 An external PowerShell acceptance launched the compiled Phase D test directly
@@ -241,10 +301,12 @@ source-level type relaxation is added.
 
 ## Not run / known limitations
 
-- Live GPT-5.6 Luna Decision 429 execution: July **FAIL — ROW** after semantic
-  `MONTH` passed; August **NOT RUN**. The two earlier July `FAIL — MONTH` runs
-  remain historical old-Acceptance evidence. No API key, raw live log, or generated live
-  artifact is committed or retained in this repository.
+- Live GPT-5.6 Luna execution: Decision 429 July remains **FAIL — ROWS** after
+  semantic `MONTH` passed. The one Decision 430 diagnosis rerun passed the
+  unchanged `ROWS` criterion and is classified as run-to-run variance, not a
+  repair or reliability PASS. August is **NOT RUN**. The two earlier July
+  `FAIL — MONTH` runs remain historical old-Acceptance evidence. No API key,
+  raw live log, or generated live artifact is committed or retained.
 - DSH public UI composition implementation and rendered-browser validation:
   **NOT RUN**. Public UI package seams were inspected only.
 - Corporate EDR/proxy/device deployment: **NOT RUN**.
