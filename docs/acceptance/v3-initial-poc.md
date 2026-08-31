@@ -327,15 +327,27 @@ This attempted rerun is invalid as evidence for that candidate. Direct active `$
 | A05 | NOT RUN | Not run after the stale active profile was discovered; exact Decision 424 profile was not mounted. |
 | A18 | NOT RUN | Monitor mechanics completed, but the representative A02–A05 flow was incomplete and did not run under the exact Decision 424 profile. Root PID `20176`; continuous observation from `2026-08-31T12:21:52.5186711+09:00` through `2026-08-31T13:14:37.6351926+09:00`; phase samples: `BEFORE_FLOW` 320, `FLOW_ACTIVE` 1837, `FLOW_END` 4; failure rows 0; DSH-tree non-loopback connections 0; three-second grace completed. This remains `NOT RUN`, not a pass. Raw logs remain outside Git. |
 
-The table below is the consolidated current status. The earlier Decision 422 A02 failure and this invalid stale-profile attempt are both preserved as history; no Decision 424 Windows result is currently authoritative.
+The table below is the consolidated current status. The earlier Decision 422 A02 failure and this invalid stale-profile attempt are both preserved as history; neither prior run is authoritative for the current Decision 425 candidate.
+
+### Decision 425 fresh-state run (current authority)
+
+Acceptance candidate: branch `issue-67-v3-replacement`, HEAD `f003dc9efd3023b68fdad6d2ebabdd6db0ef18bc`, clean working tree. A new run-specific `DSH_HOME` was created (no prior state reused). The direct active profile at `$DSH_HOME\profiles\misen\cordis.patch.yml` matched the repository source SHA256, contained the Decision 424 map (`off: none`, `high: high`), contained no `reasoningEfforts: false`, and had no nested `profiles\misen\misen` directory. Real profile mount resolved `misen` successfully. Effective configuration recorded provider `misen-ollama`, model `ornith-1.5:9b`, `contextWindow: 4096`, provider `reasoning: off`, model `reasoningEfforts` `off -> none` / `high -> high`, read-only sandbox, `approval: ask`, and `misen-file` preset. Runtime evidence recorded CPU execution and context `4096`.
+
+The current flow used the exact Decision 424 A02 prompt. A02 was `PASS`: real `glob` (1), `grep` (1), and `read` (3) calls; `overview` remained `draft`; `alpha` was `open` with total `12`; `beta` was `closed` with total `30`; sum `42`; pre/post TXT hashes were unchanged; no Think/reasoning text was displayed. The recorded run had 4 steps/5 calls, LLM time 2m32s, tool time 0.5s, average TTFT 24.8s, and 7.5 tok/s (observations only).
+
+A03 was `PASS`: a human Chat attachment of `red.png` was inspected with the exact prompt `Inspect the attached image itself. Report its color and the printed number.`; the result was `red` / `RED 17`, with no Think/reasoning text and an actual image attachment.
+
+A04 was `FAIL` (mandatory PoC `BLOCKER`): the exact prompt `Inspect the workspace file \`blue.png\` using the \`read_image\` tool. Report its color and printed number. Do not infer from the filename and do not modify files.` produced a real `read_image` call against the expected workspace path and the PNG was `640x480`, `6137` bytes, visibly `BLUE 29` (SHA256 `14C3B618425A1E1DAF03DE34F7A0F9F5B10CBF1B0091110C2A97642B9E155548`), but the model answered `blue` / `BLUE 20` / `20`. No retry occurred and no Think/reasoning text was shown. There was no evidence of stale state, wrong path, fixture substitution, tool-resolution error, Misen configuration error, or a pinned DSH defect; the failure cannot be isolated between stock Ornith weights and the Ollama vision runtime. Per the stop rule, A05 and A06–A17 were not run and a new product/config repair was not attempted.
+
+A18 monitor mechanics completed for the same flow from `2026-08-31T16:47:17+09:00` through `2026-08-31T17:04:05+09:00`: `BEFORE_FLOW` 15 samples, `FLOW_ACTIVE` 622 samples, `FLOW_END` 3 samples; failure rows `0`, DSH-tree non-loopback connections `0`, and the three-second grace period completed. Because the A02–A05 flow stopped at the A04 failure, A18 remains `NOT RUN` as an Acceptance result (not a pass). Raw logs remain outside Git.
 
 | ID | Mandatory result | Evidence / notes |
 | --- | --- | --- |
-| A01 | PASS | DSH Web listened on `127.0.0.1:3080`; the standard DeepSeek Harness UI opened without an additional Misen auth layer, selected `misen-v3-acceptance` through the Project picker, and created a new session with an enabled Chat input. |
-| A02 | NOT RUN | Attempted Decision 424 rerun invalid because the active mounted profile still had `reasoningEfforts: false`; see the detailed record above. |
-| A03 | NOT RUN | Think was observed under the stale Decision 422 profile and is not a PR-candidate result; see the detailed record above. |
-| A04 | NOT RUN | Exact Decision 424 profile was not mounted for the flow. |
-| A05 | NOT RUN | Exact Decision 424 profile was not mounted for the flow. |
+| A01 | PASS (carried forward) | Carried from the prior valid A01: DSH Web listened on `127.0.0.1:3080`; the standard DeepSeek Harness UI opened without an additional Misen auth layer, selected `misen-v3-acceptance` through the Project picker, and created a new session with an enabled Chat input. Decision 425 changes only Acceptance setup state and does not invalidate this boot/auth/project-picker/session evidence. |
+| A02 | PASS | Decision 425 fresh-state run: exact prompt; real `glob` 1, `grep` 1, `read` 3; `alpha=open`, `beta=closed`, totals `12+30=42`; TXT hashes unchanged; no Think/reasoning. See the current-authority record above. |
+| A03 | PASS | Decision 425 fresh-state run: human-attached `red.png`; exact image prompt; result `red` / `RED 17`; no Think/reasoning. |
+| A04 | FAIL (BLOCKER) | Decision 425 fresh-state run: real `read_image` loaded workspace `blue.png` (`640x480`, `6137` bytes, SHA256 `14C3B618425A1E1DAF03DE34F7A0F9F5B10CBF1B0091110C2A97642B9E155548`), visibly `BLUE 29`, but model answered `BLUE 20`. Stop rule triggered; no retry or adjacent repair. |
+| A05 | NOT RUN | Stopped after mandatory A04 BLOCKER; no A05 execution. |
 | A06 | NOT RUN | |
 | A07 | NOT RUN | |
 | A08 | NOT RUN | |
@@ -348,13 +360,13 @@ The table below is the consolidated current status. The earlier Decision 422 A02
 | A15 | NOT RUN | |
 | A16 | NOT RUN | |
 | A17 | NOT RUN | |
-| A18 | NOT RUN | Current monitor run completed mechanically, but the representative flow was not run under the exact Decision 424 profile; see the detailed row above. Raw CSV remains outside Git. |
+| A18 | NOT RUN | Continuous PID-scoped monitor completed mechanically (`BEFORE_FLOW` 15 / `FLOW_ACTIVE` 622 / `FLOW_END` 3; failures 0; non-loopback 0; grace complete), but the representative flow stopped at A04, so A18 is not a pass. Raw CSV remains outside Git. |
 
 Tester: `Codex coordinator with human Web UI operator`
 Date/time and timezone: `2026-08-31, Asia/Tokyo`
 Windows build / CPU / RAM: `Windows 11 Pro 10.0.26200 (x64) / Intel Core Ultra 5 228V / 33,847,832,576 bytes`
 Node / npm / Ollama / model digest: `Node 24.18.1 / npm 11.16.0 / Ollama 0.33.2 / ornith-1.5:9b e5df7dcdd8a2 (Q4_K_M)`
-Intended Acceptance candidate commit: `e1e836db804922de33576ad014ff88914f1d9a57` (Decision 424 config candidate; not validly tested in this run)
+Current tested Acceptance candidate commit: `f003dc9efd3023b68fdad6d2ebabdd6db0ef18bc` (Decision 425 fresh-state run; stopped at A04 BLOCKER)
 Pre-Decision-425 record-only branch HEAD: `c0f9bf02864765e5757acd3581c1743d9703c73c` (historical; not an Acceptance candidate). The actual tested PR #68 HEAD is captured at runtime by the setup commands above and recorded with the resulting evidence.
 
-Overall status: `PENDING_DECISION_425_CLEAN_STATE_SETUP`. The attempted Decision 424 rerun remains invalid because the active DSH profile was stale; A02–A05 and A18 therefore remain `NOT RUN` for the candidate. Use a new dedicated DSH home and the direct-profile checks above before restarting the flow. Do not mark the PR Ready, merge it, or close the issue.
+Overall status: `STOPPED_A04_BLOCKER_DECISION_425`. Clean-state setup, A02, and A03 passed; A04 failed on stock Ornith/Ollama multimodal numeric accuracy. A05 and A06–A17 are `NOT RUN`; A18 monitor mechanics completed but remains `NOT RUN` because the representative flow was incomplete. Do not mark the PR Ready, merge it, or close the issue; a new human Decision is required before any product/config repair or retry.
