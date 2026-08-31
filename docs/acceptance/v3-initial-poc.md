@@ -286,28 +286,30 @@ Get-Process node,ollama -ErrorAction SilentlyContinue |
 
 The earlier Decision 422 configuration run remains part of the record. Its A02 result was `FAIL`: the trajectory completed the text inspection without a `grep` call, and visible Think/reasoning content appeared. Acceptance stopped before A03–A05; A18 was recorded as `NOT RUN` for that incomplete flow. This historical result is not the current Decision 424 authority.
 
-### Current Decision 424 rerun
+### Attempted Decision 424 rerun (INVALID candidate)
 
-Candidate commit: `e1e836db804922de33576ad014ff88914f1d9a57`.
+Intended Decision 424 configuration candidate: `e1e836db804922de33576ad014ff88914f1d9a57`.
+
+This attempted rerun is invalid as evidence for that candidate. Direct active `$DSH_HOME\profiles\misen\cordis.patch.yml` (timestamp `08:34`) still contained `reasoningEfforts: false`; the Decision 424 map was only present in inactive nested `profiles\misen\misen\cordis.patch.yml` (timestamp `12:06`). Pinned DSH resolves the direct `profiles/<name>` path, so the mounted flow did not use the Decision 424 map. The setup/procedure must be corrected and rerun only with human authorization. The A03 Think observation below is setup-state evidence from the stale Decision 422 profile, not a failure of the PR candidate.
 
 | ID | Current Decision 424 result | Evidence / notes |
 | --- | --- | --- |
 | A01 | PASS (carried forward) | The prior A01 PASS remains valid; this reasoning/prompt repair did not alter boot, auth, project-picker, or session creation behavior. |
-| A02 | PASS | Exact authoritative prompt used: ``Find every txt file. You must use `glob` to enumerate the txt files, `grep` to locate the `status` and `total` lines, and `read` to read the files and verify the values. Report each status and the sum of all totals. Do not modify files.`` Real `glob` ran once, `grep` once, and `read` three times. The response reported `alpha=open`, `beta=closed`, and total `42`; pre/post TXT SHA256 hashes were unchanged. No Think/reasoning block or text was displayed. Standard automatic compaction occurred. Observed turn: 3 steps / 5 tool calls. Session metrics after A02: LLM 7m50s, tool 2.2s, TTFT average 44.2s, 6.6 tok/s; these are observations only and imply no SLA. |
-| A03 | FAIL | Human attached `red.png` in Chat and used `Inspect the attached image itself. Report its color and the printed number.` DSH displayed a real Think block with reasoning beginning `Let me confirm the details: The image is 640x480px, image/png. It's a`; after stop it remained `Thought for a while`. The partial visible inspection recognized `RED 17`, but the turn was stopped immediately for the thinking-OFF violation; this is not an image-understanding PASS. |
-| A04 | NOT RUN | Stopped at the first current-run failure (A03). |
-| A05 | NOT RUN | Stopped at the first current-run failure (A03). |
-| A18 | NOT RUN | Monitor mechanics completed, but the representative A02–A05 flow was incomplete because execution stopped at A03. Root PID `20176`; continuous observation from `2026-08-31T12:21:52.5186711+09:00` through `2026-08-31T13:14:37.6351926+09:00`; phase samples: `BEFORE_FLOW` 320, `FLOW_ACTIVE` 1837, `FLOW_END` 4; failure rows 0; DSH-tree non-loopback connections 0; three-second grace completed. This remains `NOT RUN`, not a pass, because the required representative flow did not complete. Raw logs remain outside Git. |
+| A02 | NOT RUN | The exact authoritative prompt was issued and the observed trajectory contained real `glob` once, `grep` once, and `read` three times; it reported `alpha=open`, `beta=closed`, and total `42`, with unchanged pre/post TXT SHA256 hashes, no visible Think/reasoning text, automatic compaction, 3 steps/5 tool calls, and measured session metrics (LLM 7m50s, tool 2.2s, TTFT average 44.2s, 6.6 tok/s). Because the active mounted profile was stale (`reasoningEfforts: false`), these observations cannot establish a Decision 424 candidate result and are retained only as setup-state evidence. |
+| A03 | NOT RUN | Human attached `red.png` and used `Inspect the attached image itself. Report its color and the printed number.` DSH displayed a real Think block beginning `Let me confirm the details: The image is 640x480px, image/png. It's a`; after stop it remained `Thought for a while`, and the partial visible inspection recognized `RED 17`. This was observed under the stale Decision 422 profile, so it is not a PR-candidate failure or an image-understanding PASS. |
+| A04 | NOT RUN | Not run after the stale active profile was discovered; exact Decision 424 profile was not mounted. |
+| A05 | NOT RUN | Not run after the stale active profile was discovered; exact Decision 424 profile was not mounted. |
+| A18 | NOT RUN | Monitor mechanics completed, but the representative A02–A05 flow was incomplete and did not run under the exact Decision 424 profile. Root PID `20176`; continuous observation from `2026-08-31T12:21:52.5186711+09:00` through `2026-08-31T13:14:37.6351926+09:00`; phase samples: `BEFORE_FLOW` 320, `FLOW_ACTIVE` 1837, `FLOW_END` 4; failure rows 0; DSH-tree non-loopback connections 0; three-second grace completed. This remains `NOT RUN`, not a pass. Raw logs remain outside Git. |
 
-The table below is the consolidated current status. The earlier Decision 422 A02 failure is preserved above for audit history; the Decision 424 rows are the current authority.
+The table below is the consolidated current status. The earlier Decision 422 A02 failure and this invalid stale-profile attempt are both preserved as history; no Decision 424 Windows result is currently authoritative.
 
 | ID | Mandatory result | Evidence / notes |
 | --- | --- | --- |
 | A01 | PASS | DSH Web listened on `127.0.0.1:3080`; the standard DeepSeek Harness UI opened without an additional Misen auth layer, selected `misen-v3-acceptance` through the Project picker, and created a new session with an enabled Chat input. |
-| A02 | PASS | Current Decision 424 rerun: see the detailed row above for the exact prompt, real `glob`/`grep`/`read` evidence, values, unchanged hashes, no Think/reasoning content, and measured observations. |
-| A03 | FAIL | Current Decision 424 rerun failed the thinking-OFF requirement when inspecting the attached `red.png`; see the detailed row above. |
-| A04 | NOT RUN | Stopped at the first current-run failure (A03). |
-| A05 | NOT RUN | Stopped at the first current-run failure (A03). |
+| A02 | NOT RUN | Attempted Decision 424 rerun invalid because the active mounted profile still had `reasoningEfforts: false`; see the detailed record above. |
+| A03 | NOT RUN | Think was observed under the stale Decision 422 profile and is not a PR-candidate result; see the detailed record above. |
+| A04 | NOT RUN | Exact Decision 424 profile was not mounted for the flow. |
+| A05 | NOT RUN | Exact Decision 424 profile was not mounted for the flow. |
 | A06 | NOT RUN | |
 | A07 | NOT RUN | |
 | A08 | NOT RUN | |
@@ -320,12 +322,13 @@ The table below is the consolidated current status. The earlier Decision 422 A02
 | A15 | NOT RUN | |
 | A16 | NOT RUN | |
 | A17 | NOT RUN | |
-| A18 | NOT RUN | Current Decision 424 monitor run completed mechanically, but the mandatory representative A02–A05 flow was incomplete because execution stopped at A03; see the detailed row above. Raw CSV remains outside Git. |
+| A18 | NOT RUN | Current monitor run completed mechanically, but the representative flow was not run under the exact Decision 424 profile; see the detailed row above. Raw CSV remains outside Git. |
 
 Tester: `Codex coordinator with human Web UI operator`
 Date/time and timezone: `2026-08-31, Asia/Tokyo`
 Windows build / CPU / RAM: `Windows 11 Pro 10.0.26200 (x64) / Intel Core Ultra 5 228V / 33,847,832,576 bytes`
 Node / npm / Ollama / model digest: `Node 24.18.1 / npm 11.16.0 / Ollama 0.33.2 / ornith-1.5:9b e5df7dcdd8a2 (Q4_K_M)`
-Draft PR commit: `e1e836db804922de33576ad014ff88914f1d9a57` (current Acceptance candidate)
+Intended Acceptance candidate commit: `e1e836db804922de33576ad014ff88914f1d9a57` (Decision 424 config candidate; not validly tested in this run)
+Current record-only branch HEAD: `c2178d6` (documentation record update; not an Acceptance candidate)
 
-Overall status: `BLOCKED_AFTER_A03_DECISION_424`. Mechanical implementation, deterministic verification, independent reviews, and Draft PR creation are complete, but current Windows Acceptance has A03 `FAIL` and A04/A05/A18 `NOT RUN`. Do not mark the PR Ready, merge it, or close the issue until the authorized repair loop resolves the failure and every A01–A18 row is `PASS`.
+Overall status: `BLOCKED_STALE_ACCEPTANCE_PROFILE`. The attempted Decision 424 rerun is invalid because the active DSH profile was stale; A02–A05 and A18 therefore remain `NOT RUN` for the candidate. Correcting the setup/procedure and rerunning requires human authorization. Do not mark the PR Ready, merge it, or close the issue.
