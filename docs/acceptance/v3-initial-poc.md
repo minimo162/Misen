@@ -282,13 +282,32 @@ Get-Process node,ollama -ErrorAction SilentlyContinue |
 
 ## 4. Result record
 
+### Historical Decision 422 run
+
+The earlier Decision 422 configuration run remains part of the record. Its A02 result was `FAIL`: the trajectory completed the text inspection without a `grep` call, and visible Think/reasoning content appeared. Acceptance stopped before A03–A05; A18 was recorded as `NOT RUN` for that incomplete flow. This historical result is not the current Decision 424 authority.
+
+### Current Decision 424 rerun
+
+Candidate commit: `e1e836db804922de33576ad014ff88914f1d9a57`.
+
+| ID | Current Decision 424 result | Evidence / notes |
+| --- | --- | --- |
+| A01 | PASS (carried forward) | The prior A01 PASS remains valid; this reasoning/prompt repair did not alter boot, auth, project-picker, or session creation behavior. |
+| A02 | PASS | Exact authoritative prompt used: ``Find every txt file. You must use `glob` to enumerate the txt files, `grep` to locate the `status` and `total` lines, and `read` to read the files and verify the values. Report each status and the sum of all totals. Do not modify files.`` Real `glob` ran once, `grep` once, and `read` three times. The response reported `alpha=open`, `beta=closed`, and total `42`; pre/post TXT SHA256 hashes were unchanged. No Think/reasoning block or text was displayed. Standard automatic compaction occurred. Observed turn: 3 steps / 5 tool calls. Session metrics after A02: LLM 7m50s, tool 2.2s, TTFT average 44.2s, 6.6 tok/s; these are observations only and imply no SLA. |
+| A03 | FAIL | Human attached `red.png` in Chat and used `Inspect the attached image itself. Report its color and the printed number.` DSH displayed a real Think block with reasoning beginning `Let me confirm the details: The image is 640x480px, image/png. It's a`; after stop it remained `Thought for a while`. The partial visible inspection recognized `RED 17`, but the turn was stopped immediately for the thinking-OFF violation; this is not an image-understanding PASS. |
+| A04 | NOT RUN | Stopped at the first current-run failure (A03). |
+| A05 | NOT RUN | Stopped at the first current-run failure (A03). |
+| A18 | NOT RUN | Monitor mechanics completed, but the representative A02–A05 flow was incomplete because execution stopped at A03. Root PID `20176`; continuous observation from `2026-08-31T12:21:52.5186711+09:00` through `2026-08-31T13:14:37.6351926+09:00`; phase samples: `BEFORE_FLOW` 320, `FLOW_ACTIVE` 1837, `FLOW_END` 4; failure rows 0; DSH-tree non-loopback connections 0; three-second grace completed. This remains `NOT RUN`, not a pass, because the required representative flow did not complete. Raw logs remain outside Git. |
+
+The table below is the consolidated current status. The earlier Decision 422 A02 failure is preserved above for audit history; the Decision 424 rows are the current authority.
+
 | ID | Mandatory result | Evidence / notes |
 | --- | --- | --- |
 | A01 | PASS | DSH Web listened on `127.0.0.1:3080`; the standard DeepSeek Harness UI opened without an additional Misen auth layer, selected `misen-v3-acceptance` through the Project picker, and created a new session with an enabled Chat input. |
-| A02 | FAIL | Exact prompt run on 2026-08-31 JST. Trajectory showed `glob` plus reads of all three text files and the answer correctly reported `draft`, `open`, `closed`, and total `42`, but no required `grep` call occurred. Visible `Think` blocks with reasoning content also appeared during the real DSH/Ollama request despite the frozen thinking-OFF declaration. Acceptance stopped at this failure. |
-| A03 | NOT RUN | Stopped after A02 failure. |
-| A04 | NOT RUN | Stopped after A02 failure. |
-| A05 | NOT RUN | Stopped after A02 failure. |
+| A02 | PASS | Current Decision 424 rerun: see the detailed row above for the exact prompt, real `glob`/`grep`/`read` evidence, values, unchanged hashes, no Think/reasoning content, and measured observations. |
+| A03 | FAIL | Current Decision 424 rerun failed the thinking-OFF requirement when inspecting the attached `red.png`; see the detailed row above. |
+| A04 | NOT RUN | Stopped at the first current-run failure (A03). |
+| A05 | NOT RUN | Stopped at the first current-run failure (A03). |
 | A06 | NOT RUN | |
 | A07 | NOT RUN | |
 | A08 | NOT RUN | |
@@ -301,12 +320,12 @@ Get-Process node,ollama -ErrorAction SilentlyContinue |
 | A15 | NOT RUN | |
 | A16 | NOT RUN | |
 | A17 | NOT RUN | |
-| A18 | NOT RUN | PID-scoped monitor completed from `2026-08-31T10:30:47+09:00` through `10:35:16+09:00`, with `BEFORE_FLOW`, `FLOW_ACTIVE`, and `FLOW_END` samples, zero monitor failures, and zero non-loopback DSH-tree connections. The mandatory A02-A05 representative flow was incomplete because Acceptance stopped at A02, so this is not a pass. Raw CSV remains outside Git. |
+| A18 | NOT RUN | Current Decision 424 monitor run completed mechanically, but the mandatory representative A02–A05 flow was incomplete because execution stopped at A03; see the detailed row above. Raw CSV remains outside Git. |
 
 Tester: `Codex coordinator with human Web UI operator`
 Date/time and timezone: `2026-08-31, Asia/Tokyo`
 Windows build / CPU / RAM: `Windows 11 Pro 10.0.26200 (x64) / Intel Core Ultra 5 228V / 33,847,832,576 bytes`
 Node / npm / Ollama / model digest: `Node 24.18.1 / npm 11.16.0 / Ollama 0.33.2 / ornith-1.5:9b e5df7dcdd8a2 (Q4_K_M)`
-Draft PR commit: `947a758039ee4bc078dd412cc138ba47a170f734` (Acceptance candidate before this record-only update)
+Draft PR commit: `e1e836db804922de33576ad014ff88914f1d9a57` (current Acceptance candidate)
 
-Overall status: `READY_FOR_WINDOWS_ACCEPTANCE` only after mechanical implementation, deterministic verification, both independent reviews, and Draft PR creation. Change this to `WINDOWS_ACCEPTANCE_PASS` only when every A01–A18 row is `PASS`. Any `FAIL`, `NOT RUN`, inferred result, or missing evidence blocks Ready and merge.
+Overall status: `BLOCKED_AFTER_A03_DECISION_424`. Mechanical implementation, deterministic verification, independent reviews, and Draft PR creation are complete, but current Windows Acceptance has A03 `FAIL` and A04/A05/A18 `NOT RUN`. Do not mark the PR Ready, merge it, or close the issue until the authorized repair loop resolves the failure and every A01–A18 row is `PASS`.
