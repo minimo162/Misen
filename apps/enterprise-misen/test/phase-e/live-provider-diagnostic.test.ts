@@ -4,7 +4,13 @@ import { test } from 'node:test'
 import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
 import type { Config as LlmPiAiConfig } from '@deepseek-ai/dsh-llm-pi-ai'
 import { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
-import { createLivePrompt, createLiveSessionId, runLiveAcceptance } from '../../acceptance/live-brain.js'
+import {
+  collectSpreadsheetUpdateDiagnostics,
+  createLivePrompt,
+  createLiveSessionId,
+  runJulyMonthDiagnosis,
+  runLiveAcceptance,
+} from '../../acceptance/live-brain.js'
 import { createPhaseAContext } from '../../src/runtime/phase-a.js'
 
 const DIAGNOSTIC_CONFIG: LlmPiAiConfig = {
@@ -101,6 +107,66 @@ test('live acceptance reports NOT RUN without a credential and does not fall bac
     if (previous === undefined) delete process.env.OPENAI_API_KEY
     else process.env.OPENAI_API_KEY = previous
   }
+})
+
+test('Decision 428 July diagnosis reports NOT RUN without a credential and does not fall back', async () => {
+  const previous = process.env.OPENAI_API_KEY
+  delete process.env.OPENAI_API_KEY
+  try {
+    const result = await runJulyMonthDiagnosis()
+    assert.equal(result.status, 'NOT RUN')
+    assert.equal(result.reason, 'OPENAI_API_KEY unavailable')
+    assert.equal(result.provider, 'openai')
+    assert.equal(result.model, 'gpt-5.6-luna')
+    assert.deepEqual(result.months, [])
+  } finally {
+    if (previous === undefined) delete process.env.OPENAI_API_KEY
+    else process.env.OPENAI_API_KEY = previous
+  }
+})
+
+test('Decision 428 observer correlates DSH tool results without retaining unrelated arguments', () => {
+  const events = [
+    {
+      type: 'tool/call',
+      data: { callId: 'call-1', name: 'workspace_list_files', arguments: '{"path":"."}' },
+    },
+    {
+      type: 'tool/result',
+      data: {
+        message: {
+          source: { kind: 'tool', callId: 'call-1' },
+          content: [{ type: 'tool-result', toolCallId: 'call-1', content: [], isError: false }],
+        },
+      },
+    },
+    {
+      type: 'tool/call',
+      data: {
+        callId: 'call-2',
+        name: 'spreadsheet_update',
+        arguments: '{"workbook":"output/report.xlsx","sheet":"Report","range":"B2:B2","values":[["2024年7月"]] }',
+      },
+    },
+    {
+      type: 'tool/result',
+      data: {
+        message: {
+          source: { kind: 'tool', callId: 'call-2' },
+          content: [{ type: 'tool-result', toolCallId: 'call-2', content: [], isError: false }],
+        },
+      },
+    },
+  ]
+
+  assert.deepEqual(collectSpreadsheetUpdateDiagnostics(events), [{
+    sequence: 2,
+    workbook: 'output/report.xlsx',
+    sheet: 'Report',
+    range: 'B2:B2',
+    values: [['2024年7月']],
+    result: 'success',
+  }])
 })
 
 test('live prompt remains the exact minimal Japanese request', () => {

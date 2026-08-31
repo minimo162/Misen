@@ -26,7 +26,7 @@ Acceptance candidate provenance:
 | B — commodity Spreadsheet engine | PASS | `@office-kit/xlsx@0.9.0` opens, reads, batch-writes, saves, and reopens both synthetic templates and an independently generated EPPlus workbook while preserving checked values/styles/dimensions and input hashes. |
 | C — File + Spreadsheet capability integration | PASS | Exact five-tool roster; non-recursive listing; workspace-relative reads; symlink/traversal/absolute/hardlink denial; safe local formula subset applied to model-authored and carried formulas; output-only `.xlsx` writes. |
 | D — two-month mechanical vertical slice | PASS (mechanical only) | A scripted test adapter drives the real DSH Agent Loop and production Tools to create independently checked July and August deliverables without production month/company hard-coding or input mutation. Live-model July ran separately and failed independent `MONTH` validation; August was not run. |
-| E — independent deterministic acceptance | PASS (deterministic); live FAIL | 35 tests: 34 PASS, 0 FAIL, 1 host-permission SKIP. Overwrite, external-relationship, credential, ASCII session-id, provider failure/retry, supply-chain, and boundary evidence passed. The first live July result failed independent workbook validation (`MONTH`); August was not run. |
+| E — independent deterministic acceptance | PASS (deterministic); live FAIL | 37 tests: 36 PASS, 0 FAIL, 1 host-permission SKIP. Overwrite, external-relationship, credential, ASCII session-id, Decision 428 observer correlation, provider failure/retry, supply-chain, and boundary evidence passed. Both live July results failed independent workbook validation (`MONTH`); August was not run. |
 
 ## Capability roster
 
@@ -48,7 +48,7 @@ commands below were rerun on the final implementation tree:
 ```text
 npm ci --ignore-scripts                     PASS (133 packages installed)
 npm ls --all                                PASS (only declared optional peers absent)
-npm run test                                PASS (34 pass, 0 fail, 1 skip / 35)
+npm run test                                PASS (36 pass, 0 fail, 1 skip / 37)
 npm run acceptance                          PASS (1 pass, 0 fail)
 npm run sbom                                PASS (131 unique production versions / 132 locations)
 npm audit --omit=dev --package-lock-only    PASS (0 vulnerabilities)
@@ -82,6 +82,48 @@ month label changed for August). The two earlier July `PI_AI_ERROR` diagnostics
 were caused by localized session ids reaching the provider's HTTP header. The
 harness now uses an ASCII-only deterministic correlation id and retains the
 localized label only in the user prompt.
+
+### Decision 428 diagnosis-only rerun
+
+One July rerun was performed with the same standard DSH OpenAI Responses route,
+exact `gpt-5.6-luna` model, `off` reasoning setting, persona, handoff, exact
+prompt, five Tool contracts, fixtures, template, and independent Acceptance.
+It again returned `FAIL — MONTH`; no retry, fallback, prompt hint, remediation,
+or August request followed.
+
+The generated workbook contained `Report!A2 = "Month"` and
+`Report!B2 = "2024年7月"`, while Acceptance requires the synthetic literal
+`"7月"`. The Tool sequence contained 20 calls. At sequence 16 the Brain called
+`spreadsheet_update` for workbook `output/7月_月次管理レポート.xlsx`, sheet
+`Report`, range `B2:B2`, with values `[["2024年7月"]]`. The call succeeded: all
+20 calls had results, no Tool error was recorded, and the independently reopened
+workbook contained that exact value. The first observer rendering labeled the
+result `missing-result` because it looked for the DSH call id on the message
+rather than on `message.source.callId`; this observer-only correlation defect
+was corrected and covered by a deterministic DSH event-shape test without a
+second live run.
+
+Read-only output diagnosis was:
+
+```text
+SHEET             PASS
+MONTH             FAIL
+ROWS              PASS
+PROFIT_FORMULAS   PASS
+STATUS            PASS
+TOTAL             PASS
+FOOTER            PASS
+FORMAT            PASS
+```
+
+Inputs were unchanged, the forbidden Tool roster was empty, no reasoning block
+was recorded, no LLM retry occurred, and the turn completed normally. The
+evidence-supported root cause is **CLASS B — representation mismatch**: the
+Brain targeted the correct month cell and wrote a value that denotes July, but
+used `2024年7月` rather than the exact Acceptance representation `7月`.
+Production behavior was not changed; diagnostic code reads only synthetic Tool
+events and the completed workbook. The API key and raw reasoning/provider
+payload were neither collected nor retained.
 
 ## Process and network observation
 

@@ -82,6 +82,8 @@ interface MonthResult {
   sessionEventCounts?: Record<string, number>
   toolResultErrors?: ToolResultError[]
   retryEventCount?: number
+  spreadsheetUpdates?: SpreadsheetUpdateDiagnostic[]
+  outputDiagnosis?: OutputDiagnosis
 }
 
 interface ToolResultError {
@@ -99,6 +101,26 @@ interface FailureDiagnostic {
   readonly network?: boolean
   readonly messageSha256?: string
   readonly messageLength?: number
+}
+
+interface SpreadsheetUpdateDiagnostic {
+  readonly sequence: number
+  readonly workbook?: string
+  readonly sheet?: string
+  readonly range?: string
+  readonly values?: unknown
+  readonly result: 'success' | 'error' | 'missing-result'
+  readonly errorCode?: string
+  readonly errorCategory?: string
+}
+
+interface OutputDiagnosis {
+  readonly actualA2?: unknown
+  readonly actualB2?: unknown
+  readonly checks: Readonly<Record<
+    'SHEET' | 'MONTH' | 'ROWS' | 'PROFIT_FORMULAS' | 'STATUS' | 'TOTAL' | 'FOOTER' | 'FORMAT',
+    'PASS' | 'FAIL'
+  >>
 }
 
 interface LiveAcceptanceResult {
@@ -349,6 +371,147 @@ function validateOutput(
   if (readCellStyle(workbook, 'Report', 'B5')?.numberFormat !== '#,##0') throw new Error('number format was not preserved')
 }
 
+function diagnosticCellValue(value: ReturnType<typeof readCell>): unknown {
+  if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value
+  if (value instanceof Date) return { kind: 'date', value: value.toISOString() }
+  if (isFormulaValue(value)) return { kind: 'formula', formula: value.formula }
+  return { kind: typeof value === 'object' && value !== null && 'kind' in value ? String(value.kind) : 'other' }
+}
+
+function checkOutput(predicate: () => boolean): 'PASS' | 'FAIL' {
+  try {
+    return predicate() ? 'PASS' : 'FAIL'
+  } catch {
+    return 'FAIL'
+  }
+}
+
+/**
+ * Read-only, synthetic-safe diagnosis of every independent output axis. This
+ * does not replace or weaken validateOutput: the acceptance still stops on its
+ * original first failure, while this observer records how much of the output
+ * was otherwise correct.
+ */
+function diagnoseOutput(
+  workbook: Awaited<ReturnType<typeof openSpreadsheet>>,
+  month: string,
+): OutputDiagnosis {
+  const fixture = SYNTHETIC_MONTHS.find(candidate => candidate.month === month)
+  const hasReport = listWorksheetTitles(workbook).length === 1 && listWorksheetTitles(workbook)[0] === 'Report'
+  const actualA2 = hasReport ? diagnosticCellValue(readCell(workbook, 'Report', 'A2')) : undefined
+  const actualB2 = hasReport ? diagnosticCellValue(readCell(workbook, 'Report', 'B2')) : undefined
+  const sorted = fixture === undefined ? [] : [...fixture.companies].sort((left, right) => left.company.localeCompare(right.company))
+
+  return {
+    ...(actualA2 === undefined ? {} : { actualA2 }),
+    ...(actualB2 === undefined ? {} : { actualB2 }),
+    checks: {
+      SHEET: hasReport ? 'PASS' : 'FAIL',
+      MONTH: hasReport && actualB2 === month ? 'PASS' : 'FAIL',
+      ROWS: checkOutput(() => hasReport && sorted.every((company, index) => {
+        const values = readRange(workbook, 'Report', `A${index + 5}:C${index + 5}`)[0]
+        return values?.[0] === company.company && values?.[1] === company.revenue && values?.[2] === company.cost
+      })),
+      PROFIT_FORMULAS: checkOutput(() => hasReport && sorted.every((_company, index) => {
+        const row = index + 5
+        const cell = getCellByCoord(requireWorksheet(workbook, 'Report'), `D${row}`)
+        return cell !== undefined && isFormulaValue(cell.value) && getFormulaText(cell) === `=B${row}-C${row}`
+      })),
+      STATUS: checkOutput(() => hasReport && sorted.every((company, index) => {
+        const profit = company.revenue - company.cost
+        const expected = profit >= (SYNTHETIC_TARGETS[company.company] ?? Number.POSITIVE_INFINITY) ? 'On target' : 'Review'
+        return readCell(workbook, 'Report', `E${index + 5}`) === expected
+      })),
+      TOTAL: checkOutput(() => {
+        if (!hasReport) return false
+        const cell = getCellByCoord(requireWorksheet(workbook, 'Report'), 'D9')
+        return cell !== undefined && isFormulaValue(cell.value) && getFormulaText(cell) === '=SUM(D5:D7)'
+      }),
+      FOOTER: checkOutput(() => hasReport && readCell(workbook, 'Report', 'A11') === 'Template footer — untouched by the agent'),
+      FORMAT: checkOutput(() => hasReport &&
+        readCellStyle(workbook, 'Report', 'A1')?.font.bold === true &&
+        readCellStyle(workbook, 'Report', 'B5')?.numberFormat === '#,##0'),
+    },
+  }
+}
+
+function boundedDiagnosticValue(value: unknown): unknown {
+  if (value === null || typeof value === 'number' || typeof value === 'boolean') return value
+  if (typeof value === 'string') return value.length <= 256 ? value : `${value.slice(0, 256)}…`
+  if (Array.isArray(value)) {
+    if (value.length > 100) return { omitted: 'array-too-large', length: value.length }
+    return value.map(boundedDiagnosticValue)
+  }
+  if (typeof value === 'object' && value !== null) {
+    const entries = Object.entries(value)
+    if (entries.length > 20) return { omitted: 'object-too-wide', keys: entries.length }
+    return Object.fromEntries(entries.map(([key, child]) => [key, boundedDiagnosticValue(child)]))
+  }
+  return undefined
+}
+
+export function collectSpreadsheetUpdateDiagnostics(events: readonly unknown[]): SpreadsheetUpdateDiagnostic[] {
+  const results = new Map<string, { result: 'success' | 'error'; errorCode?: string; errorCategory?: string }>()
+  for (const event of events) {
+    if ((event as { type?: unknown }).type !== 'tool/result') continue
+    const data = eventData(event)
+    const message = typeof data.message === 'object' && data.message !== null && !Array.isArray(data.message)
+      ? data.message as JsonRecord
+      : {}
+    const source = typeof message.source === 'object' && message.source !== null && !Array.isArray(message.source)
+      ? message.source as JsonRecord
+      : {}
+    const content = Array.isArray(message.content) ? message.content : []
+    const resultBlock = typeof content[0] === 'object' && content[0] !== null && !Array.isArray(content[0])
+      ? content[0] as JsonRecord
+      : {}
+    const callId = typeof source.callId === 'string' ? source.callId : undefined
+    if (callId === undefined) continue
+    const error = typeof data.error === 'object' && data.error !== null && !Array.isArray(data.error)
+      ? data.error as JsonRecord
+      : undefined
+    const errorCode = error === undefined ? undefined : safeIdentifier(error.code)
+    const errorCategory = error === undefined ? undefined : safeIdentifier(error.name)
+    results.set(callId, {
+      result: error === undefined && resultBlock.isError !== true ? 'success' : 'error',
+      ...(errorCode === undefined ? {} : { errorCode }),
+      ...(errorCategory === undefined ? {} : { errorCategory }),
+    })
+  }
+
+  const diagnostics: SpreadsheetUpdateDiagnostic[] = []
+  let sequence = 0
+  for (const event of events) {
+    if ((event as { type?: unknown }).type !== 'tool/call') continue
+    sequence += 1
+    const data = eventData(event)
+    if (data.name !== 'spreadsheet_update') continue
+    const callId = typeof data.callId === 'string' ? data.callId : undefined
+    let parsed: JsonRecord = {}
+    if (typeof data.arguments === 'string') {
+      try {
+        const candidate = JSON.parse(data.arguments) as unknown
+        if (typeof candidate === 'object' && candidate !== null && !Array.isArray(candidate)) parsed = candidate as JsonRecord
+      } catch {
+        // Invalid JSON is already represented by the matching Tool error; do
+        // not retain the raw model text in diagnostic output.
+      }
+    }
+    const result = callId === undefined ? undefined : results.get(callId)
+    diagnostics.push({
+      sequence,
+      ...(typeof parsed.workbook === 'string' ? { workbook: parsed.workbook.slice(0, 256) } : {}),
+      ...(typeof parsed.sheet === 'string' ? { sheet: parsed.sheet.slice(0, 128) } : {}),
+      ...(typeof parsed.range === 'string' ? { range: parsed.range.slice(0, 64) } : {}),
+      ...(parsed.values === undefined ? {} : { values: boundedDiagnosticValue(parsed.values) }),
+      result: result?.result ?? 'missing-result',
+      ...(result?.errorCode === undefined ? {} : { errorCode: result.errorCode }),
+      ...(result?.errorCategory === undefined ? {} : { errorCategory: result.errorCategory }),
+    })
+  }
+  return diagnostics
+}
+
 function collectResult(
   root: string,
   month: string,
@@ -405,6 +568,7 @@ function collectResult(
     const type = (event as { type?: unknown }).type
     return type === 'llm/retry' || type === 'llm/retry-started'
   }).length
+  const spreadsheetUpdates = collectSpreadsheetUpdateDiagnostics(events)
   const reasoningBlocks = assistantEvents.reduce<number>(
     (count: number, event: unknown) => count + (hasReasoningBlock(event) ? 1 : 0),
     0,
@@ -507,6 +671,7 @@ function collectResult(
     sessionEventCounts,
     ...(toolResultErrors.length === 0 ? {} : { toolResultErrors }),
     retryEventCount,
+    ...(spreadsheetUpdates.length === 0 ? {} : { spreadsheetUpdates }),
   }
 }
 
@@ -577,7 +742,9 @@ async function runMonth(month: string): Promise<MonthResult> {
       const outputPath = await boundary.resolveOutputFile(outputRelative)
       outputBytes = (await stat(outputPath)).size
       try {
-        validateOutput(await openSpreadsheet(outputPath), month)
+        const workbook = await openSpreadsheet(outputPath)
+        terminal.outputDiagnosis = diagnoseOutput(workbook, month)
+        validateOutput(workbook, month)
       } catch (error) {
         // Session/tool evidence was collected before touching the deliverable.
         // Preserve that evidence when independent output validation rejects a
@@ -594,6 +761,7 @@ async function runMonth(month: string): Promise<MonthResult> {
     }
     stage = 'final-collect'
     const result = collectResult(root, month, startedAt, agent, inputBefore, inputAfter, outputRelative, outputBytes)
+    if (terminal.outputDiagnosis !== undefined) result.outputDiagnosis = terminal.outputDiagnosis
     if (Object.entries(inputBefore).some(([path, before]) => inputAfter[path] !== before)) {
       result.status = 'FAIL'
       result.reason = 'an input workbook changed'
@@ -710,6 +878,65 @@ export async function runLiveAcceptance(): Promise<LiveAcceptanceResult> {
       inputUnchanged: Object.entries(month.inputHashesBefore).every(([path, before]) => month.inputHashesAfter[path] === before),
       ...(month.turnEnd === undefined ? {} : { turnEnd: month.turnEnd }),
     })),
+  })}`)
+  return result
+}
+
+/**
+ * Decision 428 diagnosis-only entry point. It performs exactly one July run
+ * and cannot advance to August, even if the rerun happens to pass.
+ */
+export async function runJulyMonthDiagnosis(): Promise<LiveAcceptanceResult> {
+  if (typeof process.env.OPENAI_API_KEY !== 'string' || process.env.OPENAI_API_KEY.trim().length === 0) {
+    console.log('NOT RUN — OPENAI_API_KEY unavailable')
+    return { status: 'NOT RUN', reason: 'OPENAI_API_KEY unavailable', provider: LIVE_PROVIDER, model: LIVE_MODEL, months: [] }
+  }
+
+  const month = '7月'
+  let monthResult: MonthResult
+  try {
+    monthResult = await runMonth(month)
+  } catch (error) {
+    monthResult = {
+      month,
+      status: 'FAIL',
+      reason: error instanceof LiveAcceptanceStageError
+        ? `stage error (${error.stage}${error.stage === 'output-validation'
+          ? `:${outputValidationFailureCode(error.cause) ?? 'UNKNOWN'}`
+          : ''})`
+        : safeFailureReason(error),
+      toolNames: [],
+      metrics: { elapsedMs: 0, llmRequestCount: 0, toolCallCount: 0, toolResultCount: 0, memoryBytes: process.memoryUsage().rss },
+      inputHashesBefore: {},
+      inputHashesAfter: {},
+      forbiddenToolNames: [],
+      reasoningBlocks: 0,
+      requestToolRoster: [],
+    }
+  }
+  const result: LiveAcceptanceResult = {
+    status: monthResult.status,
+    provider: LIVE_PROVIDER,
+    model: LIVE_MODEL,
+    months: [monthResult],
+  }
+  console.log(`DECISION_428_DIAGNOSIS ${JSON.stringify({
+    status: result.status,
+    provider: result.provider,
+    model: result.model,
+    prompt: createLivePrompt(month),
+    month: monthResult.month,
+    ...(monthResult.reason === undefined ? {} : { reason: monthResult.reason }),
+    ...(monthResult.failureCode === undefined ? {} : { failureCode: monthResult.failureCode }),
+    toolNames: monthResult.toolNames,
+    ...(monthResult.spreadsheetUpdates === undefined ? {} : { spreadsheetUpdates: monthResult.spreadsheetUpdates }),
+    ...(monthResult.outputDiagnosis === undefined ? {} : { outputDiagnosis: monthResult.outputDiagnosis }),
+    metrics: monthResult.metrics,
+    inputUnchanged: Object.entries(monthResult.inputHashesBefore).every(([path, before]) => monthResult.inputHashesAfter[path] === before),
+    forbiddenToolNames: monthResult.forbiddenToolNames,
+    reasoningBlocks: monthResult.reasoningBlocks,
+    retryEventCount: monthResult.retryEventCount ?? 0,
+    ...(monthResult.turnEnd === undefined ? {} : { turnEnd: monthResult.turnEnd }),
   })}`)
   return result
 }
