@@ -49,7 +49,7 @@ export interface ReportingPeriod {
 
 export type CompanyValueTriple = readonly [company: string, revenue: number, cost: number]
 
-interface UsageTotals {
+export interface UsageTotals {
   inputTokens?: number
   outputTokens?: number
   totalTokens?: number
@@ -58,7 +58,7 @@ interface UsageTotals {
   cacheWriteTokens?: number
 }
 
-interface LiveMetrics {
+export interface LiveMetrics {
   elapsedMs: number
   llmRequestCount: number
   toolCallCount: number
@@ -68,7 +68,7 @@ interface LiveMetrics {
   memoryBytes: number
 }
 
-interface MonthResult {
+export interface MonthResult {
   month: string
   status: 'PASS' | 'FAIL'
   reason?: string
@@ -76,6 +76,7 @@ interface MonthResult {
   failureDiagnostic?: FailureDiagnostic
   finalText?: string
   output?: string
+  outputWorkbookCount?: number
   toolNames: string[]
   metrics: LiveMetrics
   inputHashesBefore: Record<string, string>
@@ -91,6 +92,10 @@ interface MonthResult {
   retryEventCount?: number
   spreadsheetUpdates?: SpreadsheetUpdateDiagnostic[]
   outputDiagnosis?: OutputDiagnosis
+  toolErrorCount?: number
+  toolValidationErrorCount?: number
+  agentSelfCorrection?: boolean
+  agentSelfCorrectionSucceeded?: boolean
 }
 
 interface ToolResultError {
@@ -110,7 +115,7 @@ interface FailureDiagnostic {
   readonly messageLength?: number
 }
 
-interface SpreadsheetUpdateDiagnostic {
+export interface SpreadsheetUpdateDiagnostic {
   readonly sequence: number
   readonly workbook?: string
   readonly sheet?: string
@@ -121,7 +126,7 @@ interface SpreadsheetUpdateDiagnostic {
   readonly errorCategory?: string
 }
 
-interface OutputDiagnosis {
+export interface OutputDiagnosis {
   readonly actualA2?: unknown
   readonly actualB2?: unknown
   readonly actualRows?: readonly unknown[][]
@@ -133,7 +138,7 @@ interface OutputDiagnosis {
   >>
 }
 
-interface LiveAcceptanceResult {
+export interface LiveAcceptanceResult {
   status: 'PASS' | 'FAIL' | 'NOT RUN'
   reason?: string
   provider: string
@@ -174,8 +179,12 @@ function sha256(bytes: Uint8Array): string {
  * correlation id deterministic but ASCII-only so a localized month label can
  * never become an invalid HTTP ByteString header value.
  */
-export function createLiveSessionId(month: string): SessionId {
-  return SessionId(`enterprise-live-${sha256(Buffer.from(month, 'utf8')).slice(0, 16)}`)
+export function createLiveSessionId(month: string, runIdentity?: string): SessionId {
+  const monthId = sha256(Buffer.from(month, 'utf8')).slice(0, 16)
+  const runId = runIdentity === undefined
+    ? ''
+    : `-${sha256(Buffer.from(runIdentity, 'utf8')).slice(0, 12)}`
+  return SessionId(`enterprise-live-${monthId}${runId}`)
 }
 
 /**
@@ -607,6 +616,118 @@ export function collectSpreadsheetUpdateDiagnostics(events: readonly unknown[]):
   return diagnostics
 }
 
+export interface ToolCorrectionSummary {
+  readonly toolErrorCount: number
+  readonly validationErrorCount: number
+  readonly selfCorrectionAttempted: boolean
+  readonly selfCorrectionSucceeded: boolean
+}
+
+function toolOperationKey(data: JsonRecord): string | undefined {
+  if (typeof data.name !== 'string' || typeof data.arguments !== 'string') return undefined
+  let args: JsonRecord
+  try {
+    const parsed = JSON.parse(data.arguments) as unknown
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined
+    args = parsed as JsonRecord
+  } catch {
+    return undefined
+  }
+  const fields = data.name === 'spreadsheet_update'
+    ? ['workbook', 'sheet', 'range']
+    : data.name === 'spreadsheet_create_output'
+      ? ['source', 'output']
+      : data.name === 'spreadsheet_read'
+        ? ['workbook', 'sheet', 'range']
+        : ['path']
+  return JSON.stringify([data.name, ...fields.map(field => typeof args[field] === 'string' ? args[field] : null)])
+}
+
+function isToolValidationError(data: JsonRecord, resultBlock: JsonRecord): boolean {
+  const error = typeof data.error === 'object' && data.error !== null && !Array.isArray(data.error)
+    ? data.error as JsonRecord
+    : {}
+  if (error.code === 'INVALID_ARGS' || error.code === 'INVALID_TOOL_OUTPUT' ||
+    error.name === 'ToolArgsError' || error.name === 'ToolOutputError') return true
+  const content = Array.isArray((resultBlock as JsonRecord).content)
+    ? (resultBlock as JsonRecord).content as unknown[]
+    : []
+  const text = content
+    .filter((block): block is JsonRecord => typeof block === 'object' && block !== null && !Array.isArray(block))
+    .filter(block => block.type === 'text' && typeof block.text === 'string')
+    .map(block => block.text as string)
+    .join('\n')
+  return /^Error: (?:invalid arguments:|unsupported spreadsheet cell value|invalid date value|model-supplied formula cachedValue is not allowed|values must be (?:a rectangular array of rows|non-empty and rectangular)|values dimensions must exactly match range|range exceeds \d+ cells|unsafe formula|source workbook must use the \.xlsx extension)/u.test(text)
+}
+
+/**
+ * Observe Tool error -> later same-Tool call behavior without retaining general
+ * Tool arguments. This distinguishes provider retries from an Agent reacting
+ * to a Tool result inside one ordinary turn.
+ */
+export function collectToolCorrectionSummary(events: readonly unknown[]): ToolCorrectionSummary {
+  const calls: Array<{
+    callId?: string
+    name?: string
+    operationKey?: string
+    result: 'success' | 'error' | 'missing-result'
+    validationError: boolean
+  }> = []
+  const results = new Map<string, { result: 'success' | 'error'; validationError: boolean }>()
+  for (const event of events) {
+    if ((event as { type?: unknown }).type !== 'tool/result') continue
+    const data = eventData(event)
+    const message = typeof data.message === 'object' && data.message !== null && !Array.isArray(data.message)
+      ? data.message as JsonRecord
+      : {}
+    const source = typeof message.source === 'object' && message.source !== null && !Array.isArray(message.source)
+      ? message.source as JsonRecord
+      : {}
+    const content = Array.isArray(message.content) ? message.content : []
+    const resultBlock = typeof content[0] === 'object' && content[0] !== null && !Array.isArray(content[0])
+      ? content[0] as JsonRecord
+      : {}
+    const callId = safeIdentifier(source.callId)
+    if (callId === undefined) continue
+    const hasError = (typeof data.error === 'object' && data.error !== null) || resultBlock.isError === true
+    results.set(callId, {
+      result: hasError ? 'error' : 'success',
+      validationError: hasError && isToolValidationError(data, resultBlock),
+    })
+  }
+  for (const event of events) {
+    if ((event as { type?: unknown }).type !== 'tool/call') continue
+    const data = eventData(event)
+    const callId = safeIdentifier(data.callId)
+    const name = typeof data.name === 'string' ? data.name : undefined
+    const operationKey = toolOperationKey(data)
+    const outcome = callId === undefined ? undefined : results.get(callId)
+    calls.push({
+      ...(callId === undefined ? {} : { callId }),
+      ...(name === undefined ? {} : { name }),
+      ...(operationKey === undefined ? {} : { operationKey }),
+      result: outcome?.result ?? 'missing-result',
+      validationError: outcome?.validationError ?? false,
+    })
+  }
+
+  let selfCorrectionAttempted = false
+  let selfCorrectionSucceeded = false
+  for (const [index, call] of calls.entries()) {
+    if (!call.validationError || call.name === undefined || call.operationKey === undefined) continue
+    const next = calls[index + 1]
+    if (next?.name !== call.name || next.operationKey !== call.operationKey) continue
+    selfCorrectionAttempted = true
+    if (next.result === 'success') selfCorrectionSucceeded = true
+  }
+  return {
+    toolErrorCount: calls.filter(call => call.result === 'error').length,
+    validationErrorCount: calls.filter(call => call.validationError).length,
+    selfCorrectionAttempted,
+    selfCorrectionSucceeded,
+  }
+}
+
 function collectResult(
   root: string,
   month: string,
@@ -664,6 +785,7 @@ function collectResult(
     return type === 'llm/retry' || type === 'llm/retry-started'
   }).length
   const spreadsheetUpdates = collectSpreadsheetUpdateDiagnostics(events)
+  const correctionSummary = collectToolCorrectionSummary(events)
   const reasoningBlocks = assistantEvents.reduce<number>(
     (count: number, event: unknown) => count + (hasReasoningBlock(event) ? 1 : 0),
     0,
@@ -767,10 +889,14 @@ function collectResult(
     ...(toolResultErrors.length === 0 ? {} : { toolResultErrors }),
     retryEventCount,
     ...(spreadsheetUpdates.length === 0 ? {} : { spreadsheetUpdates }),
+    toolErrorCount: correctionSummary.toolErrorCount,
+    toolValidationErrorCount: correctionSummary.validationErrorCount,
+    agentSelfCorrection: correctionSummary.selfCorrectionAttempted,
+    agentSelfCorrectionSucceeded: correctionSummary.selfCorrectionSucceeded,
   }
 }
 
-async function runMonth(month: string): Promise<MonthResult> {
+export async function runMonth(month: string, runIdentity?: string): Promise<MonthResult> {
   const root = await mkdtemp(join(tmpdir(), 'misen-enterprise-live-'))
   const startedAt = performance.now()
   let ctx: Awaited<ReturnType<typeof createEnterpriseBrainContext>> | undefined
@@ -795,7 +921,7 @@ async function runMonth(month: string): Promise<MonthResult> {
       schemas.some(name => !(ENTERPRISE_CAPABILITY_TOOL_NAMES as readonly string[]).includes(name))) {
       throw new Error(`unexpected model-facing capability roster: ${schemas.join(', ')}`)
     }
-    const agent = ctx.agentLoop.create(createLiveSessionId(month), {
+    const agent = ctx.agentLoop.create(createLiveSessionId(month, runIdentity), {
       provider: LIVE_PROVIDER,
       model: LIVE_MODEL,
       reasoningEffort: ReasoningEffortId('off'),
@@ -825,14 +951,33 @@ async function runMonth(month: string): Promise<MonthResult> {
     // Inspect the Agent Loop terminal event before touching output files. A
     // provider/credential failure is the primary acceptance finding; do not
     // overwrite it with the secondary fact that no deliverable was produced.
-    stage = 'session-collect'
-    const terminal = collectResult(root, month, startedAt, agent, inputBefore, inputAfter, undefined, undefined, executionError)
-    if (terminal.status === 'FAIL') return terminal
-
     stage = 'output-list'
     const outputFiles = (await readdir(join(root, 'output'), { withFileTypes: true }))
       .filter(entry => entry.isFile() && entry.name.toLocaleLowerCase().endsWith('.xlsx'))
       .map(entry => entry.name)
+    stage = 'session-collect'
+    const terminal = collectResult(root, month, startedAt, agent, inputBefore, inputAfter, undefined, undefined, executionError)
+    terminal.outputWorkbookCount = outputFiles.length
+    if (Object.entries(inputBefore).some(([path, before]) => inputAfter[path] !== before)) {
+      terminal.status = 'FAIL'
+      terminal.reason = 'an input workbook changed'
+      return terminal
+    }
+    if (terminal.forbiddenToolNames.length > 0) return terminal
+    if (terminal.metrics.toolResultCount !== terminal.metrics.toolCallCount) {
+      terminal.status = 'FAIL'
+      terminal.reason = 'tool calls and tool results are not balanced'
+      return terminal
+    }
+    if (terminal.requestToolRoster.length > 0 &&
+      (terminal.requestToolRoster.length !== ENTERPRISE_CAPABILITY_TOOL_NAMES.length ||
+        terminal.requestToolRoster.some(name => !(ENTERPRISE_CAPABILITY_TOOL_NAMES as readonly string[]).includes(name)))) {
+      terminal.status = 'FAIL'
+      terminal.reason = `request/header exposed an unexpected tool roster: ${terminal.requestToolRoster.join(', ')}`
+      return terminal
+    }
+    if (terminal.status === 'FAIL') return terminal
+
     let outputRelative: string | undefined
     let outputBytes: number | undefined
     if (outputFiles.length === 1) {
@@ -860,6 +1005,7 @@ async function runMonth(month: string): Promise<MonthResult> {
     }
     stage = 'final-collect'
     const result = collectResult(root, month, startedAt, agent, inputBefore, inputAfter, outputRelative, outputBytes)
+    result.outputWorkbookCount = outputFiles.length
     if (terminal.outputDiagnosis !== undefined) result.outputDiagnosis = terminal.outputDiagnosis
     if (Object.entries(inputBefore).some(([path, before]) => inputAfter[path] !== before)) {
       result.status = 'FAIL'
@@ -968,12 +1114,17 @@ export async function runLiveAcceptance(): Promise<LiveAcceptanceResult> {
       ...(month.executionErrorCode === undefined ? {} : { executionErrorCode: month.executionErrorCode }),
       toolNames: month.toolNames,
       metrics: month.metrics,
+      ...(month.outputWorkbookCount === undefined ? {} : { outputWorkbookCount: month.outputWorkbookCount }),
       forbiddenToolNames: month.forbiddenToolNames,
       reasoningBlocks: month.reasoningBlocks,
       requestToolRoster: month.requestToolRoster,
       ...(month.sessionEventCounts === undefined ? {} : { sessionEventCounts: month.sessionEventCounts }),
       ...(month.toolResultErrors === undefined ? {} : { toolResultErrors: month.toolResultErrors }),
       ...(month.retryEventCount === undefined ? {} : { retryEventCount: month.retryEventCount }),
+      ...(month.toolErrorCount === undefined ? {} : { toolErrorCount: month.toolErrorCount }),
+      ...(month.toolValidationErrorCount === undefined ? {} : { toolValidationErrorCount: month.toolValidationErrorCount }),
+      ...(month.agentSelfCorrection === undefined ? {} : { agentSelfCorrection: month.agentSelfCorrection }),
+      ...(month.agentSelfCorrectionSucceeded === undefined ? {} : { agentSelfCorrectionSucceeded: month.agentSelfCorrectionSucceeded }),
       ...(month.outputDiagnosis === undefined ? {} : { outputDiagnosis: month.outputDiagnosis }),
       inputUnchanged: Object.entries(month.inputHashesBefore).every(([path, before]) => month.inputHashesAfter[path] === before),
       ...(month.turnEnd === undefined ? {} : { turnEnd: month.turnEnd }),
@@ -1030,10 +1181,15 @@ async function runSingleJulyDiagnosis(
     ...(monthResult.spreadsheetUpdates === undefined ? {} : { spreadsheetUpdates: monthResult.spreadsheetUpdates }),
     ...(monthResult.outputDiagnosis === undefined ? {} : { outputDiagnosis: monthResult.outputDiagnosis }),
     metrics: monthResult.metrics,
+    ...(monthResult.outputWorkbookCount === undefined ? {} : { outputWorkbookCount: monthResult.outputWorkbookCount }),
     inputUnchanged: Object.entries(monthResult.inputHashesBefore).every(([path, before]) => monthResult.inputHashesAfter[path] === before),
     forbiddenToolNames: monthResult.forbiddenToolNames,
     reasoningBlocks: monthResult.reasoningBlocks,
     retryEventCount: monthResult.retryEventCount ?? 0,
+    toolErrorCount: monthResult.toolErrorCount ?? 0,
+    toolValidationErrorCount: monthResult.toolValidationErrorCount ?? 0,
+    agentSelfCorrection: monthResult.agentSelfCorrection ?? false,
+    agentSelfCorrectionSucceeded: monthResult.agentSelfCorrectionSucceeded ?? false,
     ...(monthResult.turnEnd === undefined ? {} : { turnEnd: monthResult.turnEnd }),
   })}`)
   return result

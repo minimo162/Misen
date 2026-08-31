@@ -26,7 +26,7 @@ Acceptance candidate provenance:
 | B — commodity Spreadsheet engine | PASS | `@office-kit/xlsx@0.9.0` opens, reads, batch-writes, saves, and reopens both synthetic templates and an independently generated EPPlus workbook while preserving checked values/styles/dimensions and input hashes. |
 | C — File + Spreadsheet capability integration | PASS | Exact five-tool roster; non-recursive listing; workspace-relative reads; symlink/traversal/absolute/hardlink denial; safe local formula subset applied to model-authored and carried formulas; output-only `.xlsx` writes. |
 | D — two-month mechanical vertical slice | PASS (mechanical only) | A scripted test adapter drives the real DSH Agent Loop and production Tools to create independently checked July and August deliverables without production month/company hard-coding or input mutation. Live-model July ran separately and failed independent `MONTH` validation; August was not run. |
-| E — independent deterministic acceptance | PASS (deterministic); live FAIL | Decision 430 pre-live regression: 46 tests: 45 PASS, 0 FAIL, 1 host-permission SKIP. Decision 429's bounded July run remains historical `FAIL — ROWS`; the one Decision 430 diagnosis rerun passed current `ROWS`, so the result is classified as run-to-run variance rather than remediation. August was not run. |
+| E — independent deterministic acceptance | PASS (deterministic); live reliability incomplete | Decision 431 pre-live regression: 52 tests: 51 PASS, 0 FAIL, 1 host-permission SKIP. The bounded study completed four July runs (3 PASS / 1 STATUS FAIL) and then stopped on a mandatory observer defect; July run 5 and all August runs were not run. Historical Decision 428–430 evidence remains unchanged. |
 
 ## Capability roster
 
@@ -229,6 +229,72 @@ this diagnosis rerun passed the unchanged criterion, the Decision 430 result is
 retroactively reclassify the earlier failure. No second rerun, Acceptance
 change, prompt hint, fallback, August run, or remediation followed. The API key
 and raw reasoning/provider payload were not collected or retained.
+
+### Decision 431 bounded reliability study — stopped
+
+Decision 431 authorized five independent July runs followed by five independent
+August runs under unchanged Agent behavior. An Acceptance-only runner created a
+fresh temporary Workspace, Cordis/DSH context, Agent Session identity, and
+output for every run. It did not change production source, the current
+Acceptance, prompt/persona/handoff, fixtures/template, five Tool contracts,
+provider/model/reasoning, retry, or fallback behavior.
+
+The live study was stopped after four completed July runs because live evidence
+exposed a mandatory observer defect. Two bounded `spreadsheet_update` results in
+July run 3 were recorded as errors, but the new aggregate fields incorrectly
+reported `toolErrorCount = 0` and `toolValidationErrorCount = 0`. The same safe
+record also rendered the business failure code `STATUS` under a misleading
+`providerFailureCode` field even though `providerOrTransportFailure` was false.
+Decision 431 forbids silently repairing a study-invalidating observer after the
+first live run, so July run 5 and all August runs were not executed.
+
+Completed results:
+
+| Month | Run | Result | Failed axis | Elapsed ms | LLM requests | Tool calls/results | Provider total tokens | Output bytes |
+| --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: |
+| July | 1 | PASS | — | 29,667.474 | 12 | 22 / 22 | 47,588 | 3,227 |
+| July | 2 | PASS | — | 33,589.046 | 16 | 24 / 24 | 138,926 | 3,227 |
+| July | 3 | FAIL | STATUS | 48,497.073 | 17 | 24 / 24 | 72,570 | 3,271 |
+| July | 4 | PASS | — | 30,189.051 | 15 | 23 / 23 | 64,678 | 3,227 |
+| July | 5 | NOT RUN | observer blocker | — | — | — | — | — |
+| August | 1–5 | NOT RUN | observer blocker | — | — | — | — | — |
+
+For the four completed runs only: elapsed min/median/max was
+29,667.474 / 31,889.049 / 48,497.073 ms; LLM requests 12 / 15.5 / 17;
+Tool calls 22 / 23.5 / 24; provider total tokens 47,588 / 68,624 / 138,926.
+These partial-study statistics are not a 10-run reliability result.
+
+All four completed runs produced exactly one workbook, kept input hashes
+unchanged, exposed only the expected five-Tool roster, balanced Tool calls and
+results, emitted no reasoning block, and recorded zero provider retry or
+transport failure. July runs 1, 2, and 4 passed every output axis. Run 3 passed
+SHEET, MONTH, ROWS, PROFIT_FORMULAS, TOTAL, FOOTER, and FORMAT but failed STATUS.
+Its bounded evidence retained `Report!B2 = "2024年7月"`, correct
+`Report!A5:C7` company/value triples, and only the relevant synthetic-safe
+Spreadsheet updates. The Brain first attempted formula values in the status
+column, later wrote formula strings, and independently reopened output still
+failed the required status values. No extra diagnosis run was performed.
+The bounded update evidence shows two error results in this run, including an
+`E9:E9` error followed immediately by a successful same-target alternative;
+however, the automated generic-error/validation-error aggregate is invalid and
+must not be presented as a completed study statistic.
+
+External PID/TCP observation covered the study process until the explicit
+observer-defect stop: 278 samples at 250 ms, no child process, and only the two
+runtime-resolved `api.openai.com:443` addresses. It reported no
+Security/Integrity violation. The exact PID was stopped after the observer
+defect was identified. No raw provider payload, API key, assistant final text,
+reasoning content, generated workbook, or raw live log is committed.
+
+Pre-live deterministic evidence was 51 PASS, 0 FAIL, and one Windows symlink
+`EPERM` SKIP; mechanical Acceptance passed, npm audit reported zero
+vulnerabilities, and `git diff --check` plus PowerShell parsing passed. A final
+fresh pre-live review reported BLOCKER 0 / MUST FIX 0. Live evidence superseded
+that observer conclusion and is the reason this study is incomplete.
+
+**Reliability study status: STOPPED — INFRASTRUCTURE/OBSERVER BLOCKER.** No
+reliability threshold or production-readiness conclusion is inferred from four
+runs.
 
 ## Process and network observation
 
