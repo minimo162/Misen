@@ -22,12 +22,14 @@ Node and npm are not exact-version equality gates beyond the pinned DSH compatib
 
 Record the date, tester, PC/Windows build, and exact command output. Store raw logs outside Git when they contain session data; commit only redacted conclusions and small synthetic evidence.
 
-## 1. Clean checkout and dedicated state
+## 1. Clean checkout and fresh dedicated state
 
-Run in a new PowerShell terminal from a clean checkout of the Draft PR commit:
+Run in a new PowerShell terminal from a clean checkout of the current Draft PR HEAD. Record the branch, HEAD, and clean-worktree result; the recorded HEAD is the Acceptance candidate for this run:
 
 ```powershell
 git status --short
+if ((git status --short).Count -ne 0) { throw "Working tree must be clean before Acceptance" }
+git branch --show-current
 git rev-parse HEAD
 node --version
 npm --version
@@ -36,16 +38,40 @@ ollama list
 npm ci
 npm ls @deepseek-ai/dsh --depth=0
 
-$env:DSH_HOME = Join-Path $env:USERPROFILE '.dsh-misen-acceptance'
+$runId = Get-Date -Format 'yyyyMMdd-HHmmss'
+$env:DSH_HOME = Join-Path $env:USERPROFILE ('.dsh-misen-acceptance-' + $runId)
+if (Test-Path -LiteralPath $env:DSH_HOME) { throw "DSH_HOME must be a new path for every Acceptance run" }
 $env:DSH_TELEMETRY_DISABLED = '1'
 $env:MISEN_LLM_API_KEY = 'ollama'
 New-Item -ItemType Directory -Force $env:DSH_HOME | Out-Null
-Copy-Item -Recurse -Force .\profile\misen (Join-Path $env:DSH_HOME 'profiles\misen')
-Copy-Item -Recurse -Force .\agent-presets\misen-file (Join-Path $env:DSH_HOME 'misen-agent-presets\misen-file')
+$activeProfile = Join-Path $env:DSH_HOME 'profiles\misen'
+$activePreset = Join-Path $env:DSH_HOME 'misen-agent-presets\misen-file'
+New-Item -ItemType Directory -Force (Split-Path -Parent $activeProfile) | Out-Null
+New-Item -ItemType Directory -Force (Split-Path -Parent $activePreset) | Out-Null
+# The destination directories do not exist yet: this copies into the exact
+# direct paths that DSH resolves, and cannot create profiles\misen\misen.
+Copy-Item -Recurse -Force .\profile\misen $activeProfile
+Copy-Item -Recurse -Force .\agent-presets\misen-file $activePreset
+if (-not (Test-Path -LiteralPath (Join-Path $activeProfile 'cordis.patch.yml'))) { throw "Direct active Profile is missing" }
+if (Test-Path -LiteralPath (Join-Path $activeProfile 'misen')) { throw "Nested inactive Profile copy found" }
+$sourceHash = (Get-FileHash -Algorithm SHA256 .\profile\misen\cordis.patch.yml).Hash
+$activeHash = (Get-FileHash -Algorithm SHA256 (Join-Path $activeProfile 'cordis.patch.yml')).Hash
+if ($sourceHash -ne $activeHash) { throw "Direct active Profile differs from repository Profile" }
+$activeText = Get-Content -Raw (Join-Path $activeProfile 'cordis.patch.yml')
+if ($activeText -match '(?m)^\s*reasoningEfforts:\s*false\s*$') { throw "Stale reasoningEfforts: false remains active" }
+if ($activeText -notmatch "(?m)^\s*'off':\s*none\s*$" -or $activeText -notmatch '(?m)^\s*high:\s*high\s*$') { throw "Decision 424 reasoningEfforts map is not active" }
 npx --no-install dsh --profile misen --dump-config
 ```
 
-Confirm the package is exactly `0.1.2-alpha.2`; the effective configuration selects `misen-ollama` / `ornith-1.5:9b`, context `4096`, reasoning `off`, telemetry disabled, and the `misen-file` preset. Do not reuse a normal DSH home.
+Confirm the package is exactly `0.1.2-alpha.2`; the effective configuration selects `misen-ollama` / `ornith-1.5:9b`, `contextWindow: 4096`, provider `reasoning: off`, model `reasoningEfforts` `off -> none` and `high -> high`, telemetry disabled, read-only sandbox, `approval: ask`, and the `misen-file` preset. The direct active Profile hash must match the repository source, it must contain no `reasoningEfforts: false`, and no nested `profiles\misen\misen` path may exist. Do not reuse a normal or prior Acceptance DSH home.
+
+In the same setup PowerShell terminal, after the dump-config check above (so the fresh `DSH_HOME` and required environment variables remain active), perform a real profile mount (not just a config dump):
+
+```powershell
+npx --no-install dsh --profile misen --no-open --port 0
+```
+
+Record the startup output proving that the `misen` profile and plugin/config resolution succeeded, then stop that process with `Ctrl+C`. A failed or immediately exiting mount is a setup-gate failure. The `--dump-config` output is supplementary evidence and cannot replace this real mount.
 
 Create a synthetic project outside the repository:
 
@@ -290,7 +316,7 @@ The earlier Decision 422 configuration run remains part of the record. Its A02 r
 
 Intended Decision 424 configuration candidate: `e1e836db804922de33576ad014ff88914f1d9a57`.
 
-This attempted rerun is invalid as evidence for that candidate. Direct active `$DSH_HOME\profiles\misen\cordis.patch.yml` (timestamp `08:34`) still contained `reasoningEfforts: false`; the Decision 424 map was only present in inactive nested `profiles\misen\misen\cordis.patch.yml` (timestamp `12:06`). Pinned DSH resolves the direct `profiles/<name>` path, so the mounted flow did not use the Decision 424 map. The setup/procedure must be corrected and rerun only with human authorization. The A03 Think observation below is setup-state evidence from the stale Decision 422 profile, not a failure of the PR candidate.
+This attempted rerun is invalid as evidence for that candidate. Direct active `$DSH_HOME\profiles\misen\cordis.patch.yml` (timestamp `08:34`) still contained `reasoningEfforts: false`; the Decision 424 map was only present in inactive nested `profiles\misen\misen\cordis.patch.yml` (timestamp `12:06`). Pinned DSH resolves the direct `profiles/<name>` path, so the mounted flow did not use the Decision 424 map. Decision 425 authorizes a fresh dedicated DSH home and rerun using the clean-state procedure above; this stale state must not be reused. The A03 Think observation below is setup-state evidence from the stale Decision 422 profile, not a failure of the PR candidate.
 
 | ID | Current Decision 424 result | Evidence / notes |
 | --- | --- | --- |
@@ -329,6 +355,6 @@ Date/time and timezone: `2026-08-31, Asia/Tokyo`
 Windows build / CPU / RAM: `Windows 11 Pro 10.0.26200 (x64) / Intel Core Ultra 5 228V / 33,847,832,576 bytes`
 Node / npm / Ollama / model digest: `Node 24.18.1 / npm 11.16.0 / Ollama 0.33.2 / ornith-1.5:9b e5df7dcdd8a2 (Q4_K_M)`
 Intended Acceptance candidate commit: `e1e836db804922de33576ad014ff88914f1d9a57` (Decision 424 config candidate; not validly tested in this run)
-Current record-only branch HEAD: `c2178d6` (documentation record update; not an Acceptance candidate)
+Pre-Decision-425 record-only branch HEAD: `c0f9bf02864765e5757acd3581c1743d9703c73c` (historical; not an Acceptance candidate). The actual tested PR #68 HEAD is captured at runtime by the setup commands above and recorded with the resulting evidence.
 
-Overall status: `BLOCKED_STALE_ACCEPTANCE_PROFILE`. The attempted Decision 424 rerun is invalid because the active DSH profile was stale; A02–A05 and A18 therefore remain `NOT RUN` for the candidate. Correcting the setup/procedure and rerunning requires human authorization. Do not mark the PR Ready, merge it, or close the issue.
+Overall status: `PENDING_DECISION_425_CLEAN_STATE_SETUP`. The attempted Decision 424 rerun remains invalid because the active DSH profile was stale; A02–A05 and A18 therefore remain `NOT RUN` for the candidate. Use a new dedicated DSH home and the direct-profile checks above before restarting the flow. Do not mark the PR Ready, merge it, or close the issue.
