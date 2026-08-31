@@ -42,6 +42,11 @@ const LIVE_TIMEOUT_MS = 15 * 60 * 1_000
 
 type JsonRecord = Record<string, unknown>
 
+export interface ReportingPeriod {
+  readonly year: number
+  readonly month: number
+}
+
 interface UsageTotals {
   inputTokens?: number
   outputTokens?: number
@@ -143,7 +148,7 @@ function outputValidationFailureCode(error: unknown): string | undefined {
   if (!(error instanceof Error)) return undefined
   const message = error.message
   if (message === 'output must contain the Report worksheet') return 'SHEET'
-  if (message.startsWith('report month is not ')) return 'MONTH'
+  if (message.startsWith('reporting period does not match source period ')) return 'MONTH'
   if (message.startsWith('report row ')) return 'ROW'
   if (message.startsWith('profit formula missing ')) return 'PROFIT_FORMULA'
   if (message.startsWith('status missing ')) return 'STATUS'
@@ -271,6 +276,49 @@ async function fixtureInputPaths(root: string, month: string): Promise<string[]>
   ].map(path => join(root, path))
 }
 
+/**
+ * Derive one concrete reporting period from the source workbook as-of values.
+ * A disagreement is an Acceptance-fixture inconsistency, never a value that
+ * the Agent may resolve or that the validator may silently pick around.
+ */
+export function deriveUniqueReportingPeriod(asOfValues: readonly unknown[]): ReportingPeriod {
+  if (asOfValues.length === 0) throw new Error('source reporting period is missing')
+  let expected: ReportingPeriod | undefined
+  for (const value of asOfValues) {
+    if (!(value instanceof Date) || !Number.isFinite(value.getTime())) {
+      throw new Error('source reporting period is not a valid date')
+    }
+    const candidate = { year: value.getUTCFullYear(), month: value.getUTCMonth() + 1 }
+    if (expected === undefined) expected = candidate
+    else if (candidate.year !== expected.year || candidate.month !== expected.month) {
+      throw new Error('source reporting periods are inconsistent')
+    }
+  }
+  return expected!
+}
+
+/** Accept only the two Decision 429 representations: M月 and YYYY年M月. */
+export function reportingPeriodMatches(value: unknown, expected: ReportingPeriod): boolean {
+  if (typeof value !== 'string') return false
+  const match = /^(?:(?<year>[1-9]\d{3})年)?(?<month>[1-9]|1[0-2])月$/u.exec(value)
+  if (match?.groups === undefined) return false
+  const month = Number(match.groups.month)
+  if (month !== expected.month) return false
+  const year = match.groups.year
+  return year === undefined || Number(year) === expected.year
+}
+
+export async function deriveSourceReportingPeriod(root: string, month: string): Promise<ReportingPeriod> {
+  const fixture = SYNTHETIC_MONTHS.find(candidate => candidate.month === month)
+  if (fixture === undefined) throw new Error(`unknown synthetic month: ${month}`)
+  const asOfValues: unknown[] = []
+  for (const company of fixture.companies) {
+    const workbook = await openSpreadsheet(join(root, month, `${company.company}.xlsx`))
+    asOfValues.push(readCell(workbook, 'Actuals', 'B4'))
+  }
+  return deriveUniqueReportingPeriod(asOfValues)
+}
+
 async function hashPaths(paths: readonly string[]): Promise<Record<string, string>> {
   const result: Record<string, string> = {}
   for (const path of paths) {
@@ -337,13 +385,16 @@ async function waitForAgent(agent: Agent, timeoutMs = LIVE_TIMEOUT_MS): Promise<
 function validateOutput(
   workbook: Awaited<ReturnType<typeof openSpreadsheet>>,
   month: string,
+  expectedPeriod: ReportingPeriod,
 ): void {
   const fixture = SYNTHETIC_MONTHS.find(candidate => candidate.month === month)
   if (fixture === undefined) throw new Error(`missing fixture for ${month}`)
   if (listWorksheetTitles(workbook).length !== 1 || listWorksheetTitles(workbook)[0] !== 'Report') {
     throw new Error('output must contain the Report worksheet')
   }
-  if (readCell(workbook, 'Report', 'B2') !== month) throw new Error(`report month is not ${month}`)
+  if (!reportingPeriodMatches(readCell(workbook, 'Report', 'B2'), expectedPeriod)) {
+    throw new Error(`reporting period does not match source period ${expectedPeriod.year}-${String(expectedPeriod.month).padStart(2, '0')}`)
+  }
   const sorted = [...fixture.companies].sort((left, right) => left.company.localeCompare(right.company))
   for (const [index, company] of sorted.entries()) {
     const row = index + 5
@@ -395,6 +446,7 @@ function checkOutput(predicate: () => boolean): 'PASS' | 'FAIL' {
 function diagnoseOutput(
   workbook: Awaited<ReturnType<typeof openSpreadsheet>>,
   month: string,
+  expectedPeriod: ReportingPeriod,
 ): OutputDiagnosis {
   const fixture = SYNTHETIC_MONTHS.find(candidate => candidate.month === month)
   const hasReport = listWorksheetTitles(workbook).length === 1 && listWorksheetTitles(workbook)[0] === 'Report'
@@ -407,7 +459,7 @@ function diagnoseOutput(
     ...(actualB2 === undefined ? {} : { actualB2 }),
     checks: {
       SHEET: hasReport ? 'PASS' : 'FAIL',
-      MONTH: hasReport && actualB2 === month ? 'PASS' : 'FAIL',
+      MONTH: hasReport && reportingPeriodMatches(actualB2, expectedPeriod) ? 'PASS' : 'FAIL',
       ROWS: checkOutput(() => hasReport && sorted.every((company, index) => {
         const values = readRange(workbook, 'Report', `A${index + 5}:C${index + 5}`)[0]
         return values?.[0] === company.company && values?.[1] === company.revenue && values?.[2] === company.cost
@@ -685,6 +737,8 @@ async function runMonth(month: string): Promise<MonthResult> {
     await createEnterpriseFixtureWorkspace(root)
     const boundary = new WorkspaceBoundary(root)
     const inputPaths = await fixtureInputPaths(root, month)
+    stage = 'source-period-derive'
+    const expectedPeriod = await deriveSourceReportingPeriod(root, month)
     stage = 'input-hash-before'
     const inputBefore = await hashPaths(inputPaths)
     stage = 'brain-mount'
@@ -743,8 +797,8 @@ async function runMonth(month: string): Promise<MonthResult> {
       outputBytes = (await stat(outputPath)).size
       try {
         const workbook = await openSpreadsheet(outputPath)
-        terminal.outputDiagnosis = diagnoseOutput(workbook, month)
-        validateOutput(workbook, month)
+        terminal.outputDiagnosis = diagnoseOutput(workbook, month, expectedPeriod)
+        validateOutput(workbook, month, expectedPeriod)
       } catch (error) {
         // Session/tool evidence was collected before touching the deliverable.
         // Preserve that evidence when independent output validation rejects a
@@ -875,6 +929,7 @@ export async function runLiveAcceptance(): Promise<LiveAcceptanceResult> {
       ...(month.sessionEventCounts === undefined ? {} : { sessionEventCounts: month.sessionEventCounts }),
       ...(month.toolResultErrors === undefined ? {} : { toolResultErrors: month.toolResultErrors }),
       ...(month.retryEventCount === undefined ? {} : { retryEventCount: month.retryEventCount }),
+      ...(month.outputDiagnosis === undefined ? {} : { outputDiagnosis: month.outputDiagnosis }),
       inputUnchanged: Object.entries(month.inputHashesBefore).every(([path, before]) => month.inputHashesAfter[path] === before),
       ...(month.turnEnd === undefined ? {} : { turnEnd: month.turnEnd }),
     })),

@@ -26,7 +26,7 @@ Acceptance candidate provenance:
 | B — commodity Spreadsheet engine | PASS | `@office-kit/xlsx@0.9.0` opens, reads, batch-writes, saves, and reopens both synthetic templates and an independently generated EPPlus workbook while preserving checked values/styles/dimensions and input hashes. |
 | C — File + Spreadsheet capability integration | PASS | Exact five-tool roster; non-recursive listing; workspace-relative reads; symlink/traversal/absolute/hardlink denial; safe local formula subset applied to model-authored and carried formulas; output-only `.xlsx` writes. |
 | D — two-month mechanical vertical slice | PASS (mechanical only) | A scripted test adapter drives the real DSH Agent Loop and production Tools to create independently checked July and August deliverables without production month/company hard-coding or input mutation. Live-model July ran separately and failed independent `MONTH` validation; August was not run. |
-| E — independent deterministic acceptance | PASS (deterministic); live FAIL | 37 tests: 36 PASS, 0 FAIL, 1 host-permission SKIP. Overwrite, external-relationship, credential, ASCII session-id, Decision 428 observer correlation, provider failure/retry, supply-chain, and boundary evidence passed. Both live July results failed independent workbook validation (`MONTH`); August was not run. |
+| E — independent deterministic acceptance | PASS (deterministic); live FAIL | 42 tests: 41 PASS, 0 FAIL, 1 host-permission SKIP. Decision 429 semantic-period, overwrite, external-relationship, credential, ASCII session-id, observer correlation, provider failure/retry, supply-chain, and boundary evidence passed. The bounded Decision 429 July live run passed `MONTH` but failed `ROWS`; August was not run. |
 
 ## Capability roster
 
@@ -48,7 +48,7 @@ commands below were rerun on the final implementation tree:
 ```text
 npm ci --ignore-scripts                     PASS (133 packages installed)
 npm ls --all                                PASS (only declared optional peers absent)
-npm run test                                PASS (36 pass, 0 fail, 1 skip / 37)
+npm run test                                PASS (41 pass, 0 fail, 1 skip / 42)
 npm run acceptance                          PASS (1 pass, 0 fail)
 npm run sbom                                PASS (131 unique production versions / 132 locations)
 npm audit --omit=dev --package-lock-only    PASS (0 vulnerabilities)
@@ -59,8 +59,8 @@ Final-head metrics:
 
 | Dataset | Total elapsed | Spreadsheet local time | LLM requests | Tool calls | Model-visible input | Tool results | RSS sample | Output size |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| July | 128.428 ms | 74 ms | 10 | 9 | 49,027 B | 22,296 B | 120,930,304 B | 3,216 B |
-| August | 75.132 ms | 49 ms | 10 | 9 | 49,036 B | 22,301 B | 140,341,248 B | 3,211 B |
+| July | 129.935 ms | 76 ms | 10 | 9 | 49,027 B | 22,296 B | 120,410,112 B | 3,216 B |
+| August | 74.738 ms | 50 ms | 10 | 9 | 49,036 B | 22,301 B | 140,144,640 B | 3,211 B |
 
 These are local deterministic replay measurements, not SLA claims. Token counts
 and cost are recorded only when the provider exposes them; byte counts are not
@@ -124,6 +124,51 @@ used `2024年7月` rather than the exact Acceptance representation `7月`.
 Production behavior was not changed; diagnostic code reads only synthetic Tool
 events and the completed workbook. The API key and raw reasoning/provider
 payload were neither collected nor retained.
+
+### Decision 429 semantic-period correction and bounded continuation
+
+Decision 429 corrected only the independent `MONTH` checker. The previous two
+July runs remain historical `FAIL — MONTH` results under the old exact-string
+Acceptance; they are not retroactively reclassified. The defect was that the
+business specification required the reporting period's meaning but did not
+require the hidden literal representation `7月`.
+
+The current checker derives one concrete `{ year, month }` from all three source
+workbooks' `Actuals!B4` as-of dates. Missing, invalid, or inconsistent source
+periods fail the Acceptance-fixture stage. Output accepts only `M月` and
+`YYYY年M月`; the latter must match both year and month. Wrong month/year, empty,
+unparseable, English, ISO, slash, and numeric-only forms fail. No substring
+matching is used.
+
+After clean deterministic gates and fresh review passed, one July live run was
+performed with the unchanged exact GPT-5.6 Luna route, prompt, persona, handoff,
+fixtures, Tool contracts, and capability behavior. It produced one workbook
+with `Report!B2 = "7月"`, so semantic `MONTH` passed. Independent validation then
+stopped at **`FAIL — ROW`**. Read-only output diagnosis was:
+
+```text
+SHEET             PASS
+MONTH             PASS
+ROWS              FAIL
+PROFIT_FORMULAS   PASS
+STATUS            PASS
+TOTAL             PASS
+FOOTER            PASS
+FORMAT            PASS
+```
+
+The July turn completed with 16 LLM requests, 20 Tool calls, 20 Tool results,
+39,620.379 ms elapsed, 2,886 input tokens, 2,402 output tokens, 7,804 cache-write
+tokens, 69,706 cache-read tokens, 82,798 provider total tokens, 105,357,312 B RSS,
+and a 3,217-byte output. The provider did not expose a reasoning-token value;
+no reasoning content block was recorded. API cost was not calculated because no
+authoritative per-model price was established in this gate. Inputs were
+unchanged, the exact five-Tool request roster was retained, no forbidden Tool
+appeared, no retry occurred, and no fallback or prompt hint was used.
+
+Per the first-failure rule, August is `NOT RUN` and the current
+**Live Brain Gate is FAIL**. No additional live run or business failure repair
+was performed.
 
 ## Process and network observation
 
@@ -196,8 +241,9 @@ source-level type relaxation is added.
 
 ## Not run / known limitations
 
-- Live GPT-5.6 Luna credential execution: July **FAIL — MONTH** after one
-  output; August **NOT RUN**. No API key, raw live log, or generated live
+- Live GPT-5.6 Luna Decision 429 execution: July **FAIL — ROW** after semantic
+  `MONTH` passed; August **NOT RUN**. The two earlier July `FAIL — MONTH` runs
+  remain historical old-Acceptance evidence. No API key, raw live log, or generated live
   artifact is committed or retained in this repository.
 - DSH public UI composition implementation and rendered-browser validation:
   **NOT RUN**. Public UI package seams were inspected only.
