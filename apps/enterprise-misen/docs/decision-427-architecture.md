@@ -21,6 +21,15 @@ The minimal DSH graph is:
 
 Every DSH package is pinned to `0.1.2-alpha.2`. Provider/model routing remains
 an injected `LlmAdapter`; Misen owns no Model Gateway and no custom Agent Loop.
+The optional live Brain route uses DSH's public
+`@deepseek-ai/dsh-llm-pi-ai@0.1.2-alpha.2` adapter, configured for the explicitly
+declared `openai` route and model `gpt-5.6-luna`. It does not mount the retry
+plugin: the first failed live business result stops month progression. The
+public `@deepseek-ai/dsh-llm-retry@0.1.2-alpha.2` seam is retained only for the
+deterministic transient-provider recovery test. The profile stores only the
+credential reference `OPENAI_API_KEY`; the value is resolved at request time
+inside the provider boundary and is never passed through a model-facing Tool,
+logged, persisted, or copied into the repository.
 
 ## Rejected runtime boundaries
 
@@ -49,7 +58,20 @@ Before any source or existing output workbook can be serialized as a
 deliverable, every populated formula cell is checked against the same bounded
 local-formula policy used for model-authored formulas. Unsafe network, file,
 external-workbook, cross-sheet, DDE, or unapproved function/name references
-fail closed without publishing or mutating the output.
+fail closed without publishing or mutating the output. The public Office Kit
+relationship/passthrough surface is also inspected: explicit URI/host-file
+targets on generic preserved relationships, external URL/file
+hyperlinks, external workbook references, external-link/query-table/connection
+parts, and corresponding relationship extras are rejected rather than copied
+into a deliverable. Location-only links inside the workbook remain valid.
+
+Output replacement writes and syncs a private sibling temporary file and then
+uses one same-directory `rename` replacement. The old destination is never
+unlinked first, so an ordinary commit/rename error leaves the last-known-good
+file intact and the temporary is cleaned. This is failure-safe namespace
+replacement, not a power-loss-durable transaction: Node/libuv does not fsync
+the directory entry here, and open handles, ACL interference, and filesystem
+failure remain residual risks.
 
 The selection gate also opens, edits, saves, and reopens the tracked
 `demo/renketsu-demo/workspace/集計台帳.xlsx` fixture. That workbook was generated
@@ -72,6 +94,19 @@ mechanical two-dataset integration and independent grading path; it does not
 prove autonomous planning/generalization by GPT-5.6 Luna.
 
 Live Luna and DSH UI remain explicit follow-up gates, not inferred PASS results.
+The first configured live attempt used the exact minimal Japanese request
+`7月の3社実績を取りまとめて、月次管理レポートを完成させて`; independent
+validation found the produced report month was incorrect (`MONTH`), so July is
+recorded as FAIL and no August live request was started. A later rerun is
+credential-gated and must use the same prompt for both synthetic months; the
+deterministic replay remains evidence of mechanical integration only.
+
+Two earlier live diagnostics exposed a transport issue rather than a provider
+contract issue: localized month labels in the session id reached an HTTP header
+and produced `PI_AI_ERROR`. The live harness now derives an ASCII-only,
+deterministic SHA-256 correlation id (`enterprise-live-<hex>`) while retaining
+the localized month solely in the prompt. No API key, raw provider payload,
+session log, or generated live artifact is stored in version control.
 
 ## Public UI seam inspection
 

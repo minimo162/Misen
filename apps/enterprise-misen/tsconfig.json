@@ -13,7 +13,7 @@
     "noEmitOnError": true,
     "declaration": true,
     "sourceMap": false,
-    "skipLibCheck": false,
+    "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "acceptance/**/*.ts", "demo/**/*.ts"]

@@ -2,6 +2,8 @@ import { Context } from '@deepseek-ai/cordis'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
+import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
+import type { Config as LlmPiAiConfig } from '@deepseek-ai/dsh-llm-pi-ai'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SessionStore from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -32,6 +34,48 @@ export interface PhaseACompositionOptions {
 }
 
 /**
+ * The first Enterprise Brain route. The provider adapter is DSH's public
+ * pi-ai composition seam; Misen owns only this declarative deployment profile.
+ * The environment reference is resolved per request by DSH and is never
+ * copied into this module's state or logs.
+ */
+export const ENTERPRISE_BRAIN_PROFILE: LlmPiAiConfig = {
+  providers: {
+    openai: {
+      apiKeyEnv: 'OPENAI_API_KEY',
+      api: 'openai-responses',
+      baseURL: 'https://api.openai.com/v1',
+      reasoning: 'off',
+      models: [{
+        id: 'gpt-5.6-luna',
+        name: 'GPT-5.6 Luna',
+        contextWindow: 1_050_000,
+        maxTokens: 128_000,
+        input: ['text', 'image'],
+        reasoningEfforts: {
+          off: 'none',
+          low: 'low',
+          medium: 'medium',
+          high: 'high',
+          xhigh: 'xhigh',
+          max: 'max',
+        },
+      }],
+    },
+  },
+}
+
+/** Exact public DSH packages used by the optional live Brain composition. */
+export const ENTERPRISE_BRAIN_COMPONENTS = Object.freeze([
+  '@deepseek-ai/dsh-llm-pi-ai@0.1.2-alpha.2',
+] as const)
+
+export interface EnterpriseBrainCompositionOptions {
+  /** Generic persona; business semantics come from the handoff/workspace. */
+  readonly persona?: string
+}
+
+/**
  * Mount the standard DSH Agent Loop from public package seams only.
  *
  * No adapter is registered here: provider routing is a deployment concern and
@@ -55,6 +99,22 @@ export async function createPhaseAContext(
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
 
+  return ctx
+}
+
+/**
+ * Mount the standard provider after the minimal Agent Loop.
+ * This is deliberately a second composition entry point so deterministic
+ * Phase A tests remain provider-neutral while live acceptance can select the
+ * configured OpenAI route without changing the loop or tool registry.
+ */
+export async function createEnterpriseBrainContext(
+  options: EnterpriseBrainCompositionOptions = {},
+): Promise<Context> {
+  const ctx = await createPhaseAContext({
+    persona: options.persona ?? 'General enterprise workspace assistant.',
+  })
+  await ctx.plugin(LlmPiAi, ENTERPRISE_BRAIN_PROFILE)
   return ctx
 }
 

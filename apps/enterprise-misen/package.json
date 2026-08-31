@@ -11,22 +11,39 @@
     "sbom": "node scripts/generate-sbom.mjs",
     "build": "npm run clean && tsc -p tsconfig.json",
     "test": "npm run build && node --test \"dist/test/**/*.test.js\"",
-    "acceptance": "npm run build && node --test \"dist/test/phase-d/**/*.test.js\""
+    "acceptance": "npm run build && node --test \"dist/test/phase-d/**/*.test.js\"",
+    "live:brain": "npm run clean && tsc -p tsconfig.json && node dist/acceptance/live-brain.js"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.2",
     "@deepseek-ai/dsh-agent": "0.1.2-alpha.2",
     "@deepseek-ai/dsh-agent-loop": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-attachment": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-authorization": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-brand": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-code-runtime": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-credentials": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-fs": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-invariants": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-launch-environment": "0.1.2-alpha.2",
     "@deepseek-ai/dsh-llm": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-llm-pi-ai": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-llm-retry": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-scope": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-sandbox": "0.1.2-alpha.2",
     "@deepseek-ai/dsh-session": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-session-persistence": "0.1.2-alpha.2",
     "@deepseek-ai/dsh-session-projection": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-settings": "0.1.2-alpha.2",
     "@deepseek-ai/dsh-system-prompt": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-timeout": "0.1.2-alpha.2",
     "@deepseek-ai/dsh-tools": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-user-approval": "0.1.2-alpha.2",
     "@deepseek-ai/dsh-util-values": "0.1.2-alpha.2",
     "@office-kit/xlsx": "0.9.0"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-attachment": "0.1.2-alpha.2",
     "@types/node": "24.13.3",
     "typescript": "6.0.3"
   }

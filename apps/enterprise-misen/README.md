@@ -52,7 +52,8 @@ not autonomous Agent planning or live-model generalization.
 ## Current boundary
 
 - Dummy data only.
-- Live GPT-5.6 Luna credential execution: **NOT RUN**.
+- Live GPT-5.6 Luna credential execution: July **FAIL — MONTH** after one
+  independently validated output; August **NOT RUN** after the first failure.
 - DSH public UI composition: source seam inspected; UI implementation/live test
   **NOT RUN** in this backend vertical slice.
 - Model-authored formulas write validated local formula text and reject

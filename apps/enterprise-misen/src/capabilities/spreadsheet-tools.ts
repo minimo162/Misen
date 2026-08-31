@@ -4,6 +4,7 @@ import {
   getCellByCoord,
   getDataExtent,
   iterCells,
+  listHyperlinks,
   setCellByCoord,
 } from '@office-kit/xlsx/worksheet'
 import { getCoordinate, getFormulaText, isFormulaValue, type CellValue, type FormulaValue } from '@office-kit/xlsx/cell'
@@ -76,7 +77,60 @@ function safeFormula(value: string): string {
  * the capability just like model-authored values; an untouched unsafe formula
  * must not be carried through a create or update operation.
  */
-function validateWorkbookFormulas(workbook: SpreadsheetWorkbook): void {
+function relationshipLooksExternal(type: string, target: string): boolean {
+  const normalizedType = type.toLocaleLowerCase()
+  const trimmedTarget = target.trim()
+  const normalizedTarget = trimmedTarget.replace(/^\/+/, '').toLocaleLowerCase()
+  // The public relsExtras model preserves unrecognised relationship records;
+  // fail closed for any explicit URI/host-file target as well as the known
+  // external-link/data-connection families. Office Kit does not retain
+  // TargetMode on relsExtras, so the target itself is part of this boundary.
+  if (/^[a-z][a-z0-9+.-]*:/iu.test(trimmedTarget)) return true
+  if (/^(?:\\\\|\/\/)/u.test(trimmedTarget)) return true
+  if (/^[a-z]:[\\/]/iu.test(trimmedTarget)) return true
+  if (/(?:^|\/)external(?:link)?(?:$|[\/#])/u.test(normalizedType)) return true
+  if (/(?:^|\/)connections?(?:$|[\/#])/u.test(normalizedType)) return true
+  if (/(?:^|\/)querytable(?:$|[\/#])/u.test(normalizedType)) return true
+  if (/(?:^|\/)(?:externalLinks?|connections(?:\.xml)?|queryTables?)(?:\/|$)/u.test(normalizedTarget)) return true
+  return false
+}
+
+function validateExternalWorkbookSurface(workbook: SpreadsheetWorkbook): void {
+  if (workbook.externalReferences !== undefined && workbook.externalReferences.length > 0) {
+    throw new Error('external workbook references are not allowed in deliverables')
+  }
+
+  for (const rawPath of workbook.passthrough?.keys() ?? []) {
+    const path = rawPath.replace(/^\/+/, '').toLocaleLowerCase()
+    if (path === 'xl/connections.xml' || path.startsWith('xl/externallinks/') || path.startsWith('xl/querytables/')) {
+      throw new Error(`external workbook passthrough is not allowed: ${rawPath}`)
+    }
+  }
+
+  for (const relationship of workbook.workbookRelsExtras ?? []) {
+    if (relationshipLooksExternal(relationship.type, relationship.target)) {
+      throw new Error(`external workbook relationship is not allowed: ${relationship.type}`)
+    }
+  }
+
+  for (const sheet of iterWorksheets(workbook)) {
+    for (const hyperlink of listHyperlinks(sheet)) {
+      // A location-only hyperlink stays inside this workbook and is safe to
+      // carry through. Any target is a worksheet relationship to an external
+      // URL or file, including relative targets.
+      if (hyperlink.target !== undefined && hyperlink.target.length > 0) {
+        throw new Error(`external hyperlink target is not allowed at ${sheet.title}!${hyperlink.ref}`)
+      }
+    }
+    for (const relationship of sheet.relsExtras ?? []) {
+      if (relationshipLooksExternal(relationship.type, relationship.target)) {
+        throw new Error(`external worksheet relationship is not allowed at ${sheet.title}: ${relationship.type}`)
+      }
+    }
+  }
+}
+
+function validateDeliverableWorkbook(workbook: SpreadsheetWorkbook): void {
   for (const sheet of iterWorksheets(workbook)) {
     for (const cell of iterCells(sheet)) {
       if (!isFormulaValue(cell.value)) continue
@@ -88,6 +142,7 @@ function validateWorkbookFormulas(workbook: SpreadsheetWorkbook): void {
       }
     }
   }
+  validateExternalWorkbookSurface(workbook)
 }
 
 /** Convert the xlsx value union to lossless JSON suitable for a model result. */
@@ -203,7 +258,7 @@ export function createSpreadsheetCapabilityTools(boundary: WorkspaceBoundary): r
       const { absolute: source, bytes: sourceBytes } = await boundary.readFileBytes(args.source)
       if (!/\.xlsx$/iu.test(source)) throw new Error('source workbook must use the .xlsx extension')
       const workbook = await openSpreadsheetBytes(sourceBytes)
-      validateWorkbookFormulas(workbook)
+      validateDeliverableWorkbook(workbook)
       const outputBytes = await serializeSpreadsheet(workbook)
       const destination = await boundary.writeOutputFileBytes(args.output, outputBytes, args.overwrite === true)
       return {
@@ -238,7 +293,7 @@ export function createSpreadsheetCapabilityTools(boundary: WorkspaceBoundary): r
       }
 
       const workbook = await openSpreadsheetBytes(bytes)
-      validateWorkbookFormulas(workbook)
+      validateDeliverableWorkbook(workbook)
       // Materialise scalar values first so office-kit retains existing styles;
       // formula cells are installed immediately afterwards through its public
       // formula setter, preserving the same style IDs.
@@ -253,7 +308,7 @@ export function createSpreadsheetCapabilityTools(boundary: WorkspaceBoundary): r
           writeFormula(workbook, args.sheet, coordinate, getFormulaText(cell) ?? formula.formula)
         }
       }
-      validateWorkbookFormulas(workbook)
+      validateDeliverableWorkbook(workbook)
       const outputBytes = await serializeSpreadsheet(workbook)
       await boundary.writeOutputFileBytes(args.workbook, outputBytes, true)
       return {

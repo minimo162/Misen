@@ -111,8 +111,14 @@ export class WorkspaceBoundary {
   }
 
   /**
-   * Commit bytes through a private temporary file and an atomic directory-entry
-   * rename. Existing symlink/hardlink targets are never opened for writing.
+   * Commit bytes through a private temporary file and a same-directory rename
+   * replacement. Existing symlink/hardlink targets are never opened for
+   * writing. A normal rename error leaves the last-known-good destination in
+   * place because the destination is never unlinked first. This is
+   * failure-safe namespace replacement, not a power-loss-durable transaction:
+   * Node/libuv does not fsync the directory entry here and abrupt power loss,
+   * open-handle/ACL interference, or filesystem failure remains outside this
+   * boundary's guarantee.
    */
   async writeOutputFileBytes(userPath: string, bytes: Uint8Array, overwrite = false): Promise<string> {
     await this.ensureOutputDirectory()
@@ -144,13 +150,7 @@ export class WorkspaceBoundary {
       this.assertInside(parentRealAfter, 'output parent')
       if (parentRealAfter !== parentRealBefore) throw new WorkspaceBoundaryError('output parent changed during write')
 
-      if (overwrite) {
-        try {
-          await unlink(destination)
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-        }
-      } else {
+      if (!overwrite) {
         try {
           await lstat(destination)
           throw new WorkspaceBoundaryError('output appeared during write')
@@ -159,12 +159,21 @@ export class WorkspaceBoundary {
           if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
         }
       }
-      await rename(temporary, destination)
+      await this.commitTemporaryFile(temporary, destination)
       committed = true
       return destination
     } finally {
       if (!committed) await unlink(temporary).catch(() => undefined)
     }
+  }
+
+  /**
+   * Same-directory commit seam. The default is Node's rename replacement;
+   * tests may subclass the boundary to inject a deterministic commit failure
+   * without changing production behavior or adding a runtime hook.
+   */
+  protected async commitTemporaryFile(temporary: string, destination: string): Promise<void> {
+    await rename(temporary, destination)
   }
 
   /** Return a workspace-relative, stable POSIX display path. */

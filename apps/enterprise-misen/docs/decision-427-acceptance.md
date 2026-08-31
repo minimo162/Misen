@@ -1,9 +1,22 @@
 # Decision 427 acceptance record
 
-Tested on Windows x64 with Node.js `24.18.1` and npm `11.16.0`. All results
-below use synthetic workbooks and a deterministic test-only Brain adapter over
-DSH's public `LlmAdapter` seam. They do not claim a live GPT-5.6 Luna run or
-corporate deployment approval.
+This record is for the Enterprise Misen Home Technical PoC. It uses synthetic
+workbooks only and does not claim enterprise adoption, security approval, or a
+production Brain decision.
+
+Acceptance candidate provenance:
+
+- Starting PR #71 code commit: `d014308cb440166fb7ccff59e6e72af7ee87fb7b`.
+- Final tested implementation commit: recorded in the PR #71 and Issue #70
+  checkpoint after the verified tree is committed; the record-only commit that
+  may follow is not recursively embedded here.
+- Branch at final rerun: `issue-70-enterprise-poc`.
+- Windows candidate runtime: Node.js `24.18.1`, npm `11.16.0`; exact observed
+  versions are recorded rather than used as an unrelated compatibility claim.
+- Live model/provider boundary: DSH public `dsh-llm-pi-ai@0.1.2-alpha.2` on the
+  `openai` route, hand-declared model `gpt-5.6-luna`; only the environment
+  reference `OPENAI_API_KEY` is configured. The key value is request-scoped and
+  is not logged, persisted, committed, or exposed to a Tool.
 
 ## Phase results
 
@@ -12,8 +25,8 @@ corporate deployment approval.
 | A — minimal DSH composition | PASS | Public Cordis/DSH services start; Session and standard Agent Loop complete Tool call → result → next request → final response; provider/model adapter is replaceable; forbidden services are absent. |
 | B — commodity Spreadsheet engine | PASS | `@office-kit/xlsx@0.9.0` opens, reads, batch-writes, saves, and reopens both synthetic templates and an independently generated EPPlus workbook while preserving checked values/styles/dimensions and input hashes. |
 | C — File + Spreadsheet capability integration | PASS | Exact five-tool roster; non-recursive listing; workspace-relative reads; symlink/traversal/absolute/hardlink denial; safe local formula subset applied to model-authored and carried formulas; output-only `.xlsx` writes. |
-| D — two-month mechanical vertical slice | PASS (mechanical only) | A scripted test adapter drives the real DSH Agent Loop and production Tools to create independently checked July and August deliverables without production month/company hard-coding or input mutation. Live-model planning/generalization is **NOT RUN**. |
-| E — independent deterministic acceptance | PASS (local scope) | 15/15 tests pass; hashes, formulas, values, styles, roster, dependency graph, source boundary, and workspace boundary are checked outside model-facing Tools. One external PID/TCP observation is recorded separately below. |
+| D — two-month mechanical vertical slice | PASS (mechanical only) | A scripted test adapter drives the real DSH Agent Loop and production Tools to create independently checked July and August deliverables without production month/company hard-coding or input mutation. Live-model July ran separately and failed independent `MONTH` validation; August was not run. |
+| E — independent deterministic acceptance | PASS (deterministic); live FAIL | 35 tests: 34 PASS, 0 FAIL, 1 host-permission SKIP. Overwrite, external-relationship, credential, ASCII session-id, provider failure/retry, supply-chain, and boundary evidence passed. The first live July result failed independent workbook validation (`MONTH`); August was not run. |
 
 ## Capability roster
 
@@ -29,24 +42,46 @@ capability is mounted model-facing.
 
 ## Deterministic gates
 
+The starting-candidate gate output is historical evidence only. The post-repair
+commands below were rerun on the final implementation tree:
+
 ```text
-npm ci                                      PASS
-npm ls --all                                PASS
-npm run test                                PASS (15/15, 0 skipped)
-npm run acceptance                          PASS (2 months)
+npm ci --ignore-scripts                     PASS (133 packages installed)
+npm ls --all                                PASS (only declared optional peers absent)
+npm run test                                PASS (34 pass, 0 fail, 1 skip / 35)
+npm run acceptance                          PASS (1 pass, 0 fail)
+npm run sbom                                PASS (131 unique production versions / 132 locations)
 npm audit --omit=dev --package-lock-only    PASS (0 vulnerabilities)
 git diff --check                            PASS
 ```
 
-The successful acceptance run recorded:
+Final-head metrics:
 
 | Dataset | Total elapsed | Spreadsheet local time | LLM requests | Tool calls | Model-visible input | Tool results | RSS sample | Output size |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| July | 138.28 ms | 87 ms | 10 | 9 | 49,027 bytes | 22,296 bytes | 103,628,800 bytes | 3,216 bytes |
-| August | 96.89 ms | 66 ms | 10 | 9 | 49,036 bytes | 22,301 bytes | 97,406,976 bytes | 3,211 bytes |
+| July | 128.428 ms | 74 ms | 10 | 9 | 49,027 B | 22,296 B | 120,930,304 B | 3,216 B |
+| August | 75.132 ms | 49 ms | 10 | 9 | 49,036 B | 22,301 B | 140,341,248 B | 3,211 B |
 
 These are local deterministic replay measurements, not SLA claims. Token counts
-were not available and are not inferred from byte counts.
+and cost are recorded only when the provider exposes them; byte counts are not
+used as token or cost estimates. The previous starting-candidate measurements
+remain historical and are not final-head evidence.
+
+## Live Brain status
+
+The first configured GPT-5.6 Luna attempt is independent live evidence, not a
+replay result. July produced one output workbook, but independent validation
+classified it `FAIL — MONTH` because the report month did not match the July
+dataset. No August live request was started after that first failure, so August
+is `NOT RUN`. This failure does not claim an upstream DSH/Ollama defect, and no
+live retry or fallback Brain is authorized by this record.
+
+The exact minimal prompt is preserved for any future credential-gated rerun:
+`7月の3社実績を取りまとめて、月次管理レポートを完成させて` (with only the
+month label changed for August). The two earlier July `PI_AI_ERROR` diagnostics
+were caused by localized session ids reaching the provider's HTTP header. The
+harness now uses an ASCII-only deterministic correlation id and retains the
+localized label only in the user prompt.
 
 ## Process and network observation
 
@@ -55,15 +90,18 @@ in one Node process, scoped observation to that root PID and descendants, and
 kept the process alive for observation after the real flow completed. It
 recorded root PID `23984`, exit code `0`, 11 samples, and zero TCP connections.
 The only observed descendant was the Windows console host (`conhost.exe`, PID
-`26400`) created by the external hidden-window test launcher; the Agent path
-created no child process. The exact external harness and captured rows are
+`26400`) created by the external `Start-Process` hidden-window test launcher;
+the Agent path created no child process. The exact external harness and captured rows are
 retained in
 [`acceptance/observe-process-network.ps1`](../acceptance/observe-process-network.ps1)
 and [`evidence/process-network-observation.json`](../evidence/process-network-observation.json).
 This measured run is evidence, not an automatically executed repository gate.
 Production source imports no child-process/network
-executor API, and no model-facing Tool invokes a process. A future configured
-LLM endpoint remains the expected runtime network destination.
+executor API, and no model-facing Tool invokes a process. In the attempted
+live July run the expected OpenAI destination was observed as
+`172.66.0.243:443`; this is endpoint evidence only, not a fixed-IP guarantee.
+The provider observation must remain PID-scoped to the Misen/DSH process tree;
+unrelated browser, EDR, Zscaler, or Ollama traffic is not attributed to Misen.
 
 The observation can be repeated without adding runtime code: use
 `node --input-type=module --eval` to import the compiled Phase D test and retain
@@ -78,21 +116,47 @@ capability or launcher dependency.
 
 - Exact DSH line: every resolved `@deepseek-ai/dsh-*` package is
   `0.1.2-alpha.2`; Cordis is `4.0.2`.
+- Standard live provider seam: `@deepseek-ai/dsh-llm-pi-ai@0.1.2-alpha.2`;
+  its resolved pi-ai package is `@earendil-works/pi-ai@0.84.4`. Live composition
+  does not mount retry. `@deepseek-ai/dsh-llm-retry@0.1.2-alpha.2` is exercised
+  only by the deterministic transient-provider recovery test.
 - Spreadsheet engine: `@office-kit/xlsx@0.9.0`.
-- Clean development install: 39 package manifests; no dependency install hooks, gyp/native
-  declaration, `.node`, `.dll`, or `.exe` files.
-- Installed development graph measurement: 1,844 files / 41,221,651 bytes.
-- Lockfile SHA-256:
-  `C046EE6649D376B4BD8458AF7CAD52864C1165A3B117B1698D86D4078B3EC95D`.
-- CycloneDX SBOM SHA-256:
-  `42FDD9A9E884C6DE852A413B9B82B6C8A565BBA9BBFE1D6BF051E5662FB01271`
-  (35 production libraries; exact match to all non-dev lock packages).
-- Process/network observation SHA-256:
-  `E9A444FE2A132ACE1F5166AAA11EA7FF4C480D9B795D6AB1639149D8C9FC500E`.
+- Clean development install uses `npm ci --ignore-scripts`. The exact installed
+  graph has 133 package locations and 131 unique production package versions.
+  It has two declared but disabled install hooks: `@google/genai@1.52.0` preinstall
+  `echo 'preinstall: no-op'` and `protobufjs@7.6.6` postinstall
+  `node scripts/postinstall`. No package declares gyp/native metadata, and the
+  installed graph contains no `.node`, `.dll`, or `.exe` files.
+- Installed development graph measurement: 11,936 files / 97,242,705 bytes.
+- Lockfile SHA-256: `ef961cc8d790f1ce9425c5128c8632099ee9e7781b8477fe7d3afcc34c779208`.
+- CycloneDX SBOM SHA-256: `5510490db476cf21a8948c706c7d45cb08aeacc015943ad23c4c6016b654c288`
+  (the generator derives the production component set from the exact lockfile).
+- Retained deterministic Phase D PID/network observation SHA-256:
+  `e9a444fe2a132ace1f5166aaa11ea7ff4c480d9b795d6ab1639149d8c9fc500e`.
+  Live July PID/TCP evidence was held outside the repository: the root had only
+  launcher-created `conhost.exe` as a descendant, and the only observed TCP
+  destination was the expected OpenAI HTTPS endpoint `172.66.0.243:443`; no raw
+  live log is committed.
+
+The Office Kit guard rejects external URL/file hyperlinks, external workbook
+references, external-link/query-table/connection passthrough parts, and their
+relationship extras before publishing or mutating an output; location-only
+links inside the workbook remain accepted. Overwrite uses a private sibling
+temporary plus direct same-directory replacement, so ordinary rename failure
+preserves the last-known-good destination and cleans the temporary. This is not
+a power-loss-durable transaction: directory fsync, open-handle/ACL races, and
+filesystem failure remain residual risks.
+
+TypeScript keeps source checking strict. `tsconfig.json` sets
+`skipLibCheck: true` only to avoid unrelated declaration-resolution failures in
+upstream transitive `@anthropic-ai`/`@google` SDK packages; no SDK shim or
+source-level type relaxation is added.
 
 ## Not run / known limitations
 
-- Live GPT-5.6 Luna credential execution: **NOT RUN**.
+- Live GPT-5.6 Luna credential execution: July **FAIL — MONTH** after one
+  output; August **NOT RUN**. No API key, raw live log, or generated live
+  artifact is committed or retained in this repository.
 - DSH public UI composition implementation and rendered-browser validation:
   **NOT RUN**. Public UI package seams were inspected only.
 - Corporate EDR/proxy/device deployment: **NOT RUN**.
@@ -102,5 +166,9 @@ capability or launcher dependency.
   the same OS identity that deliberately races those checks remains outside
   this model-capability PoC threat boundary and requires corporate-device
   validation; the model has no Tool that can create links or processes.
+- The replacement regression validated the hardlink path, but Windows denied
+  creation of the symlink fixture with `EPERM`; that symlink subcase is the one
+  deterministic test SKIP and remains device-policy acceptance work rather
+  than a claimed PASS.
 - Formula recalculation, `.xlsm`, VBA, Pivot refresh, chart repair, Excel COM,
   LibreOffice, and visual spreadsheet inspection are outside this initial slice.

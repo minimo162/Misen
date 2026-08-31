@@ -5,7 +5,7 @@ import { join } from 'node:path'
 const lockBytes = await readFile(new URL('../package-lock.json', import.meta.url))
 const lock = JSON.parse(lockBytes.toString('utf8'))
 const root = lock.packages['']
-const records = []
+const occurrences = []
 
 function packageName(path) {
   return path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length)
@@ -18,7 +18,7 @@ function purl(name, version) {
 for (const [path, entry] of Object.entries(lock.packages)) {
   if (path === '' || entry.dev === true) continue
   const name = packageName(path)
-  const manifest = JSON.parse(await readFile(new URL(`../node_modules/${name}/package.json`, import.meta.url), 'utf8'))
+  const manifest = JSON.parse(await readFile(new URL(`../${path}/package.json`, import.meta.url), 'utf8'))
   const ref = purl(name, entry.version)
   const component = {
     type: 'library',
@@ -35,26 +35,54 @@ for (const [path, entry] of Object.entries(lock.packages)) {
   if (typeof entry.resolved === 'string') {
     component.externalReferences = [{ type: 'distribution', url: entry.resolved }]
   }
-  records.push({ name, ref, entry, component })
+  occurrences.push({ path, name, ref, entry, component })
 }
 
 const byName = new Map()
-for (const record of records) {
+for (const record of occurrences) {
   const matches = byName.get(record.name) ?? []
   matches.push(record)
   byName.set(record.name, matches)
 }
-for (const [name, matches] of byName) {
-  if (matches.length !== 1) throw new Error(`SBOM generator requires a unique resolved ${name}; found ${matches.length}`)
+
+const byRef = new Map()
+for (const occurrence of occurrences) {
+  const existing = byRef.get(occurrence.ref)
+  if (existing === undefined) {
+    byRef.set(occurrence.ref, { ...occurrence, paths: [occurrence.path] })
+    continue
+  }
+  existing.paths.push(occurrence.path)
 }
 
-function dependencyRefs(entry) {
+function resolveDependency(path, name) {
+  const candidates = [`${path}/node_modules/${name}`]
+  let cursor = path
+  for (;;) {
+    const marker = cursor.lastIndexOf('/node_modules/')
+    if (marker < 0) break
+    cursor = cursor.slice(0, marker)
+    candidates.push(`${cursor}/node_modules/${name}`)
+  }
+  candidates.push(`node_modules/${name}`)
+  for (const candidate of candidates) {
+    const entry = lock.packages[candidate]
+    if (entry !== undefined && entry.dev !== true) return purl(name, entry.version)
+  }
+  return undefined
+}
+
+function dependencyRefs(occurrence) {
+  const { path, entry } = occurrence
   const names = new Set([
     ...Object.keys(entry.dependencies ?? {}),
     ...Object.keys(entry.optionalDependencies ?? {}),
     ...Object.keys(entry.peerDependencies ?? {}),
   ])
-  return [...names].flatMap(name => byName.get(name)?.map(record => record.ref) ?? []).sort()
+  return [...names].flatMap(name => {
+    const ref = resolveDependency(path, name)
+    return ref === undefined ? [] : [ref]
+  }).sort()
 }
 
 const digest = createHash('sha256').update(lockBytes).digest('hex')
@@ -74,15 +102,21 @@ const bom = {
       purl: rootRef,
     },
   },
-  components: records.map(record => record.component).sort((left, right) => left['bom-ref'].localeCompare(right['bom-ref'])),
+  components: [...byRef.values()].map(record => record.component).sort((left, right) => left['bom-ref'].localeCompare(right['bom-ref'])),
   dependencies: [
     {
       ref: rootRef,
-      dependsOn: Object.keys(root.dependencies ?? {}).flatMap(name => byName.get(name)?.map(record => record.ref) ?? []).sort(),
+      dependsOn: Object.keys(root.dependencies ?? {}).flatMap(name => {
+        const ref = resolveDependency('', name)
+        return ref === undefined ? [] : [ref]
+      }).sort(),
     },
-    ...records.map(record => ({ ref: record.ref, dependsOn: dependencyRefs(record.entry) })),
+    ...[...byRef.values()].map(record => ({
+      ref: record.ref,
+      dependsOn: [...new Set(record.paths.flatMap(path => dependencyRefs({ path, entry: lock.packages[path] })))].sort(),
+    })),
   ].sort((left, right) => left.ref.localeCompare(right.ref)),
 }
 
 await writeFile(new URL('../evidence/sbom.cdx.json', import.meta.url), `${JSON.stringify(bom, null, 2)}\n`, 'utf8')
-console.log(`Wrote complete CycloneDX SBOM with ${records.length} production libraries to ${join('evidence', 'sbom.cdx.json')}`)
+console.log(`Wrote complete CycloneDX SBOM with ${byRef.size} unique production package versions from ${occurrences.length} installed locations to ${join('evidence', 'sbom.cdx.json')}`)
