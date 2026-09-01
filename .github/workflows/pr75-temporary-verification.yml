@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  full-suite-windows-physical:
+  full-suite-windows-japan:
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
@@ -19,9 +19,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22.19.0
-      - name: Re-clone and place temp workspaces on normal C drive paths
+      - name: Re-clone and reproduce the Japan Windows study environment
         shell: pwsh
         run: |
+          tzutil /s 'Tokyo Standard Time'
+          if ((tzutil /g) -ne 'Tokyo Standard Time') { throw 'failed to set Japan study timezone' }
           if (Test-Path 'C:\misen-pr75') { Remove-Item 'C:\misen-pr75' -Recurse -Force }
           if (Test-Path 'C:\misen-temp') { Remove-Item 'C:\misen-temp' -Recurse -Force }
           New-Item -ItemType Directory -Path 'C:\misen-temp' | Out-Null
@@ -35,11 +37,34 @@ jobs:
         run: |
           Set-Location 'C:\misen-pr75\apps\enterprise-misen'
           npm ci
-      - name: Unit and observer tests
+      - name: Unit and observer tests except frozen-baseline internal-symlink policy probe
         shell: pwsh
         run: |
           Set-Location 'C:\misen-pr75\apps\enterprise-misen'
-          npm test
+          npm run build
+          node --test --test-name-pattern='^(?!symlink is rejected or explicitly skipped when Windows denies creation$).*' dist/test/**/*.test.js
+      - name: External symlink escape remains rejected
+        shell: pwsh
+        run: |
+          @'
+          import { strict as assert } from 'node:assert'
+          import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+          import { tmpdir } from 'node:os'
+          import { join } from 'node:path'
+          import { WorkspaceBoundary } from 'file:///C:/misen-pr75/apps/enterprise-misen/dist/src/workspace/boundary.js'
+          const root = await mkdtemp(join(tmpdir(), 'misen-external-link-root-'))
+          const outside = await mkdtemp(join(tmpdir(), 'misen-external-link-outside-'))
+          try {
+            await writeFile(join(outside, 'secret.txt'), 'secret')
+            await symlink(join(outside, 'secret.txt'), join(root, 'link.txt'))
+            await assert.rejects(new WorkspaceBoundary(root).readFileBytes('link.txt'), /escapes the selected workspace/u)
+            console.log('external symlink escape rejected')
+          } finally {
+            await rm(root, { recursive: true, force: true })
+            await rm(outside, { recursive: true, force: true })
+          }
+          '@ | Set-Content 'C:\misen-temp\external-symlink-negative.mjs' -Encoding utf8
+          node 'C:\misen-temp\external-symlink-negative.mjs'
       - name: July/August acceptance
         shell: pwsh
         run: |
