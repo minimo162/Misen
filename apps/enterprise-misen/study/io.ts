@@ -17,7 +17,7 @@ const inside = (parent: string, child: string) => { const rel = relative(parent,
 const hex40 = /^[0-9a-f]{40}$/u
 const safeStudyId = /^[a-z0-9][a-z0-9._-]{0,79}$/u
 const utcTimestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u
-const validUtc = (value: unknown): value is string => typeof value === 'string' && utcTimestamp.test(value) && Number.isFinite(Date.parse(value))
+const validUtc = (value: unknown): value is string => typeof value === 'string' && utcTimestamp.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value
 const sameConfiguration = (value: unknown): boolean => JSON.stringify(value) === JSON.stringify(FROZEN_CONFIGURATION)
 const exactKeys = (value: object, keys: readonly string[], label: string): void => {
   const actual = Object.keys(value).sort(), expected = [...keys].sort()
@@ -228,6 +228,12 @@ export async function readRunRecords(evidenceDirectory: string): Promise<StudyRu
     if (record.studyId !== checkpoint.studyId || record.productionBaselineSha !== checkpoint.productionBaselineSha || record.observerSha !== checkpoint.observerSha || !sameConfiguration(record.configuration)) throw new Error('run/checkpoint provenance mismatch')
     const reservation = reservations.find(item => item.paidAttemptNumber === record.paidAttemptNumber)
     if (!reservation || reservation.studyRunNumber !== record.studyRunNumber || reservation.month !== record.month) throw new Error('run/reservation mismatch')
+    if (Date.parse(record.startedAtUtc) < Date.parse(checkpoint.createdAtUtc) || Date.parse(reservation.reservedAtUtc) < Date.parse(record.startedAtUtc) || Date.parse(reservation.reservedAtUtc) > Date.parse(record.endedAtUtc)) throw new Error('run/checkpoint/reservation chronology mismatch')
+  }
+  let expectedRun = 1
+  for (const record of [...records].sort((left, right) => left.paidAttemptNumber - right.paidAttemptNumber)) {
+    if (record.studyRunNumber !== expectedRun) throw new Error('valid-run sequence mismatch')
+    if (record.status !== 'INVALID') expectedRun++
   }
   return records
 }
@@ -243,8 +249,10 @@ export async function readReservations(evidenceDirectory: string): Promise<PaidA
   const checkpoint = await readCheckpoint(evidenceDirectory)
   for (const reservation of reservations) {
     if (reservation.studyId !== checkpoint.studyId || reservation.productionBaselineSha !== checkpoint.productionBaselineSha || reservation.observerSha !== checkpoint.observerSha || !sameConfiguration(reservation.configuration)) throw new Error('reservation/checkpoint provenance mismatch')
+    if (Date.parse(reservation.reservedAtUtc) < Date.parse(checkpoint.createdAtUtc)) throw new Error('reservation/checkpoint chronology mismatch')
   }
   if (reservations.some((reservation, index) => reservation.paidAttemptNumber !== index + 1)) throw new Error('reservation sequence is not contiguous')
+  if (reservations.some((reservation, index) => index > 0 && Date.parse(reservation.reservedAtUtc) < Date.parse(reservations[index - 1]!.reservedAtUtc))) throw new Error('reservation timestamp sequence mismatch')
   return reservations
 }
 

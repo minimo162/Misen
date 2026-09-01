@@ -45,6 +45,7 @@ export function aggregateStudy(records: readonly StudyRunRecord[], checkpoint: S
   }
   const toolCalls = valid.map(record => record.toolStarts.length)
   const knownCorrections = valid.filter(record => record.selfCorrectionCount !== null)
+  const knownValidationErrors = knownCorrections.reduce((sum, record) => sum + record.toolValidationErrorCount, 0)
   return {
     schemaVersion: 1,
     studyId: ordered[0]?.studyId ?? null,
@@ -63,7 +64,7 @@ export function aggregateStudy(records: readonly StudyRunRecord[], checkpoint: S
       toolErrorFrequency: toolCalls.reduce((sum, value) => sum + value, 0) === 0 ? null : valid.reduce((sum, record) => sum + record.toolErrorCount, 0) / toolCalls.reduce((sum, value) => sum + value, 0),
       selfCorrectionAvailableRuns: knownCorrections.length,
       selfCorrections: knownCorrections.reduce((sum, record) => sum + (record.selfCorrectionCount ?? 0), 0),
-      selfCorrectionFrequency: valid.reduce((sum, record) => sum + record.toolValidationErrorCount, 0) === 0 ? null : knownCorrections.reduce((sum, record) => sum + (record.selfCorrectionCount ?? 0), 0) / valid.reduce((sum, record) => sum + record.toolValidationErrorCount, 0),
+      selfCorrectionFrequency: knownValidationErrors === 0 ? null : knownCorrections.reduce((sum, record) => sum + (record.selfCorrectionCount ?? 0), 0) / knownValidationErrors,
       failureTaxonomy: taxonomy,
       repeatedFailurePatterns: [...patternCounts].filter(([, count]) => count > 1).sort((left, right) => right[1] - left[1]).map(([signature, count]) => ({ signature, count })),
     },
