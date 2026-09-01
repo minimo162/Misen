@@ -7,7 +7,7 @@ import { SYNTHETIC_MONTHS } from '../../demo/enterprise-excel/fixtures.js'
 import { liveAgent } from '../runtime/live.js'
 import { WorkspaceBoundary } from '../workspace/boundary.js'
 import type { AgentEvent } from '@earendil-works/pi-agent-core'
-import { validateReport } from '../acceptance/validator.js'
+import { snapshotOutputScope, validateReport } from '../acceptance/validator.js'
 
 export interface DemoResult {
   output: string
@@ -90,6 +90,7 @@ export const liveDemoRunner: DemoRunner = async (root, month, prompt, context) =
   const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
   const inputs = ['master.xlsx', '月次管理レポート_template.xlsx', ...scenario.companies.map(company => `${month}/${company.company}.xlsx`)]
   const before = new Map(await Promise.all(inputs.map(async path => [path, hash(await readFile(join(root, path)))] as const)))
+  const outputBefore = await snapshotOutputScope(root)
   const agent = liveAgent(root)
   const tools: string[] = []
   context?.setCancel(() => agent.abort())
@@ -101,9 +102,8 @@ export const liveDemoRunner: DemoRunner = async (root, month, prompt, context) =
       const cancelled = latest?.role === 'assistant' && latest?.stopReason === 'aborted'
       return { output: `output/${month}-月次管理レポート.xlsx`, tools, axes: [], status: cancelled ? 'CANCELLED' : 'FAIL' }
     }
-    const output = `output/${month}-月次管理レポート.xlsx`
-    await validateReport(root, scenario, output, before)
-    return { output, tools, axes: ['SHEET', 'MONTH', 'ROWS', 'PROFIT_FORMULAS', 'STATUS', 'TOTAL', 'FOOTER', 'FORMAT'], status: 'PASS' }
+    const validation = await validateReport(root, scenario, before, outputBefore)
+    return { output: validation.output, tools, axes: ['SHEET', 'MONTH', 'ROWS', 'PROFIT_FORMULAS', 'STATUS', 'TOTAL', 'FOOTER', 'FORMAT'], status: 'PASS' }
   } finally {
     unsubscribe()
   }
