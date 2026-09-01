@@ -63,6 +63,7 @@ export function assertRunRecord(value: unknown): asserts value is StudyRunRecord
   const item = value as unknown as StudyRunRecord
   exactKeys(item, ['schemaVersion','studyId','studyRunNumber','paidAttemptNumber','month','productionBaselineSha','observerSha','configuration','startedAtUtc','endedAtUtc','status','failureTaxonomy','failureSummary','axisMatrix','output','inputHashesUnchanged','toolStarts','toolResults','toolBalance','toolErrorCount','toolValidationErrorCount','selfCorrectionCount','requestCount','lifecycle','assistantStopReasons','observedProviders','observedModels','usage','elapsedMs','rssBytes','integrity','invalidReason'], 'run')
   assertSafeEvidence(item, 'run')
+  if (JSON.stringify(item).length > 1_000_000) throw new Error('run evidence exceeds size limit')
   if (!Number.isInteger(item.studyRunNumber) || item.studyRunNumber < 1 || item.studyRunNumber > 20) throw new Error('invalid study run number')
   if (!Number.isInteger(item.paidAttemptNumber) || item.paidAttemptNumber < 1 || item.paidAttemptNumber > 24) throw new Error('invalid paid attempt number')
   if (!['7月', '8月'].includes(item.month) || item.month !== alternatingSchedule()[item.studyRunNumber - 1]) throw new Error('run schedule mismatch')
@@ -86,6 +87,8 @@ export function assertRunRecord(value: unknown): asserts value is StudyRunRecord
   if (startIds.size !== item.toolStarts.length || endIds.size !== item.toolResults.length) throw new Error('duplicate Tool call ID')
   const eventSequences = [...item.toolStarts, ...item.toolResults].map(event => event.sequence).sort((left, right) => left - right)
   if (eventSequences.some((sequence, index) => sequence !== index + 1)) throw new Error('Tool event sequence mismatch')
+  const chronologicalEvents = [...item.toolStarts, ...item.toolResults].sort((left, right) => left.sequence - right.sequence)
+  if (chronologicalEvents.some((event, index) => index > 0 && Date.parse(event.timestampUtc) < Date.parse(chronologicalEvents[index - 1]!.timestampUtc))) throw new Error('Tool event timestamp chronology mismatch')
   const computedBalance = item.toolStarts.length === item.toolResults.length && item.toolStarts.every(start => endIds.has(start.toolCallId)) && item.toolResults.every(result => startIds.has(result.toolCallId))
   if (item.toolBalance !== computedBalance) throw new Error('invalid tool balance evidence')
   if (item.toolErrorCount !== item.toolResults.filter(result => result.isError).length || item.toolValidationErrorCount !== item.toolResults.filter(result => result.validationError).length) throw new Error('tool count mismatch')
