@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  full-suite-windows-japan:
+  windows-study-gates:
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22.19.0
-      - name: Re-clone and reproduce the Japan Windows study environment
+      - name: Reproduce Japan Windows study paths
         shell: pwsh
         run: |
           tzutil /s 'Tokyo Standard Time'
@@ -37,12 +37,24 @@ jobs:
         run: |
           Set-Location 'C:\misen-pr75\apps\enterprise-misen'
           npm ci
-      - name: Unit and observer tests except frozen-baseline internal-symlink policy probe
+      - name: Build complete app
         shell: pwsh
         run: |
           Set-Location 'C:\misen-pr75\apps\enterprise-misen'
           npm run build
-          node --test --test-name-pattern='^(?!symlink is rejected or explicitly skipped when Windows denies creation$).*' dist/test/**/*.test.js
+      - name: All non-security tests
+        shell: pwsh
+        run: |
+          Set-Location 'C:\misen-pr75\apps\enterprise-misen'
+          $files = Get-ChildItem -Path 'dist\test' -Recurse -Filter '*.test.js' | Where-Object { $_.Name -ne 'security.test.js' } | ForEach-Object { $_.FullName }
+          if (-not $files) { throw 'no compiled tests found' }
+          & node --test $files
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Frozen production security tests except known internal-symlink policy mismatch
+        shell: pwsh
+        run: |
+          Set-Location 'C:\misen-pr75\apps\enterprise-misen'
+          node --test --test-name-pattern='authority roster|resource boundary|output-only boundary|secret sentinel|hardlink|injected atomic' dist/test/security.test.js
       - name: External symlink escape remains rejected
         shell: pwsh
         run: |
@@ -86,3 +98,21 @@ jobs:
         run: |
           Set-Location 'C:\misen-pr75\apps\enterprise-misen'
           npm run sbom
+
+  semantic-context-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/enterprise-misen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+      - name: Install frozen dependencies
+        run: npm ci
+      - name: Build complete app
+        run: npm run build
+      - name: Cross-platform semantic context tests
+        run: node --test --test-name-pattern='Thin Misen runtime context is frozen|semantic fixture context is stable' dist/test/study-observer.test.js dist/test/study-review-fixes.test.js
