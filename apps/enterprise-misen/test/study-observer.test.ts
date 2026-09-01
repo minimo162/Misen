@@ -11,8 +11,9 @@ import { fixture } from '../demo/enterprise-excel/fixtures.js'
 import { enterpriseTools } from '../src/capabilities/tools.js'
 import { WorkspaceBoundary } from '../src/workspace/boundary.js'
 import { aggregateStudy, wilson95 } from '../study/aggregate.js'
-import { prepareEvidenceDirectory, persistRun, readCheckpoint, readReservations, readRunRecords, reservePaidAttempt, writeCheckpoint } from '../study/io.js'
+import { assertRunRecord, prepareEvidenceDirectory, persistRun, readCheckpoint, readReservations, readRunRecords, reservePaidAttempt, writeCheckpoint } from '../study/io.js'
 import { StudyObserver } from '../study/observer.js'
+import { protectedTrackedFileCounts } from '../study/provenance.js'
 import { sameFixtureInputs, snapshotFixtureInputs } from '../study/integrity.js'
 import { alternatingSchedule, FROZEN_CONFIGURATION, PRODUCTION_BASELINE_SHA, STUDY_SCHEMA_VERSION, type PaidAttemptReservation, type StudyCheckpoint, type StudyRunRecord } from '../study/schema.js'
 
@@ -93,6 +94,26 @@ test('Tool validation error followed by exact-target success is a conservative s
   assert.equal(record.toolErrorCount, 1)
   assert.equal(record.selfCorrectionCount, 1)
   assert.doesNotMatch(JSON.stringify(record), /very-secret-value|large successful result/u)
+})
+
+test('persisted Tool evidence rejects fabricated correction, nested payloads, and duplicate sequencing', () => {
+  const observer = new StudyObserver(metadata, () => '2026-09-01T00:00:01.000Z')
+  begin(observer)
+  observer.observe({ type: 'tool_execution_start', toolCallId: 'bad', toolName: 'spreadsheet_update', args: { range: 'A1' } })
+  observer.observe({ type: 'tool_execution_end', toolCallId: 'bad', toolName: 'spreadsheet_update', result: { message: 'validation failed' }, isError: true })
+  finish(observer)
+  const record = observer.finalize({ validation: validation('FAIL'), inputHashesUnchanged: true, elapsedMs: 1, rssBytes: 1, integrity })
+  assert.equal(record.selfCorrectionCount, 0)
+  assert.doesNotThrow(() => assertRunRecord(record))
+  assert.throws(() => assertRunRecord({ ...record, selfCorrectionCount: 1 }), /self-correction/u)
+  assert.throws(() => assertRunRecord({ ...record, toolResults: [{ ...record.toolResults[0]!, error: { ...record.toolResults[0]!.error!, rawProviderPayload: 'secret' } }] }), /Tool error fields/u)
+  assert.throws(() => assertRunRecord({ ...record, toolResults: [{ ...record.toolResults[0]!, sequence: record.toolStarts[0]!.sequence }] }), /sequence/u)
+})
+
+test('provenance protected pathspecs resolve to tracked repository files', () => {
+  const counts = protectedTrackedFileCounts()
+  assert.deepEqual(Object.keys(counts).sort(), ['apps/enterprise-misen/acceptance','apps/enterprise-misen/demo','apps/enterprise-misen/package-lock.json','apps/enterprise-misen/src'].sort())
+  assert.equal(Object.values(counts).every(count => count > 0), true)
 })
 
 test('public Pi lifecycle without the frozen Tool loop is rejected as incomplete', async () => {

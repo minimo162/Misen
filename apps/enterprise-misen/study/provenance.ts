@@ -19,18 +19,25 @@ const observerPaths = [
   'apps/enterprise-misen/tsconfig.json',
 ]
 
+const repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: appRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+
 function git(args: string[]): string {
-  return execFileSync('git', args, { cwd: appRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
 }
 
 function quietDiff(args: string[]): void {
-  try { execFileSync('git', ['diff', '--quiet', ...args], { cwd: appRoot, stdio: 'ignore' }) }
+  try { execFileSync('git', ['diff', '--quiet', ...args], { cwd: repoRoot, stdio: 'ignore' }) }
   catch { throw new Error('repository provenance mismatch') }
+}
+
+export function protectedTrackedFileCounts(): Readonly<Record<string, number>> {
+  return Object.fromEntries(protectedPaths.map(path => [path, git(['ls-files', '--', path]).split(/\r?\n/u).filter(Boolean).length]))
 }
 
 export function verifyRepositoryProvenance(observerSha: string): void {
   if (git(['rev-parse', 'HEAD']) !== observerSha) throw new Error('observer SHA does not equal current HEAD')
   if (git(['rev-parse', `${PRODUCTION_BASELINE_SHA}^{commit}`]) !== PRODUCTION_BASELINE_SHA) throw new Error('production baseline commit is unavailable')
+  if (Object.values(protectedTrackedFileCounts()).some(count => count === 0)) throw new Error('protected path has no tracked files')
   quietDiff([PRODUCTION_BASELINE_SHA, 'HEAD', '--', ...protectedPaths])
   quietDiff(['HEAD', '--', ...protectedPaths, ...observerPaths])
   quietDiff(['--cached', 'HEAD', '--', ...protectedPaths, ...observerPaths])

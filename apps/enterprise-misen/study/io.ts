@@ -34,6 +34,7 @@ function assertCommon(value: unknown): asserts value is { schemaVersion: 1; stud
 export function assertCheckpoint(value: unknown): asserts value is StudyCheckpoint {
   assertCommon(value)
   const item = value as unknown as StudyCheckpoint
+  exactKeys(item, ['schemaVersion','studyId','productionBaselineSha','observerSha','intendedValidRuns','maxPaidAttempts','hardSpendCapUsd','schedule','configuration','restartRule','costAuthority','providerHardCapConfirmed','hardSpendEnforcement','createdAtUtc'], 'checkpoint')
   if (item.intendedValidRuns !== 20 || item.maxPaidAttempts !== 24 || item.hardSpendCapUsd !== 10) throw new Error('study limits mismatch')
   if (JSON.stringify(item.schedule) !== JSON.stringify(alternatingSchedule())) throw new Error('study schedule mismatch')
   if (item.restartRule !== 'observer-change-restarts-at-run-1') throw new Error('restart rule mismatch')
@@ -59,12 +60,16 @@ export function assertRunRecord(value: unknown): asserts value is StudyRunRecord
   exactKeys(item.lifecycle, ['agentStart','agentEnd','turnStart','turnEnd'], 'lifecycle')
   if (!Number.isInteger(item.requestCount) || item.requestCount !== item.assistantStopReasons.length) throw new Error('request count mismatch')
   const startIds = new Set(item.toolStarts.map(start => start.toolCallId)), endIds = new Set(item.toolResults.map(result => result.toolCallId))
+  if (startIds.size !== item.toolStarts.length || endIds.size !== item.toolResults.length) throw new Error('duplicate Tool call ID')
+  const eventSequences = [...item.toolStarts, ...item.toolResults].map(event => event.sequence).sort((left, right) => left - right)
+  if (eventSequences.some((sequence, index) => sequence !== index + 1)) throw new Error('Tool event sequence mismatch')
   const computedBalance = item.toolStarts.length === item.toolResults.length && item.toolStarts.every(start => endIds.has(start.toolCallId)) && item.toolResults.every(result => startIds.has(result.toolCallId))
   if (item.toolBalance !== computedBalance) throw new Error('invalid tool balance evidence')
   if (item.toolErrorCount !== item.toolResults.filter(result => result.isError).length || item.toolValidationErrorCount !== item.toolResults.filter(result => result.validationError).length) throw new Error('tool count mismatch')
   for (const start of item.toolStarts) {
     if (!FROZEN_CONFIGURATION.tools.includes(start.toolName) || !Number.isInteger(start.sequence) || start.sequence < 1 || typeof start.toolCallId !== 'string') throw new Error('invalid Tool start evidence')
-    if (Object.keys(start).some(key => !['sequence','toolCallId','toolName','timestampUtc','target','valuesShape'].includes(key))) throw new Error('Tool start fields mismatch')
+    exactKeys(start, start.valuesShape === undefined ? ['sequence','toolCallId','toolName','timestampUtc','target'] : ['sequence','toolCallId','toolName','timestampUtc','target','valuesShape'], 'Tool start')
+    if (!start.toolCallId || typeof start.timestampUtc !== 'string' || !Number.isFinite(Date.parse(start.timestampUtc)) || !start.target || typeof start.target !== 'object' || Array.isArray(start.target)) throw new Error('invalid Tool start evidence')
     for (const [key, target] of Object.entries(start.target)) if (!['path','extension','workbook','sheet','range','source','output','offset','limit','overwrite'].includes(key)
       || !['string','number','boolean'].includes(typeof target) || (typeof target === 'string' && !/^sha256:[0-9a-f]{16}$/u.test(target))) throw new Error('invalid Tool target evidence')
     if (start.valuesShape && (Object.keys(start.valuesShape).sort().join(',') !== 'columns,formulas,literals,rows' || Object.values(start.valuesShape).some(count => typeof count !== 'number' || !Number.isInteger(count) || count < 0))) throw new Error('invalid values-shape evidence')
@@ -72,9 +77,27 @@ export function assertRunRecord(value: unknown): asserts value is StudyRunRecord
   for (const result of item.toolResults) {
     const start = item.toolStarts.find(candidate => candidate.toolCallId === result.toolCallId)
     if (!start || start.toolName !== result.toolName || !Number.isInteger(result.sequence) || result.sequence < 1) throw new Error('Tool start/result mismatch')
-    if (Object.keys(result).some(key => !['sequence','toolCallId','toolName','timestampUtc','isError','validationError','error'].includes(key)) || result.isError !== Boolean(result.error) || (result.validationError && !result.isError)) throw new Error('Tool result fields mismatch')
+    exactKeys(result, result.isError ? ['sequence','toolCallId','toolName','timestampUtc','isError','validationError','error'] : ['sequence','toolCallId','toolName','timestampUtc','isError','validationError'], 'Tool result')
+    if (typeof result.timestampUtc !== 'string' || !Number.isFinite(Date.parse(result.timestampUtc)) || typeof result.isError !== 'boolean' || typeof result.validationError !== 'boolean' || result.isError !== Boolean(result.error) || (result.validationError && !result.isError)) throw new Error('Tool result fields mismatch')
+    if (result.error) {
+      exactKeys(result.error, ['class','code','message'], 'Tool error')
+      if (result.error.class !== 'ToolError' || result.error.code !== null || !['tool validation error','tool execution error'].includes(result.error.message)
+        || result.validationError !== (result.error.message === 'tool validation error')) throw new Error('invalid Tool error evidence')
+    }
   }
-  if (item.selfCorrectionCount !== null && (!Number.isInteger(item.selfCorrectionCount) || item.selfCorrectionCount < 0 || item.selfCorrectionCount > item.toolValidationErrorCount)) throw new Error('invalid self-correction evidence')
+  let computedSelfCorrectionCount: number | null = 0
+  for (const failure of item.toolResults.filter(result => result.validationError)) {
+    const failedStart = item.toolStarts.find(start => start.toolCallId === failure.toolCallId)
+    const signature = failedStart ? JSON.stringify(failedStart.target) : ''
+    if (!failedStart || signature === '{}') { computedSelfCorrectionCount = null; break }
+    const recovered = item.toolResults.some(success => {
+      const successStart = item.toolStarts.find(start => start.toolCallId === success.toolCallId)
+      return !success.isError && success.sequence > failure.sequence && success.toolName === failure.toolName
+        && successStart !== undefined && JSON.stringify(successStart.target) === signature
+    })
+    if (recovered && computedSelfCorrectionCount !== null) computedSelfCorrectionCount++
+  }
+  if (item.selfCorrectionCount !== computedSelfCorrectionCount) throw new Error('invalid self-correction evidence')
   exactKeys(item.usage, ['input','output','cacheRead','cacheWrite','reasoning','totalTokens','catalogEstimatedCostUsd'], 'usage')
   const usageValues = [item.usage.input, item.usage.output, item.usage.cacheRead, item.usage.cacheWrite, item.usage.totalTokens, item.usage.reasoning, item.usage.catalogEstimatedCostUsd]
   if (usageValues.some(number => number !== null && (!Number.isFinite(number) || number < 0))) throw new Error('invalid usage evidence')
@@ -98,6 +121,7 @@ export function assertRunRecord(value: unknown): asserts value is StudyRunRecord
 export function assertReservation(value: unknown): asserts value is PaidAttemptReservation {
   assertCommon(value)
   const item = value as unknown as PaidAttemptReservation
+  exactKeys(item, ['schemaVersion','studyId','studyRunNumber','paidAttemptNumber','month','productionBaselineSha','observerSha','configuration','reservedAtUtc'], 'reservation')
   if (!Number.isInteger(item.studyRunNumber) || item.studyRunNumber < 1 || item.studyRunNumber > 20) throw new Error('invalid reserved run number')
   if (!Number.isInteger(item.paidAttemptNumber) || item.paidAttemptNumber < 1 || item.paidAttemptNumber > 24) throw new Error('invalid reserved attempt number')
   if (item.month !== alternatingSchedule()[item.studyRunNumber - 1]) throw new Error('reservation schedule mismatch')
