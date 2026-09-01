@@ -48,10 +48,17 @@ cannot pass without a complete balanced event stream and the frozen observed
 provider/model. The Agent/turn lifecycle, at least one Tool call, and the actual
 Agent model, thinking level, and exact five-Tool state are also checked.
 
+INVALID attempts persist only one allowlisted reason code: `OBSERVER_CAPTURE_FAILURE`,
+`INFRASTRUCTURE_FAILURE`, `CONFIGURATION_DRIFT`, or `INCOMPLETE_EVENT_STREAM`.
+Raw exception text may be consumed transiently for control flow but is never stored
+as the INVALID reason. Runtime validation rejects arbitrary or mismatched reason
+strings so the aggregate can distinguish why an attempt was excluded without
+retaining sensitive diagnostic text.
+
 The progressive monthly-report Skill read is recorded as a derived boolean from
 the already-hashed `workspace_read_text` target. It does not add a model-facing
 Tool, expose Skill contents, modify the static hook chain, or by itself determine
 PASS/FAIL. The production roster remains exactly five Tools; call count is a
 separate observed behavior metric.
 
-`credentialExposure` and `unexpectedNetwork` remain `null` unless a separate safe observer supplies evidence. Pi derives its public cost field from catalog pricing, so the record labels it a catalog estimate rather than provider billing. The checkpoint therefore requires confirmation of a provider-account USD 10 hard cap; the local estimate ledger is an additional stop control and never substitutes an absent billing control or guessed cost.
+`credentialExposure` and `unexpectedNetwork` remain `null` unless a separate safe observer supplies evidence. Pi derives its public cost field from catalog pricing, so the record labels it a catalog estimate rather than provider billing. If any AssistantMessage request lacks a finite Pi catalog total, the run-level `catalogEstimatedCostUsd` is `null`; a partial subtotal is never presented as a complete estimate. The checkpoint therefore requires confirmation of a provider-account USD 10 hard cap; the local estimate ledger is an additional stop control and never substitutes an absent billing control or guessed cost.
