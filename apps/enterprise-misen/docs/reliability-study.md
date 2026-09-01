@@ -34,10 +34,12 @@ Before reserving an attempt or sending a provider request, the live runner also
 reconstructs and verifies the Thin Misen context binding. It covers the user
 prompts, complete fixture manifest, system prompt, root `AGENTS.md`, approved
 Skill catalog and selected monthly-report `SKILL.md`, exact Tool contracts, and
-static lifecycle-hook names/timeout. OOXML package timestamps are normalized for
-this baseline fingerprint; per-run input integrity still uses raw before/after
-file hashes. The protected source tree and frozen fixture blob keep the generator
-and acceptance oracle bound to the production commit.
+static lifecycle-hook names/timeout. XLSX fixtures are fingerprinted from the
+model-visible workbook semantics — worksheet titles plus the bounded `A1:Z200`
+value surface for each sheet, with Date values canonicalized to ISO UTC — rather
+than ZIP-container bytes or package timestamps. Per-run input integrity still
+uses raw before/after file hashes. The protected source tree and frozen fixture
+blob keep the generator and acceptance oracle bound to the production commit.
 
 Captured public surfaces are Pi `message_end` AssistantMessage
 provider/model/usage/stopReason plus Tool execution start/end/isError. Target
