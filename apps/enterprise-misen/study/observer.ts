@@ -10,6 +10,7 @@ import {
   STUDY_SCHEMA_VERSION,
   type FailureTaxonomy,
   type IntegrityObservation,
+  type InvalidReason,
   type SafeToolEnd,
   type SafeToolStart,
   type StudyMonth,
@@ -72,7 +73,7 @@ function zeroUsage(): UsageTotals {
   return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: null, totalTokens: 0, catalogEstimatedCostUsd: null }
 }
 
-function addUsage(total: UsageTotals, usage: Usage): UsageTotals {
+function addUsage(total: UsageTotals, usage: Usage, catalogCostComplete: boolean): UsageTotals {
   return {
     input: total.input + usage.input,
     output: total.output + usage.output,
@@ -80,9 +81,9 @@ function addUsage(total: UsageTotals, usage: Usage): UsageTotals {
     cacheWrite: total.cacheWrite + usage.cacheWrite,
     reasoning: usage.reasoning === undefined ? total.reasoning : (total.reasoning ?? 0) + usage.reasoning,
     totalTokens: total.totalTokens + usage.totalTokens,
-    catalogEstimatedCostUsd: Number.isFinite(usage.cost.total)
+    catalogEstimatedCostUsd: catalogCostComplete && Number.isFinite(usage.cost.total)
       ? (total.catalogEstimatedCostUsd ?? 0) + usage.cost.total
-      : total.catalogEstimatedCostUsd,
+      : null,
   }
 }
 
@@ -105,7 +106,7 @@ export interface FinalizeObservation {
   readonly integrity: IntegrityObservation
   readonly agentErrorMessage?: string
   readonly acceptanceFatal?: string
-  readonly invalidReason?: string
+  readonly invalidReason?: InvalidReason
   readonly endedAtUtc?: string
 }
 
@@ -116,6 +117,7 @@ export class StudyObserver {
   private readonly models = new Set<string>()
   private readonly stopReasons: string[] = []
   private usage = zeroUsage()
+  private catalogCostComplete = true
   private requestCount = 0
   private sequence = 0
   private lifecycle = { agentStart: 0, agentEnd: 0, turnStart: 0, turnEnd: 0 }
@@ -152,7 +154,8 @@ export class StudyObserver {
     this.providers.add(message.provider)
     this.models.add(message.model)
     this.stopReasons.push(message.stopReason)
-    this.usage = addUsage(this.usage, message.usage)
+    this.catalogCostComplete = this.catalogCostComplete && Number.isFinite(message.usage.cost.total)
+    this.usage = addUsage(this.usage, message.usage, this.catalogCostComplete)
   }
 
   finalize(input: FinalizeObservation): StudyRunRecord {
@@ -191,12 +194,13 @@ export class StudyObserver {
       || this.models.size !== 1 || !this.models.has(FROZEN_CONFIGURATION.model)
     let taxonomy: FailureTaxonomy | null = null
     let failureSummary: string | null = null
+    let invalidReason: InvalidReason | null = null
     if (integrity.inputMutation === true || integrity.forbiddenCapability || integrity.credentialExposure || integrity.unexpectedNetwork) { taxonomy = 'SECURITY_OR_INTEGRITY'; failureSummary = 'integrity or security incident' }
-    else if (input.invalidReason) { taxonomy = 'INVALID_OBSERVER_OR_INFRA'; failureSummary = 'observer or infrastructure failure' }
+    else if (input.invalidReason) { taxonomy = 'INVALID_OBSERVER_OR_INFRA'; failureSummary = 'observer or infrastructure failure'; invalidReason = input.invalidReason }
     else if (providerFailure) { taxonomy = 'PROVIDER_OR_TRANSPORT'; failureSummary = 'provider or transport error' }
     else if (input.acceptanceFatal) { taxonomy = 'ACCEPTANCE_FATAL'; failureSummary = 'acceptance evaluation failed' }
-    else if (configurationDrift) { taxonomy = 'INVALID_OBSERVER_OR_INFRA'; failureSummary = 'observed provider or model differs from frozen configuration' }
-    else if (incompleteEvidence) { taxonomy = 'INVALID_OBSERVER_OR_INFRA'; failureSummary = 'incomplete observer event stream' }
+    else if (configurationDrift) { taxonomy = 'INVALID_OBSERVER_OR_INFRA'; failureSummary = 'observed provider or model differs from frozen configuration'; invalidReason = 'CONFIGURATION_DRIFT' }
+    else if (incompleteEvidence) { taxonomy = 'INVALID_OBSERVER_OR_INFRA'; failureSummary = 'incomplete observer event stream'; invalidReason = 'INCOMPLETE_EVENT_STREAM' }
     else if (this.stopReasons.includes('length') || this.stopReasons.includes('aborted')) { taxonomy = 'AGENT_INCOMPLETE'; failureSummary = 'agent did not complete' }
     else if (this.ends.some(item => item.isError) && (!input.validation || !input.validation.passed)) { taxonomy = 'TOOL_CONTRACT_OR_VALIDATION'; failureSummary = 'Tool contract or validation error affected completion' }
     else if (input.validation && !input.validation.passed) { taxonomy = 'BUSINESS_SEMANTIC'; failureSummary = 'one or more business Acceptance axes failed' }
@@ -233,7 +237,7 @@ export class StudyObserver {
       elapsedMs: Math.max(0, Math.round(input.elapsedMs)),
       rssBytes: input.rssBytes,
       integrity,
-      invalidReason: status === 'INVALID' ? 'observer or infrastructure failure' : null,
+      invalidReason: status === 'INVALID' ? invalidReason : null,
     }
   }
 }
