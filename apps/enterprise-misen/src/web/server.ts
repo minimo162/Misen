@@ -195,11 +195,18 @@ export function createDemoServer(root: string, runner: DemoRunner = liveDemoRunn
         state = { status: 'running', runId: clientId, tools: [], axes: [] }
         emit({ type: 'status', status: 'running' }); emit({ type: 'user', id: clientId, text: prompt }); emitState()
         try {
-          const result = await runner(root, month, prompt, { emit, setCancel: cancel => { activeCancel = cancel } })
+          let hasVisibleAssistantText = false
+          const runEmit = (event: DemoEvent) => {
+            if (event.type === 'assistant' && event.text.trim().length > 0) hasVisibleAssistantText = true
+            emit(event)
+          }
+          const result = await runner(root, month, prompt, { emit: runEmit, setCancel: cancel => { activeCancel = cancel } })
           const status = result.status ?? 'PASS'
           const terminalStatus: Exclude<UiState['status'], 'idle' | 'running'> = status
           state = { status: terminalStatus, runId: clientId, tools: result.tools.slice(0, 20), axes: result.axes, output: status === 'PASS' ? result.output : undefined }
-          emit({ type: 'assistant', text: status === 'PASS' ? '月次管理レポートを作成しました。' : status === 'CANCELLED' ? '処理を停止しました。' : '処理を完了できませんでした。', done: true })
+          if (status !== 'PASS' || !hasVisibleAssistantText) {
+            emit({ type: 'assistant', text: status === 'PASS' ? '月次管理レポートを作成しました。' : status === 'CANCELLED' ? '処理を停止しました。' : '処理を完了できませんでした。', done: true })
+          }
           emit({ type: 'status', status: terminalStatus }); emitState()
         } catch (error) {
           // Keep provider/transport details out of the browser-facing state;

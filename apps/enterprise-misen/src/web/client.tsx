@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import {
   AssistantRuntimeProvider,
@@ -10,7 +10,7 @@ import {
   type ThreadMessageLike,
 } from '@assistant-ui/react'
 import './client.css'
-import { processEventsForRun, runIdFromMessage, type ToolEvent } from './process.js'
+import { processEventsForRun, runIdFromMessage, shouldShowThinkingPlaceholder, type ToolEvent } from './process.js'
 
 type UiMessage = {
   id: string
@@ -90,7 +90,7 @@ const AssistantMessage = () => (
 const MESSAGE_COMPONENTS = { UserMessage, AssistantMessage }
 
 function ProcessRows({ tools, running, expanded, onToggle }: { tools: ToolEvent[]; running: boolean; expanded: boolean; onToggle: () => void }) {
-  if (tools.length === 0 && !running) return null
+  if (tools.length === 0) return null
   if (!running && !expanded) {
     return <button className="process-disclosure" type="button" onClick={onToggle} aria-expanded="false"><span>{tools.length}件の操作</span><span aria-hidden="true">›</span></button>
   }
@@ -127,21 +127,22 @@ function Artifact({ output }: { output?: string }) {
   return <a className="artifact-row" href="/download" download aria-label={`${filename}をダウンロード`}><span className="artifact-icon" aria-hidden="true">▣</span><span>{filename}</span><span className="artifact-arrow" aria-hidden="true">↗</span></a>
 }
 
-function Conversation({ messages, tools, running, expandedRunId, onToggle, output, showBackToBottom, viewportRef, activeRunId }: {
+function Conversation({ messages, tools, running, expandedRunId, onToggle, output, activeRunId, onCancel }: {
   messages: UiMessage[]
   tools: ToolEvent[]
   running: boolean
   expandedRunId?: string
   onToggle: (runId: string) => void
   output?: string
-  showBackToBottom: boolean
-  viewportRef?: RefObject<HTMLDivElement | null>
   activeRunId?: string
+  onCancel: () => void
 }) {
+  const showThinking = shouldShowThinkingPlaceholder(messages, tools, running, activeRunId)
   return (
     <ThreadPrimitive.Root className="thread-root">
-      <ThreadPrimitive.Viewport ref={viewportRef} className="thread-viewport" autoScroll={false} turnAnchor="bottom" scrollToBottomOnRunStart={false}>
+      <ThreadPrimitive.Viewport className="thread-viewport" autoScroll turnAnchor="bottom">
         <div className="thread-content">
+          {messages.length === 0 && <div className="empty-hero" aria-hidden="true"><h1>Misen</h1></div>}
           <ThreadPrimitive.Messages>
             {({ message }) => {
               // Keep process activity immediately before the assistant turn,
@@ -156,17 +157,17 @@ function Conversation({ messages, tools, running, expandedRunId, onToggle, outpu
                 {beforeAssistant && <ProcessRows tools={runTools} running={runIsActive} expanded={expandedRunId === runId} onToggle={() => onToggle(runId)} />}
                 {message.role === 'user' ? <UserMessage /> : <AssistantMessage />}
                 {afterLastUser && <ProcessRows tools={runTools} running={runIsActive} expanded={expandedRunId === runId} onToggle={() => onToggle(runId)} />}
+                {afterLastUser && showThinking && <div className="thinking-status" role="status"><span className="thinking-dot" aria-hidden="true">•</span>考えています…</div>}
               </Fragment>
             }}
           </ThreadPrimitive.Messages>
-          {messages.length === 0 && <>
-            {running && tools.length === 0 && <div className="thinking-status" role="status"><span className="thinking-dot" aria-hidden="true">•</span>考えています…</div>}
-            <ProcessRows tools={processEventsForRun(tools, activeRunId)} running={running} expanded={expandedRunId === activeRunId} onToggle={() => activeRunId && onToggle(activeRunId)} />
-          </>}
           <Artifact output={output} />
         </div>
+        <ThreadPrimitive.ViewportFooter className="composer-region">
+          <Composer running={running} onCancel={onCancel} />
+        </ThreadPrimitive.ViewportFooter>
       </ThreadPrimitive.Viewport>
-      {showBackToBottom && <ThreadPrimitive.ScrollToBottom className="back-to-bottom" aria-label="最新のメッセージへ移動">↓</ThreadPrimitive.ScrollToBottom>}
+      <ThreadPrimitive.ScrollToBottom className="back-to-bottom" aria-label="最新のメッセージへ移動">↓</ThreadPrimitive.ScrollToBottom>
     </ThreadPrimitive.Root>
   )
 }
@@ -176,9 +177,7 @@ function MisenApp() {
   const [tools, setTools] = useState<ToolEvent[]>([])
   const [state, setState] = useState<UiState>({ status: 'idle' })
   const [expandedRunId, setExpandedRunId] = useState<string | undefined>()
-  const [atBottom, setAtBottom] = useState(true)
   const runIdRef = useRef<string | undefined>(undefined)
-  const viewportRef = useRef<HTMLDivElement>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
 
   const running = state.status === 'running'
@@ -267,32 +266,14 @@ function MisenApp() {
     setMessages: next => setMessages(next.map((message, index) => ({ id: message.id ?? `message-${index}`, role: message.role === 'user' ? 'user' : 'assistant', text: message.text }))),
   })
 
-  useEffect(() => {
-    const element = viewportRef.current
-    if (!element) return
-    const update = () => setAtBottom(element.scrollHeight - element.scrollTop - element.clientHeight < 48)
-    element.addEventListener('scroll', update, { passive: true })
-    update()
-    return () => element.removeEventListener('scroll', update)
-  }, [])
-
-  useEffect(() => {
-    const element = viewportRef.current
-    if (element && atBottom) element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' })
-  }, [messages, tools, atBottom])
-
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <main className={`misen-shell ${hasConversation ? 'misen-shell--active' : 'misen-shell--empty'}`}>
         <header className="misen-header"><span className="misen-mark" aria-hidden="true">M</span><span>Misen</span></header>
         <section className="conversation" aria-label="Conversation">
-          <div ref={viewportRef} className="viewport-host">
-            {!hasConversation && <div className="empty-hero" aria-hidden="true"><h1>Misen</h1></div>}
-            <Conversation messages={messages} tools={tools} running={running} expandedRunId={expandedRunId} onToggle={runId => setExpandedRunId(value => value === runId ? undefined : runId)} output={state.output} showBackToBottom={!atBottom && hasConversation} viewportRef={viewportRef} activeRunId={state.runId} />
-          </div>
+          <Conversation messages={messages} tools={tools} running={running} expandedRunId={expandedRunId} onToggle={runId => setExpandedRunId(value => value === runId ? undefined : runId)} output={state.output} activeRunId={state.runId} onCancel={cancel} />
           {state.status === 'FAIL' && <p className="error-note" role="alert">{state.error ?? '処理に失敗しました。'}</p>}
         </section>
-        <div className="composer-region"><Composer running={running} onCancel={cancel} /></div>
       </main>
     </AssistantRuntimeProvider>
   )

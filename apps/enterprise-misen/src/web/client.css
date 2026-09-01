@@ -56,14 +56,7 @@ button { cursor: pointer; }
   width: min(100%, 960px);
   min-height: 0;
   margin: 0 auto;
-  padding: 72px 30px 154px;
-}
-
-.viewport-host {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-  flex-direction: column;
+  padding: 72px 30px 0;
 }
 
 .thread-root { position: relative; display: flex; flex: 1; min-height: 0; flex-direction: column; }
@@ -80,6 +73,7 @@ button { cursor: pointer; }
 }
 
 .thread-content {
+  flex: 1 0 auto;
   width: min(100%, 760px);
   margin: 0 auto;
   padding: 8px 0 20px;
@@ -176,22 +170,19 @@ button { cursor: pointer; }
 .artifact-arrow { color: #9b968e; }
 
 .composer-region {
-  position: fixed;
-  z-index: 4;
-  right: 0;
+  position: sticky;
+  z-index: 2;
   bottom: 24px;
-  left: 0;
   width: min(calc(100% - 40px), 800px);
-  margin: 0 auto;
+  margin: 18px auto 24px;
 }
 
-.misen-shell--empty .conversation { align-items: center; padding-top: 0; padding-bottom: 40px; }
-.misen-shell--empty .viewport-host { flex: 0; }
-.misen-shell--empty .thread-root { display: none; }
+.misen-shell--empty .conversation { padding-top: 0; }
+.misen-shell--empty .thread-viewport { justify-content: center; }
+.misen-shell--empty .thread-content { flex: 0 0 auto; }
 .empty-hero { width: min(100%, 760px); margin: 0 auto 22px; text-align: center; }
 .empty-hero h1 { margin: 0; color: #37342f; font-size: clamp(25px, 4vw, 34px); font-weight: 520; letter-spacing: -.03em; }
-.misen-shell--empty .composer-region { bottom: 50%; transform: translateY(50%); }
-.misen-shell--empty .composer-region::before { content: ""; display: block; height: 62px; }
+.misen-shell--empty .composer-region { position: static; margin-top: 0; margin-bottom: 0; }
 
 .composer {
   display: flex;
@@ -244,7 +235,7 @@ button { cursor: pointer; }
 .back-to-bottom {
   position: absolute;
   right: 16px;
-  bottom: 22px;
+  bottom: 112px;
   display: grid;
   width: 34px;
   height: 34px;
@@ -265,9 +256,9 @@ button { cursor: pointer; }
 
 @media (max-width: 640px) {
   .misen-header { top: 16px; left: 17px; }
-  .conversation { padding: 58px 17px 132px; }
-  .composer-region { bottom: 15px; width: calc(100% - 24px); }
-  .misen-shell--empty .composer-region { bottom: 50%; }
+  .conversation { padding: 58px 17px 0; }
+  .composer-region { bottom: 15px; width: calc(100% - 24px); margin-bottom: 15px; }
+  .misen-shell--empty .composer-region { margin-bottom: 0; }
   .thread-content { padding-inline: 1px; }
   .user-bubble { max-width: 80%; }
 }

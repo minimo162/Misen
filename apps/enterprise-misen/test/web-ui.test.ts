@@ -19,25 +19,31 @@ test('assistant-ui composition keeps the conversation surface restrained and saf
   const styles = await readFile(join(process.cwd(), 'src', 'web', 'client.css'), 'utf8')
   assert.match(source, /useExternalStoreRuntime/)
   assert.match(source, /ThreadPrimitive\.Viewport/)
+  assert.match(source, /ThreadPrimitive\.ViewportFooter/)
+  assert.match(source, /ThreadPrimitive\.ScrollToBottom/)
+  assert.match(source, /className="thread-viewport" autoScroll turnAnchor="bottom"/)
   assert.match(source, /ComposerPrimitive\.Input/)
   assert.match(source, /ComposerPrimitive\.Send/)
   assert.match(source, /optimistic/)
   assert.match(styles, /prefers-reduced-motion/)
   assert.match(source, /Reasoning:\s*HiddenPart/u)
-  assert.match(source, /showBackToBottom/)
+  assert.doesNotMatch(source, /viewportRef|scrollHeight|scrollTop|clientHeight/)
+  const composerRegion = styles.match(/\.composer-region\s*\{(?<rules>[^}]*)\}/u)?.groups?.rules ?? ''
+  assert.match(composerRegion, /position:\s*sticky/u)
+  assert.doesNotMatch(composerRegion, /position:\s*fixed/u)
   assert.match(source, /process-disclosure/)
   assert.match(source, /artifact-row/)
   assert.doesNotMatch(source, /assistant-cloud|pi-web|Vercel AI SDK/iu)
 })
 
-test('SSE forwards optimistic-safe user, tool, stream, and completion events', async () => {
+test('SSE preserves the Brain visible final answer instead of overwriting it', async () => {
   const root = await mkdtemp(join(tmpdir(), 'misen-ui-sse-'))
   await fixture(root)
   const runner: DemoRunner = async (_root, month, _prompt, context) => {
     context?.emit({ type: 'tool', phase: 'start', id: 't1', name: 'spreadsheet_read', detail: `${month}/Alpha.xlsx` })
     context?.emit({ type: 'assistant', text: '月次' })
     context?.emit({ type: 'tool', phase: 'end', id: 't1', name: 'spreadsheet_read', status: 'success' })
-    context?.emit({ type: 'assistant', text: '月次管理レポートを作成しました。', done: true })
+    context?.emit({ type: 'assistant', text: 'Brainが返した最終回答です。', done: true })
     return { output: `output/${month}-月次管理レポート.xlsx`, tools: ['spreadsheet_read'], axes: ['SHEET'], status: 'PASS' }
   }
   const { server, base } = await start(root, runner)
@@ -66,8 +72,38 @@ test('SSE forwards optimistic-safe user, tool, stream, and completion events', a
     assert.match(received, /event: tool/)
     assert.match(received, /event: assistant/)
     assert.match(received, /spreadsheet_read/)
-    assert.match(received, /月次管理レポートを作成しました/u)
+    assert.match(received, /Brainが返した最終回答です/u)
+    assert.doesNotMatch(received, /月次管理レポートを作成しました/u)
     assert.doesNotMatch(received, /chain.of.thought|provider_payload|api[_-]?key/iu)
+  } finally {
+    await reader.cancel()
+    await new Promise<void>(resolve => server.close(() => resolve()))
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('SSE uses the controlled success fallback only when the Brain emits no visible text', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'misen-ui-fallback-'))
+  await fixture(root)
+  const runner: DemoRunner = async (_root, month) => ({ output: `output/${month}-月次管理レポート.xlsx`, tools: [], axes: ['SHEET'], status: 'PASS' })
+  const { server, base } = await start(root, runner)
+  const stream = await fetch(`${base}/events`)
+  const reader = stream.body!.getReader()
+  const decoder = new TextDecoder()
+  let received = ''
+  const done = (async () => {
+    while (true) {
+      const chunk = await reader.read()
+      if (chunk.done) return
+      received += decoder.decode(chunk.value, { stream: true })
+      if (received.includes('"status":"PASS"')) return
+    }
+  })()
+  try {
+    const response = await fetch(`${base}/run`, { method: 'POST', redirect: 'manual', headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ prompt: PROMPTS['7月'], clientId: 'ui-fallback-1' }) })
+    assert.equal(response.status, 303)
+    await done
+    assert.match(received, /月次管理レポートを作成しました/u)
   } finally {
     await reader.cancel()
     await new Promise<void>(resolve => server.close(() => resolve()))
