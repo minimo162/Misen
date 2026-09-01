@@ -68,6 +68,9 @@ test('INVALID evidence persists only bounded reason codes and distinguishes fail
   assert.doesNotThrow(() => assertRunRecord(captureRecord))
 
   const incomplete = new StudyObserver(metadata, () => '2026-09-01T00:00:01.000Z')
+  incomplete.observe({ type: 'agent_start' })
+  incomplete.observe({ type: 'turn_start' })
+  finish(incomplete, assistant())
   const incompleteRecord = incomplete.finalize({ validation: null, inputHashesUnchanged: true, elapsedMs: 1, rssBytes: 1, integrity, endedAtUtc: '2026-09-01T00:00:01.000Z' })
   assert.equal(incompleteRecord.invalidReason, 'INCOMPLETE_EVENT_STREAM')
   assert.doesNotThrow(() => assertRunRecord(incompleteRecord))
