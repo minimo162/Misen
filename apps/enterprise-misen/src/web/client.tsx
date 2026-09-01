@@ -31,7 +31,7 @@ type ServerEvent =
   | { type: 'user'; id: string; text: string }
   | { type: 'assistant'; text: string; done?: boolean }
   | { type: 'tool'; phase: 'start' | 'end'; id: string; name: string; detail?: string; status?: 'success' | 'error' }
-  | { type: 'status'; status: 'running' | 'PASS' | 'FAIL' | 'CANCELLED'; error?: string }
+  | { type: 'status'; status: 'running' | 'PASS' | 'FAIL' | 'CANCELLED'; output?: string; error?: string }
 
 const TOOL_PRESENTATION: Record<string, string> = {
   workspace_list_files: 'List workspace files',
@@ -164,10 +164,10 @@ function Conversation({ messages, tools, running, expandedRunId, onToggle, outpu
           <Artifact output={output} />
         </div>
         <ThreadPrimitive.ViewportFooter className="composer-region">
+          <ThreadPrimitive.ScrollToBottom className="back-to-bottom" aria-label="最新のメッセージへ移動">↓</ThreadPrimitive.ScrollToBottom>
           <Composer running={running} onCancel={onCancel} />
         </ThreadPrimitive.ViewportFooter>
       </ThreadPrimitive.Viewport>
-      <ThreadPrimitive.ScrollToBottom className="back-to-bottom" aria-label="最新のメッセージへ移動">↓</ThreadPrimitive.ScrollToBottom>
     </ThreadPrimitive.Root>
   )
 }
@@ -190,7 +190,7 @@ function MisenApp() {
       return
     }
     if (event.type === 'status') {
-      setState(previous => ({ ...previous, status: event.status, error: event.error }))
+      setState(previous => ({ ...previous, status: event.status, output: event.output ?? previous.output, error: event.error }))
       if (event.status !== 'running') setExpandedRunId(undefined)
       return
     }
@@ -263,7 +263,6 @@ function MisenApp() {
     isSendDisabled: running,
     onNew: send,
     onCancel: cancel,
-    setMessages: next => setMessages(next.map((message, index) => ({ id: message.id ?? `message-${index}`, role: message.role === 'user' ? 'user' : 'assistant', text: message.text }))),
   })
 
   return (

@@ -25,7 +25,7 @@ export type DemoEvent =
   | { type: 'user'; id: string; text: string }
   | { type: 'assistant'; text: string; done?: boolean }
   | { type: 'tool'; phase: 'start' | 'end'; id: string; name: string; detail?: string; status?: 'success' | 'error' }
-  | { type: 'status'; status: 'running' | 'PASS' | 'FAIL' | 'CANCELLED'; error?: string }
+  | { type: 'status'; status: 'running' | 'PASS' | 'FAIL' | 'CANCELLED'; output?: string; error?: string }
 
 export interface DemoRunContext {
   emit: (event: DemoEvent) => void
@@ -42,9 +42,11 @@ const TOOL_LABELS: Record<string, string> = {
   spreadsheet_update: 'Update spreadsheet',
 }
 
-function textFromAssistantMessage(message: unknown): string {
+export function textFromAssistantMessage(message: unknown): string {
   if (!message || typeof message !== 'object') return ''
-  const content = (message as { content?: unknown }).content
+  const candidate = message as { role?: unknown; content?: unknown }
+  if (candidate.role !== 'assistant') return ''
+  const content = candidate.content
   if (!Array.isArray(content)) return ''
   return content
     .filter((part): part is { type: 'text'; text: string } => Boolean(part && typeof part === 'object' && (part as any).type === 'text' && typeof (part as any).text === 'string'))
@@ -207,7 +209,7 @@ export function createDemoServer(root: string, runner: DemoRunner = liveDemoRunn
           if (status !== 'PASS' || !hasVisibleAssistantText) {
             emit({ type: 'assistant', text: status === 'PASS' ? '月次管理レポートを作成しました。' : status === 'CANCELLED' ? '処理を停止しました。' : '処理を完了できませんでした。', done: true })
           }
-          emit({ type: 'status', status: terminalStatus }); emitState()
+          emit({ type: 'status', status: terminalStatus, output: status === 'PASS' ? result.output : undefined }); emitState()
         } catch (error) {
           // Keep provider/transport details out of the browser-facing state;
           // diagnostic evidence belongs to the server-side acceptance layer.
