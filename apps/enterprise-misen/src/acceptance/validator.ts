@@ -8,7 +8,19 @@ import { SYNTHETIC_TARGETS, type MonthFixture } from '../../demo/enterprise-exce
 import { listWorksheetTitles, openSpreadsheetBytes, readCell, readCellStyle, requireWorksheet } from '../spreadsheet/engine.js'
 const digest=(b:Uint8Array)=>createHash('sha256').update(b).digest('hex')
 export interface ReportingPeriod { readonly year:number; readonly month:number }
-export function parseReportPeriod(value:unknown, source:ReportingPeriod){if(typeof value!=='string'||value.length===0)throw new Error('empty report period');if(value===`${source.month}月`||value===`${source.year}年${source.month}月`)return source;throw new Error('report MONTH mismatch')}
+export function parseReportPeriod(value:unknown, source:ReportingPeriod){
+ let normalized:ReportingPeriod|undefined
+ if(value instanceof Date&&!Number.isNaN(value.getTime()))normalized={year:value.getUTCFullYear(),month:value.getUTCMonth()+1}
+ else if(typeof value==='string'){
+  const monthOnly=/^(?<month>[1-9]|1[0-2])月$/u.exec(value)
+  const yearMonth=/^(?<year>\d{4})年(?<month>[1-9]|1[0-2])月$/u.exec(value)
+  const separated=/^(?<year>\d{4})(?:-|\/)(?<month>0?[1-9]|1[0-2])$/u.exec(value)
+  const match=monthOnly??yearMonth??separated
+  if(match?.groups)normalized={year:match.groups.year?Number(match.groups.year):source.year,month:Number(match.groups.month)}
+ }
+ if(!normalized||normalized.year!==source.year||normalized.month!==source.month)throw new Error('report MONTH mismatch')
+ return normalized
+}
 export function deriveSourcePeriod(values:readonly unknown[]):ReportingPeriod{if(values.length!==3)throw new Error('exactly three source periods required');const periods=values.map(value=>{if(!(value instanceof Date)||Number.isNaN(value.getTime()))throw new Error('unparseable source As-of');return {year:value.getUTCFullYear(),month:value.getUTCMonth()+1}});const first=periods[0]!;if(periods.some(x=>x.year!==first.year||x.month!==first.month))throw new Error('source reporting periods differ');return first}
 function same(a:unknown,b:unknown,label:string){if(JSON.stringify(a)!==JSON.stringify(b))throw new Error(label)}
 export type OutputScopeSnapshot = ReadonlyMap<string,string>
