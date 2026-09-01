@@ -92,6 +92,9 @@ export interface StudyRunRecord {
   readonly status: StudyRunStatus
   readonly failureTaxonomy: FailureTaxonomy | null
   readonly failureSummary: string | null
+  readonly providerOrTransportErrorObserved: boolean
+  readonly acceptanceFatalObserved: boolean
+  readonly observerOrInfraErrorObserved: boolean
   readonly axisMatrix: Readonly<Record<AxisName, AxisResult>> | null
   readonly output: { readonly basename: string; readonly bytes: number } | null
   readonly inputHashesUnchanged: boolean | null

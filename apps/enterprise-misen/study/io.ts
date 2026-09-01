@@ -63,7 +63,7 @@ export function assertCheckpoint(value: unknown): asserts value is StudyCheckpoi
 export function assertRunRecord(value: unknown): asserts value is StudyRunRecord {
   assertCommon(value)
   const item = value as unknown as StudyRunRecord
-  exactKeys(item, ['schemaVersion','studyId','studyRunNumber','paidAttemptNumber','month','productionBaselineSha','observerSha','configuration','startedAtUtc','endedAtUtc','status','failureTaxonomy','failureSummary','axisMatrix','output','inputHashesUnchanged','toolStarts','toolResults','toolBalance','toolErrorCount','toolValidationErrorCount','selfCorrectionCount','requestCount','lifecycle','assistantStopReasons','observedProviders','observedModels','usage','elapsedMs','rssBytes','integrity','invalidReason'], 'run')
+  exactKeys(item, ['schemaVersion','studyId','studyRunNumber','paidAttemptNumber','month','productionBaselineSha','observerSha','configuration','startedAtUtc','endedAtUtc','status','failureTaxonomy','failureSummary','providerOrTransportErrorObserved','acceptanceFatalObserved','observerOrInfraErrorObserved','axisMatrix','output','inputHashesUnchanged','toolStarts','toolResults','toolBalance','toolErrorCount','toolValidationErrorCount','selfCorrectionCount','requestCount','lifecycle','assistantStopReasons','observedProviders','observedModels','usage','elapsedMs','rssBytes','integrity','invalidReason'], 'run')
   assertSafeEvidence(item, 'run')
   if (JSON.stringify(item).length > 1_000_000) throw new Error('run evidence exceeds size limit')
   if (!Number.isInteger(item.studyRunNumber) || item.studyRunNumber < 1 || item.studyRunNumber > 20) throw new Error('invalid study run number')
@@ -74,6 +74,7 @@ export function assertRunRecord(value: unknown): asserts value is StudyRunRecord
     || Date.parse(item.endedAtUtc) < Date.parse(item.startedAtUtc)) throw new Error('invalid run timestamps')
   if (item.failureTaxonomy !== null && !FAILURE_TAXONOMIES.includes(item.failureTaxonomy)) throw new Error('invalid failure taxonomy')
   if (item.failureSummary !== null && typeof item.failureSummary !== 'string' || item.invalidReason !== null && typeof item.invalidReason !== 'string') throw new Error('invalid run summary evidence')
+  if (typeof item.providerOrTransportErrorObserved !== 'boolean' || typeof item.acceptanceFatalObserved !== 'boolean' || typeof item.observerOrInfraErrorObserved !== 'boolean') throw new Error('invalid failure observation evidence')
   if (!Array.isArray(item.toolStarts) || !Array.isArray(item.toolResults) || !Array.isArray(item.assistantStopReasons)) throw new Error('invalid event evidence')
   if (item.assistantStopReasons.some(reason => typeof reason !== 'string')
     || !Array.isArray(item.observedProviders) || item.observedProviders.some(provider => typeof provider !== 'string')
@@ -123,7 +124,7 @@ export function assertRunRecord(value: unknown): asserts value is StudyRunRecord
     const recovered = item.toolResults.some(success => {
       const successStart = item.toolStarts.find(start => start.toolCallId === success.toolCallId)
       return !success.isError && success.sequence > failure.sequence && success.toolName === failure.toolName
-        && successStart !== undefined && JSON.stringify(successStart.target) === signature
+        && successStart !== undefined && successStart.sequence > failure.sequence && JSON.stringify(successStart.target) === signature
     })
     if (recovered && computedSelfCorrectionCount !== null) computedSelfCorrectionCount++
   }
@@ -156,6 +157,19 @@ export function assertRunRecord(value: unknown): asserts value is StudyRunRecord
     SECURITY_OR_INTEGRITY: ['integrity or security incident'],
     INVALID_OBSERVER_OR_INFRA: ['observer or infrastructure failure','observed provider or model differs from frozen configuration','incomplete observer event stream'],
   }
+  const configurationDrift = item.observedProviders.length !== 1 || item.observedProviders[0] !== FROZEN_CONFIGURATION.provider || item.observedModels.length !== 1 || item.observedModels[0] !== FROZEN_CONFIGURATION.model
+  const incompleteEvidence = item.requestCount === 0 || item.toolStarts.length === 0 || !item.toolBalance || item.lifecycle.agentStart !== 1 || item.lifecycle.agentEnd !== 1 || item.lifecycle.turnStart < 1 || item.lifecycle.turnStart !== item.lifecycle.turnEnd
+  const anyAxisFailed = item.axisMatrix !== null && Object.values(item.axisMatrix).some(axis => axis.status === 'FAIL')
+  const expectedTaxonomy = securityIncident ? 'SECURITY_OR_INTEGRITY'
+    : item.observerOrInfraErrorObserved ? 'INVALID_OBSERVER_OR_INFRA'
+    : item.providerOrTransportErrorObserved ? 'PROVIDER_OR_TRANSPORT'
+    : item.acceptanceFatalObserved ? 'ACCEPTANCE_FATAL'
+    : configurationDrift || incompleteEvidence ? 'INVALID_OBSERVER_OR_INFRA'
+    : item.assistantStopReasons.some(reason => reason === 'length' || reason === 'aborted') ? 'AGENT_INCOMPLETE'
+    : item.toolErrorCount > 0 && (item.axisMatrix === null || anyAxisFailed) ? 'TOOL_CONTRACT_OR_VALIDATION'
+    : anyAxisFailed ? 'BUSINESS_SEMANTIC'
+    : null
+  if (item.failureTaxonomy !== expectedTaxonomy) throw new Error('failure taxonomy does not match observations')
   if (item.failureTaxonomy === null ? item.failureSummary !== null : !allowedSummaries[item.failureTaxonomy]?.includes(item.failureSummary ?? '')) throw new Error('failure summary/taxonomy mismatch')
   if (item.status === 'PASS') {
     if (item.failureTaxonomy !== null || item.failureSummary !== null || item.invalidReason !== null || item.inputHashesUnchanged !== true || !item.output || item.requestCount < 1

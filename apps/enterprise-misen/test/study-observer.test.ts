@@ -98,6 +98,19 @@ test('Tool validation error followed by exact-target success is a conservative s
   assert.doesNotMatch(JSON.stringify(record), /very-secret-value|large successful result/u)
 })
 
+test('a Tool call started before the failure is not counted as self-correction', () => {
+  const observer = new StudyObserver(metadata, () => '2026-09-01T00:00:01.000Z')
+  begin(observer)
+  const event = (id: string): AgentEvent => ({ type: 'tool_execution_start', toolCallId: id, toolName: 'spreadsheet_update', args: { range: 'A1' } })
+  observer.observe(event('bad')); observer.observe(event('parallel'))
+  observer.observe({ type: 'tool_execution_end', toolCallId: 'bad', toolName: 'spreadsheet_update', result: { message: 'validation failed' }, isError: true })
+  observer.observe({ type: 'tool_execution_end', toolCallId: 'parallel', toolName: 'spreadsheet_update', result: {}, isError: false })
+  finish(observer)
+  const record = observer.finalize({ validation: validation('FAIL'), inputHashesUnchanged: true, elapsedMs: 1, rssBytes: 1, integrity })
+  assert.equal(record.selfCorrectionCount, 0)
+  assert.doesNotThrow(() => assertRunRecord(record))
+})
+
 test('persisted Tool evidence rejects fabricated correction, nested payloads, and duplicate sequencing', () => {
   const observer = new StudyObserver(metadata, () => '2026-09-01T00:00:01.000Z')
   begin(observer)
@@ -115,6 +128,7 @@ test('persisted Tool evidence rejects fabricated correction, nested payloads, an
   assert.throws(() => assertRunRecord({ ...record, startedAtUtc: '2026-09-01' }), /timestamps/u)
   assert.throws(() => assertRunRecord({ ...record, startedAtUtc: '2026-02-31T00:00:00.000Z' }), /timestamps/u)
   assert.throws(() => assertRunRecord({ ...record, failureTaxonomy: 'MADE_UP' }), /taxonomy/u)
+  assert.throws(() => assertRunRecord({ ...record, failureTaxonomy: 'SECURITY_OR_INTEGRITY', failureSummary: 'integrity or security incident' }), /taxonomy does not match/u)
   assert.throws(() => assertRunRecord({ ...record, failureSummary: 'Bearer private-value' }), /sensitive evidence/u)
   assert.throws(() => assertRunRecord({ ...record, failureSummary: { rawProviderPayload: 'secret' } }), /forbidden evidence|summary/u)
   assert.throws(() => assertRunRecord({ ...record, assistantStopReasons: [{ bad: true }] }), /provider or stop-reason/u)

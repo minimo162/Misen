@@ -167,7 +167,7 @@ export class StudyObserver {
       return this.ends.some(success => {
         const successStart = startsById.get(success.toolCallId)
         return !success.isError && success.sequence > failure.sequence && success.toolName === failure.toolName
-          && successStart !== undefined && JSON.stringify(successStart.target) === signature
+          && successStart !== undefined && successStart.sequence > failure.sequence && JSON.stringify(successStart.target) === signature
       })
     }
     let selfCorrectionCount: number | null = 0
@@ -208,6 +208,9 @@ export class StudyObserver {
       status,
       failureTaxonomy: taxonomy,
       failureSummary,
+      providerOrTransportErrorObserved: providerFailure,
+      acceptanceFatalObserved: Boolean(input.acceptanceFatal),
+      observerOrInfraErrorObserved: Boolean(input.invalidReason),
       axisMatrix: input.validation?.axes ?? null,
       output: input.validation && input.outputBytes !== undefined ? { basename: basename(input.validation.output), bytes: input.outputBytes } : null,
       inputHashesUnchanged: input.inputHashesUnchanged,
