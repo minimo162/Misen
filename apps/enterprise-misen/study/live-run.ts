@@ -90,7 +90,7 @@ try {
     },
     agentErrorMessage,
     acceptanceFatal,
-    invalidReason: observerFailure ? 'OBSERVER_CAPTURE_FAILURE' : undefined,
+    invalidReasonCode: observerFailure ? 'OBSERVER_CAPTURE_FAILURE' : undefined,
   })
   persistenceStarted = true
   await persistRun(evidenceDirectory, record)
@@ -104,7 +104,7 @@ try {
     elapsedMs: performance.now() - started,
     rssBytes: process.memoryUsage().rss,
     integrity: { inputMutation: inputHashesUnchanged === false ? true : null, forbiddenCapability: false, credentialExposure: null, unexpectedNetwork: null },
-    invalidReason: 'INFRASTRUCTURE_FAILURE',
+    invalidReasonCode: 'INFRASTRUCTURE_FAILURE',
   })
   await persistRun(evidenceDirectory, record)
   console.error(JSON.stringify({ status: record.status, run: runNumber, attempt: paidAttemptNumber, month, failureTaxonomy: record.failureTaxonomy, invalidReason: record.invalidReason }))
