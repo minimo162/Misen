@@ -14,7 +14,9 @@
     "live": "npm run build && node dist/acceptance/live.js",
     "study:checkpoint": "npm run build && node dist/study/checkpoint.js",
     "study:live": "npm run build && node dist/study/live-run.js",
-    "demo": "npm run build && node dist/web/server.js",
+    "demo": "npm run build && node dist/src/web/server.js",
+    "prepare-runtime": "npm run build && node scripts/prepare-runtime.mjs",
+    "verify:prepared-runtime": "node scripts/verify-prepared-runtime.mjs",
     "sbom": "node scripts/generate-sbom.mjs"
   },
   "dependencies": {
