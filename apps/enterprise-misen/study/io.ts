@@ -6,6 +6,7 @@ import { AXIS_NAMES } from '../src/acceptance/validator.js'
 import {
   FROZEN_CONFIGURATION,
   FAILURE_TAXONOMIES,
+  INVALID_REASONS,
   PRODUCTION_BASELINE_SHA,
   SELECTED_SKILL_PATH,
   STUDY_SCHEMA_VERSION,
@@ -75,7 +76,7 @@ export function assertRunRecord(value: unknown): asserts value is StudyRunRecord
   if (!validUtc(item.startedAtUtc) || !validUtc(item.endedAtUtc)
     || Date.parse(item.endedAtUtc) < Date.parse(item.startedAtUtc)) throw new Error('invalid run timestamps')
   if (item.failureTaxonomy !== null && !FAILURE_TAXONOMIES.includes(item.failureTaxonomy)) throw new Error('invalid failure taxonomy')
-  if (item.failureSummary !== null && typeof item.failureSummary !== 'string' || item.invalidReason !== null && typeof item.invalidReason !== 'string') throw new Error('invalid run summary evidence')
+  if (item.failureSummary !== null && typeof item.failureSummary !== 'string' || item.invalidReason !== null && !INVALID_REASONS.includes(item.invalidReason)) throw new Error('invalid run summary evidence')
   if (typeof item.providerOrTransportErrorObserved !== 'boolean' || typeof item.acceptanceFatalObserved !== 'boolean' || typeof item.observerOrInfraErrorObserved !== 'boolean') throw new Error('invalid failure observation evidence')
   if (!Array.isArray(item.toolStarts) || !Array.isArray(item.toolResults) || !Array.isArray(item.assistantStopReasons)) throw new Error('invalid event evidence')
   if (item.assistantStopReasons.some(reason => typeof reason !== 'string')
@@ -174,6 +175,13 @@ export function assertRunRecord(value: unknown): asserts value is StudyRunRecord
     : item.toolErrorCount > 0 && (item.axisMatrix === null || anyAxisFailed) ? 'TOOL_CONTRACT_OR_VALIDATION'
     : anyAxisFailed ? 'BUSINESS_SEMANTIC'
     : null
+  const externalInvalidReason = item.invalidReason === 'OBSERVER_CAPTURE_FAILURE' || item.invalidReason === 'INFRASTRUCTURE_FAILURE'
+  if (item.observerOrInfraErrorObserved && !externalInvalidReason) throw new Error('observer or infrastructure invalid reason mismatch')
+  const expectedInvalidReason = securityIncident ? null
+    : item.observerOrInfraErrorObserved ? item.invalidReason
+    : configurationDrift ? 'CONFIGURATION_DRIFT'
+    : incompleteEvidence ? 'INCOMPLETE_EVENT_STREAM'
+    : null
   if (item.failureTaxonomy !== expectedTaxonomy) throw new Error('failure taxonomy does not match observations')
   if (item.failureTaxonomy === null ? item.failureSummary !== null : !allowedSummaries[item.failureTaxonomy]?.includes(item.failureSummary ?? '')) throw new Error('failure summary/taxonomy mismatch')
   if (item.status === 'PASS') {
@@ -182,7 +190,7 @@ export function assertRunRecord(value: unknown): asserts value is StudyRunRecord
       || securityIncident || JSON.stringify(item.observedProviders) !== JSON.stringify([FROZEN_CONFIGURATION.provider]) || JSON.stringify(item.observedModels) !== JSON.stringify([FROZEN_CONFIGURATION.model])) throw new Error('PASS invariants violated')
     if (!item.axisMatrix || JSON.stringify(Object.keys(item.axisMatrix).sort()) !== JSON.stringify([...AXIS_NAMES].sort()) || Object.values(item.axisMatrix).some(axis => axis.status !== 'PASS')) throw new Error('PASS axis matrix incomplete')
   } else if (item.status === 'INVALID') {
-    if (item.failureTaxonomy !== 'INVALID_OBSERVER_OR_INFRA' || item.invalidReason === null || securityIncident) throw new Error('INVALID invariants violated')
+    if (item.failureTaxonomy !== 'INVALID_OBSERVER_OR_INFRA' || item.invalidReason === null || item.invalidReason !== expectedInvalidReason || securityIncident) throw new Error('INVALID invariants violated')
   } else {
     if (item.failureTaxonomy === null || item.failureTaxonomy === 'INVALID_OBSERVER_OR_INFRA' || item.invalidReason !== null) throw new Error('FAIL invariants violated')
     if (securityIncident && item.failureTaxonomy !== 'SECURITY_OR_INTEGRITY') throw new Error('security taxonomy mismatch')
