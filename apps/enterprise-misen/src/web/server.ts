@@ -1,19 +1,20 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { readFile } from 'node:fs/promises'
-import { createHash, randomBytes } from 'node:crypto'
-import { basename, join } from 'node:path'
-import { PROMPTS } from '../../demo/enterprise-excel/fixtures.js'
-import { SYNTHETIC_MONTHS } from '../../demo/enterprise-excel/fixtures.js'
+import { randomBytes } from 'node:crypto'
 import { liveAgent } from '../runtime/live.js'
 import { WorkspaceBoundary } from '../workspace/boundary.js'
 import type { AgentEvent } from '@earendil-works/pi-agent-core'
-import { snapshotOutputScope, validateReport } from '../acceptance/validator.js'
+import {
+  discoverOutputArtifacts,
+  MAX_SESSION_ARTIFACTS,
+  snapshotOutputArtifacts,
+  type DiscoveredArtifact,
+  type OutputScopeSnapshot,
+} from './artifacts.js'
 
-export interface DemoResult {
-  output: string
+export interface AgentRunResult {
   tools: string[]
-  axes: string[]
-  status?: 'PASS' | 'FAIL' | 'CANCELLED'
+  status: 'COMPLETED' | 'FAIL' | 'CANCELLED'
 }
 
 /**
@@ -25,7 +26,7 @@ export type DemoEvent =
   | { type: 'user'; id: string; text: string }
   | { type: 'assistant'; text: string; done?: boolean }
   | { type: 'tool'; phase: 'start' | 'end'; id: string; name: string; detail?: string; status?: 'success' | 'error' }
-  | { type: 'status'; status: 'running' | 'PASS' | 'FAIL' | 'CANCELLED'; error?: string }
+  | { type: 'status'; status: 'running' | 'COMPLETED' | 'FAIL' | 'CANCELLED'; error?: string }
 
 export interface DemoRunContext {
   emit: (event: DemoEvent) => void
@@ -38,7 +39,17 @@ export type UiArtifact = {
   filename: string
 }
 
-export type DemoRunner = (root: string, month: '7月' | '8月', prompt: string, context?: DemoRunContext) => Promise<DemoResult>
+export type AgentRunner = (root: string, prompt: string, context?: DemoRunContext) => Promise<AgentRunResult>
+
+export interface ArtifactObserver {
+  snapshot: (boundary: WorkspaceBoundary) => Promise<OutputScopeSnapshot>
+  discover: (boundary: WorkspaceBoundary, before: OutputScopeSnapshot, maximumArtifacts: number) => Promise<DiscoveredArtifact[]>
+}
+
+const defaultArtifactObserver: ArtifactObserver = {
+  snapshot: snapshotOutputArtifacts,
+  discover: discoverOutputArtifacts,
+}
 
 const TOOL_LABELS: Record<string, string> = {
   workspace_list_files: 'List workspace files',
@@ -91,34 +102,34 @@ function forwardAgentEvent(event: AgentEvent, context: DemoRunContext, tools: st
   }
 }
 
-/** Live Pi route. Existing deterministic runners can continue to use two args. */
-export const liveDemoRunner: DemoRunner = async (root, month, prompt, context) => {
-  const scenario = SYNTHETIC_MONTHS.find(item => item.month === month)
-  if (!scenario) throw new Error('scenario unavailable')
-  const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
-  const inputs = ['master.xlsx', '月次管理レポート_template.xlsx', ...scenario.companies.map(company => `${month}/${company.company}.xlsx`)]
-  const before = new Map(await Promise.all(inputs.map(async path => [path, hash(await readFile(join(root, path)))] as const)))
-  const outputBefore = await snapshotOutputScope(root)
-  const agent = await liveAgent(root)
-  const tools: string[] = []
-  context?.setCancel(() => agent.abort())
-  const unsubscribe = agent.subscribe(event => { if (context) forwardAgentEvent(event, context, tools) })
-  try {
-    await agent.prompt(prompt)
-    if (agent.state.errorMessage) {
-      const latest = agent.state.messages.at(-1) as any
-      const cancelled = latest?.role === 'assistant' && latest?.stopReason === 'aborted'
-      return { output: `output/${month}-月次管理レポート.xlsx`, tools, axes: [], status: cancelled ? 'CANCELLED' : 'FAIL' }
+type BoundedAgent = Pick<Awaited<ReturnType<typeof liveAgent>>, 'abort' | 'prompt' | 'state' | 'subscribe'>
+export type AgentFactory = (root: string) => Promise<BoundedAgent>
+
+/** Generic Pi route: the host does not classify the prompt or prescribe a workflow. */
+export function createAgentRunner(agentFactory: AgentFactory): AgentRunner {
+  return async (root, prompt, context) => {
+    const agent = await agentFactory(root)
+    const tools: string[] = []
+    context?.setCancel(() => agent.abort())
+    const unsubscribe = agent.subscribe(event => { if (context) forwardAgentEvent(event, context, tools) })
+    try {
+      await agent.prompt(prompt)
+      if (agent.state.errorMessage) {
+        const latest = agent.state.messages.at(-1) as any
+        const cancelled = latest?.role === 'assistant' && latest?.stopReason === 'aborted'
+        return { tools, status: cancelled ? 'CANCELLED' : 'FAIL' }
+      }
+      return { tools, status: 'COMPLETED' }
+    } finally {
+      unsubscribe()
     }
-    const validation = await validateReport(root, scenario, before, outputBefore)
-    return { output: validation.output, tools, axes: Object.entries(validation.axes).map(([axis, result]) => `${axis}:${result.status}`), status: validation.passed ? 'PASS' : 'FAIL' }
-  } finally {
-    unsubscribe()
   }
 }
 
+export const liveAgentRunner = createAgentRunner(liveAgent)
+
 type UiState = {
-  status: 'idle' | 'running' | 'PASS' | 'FAIL' | 'CANCELLED'
+  status: 'idle' | 'running' | 'COMPLETED' | 'FAIL' | 'CANCELLED'
   runId?: string
   tools: string[]
   axes: string[]
@@ -129,8 +140,6 @@ type UiState = {
 const MAX_BODY = 8192
 const RUN_ID_RE = /^[A-Za-z0-9_-]{1,80}$/u
 const ARTIFACT_ID_RE = /^[A-Za-z0-9_-]{24}$/u
-const MAX_SESSION_ARTIFACTS = 64
-const MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 
 function writeEvent(response: ServerResponse, event: DemoEvent | { type: 'state'; state: UiState }): void {
   response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
@@ -157,7 +166,7 @@ function clientAssetPath(name: string): URL {
   return new URL(`../../web/assets/${name}`, import.meta.url)
 }
 
-export function createDemoServer(root: string, runner: DemoRunner = liveDemoRunner) {
+export function createDemoServer(root: string, runner: AgentRunner = liveAgentRunner, artifactObserver: ArtifactObserver = defaultArtifactObserver) {
   const boundary = new WorkspaceBoundary(root)
   const artifactResources = new Map<string, { filename: string; bytes: Uint8Array }>()
   const usedRunIds = new Set<string>()
@@ -168,15 +177,14 @@ export function createDemoServer(root: string, runner: DemoRunner = liveDemoRunn
   const listeners = new Set<ServerResponse>()
   const emit = (event: DemoEvent) => { for (const response of listeners) writeEvent(response, event) }
   const emitState = () => { for (const response of listeners) writeEvent(response, { type: 'state', state }) }
-  const registerArtifact = async (output: string, runId: string): Promise<UiArtifact> => {
-    if (artifactResources.size >= MAX_SESSION_ARTIFACTS) throw new Error('artifact capacity')
-    const resource = await boundary.readOutputFileBytes(output)
-    const filename = basename(resource.absolute.replace(/\\/gu, '/'))
-    if (!/\.xlsx$/iu.test(filename) || resource.bytes.byteLength > MAX_ARTIFACT_BYTES) throw new Error('artifact')
-    let id = randomBytes(18).toString('base64url')
-    while (artifactResources.has(id)) id = randomBytes(18).toString('base64url')
-    artifactResources.set(id, { filename, bytes: Uint8Array.from(resource.bytes) })
-    return { id, runId, filename }
+  const registerArtifacts = (artifacts: readonly DiscoveredArtifact[], runId: string): UiArtifact[] => {
+    if (artifactResources.size + artifacts.length > MAX_SESSION_ARTIFACTS) throw new Error('artifact capacity')
+    return artifacts.map(artifact => {
+      let id = randomBytes(18).toString('base64url')
+      while (artifactResources.has(id)) id = randomBytes(18).toString('base64url')
+      artifactResources.set(id, { filename: artifact.filename, bytes: artifact.bytes })
+      return { id, runId, filename: artifact.filename }
+    })
   }
 
   return createServer(async (request, response) => {
@@ -207,39 +215,80 @@ export function createDemoServer(root: string, runner: DemoRunner = liveDemoRunn
         return response.end(JSON.stringify(state))
       }
       if (request.method === 'POST' && url.pathname === '/run') {
-        if (request.headers.origin !== `http://${host}`) throw new Error('origin')
-        if (active) throw new Error('active')
-        const params = new URLSearchParams(await readBody(request))
-        const prompt = params.get('prompt') ?? ''
-        const clientId = params.get('clientId') ?? `server-${++nextRunId}`
-        const month = Object.entries(PROMPTS).find(([, value]) => value === prompt)?.[0] as '7月' | '8月' | undefined
-        if (!month || !RUN_ID_RE.test(clientId) || usedRunIds.has(clientId)) throw new Error('prompt')
-        usedRunIds.add(clientId)
+        if (request.headers.origin !== `http://${host}` || active) {
+          response.statusCode = 400
+          return response.end('Request failed')
+        }
+
+        // Reserve before reading the body so two interleaved requests cannot
+        // both pass admission. Cancellation records intent until the Agent has
+        // registered its concrete abort callback.
         active = true
-        state = { status: 'running', runId: clientId, tools: [], axes: [], artifacts: state.artifacts }
-        emit({ type: 'status', status: 'running' }); emit({ type: 'user', id: clientId, text: prompt }); emitState()
+        let cancelRequested = false
+        let runnerCancel: (() => void) | undefined
+        activeCancel = () => {
+          cancelRequested = true
+          runnerCancel?.()
+        }
         try {
-          let hasVisibleAssistantText = false
-          const runEmit = (event: DemoEvent) => {
-            if (event.type === 'assistant' && event.text.trim().length > 0) hasVisibleAssistantText = true
-            emit(event)
+          let params: URLSearchParams
+          try {
+            params = new URLSearchParams(await readBody(request))
+          } catch {
+            response.statusCode = 400
+            return response.end('Request failed')
           }
-          const result = await runner(root, month, prompt, { emit: runEmit, setCancel: cancel => { activeCancel = cancel } })
-          const status = result.status ?? 'PASS'
-          const terminalStatus: Exclude<UiState['status'], 'idle' | 'running'> = status
-          const artifact = status === 'PASS' ? await registerArtifact(result.output, clientId) : undefined
-          state = { status: terminalStatus, runId: clientId, tools: result.tools.slice(0, 20), axes: result.axes, artifacts: artifact ? [...state.artifacts, artifact] : state.artifacts }
-          if (status !== 'PASS' || !hasVisibleAssistantText) {
-            emit({ type: 'assistant', text: status === 'PASS' ? '月次管理レポートを作成しました。' : status === 'CANCELLED' ? '処理を停止しました。' : '処理を完了できませんでした。', done: true })
+          const prompt = params.get('prompt') ?? ''
+          const clientId = params.get('clientId') ?? `server-${++nextRunId}`
+          if (prompt.trim().length === 0 || !RUN_ID_RE.test(clientId) || usedRunIds.has(clientId)) {
+            response.statusCode = 400
+            return response.end('Request failed')
           }
-          emit({ type: 'status', status: terminalStatus }); emitState()
-        } catch (error) {
-          // Keep provider/transport details out of the browser-facing state;
-          // diagnostic evidence belongs to the server-side acceptance layer.
-          state = { ...state, status: 'FAIL', error: '処理に失敗しました。' }
-          emit({ type: 'status', status: 'FAIL', error: '処理に失敗しました。' }); emitState()
-          response.statusCode = 500
-          return response.end('Run failed')
+          usedRunIds.add(clientId)
+          state = { status: 'running', runId: clientId, tools: [], axes: [], artifacts: state.artifacts }
+          emit({ type: 'status', status: 'running' }); emit({ type: 'user', id: clientId, text: prompt }); emitState()
+          try {
+            const outputBefore = await artifactObserver.snapshot(boundary)
+            if (cancelRequested) {
+              state = { ...state, status: 'CANCELLED' }
+              emit({ type: 'assistant', text: '処理を停止しました。', done: true })
+              emit({ type: 'status', status: 'CANCELLED' }); emitState()
+            } else {
+              let hasVisibleAssistantText = false
+              const runEmit = (event: DemoEvent) => {
+                if (event.type === 'assistant' && event.text.trim().length > 0) hasVisibleAssistantText = true
+                emit(event)
+              }
+              const result = await runner(root, prompt, {
+                emit: runEmit,
+                setCancel: cancel => {
+                  runnerCancel = cancel
+                  if (cancelRequested) cancel()
+                },
+              })
+              const runnerStatus = cancelRequested ? 'CANCELLED' : result.status
+              const discovered = runnerStatus === 'COMPLETED'
+                ? await artifactObserver.discover(boundary, outputBefore, MAX_SESSION_ARTIFACTS - artifactResources.size)
+                : []
+              // Discovery is host work while the run is still visibly active.
+              // Honor a Stop accepted during that await and publish nothing.
+              const status = cancelRequested ? 'CANCELLED' : runnerStatus
+              const terminalStatus: Exclude<UiState['status'], 'idle' | 'running'> = status
+              const artifacts = status === 'COMPLETED' ? registerArtifacts(discovered, clientId) : []
+              state = { status: terminalStatus, runId: clientId, tools: result.tools.slice(0, 20), axes: [], artifacts: [...state.artifacts, ...artifacts] }
+              if (status !== 'COMPLETED' || !hasVisibleAssistantText) {
+                emit({ type: 'assistant', text: status === 'COMPLETED' ? '処理が完了しました。' : status === 'CANCELLED' ? '処理を停止しました。' : '処理を完了できませんでした。', done: true })
+              }
+              emit({ type: 'status', status: terminalStatus }); emitState()
+            }
+          } catch {
+            // Keep provider/transport details out of the browser-facing state;
+            // diagnostic evidence belongs to the server-side acceptance layer.
+            state = { ...state, status: 'FAIL', error: '処理に失敗しました。' }
+            emit({ type: 'status', status: 'FAIL', error: '処理に失敗しました。' }); emitState()
+            response.statusCode = 500
+            return response.end('Run failed')
+          }
         } finally {
           active = false
           activeCancel = undefined
@@ -267,15 +316,13 @@ export function createDemoServer(root: string, runner: DemoRunner = liveDemoRunn
       response.statusCode = 404
       return response.end()
     } catch {
-      state = { ...state, status: 'FAIL', error: 'Request failed' }
-      emit({ type: 'status', status: 'FAIL', error: 'Request failed' }); emitState()
       response.statusCode = 400
       return response.end('Request failed')
     }
   })
 }
 
-export function startDemoServer(root: string, port = 8787, runner: DemoRunner = liveDemoRunner) {
+export function startDemoServer(root: string, port = 8787, runner: AgentRunner = liveAgentRunner) {
   const server = createDemoServer(root, runner)
   server.listen(port, '127.0.0.1')
   return server

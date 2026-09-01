@@ -4,10 +4,10 @@ import { readFile, rm, writeFile } from 'node:fs/promises'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fixture, PROMPTS } from '../demo/enterprise-excel/fixtures.js'
-import { createDemoServer, type DemoRunner } from '../src/web/server.js'
+import { fixture } from '../demo/enterprise-excel/fixtures.js'
+import { createDemoServer, type AgentRunner } from '../src/web/server.js'
 
-async function start(root: string, runner: DemoRunner) {
+async function start(root: string, runner: AgentRunner) {
   const server = createDemoServer(root, runner)
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   const address = server.address() as { port: number }
@@ -42,13 +42,12 @@ test('assistant-ui composition keeps the conversation surface restrained and saf
 test('SSE preserves the Brain visible final answer instead of overwriting it', async () => {
   const root = await mkdtemp(join(tmpdir(), 'misen-ui-sse-'))
   await fixture(root)
-  await writeFile(join(root, 'output', '7月-月次管理レポート.xlsx'), 'xlsx')
-  const runner: DemoRunner = async (_root, month, _prompt, context) => {
-    context?.emit({ type: 'tool', phase: 'start', id: 't1', name: 'spreadsheet_read', detail: `${month}/Alpha.xlsx` })
+  const runner: AgentRunner = async (_root, _prompt, context) => {
+    context?.emit({ type: 'tool', phase: 'start', id: 't1', name: 'spreadsheet_read', detail: '8月/Alpha.xlsx' })
     context?.emit({ type: 'assistant', text: '月次' })
     context?.emit({ type: 'tool', phase: 'end', id: 't1', name: 'spreadsheet_read', status: 'success' })
     context?.emit({ type: 'assistant', text: 'Brainが返した最終回答です。', done: true })
-    return { output: `output/${month}-月次管理レポート.xlsx`, tools: ['spreadsheet_read'], axes: ['SHEET'], status: 'PASS' }
+    return { tools: ['spreadsheet_read'], status: 'COMPLETED' }
   }
   const { server, base } = await start(root, runner)
   const stream = await fetch(`${base}/events`)
@@ -62,14 +61,14 @@ test('SSE preserves the Brain visible final answer instead of overwriting it', a
           const chunk = await reader.read()
           if (chunk.done) return resolve()
           received += decoder.decode(chunk.value, { stream: true })
-          if (received.includes('"status":"PASS"')) return resolve()
+          if (received.includes('"status":"COMPLETED"')) return resolve()
         }
       } catch (error) { reject(error) }
     }
     void read()
   })
   try {
-    const response = await fetch(`${base}/run`, { method: 'POST', redirect: 'manual', headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ prompt: PROMPTS['7月'], clientId: 'ui-test-1' }) })
+    const response = await fetch(`${base}/run`, { method: 'POST', redirect: 'manual', headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ prompt: '8月の利益状況を説明して', clientId: 'ui-test-1' }) })
     assert.equal(response.status, 303)
     await done
     assert.match(received, /event: user/)
@@ -89,8 +88,7 @@ test('SSE preserves the Brain visible final answer instead of overwriting it', a
 test('SSE uses the controlled success fallback only when the Brain emits no visible text', async () => {
   const root = await mkdtemp(join(tmpdir(), 'misen-ui-fallback-'))
   await fixture(root)
-  await writeFile(join(root, 'output', '7月-月次管理レポート.xlsx'), 'xlsx')
-  const runner: DemoRunner = async (_root, month) => ({ output: `output/${month}-月次管理レポート.xlsx`, tools: [], axes: ['SHEET'], status: 'PASS' })
+  const runner: AgentRunner = async () => ({ tools: [], status: 'COMPLETED' })
   const { server, base } = await start(root, runner)
   const stream = await fetch(`${base}/events`)
   const reader = stream.body!.getReader()
@@ -101,14 +99,15 @@ test('SSE uses the controlled success fallback only when the Brain emits no visi
       const chunk = await reader.read()
       if (chunk.done) return
       received += decoder.decode(chunk.value, { stream: true })
-      if (received.includes('"status":"PASS"')) return
+      if (received.includes('"status":"COMPLETED"')) return
     }
   })()
   try {
-    const response = await fetch(`${base}/run`, { method: 'POST', redirect: 'manual', headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ prompt: PROMPTS['7月'], clientId: 'ui-fallback-1' }) })
+    const response = await fetch(`${base}/run`, { method: 'POST', redirect: 'manual', headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ prompt: '自由形式の質問', clientId: 'ui-fallback-1' }) })
     assert.equal(response.status, 303)
     await done
-    assert.match(received, /月次管理レポートを作成しました/u)
+    assert.match(received, /処理が完了しました/u)
+    assert.doesNotMatch(received, /PASS|月次管理レポートを作成しました/u)
   } finally {
     await reader.cancel()
     await new Promise<void>(resolve => server.close(() => resolve()))
@@ -122,9 +121,15 @@ test('cancel endpoint invokes the current Pi run and never exposes an arbitrary 
   await writeFile(join(root, 'output', 'safe.xlsx'), 'safe')
   let cancel: (() => void) | undefined
   let released = false
-  const runner: DemoRunner = async (_root, month, _prompt, context) => {
-    await new Promise<void>(resolve => { cancel = () => { released = true; resolve() }; context?.setCancel(cancel) })
-    return { output: `output/${month}-月次管理レポート.xlsx`, tools: [], axes: [], status: 'CANCELLED' }
+  let markRunnerStarted!: () => void
+  const runnerStarted = new Promise<void>(resolve => { markRunnerStarted = resolve })
+  const runner: AgentRunner = async (_root, _prompt, context) => {
+    await new Promise<void>(resolve => {
+      cancel = () => { released = true; resolve() }
+      context?.setCancel(cancel)
+      markRunnerStarted()
+    })
+    return { tools: [], status: 'CANCELLED' }
   }
   const { server, base } = await start(root, runner)
   const stream = await fetch(`${base}/events`)
@@ -140,8 +145,8 @@ test('cancel endpoint invokes the current Pi run and never exposes an arbitrary 
     }
   })()
   try {
-    const run = fetch(`${base}/run`, { method: 'POST', redirect: 'manual', headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ prompt: PROMPTS['8月'], clientId: 'ui-cancel-1' }) })
-    await new Promise(resolve => setTimeout(resolve, 20))
+    const run = fetch(`${base}/run`, { method: 'POST', redirect: 'manual', headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ prompt: 'この処理を開始して', clientId: 'ui-cancel-1' }) })
+    await runnerStarted
     const cancelResponse = await fetch(`${base}/cancel`, { method: 'POST', headers: { origin: base } })
     assert.equal(cancelResponse.status, 202)
     await run
