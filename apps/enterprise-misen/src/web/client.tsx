@@ -21,7 +21,7 @@ type UiMessage = {
 }
 
 type UiState = {
-  status: 'idle' | 'running' | 'PASS' | 'FAIL' | 'CANCELLED'
+  status: 'idle' | 'running' | 'COMPLETED' | 'FAIL' | 'CANCELLED'
   runId?: string
   artifacts: UiArtifact[]
   error?: string
@@ -34,7 +34,7 @@ type ServerEvent =
   | { type: 'user'; id: string; text: string }
   | { type: 'assistant'; text: string; done?: boolean }
   | { type: 'tool'; phase: 'start' | 'end'; id: string; name: string; detail?: string; status?: 'success' | 'error' }
-  | { type: 'status'; status: 'running' | 'PASS' | 'FAIL' | 'CANCELLED'; error?: string }
+  | { type: 'status'; status: 'running' | 'COMPLETED' | 'FAIL' | 'CANCELLED'; error?: string }
 
 const TOOL_PRESENTATION: Record<string, string> = {
   workspace_list_files: 'ファイル一覧を確認',
@@ -149,9 +149,8 @@ function Composer({ running, onCancel }: { running: boolean; onCancel: () => voi
   )
 }
 
-function Artifact({ artifact }: { artifact?: UiArtifact }) {
-  if (!artifact) return null
-  return <a className="artifact-row" href={`/download/${encodeURIComponent(artifact.id)}`} download aria-label={`${artifact.filename}をダウンロード`}><Icon name="file" className="artifact-icon" /><span>{artifact.filename}</span><Icon name="open" className="artifact-arrow" /></a>
+function Artifacts({ artifacts }: { artifacts: readonly UiArtifact[] }) {
+  return <>{artifacts.map(artifact => <a key={artifact.id} className="artifact-row" href={`/download/${encodeURIComponent(artifact.id)}`} download aria-label={`${artifact.filename}をダウンロード`}><Icon name="file" className="artifact-icon" /><span>{artifact.filename}</span><Icon name="open" className="artifact-arrow" /></a>)}</>
 }
 
 function Conversation({ messages, tools, running, expandedRunId, onToggle, artifacts, activeRunId, onCancel }: {
@@ -178,12 +177,12 @@ function Conversation({ messages, tools, running, expandedRunId, onToggle, artif
               const beforeAssistant = message.role === 'assistant'
               const runId = runIdFromMessage(message.id, message.role === 'user' ? 'user' : 'assistant')
               const runTools = processEventsForRun(tools, runId)
-              const runArtifact = artifacts.find(artifact => artifact.runId === runId)
+              const runArtifacts = artifacts.filter(artifact => artifact.runId === runId)
               const runIsActive = running && activeRunId === runId
               const afterLastUser = message.role === 'user' && message.id === messages.at(-1)?.id && !messages.some(item => item.id === `assistant-${runId}`)
               return <Fragment key={message.id}>
                 {beforeAssistant && <ProcessRows tools={runTools} running={runIsActive} expanded={expandedRunId === runId} onToggle={() => onToggle(runId)} />}
-                {message.role === 'user' ? <UserMessage /> : <><AssistantMessage /><Artifact artifact={runArtifact} /></>}
+                {message.role === 'user' ? <UserMessage /> : <><AssistantMessage /><Artifacts artifacts={runArtifacts} /></>}
                 {afterLastUser && <ProcessRows tools={runTools} running={runIsActive} expanded={expandedRunId === runId} onToggle={() => onToggle(runId)} />}
                 {afterLastUser && showThinking && <div className="thinking-status" role="status"><span className="thinking-dot" aria-hidden="true">•</span>考えています…</div>}
               </Fragment>

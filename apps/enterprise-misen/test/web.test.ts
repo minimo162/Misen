@@ -1,14 +1,16 @@
 import test from 'node:test'
 import { strict as assert } from 'node:assert'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, symlink, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { request } from 'node:http'
 import { fixture, PROMPTS } from '../demo/enterprise-excel/fixtures.js'
-import { createDemoServer, encodeRfc5987Value, liveDemoRunner, textFromAssistantMessage, type DemoRunner } from '../src/web/server.js'
+import { MAX_ARTIFACT_BYTES, MAX_SESSION_ARTIFACTS, snapshotOutputArtifacts } from '../src/web/artifacts.js'
+import { createDemoServer, encodeRfc5987Value, liveAgentRunner, textFromAssistantMessage, type AgentRunner, type ArtifactObserver } from '../src/web/server.js'
+import { WorkspaceBoundary } from '../src/workspace/boundary.js'
 
-async function start(root: string, runner: DemoRunner) {
-  const server = createDemoServer(root, runner)
+async function start(root: string, runner: AgentRunner, artifactObserver?: ArtifactObserver) {
+  const server = createDemoServer(root, runner, artifactObserver)
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   const port = (server.address() as { port: number }).port
   return { server, base: 'http://127.0.0.1:' + port }
@@ -37,21 +39,29 @@ test('assistant visible text preserves actual newlines and legitimate backslashe
 test('loopback HTTP server validates requests and serves only an opaque validated artifact', async () => {
   const root = await mkdtemp(join(tmpdir(), 'misen-web-'))
   await fixture(root)
-  await writeFile(join(root, 'output', '7月-月次管理レポート.xlsx'), 'xlsx')
-  const runner: DemoRunner = async (_root, month) => ({ output: 'output/' + month + '-月次管理レポート.xlsx', tools: ['spreadsheet_read'], axes: ['SHEET', 'MONTH'] })
+  let receivedPrompt = ''
+  const runner: AgentRunner = async (_root, prompt) => {
+    receivedPrompt = prompt
+    await writeFile(join(root, 'output', '自由形式.xlsx'), 'xlsx')
+    return { tools: ['spreadsheet_read'], status: 'COMPLETED' }
+  }
   const { server, base } = await start(root, runner)
   try {
-    assert.equal(liveDemoRunner.name, 'liveDemoRunner')
+    assert.equal(typeof liveAgentRunner, 'function')
     assert.equal((await fetch(base + '/')).status, 200)
     const badHost = await new Promise<number>(resolve => { const req = request({ host: '127.0.0.1', port: new URL(base).port, path: '/', headers: { host: 'evil:1' } }, response => resolve(response.statusCode ?? 0)); req.end() })
     assert.equal(badHost, 400)
     assert.equal((await fetch(base + '/run', { method: 'POST', headers: { origin: 'http://evil', 'content-type': 'application/x-www-form-urlencoded' }, body: 'prompt=x' })).status, 400)
     assert.equal((await fetch(base + '/run', { method: 'POST', headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' }, body: 'x=' + 'a'.repeat(9000) })).status, 400)
-    assert.equal((await fetch(base + '/run', { method: 'POST', headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' }, body: 'prompt=x' })).status, 400)
-    assert.equal((await run(base, PROMPTS['7月'], 'opaque-1')).status, 303)
+    assert.equal((await run(base, '   ', 'empty-1')).status, 400)
+    assert.equal((await run(base, '任意の依頼', 'bad id')).status, 400)
+    const prompt = '8月の3社で利益が最大の会社を教えて'
+    assert.ok(!Object.values(PROMPTS).includes(prompt as any))
+    assert.equal((await run(base, prompt, 'opaque-1')).status, 303)
+    assert.equal(receivedPrompt, prompt)
     const state = await (await fetch(base + '/state')).json() as any
-    assert.equal(state.status, 'PASS')
-    assert.deepEqual(state.axes, ['SHEET', 'MONTH'])
+    assert.equal(state.status, 'COMPLETED')
+    assert.deepEqual(state.axes, [])
     assert.deepEqual(state.tools, ['spreadsheet_read'])
     assert.equal(state.artifacts.length, 1)
     assert.match(state.artifacts[0].id, /^[A-Za-z0-9_-]{24}$/u)
@@ -59,7 +69,7 @@ test('loopback HTTP server validates requests and serves only an opaque validate
     assert.equal(JSON.stringify(state).includes('output/'), false)
     const download = await fetch(base + '/download/' + state.artifacts[0].id)
     assert.equal(download.status, 200)
-    assert.match(download.headers.get('content-disposition') ?? '', /filename\*=UTF-8''7%E6%9C%88-%E6%9C%88%E6%AC%A1%E7%AE%A1%E7%90%86%E3%83%AC%E3%83%9D%E3%83%BC%E3%83%88\.xlsx/u)
+    assert.match(download.headers.get('content-disposition') ?? '', /filename\*=UTF-8''%E8%87%AA%E7%94%B1%E5%BD%A2%E5%BC%8F\.xlsx/u)
     assert.equal(await download.text(), 'xlsx')
     assert.equal((await fetch(base + '/download/AAAAAAAAAAAAAAAAAAAAAAAA')).status, 404)
     assert.equal((await fetch(base + '/download?path=../master.xlsx')).status, 404)
@@ -73,11 +83,10 @@ test('loopback HTTP server validates requests and serves only an opaque validate
 test('SSE preserves actual newlines and literal backslashes without exposing a raw output path', async () => {
   const root = await mkdtemp(join(tmpdir(), 'misen-web-events-'))
   await fixture(root)
-  await writeFile(join(root, 'output', 'validated.xlsx'), 'xlsx')
   const visible = 'line1\n\nline2\nC:\\Users\\example\nliteral \\n'
-  const runner: DemoRunner = async (_root, _month, _prompt, context) => {
+  const runner: AgentRunner = async (_root, _prompt, context) => {
     context?.emit({ type: 'assistant', text: visible })
-    return { output: 'output/validated.xlsx', tools: [], axes: ['SHEET:PASS'], status: 'PASS' }
+    return { tools: [], status: 'COMPLETED' }
   }
   const { server, base } = await start(root, runner)
   const controller = new AbortController()
@@ -86,13 +95,13 @@ test('SSE preserves actual newlines and literal backslashes without exposing a r
     const reader = stream.body!.getReader()
     let received = ''
     const readUntilTerminal = async () => {
-      while (!received.includes('"status":"PASS"')) {
+      while (!received.includes('"status":"COMPLETED"')) {
         const chunk = await reader.read()
         if (chunk.done) break
         received += new TextDecoder().decode(chunk.value)
       }
     }
-    const requestRun = run(base, PROMPTS['7月'], 'newline-1')
+    const requestRun = run(base, '業務引継ぎを要約して', 'newline-1')
     await readUntilTerminal()
     await requestRun
     const assistantData = [...received.matchAll(/event: assistant\ndata: ([^\n]+)\n\n/gu)].map(match => JSON.parse(match[1]!) as { text: string })
@@ -111,14 +120,14 @@ test('two successful runs retain distinct turn-scoped artifacts and failures add
   await fixture(root)
   let invocation = 0
   let releaseSecond: (() => void) | undefined
-  const runner: DemoRunner = async () => {
+  const runner: AgentRunner = async () => {
     invocation += 1
     if (invocation === 2) await new Promise<void>(resolve => { releaseSecond = resolve })
-    if (invocation === 3) return { output: 'output/fail.xlsx', tools: [], axes: [], status: 'FAIL' }
-    if (invocation === 4) return { output: 'output/cancelled.xlsx', tools: [], axes: [], status: 'CANCELLED' }
+    if (invocation === 3) return { tools: [], status: 'FAIL' }
+    if (invocation === 4) return { tools: [], status: 'CANCELLED' }
     const filename = invocation === 1 ? 'July.xlsx' : 'August.xlsx'
     await writeFile(join(root, 'output', filename), invocation === 1 ? 'workbook-A' : 'workbook-B')
-    return { output: 'output/' + filename, tools: [], axes: ['SHEET:PASS'], status: 'PASS' }
+    return { tools: [], status: 'COMPLETED' }
   }
   const { server, base } = await start(root, runner)
   try {
@@ -131,6 +140,10 @@ test('two successful runs retain distinct turn-scoped artifacts and failures add
     const stateDuringAugust = await (await fetch(base + '/state')).json() as any
     assert.equal(stateDuringAugust.status, 'running')
     assert.deepEqual(stateDuringAugust.artifacts, stateAfterJuly.artifacts)
+    assert.equal((await run(base, '同時実行は拒否される', 'parallel-run')).status, 400)
+    const stateAfterRejection = await (await fetch(base + '/state')).json() as any
+    assert.equal(stateAfterRejection.status, 'running')
+    assert.equal(stateAfterRejection.runId, 'run-august')
     releaseSecond()
     assert.equal((await augustRun).status, 303)
 
@@ -150,5 +163,217 @@ test('two successful runs retain distinct turn-scoped artifacts and failures add
   } finally {
     await new Promise<void>(resolve => server.close(() => resolve()))
     await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('single-active admission is reserved before a slow request body is read', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'misen-web-slow-admission-'))
+  await fixture(root)
+  let invocations = 0
+  const runner: AgentRunner = async () => { invocations += 1; return { tools: [], status: 'COMPLETED' } }
+  const { server, base } = await start(root, runner)
+  const target = new URL(base)
+  const body = new URLSearchParams({ prompt: 'slow request', clientId: 'slow-request' }).toString()
+  try {
+    const slowStatus = new Promise<number>((resolve, reject) => {
+      const slow = request({
+        host: target.hostname,
+        port: target.port,
+        path: '/run',
+        method: 'POST',
+        headers: {
+          origin: base,
+          'content-type': 'application/x-www-form-urlencoded',
+          'content-length': Buffer.byteLength(body),
+        },
+      }, response => { response.resume(); response.on('end', () => resolve(response.statusCode ?? 0)) })
+      slow.on('error', reject)
+      slow.flushHeaders()
+      setTimeout(() => slow.end(body), 50)
+    })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    assert.equal((await run(base, 'must be rejected', 'interleaved-request')).status, 400)
+    assert.equal(await slowStatus, 303)
+    assert.equal(invocations, 1)
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()))
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('cancellation during the pre-run artifact snapshot prevents Agent startup', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'misen-web-snapshot-cancel-'))
+  await fixture(root)
+  let releaseSnapshot!: () => void
+  let markSnapshotStarted!: () => void
+  const snapshotStarted = new Promise<void>(resolve => { markSnapshotStarted = resolve })
+  const snapshotRelease = new Promise<void>(resolve => { releaseSnapshot = resolve })
+  let runnerInvoked = false
+  const runner: AgentRunner = async () => { runnerInvoked = true; return { tools: [], status: 'COMPLETED' } }
+  const observer: ArtifactObserver = {
+    snapshot: async () => { markSnapshotStarted(); await snapshotRelease; return new Map() },
+    discover: async () => [],
+  }
+  const { server, base } = await start(root, runner, observer)
+  try {
+    const pendingRun = run(base, 'snapshot中に停止', 'snapshot-cancel')
+    await snapshotStarted
+    assert.equal((await fetch(base + '/cancel', { method: 'POST', headers: { origin: base } })).status, 202)
+    releaseSnapshot()
+    assert.equal((await pendingRun).status, 303)
+    assert.equal(runnerInvoked, false)
+    const state = await (await fetch(base + '/state')).json() as any
+    assert.equal(state.status, 'CANCELLED')
+    assert.equal(state.runId, 'snapshot-cancel')
+  } finally {
+    releaseSnapshot()
+    await new Promise<void>(resolve => server.close(() => resolve()))
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('cancellation during post-run artifact discovery suppresses publication', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'misen-web-discovery-cancel-'))
+  await fixture(root)
+  let releaseDiscovery!: () => void
+  let markDiscoveryStarted!: () => void
+  const discoveryStarted = new Promise<void>(resolve => { markDiscoveryStarted = resolve })
+  const discoveryRelease = new Promise<void>(resolve => { releaseDiscovery = resolve })
+  let runnerInvoked = false
+  const runner: AgentRunner = async () => { runnerInvoked = true; return { tools: [], status: 'COMPLETED' } }
+  const observer: ArtifactObserver = {
+    snapshot: async () => new Map(),
+    discover: async () => {
+      markDiscoveryStarted()
+      await discoveryRelease
+      return [{ path: 'output/late.xlsx', filename: 'late.xlsx', bytes: Uint8Array.from([1, 2, 3]) }]
+    },
+  }
+  const { server, base } = await start(root, runner, observer)
+  try {
+    const pendingRun = run(base, '成果物を作って', 'discovery-cancel')
+    await discoveryStarted
+    assert.equal((await fetch(base + '/cancel', { method: 'POST', headers: { origin: base } })).status, 202)
+    releaseDiscovery()
+    assert.equal((await pendingRun).status, 303)
+    assert.equal(runnerInvoked, true)
+    const state = await (await fetch(base + '/state')).json() as any
+    assert.equal(state.status, 'CANCELLED')
+    assert.deepEqual(state.artifacts, [])
+  } finally {
+    releaseDiscovery()
+    await new Promise<void>(resolve => server.close(() => resolve()))
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('artifact discovery rejects a workspace-external output junction', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'misen-web-output-junction-'))
+  const outside = await mkdtemp(join(tmpdir(), 'misen-web-output-outside-'))
+  try {
+    await writeFile(join(outside, 'escaped.xlsx'), 'outside')
+    try {
+      await symlink(outside, join(root, 'output'), 'junction')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EPERM') {
+        t.skip('Windows EPERM: junction fixture unavailable')
+        return
+      }
+      throw error
+    }
+    await assert.rejects(snapshotOutputArtifacts(new WorkspaceBoundary(root)), /escapes/u)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+    await rm(outside, { recursive: true, force: true })
+  }
+})
+
+test('text-only free-form completion exposes no artifact and never claims Decision 441 PASS', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'misen-web-text-only-'))
+  await fixture(root)
+  const prompts = [
+    '7月から8月で利益の改善額が最大だった会社は？',
+    '8月で目標未達の会社があるか確認して',
+    '業務引継ぎを読んで注意事項を説明して',
+    `未登録の観点で比較して-${Date.now()}`,
+  ]
+  const received: string[] = []
+  const runner: AgentRunner = async (_root, prompt, context) => {
+    received.push(prompt)
+    context?.emit({ type: 'assistant', text: 'bounded answer', done: true })
+    return { tools: ['workspace_read_text'], status: 'COMPLETED' }
+  }
+  const { server, base } = await start(root, runner)
+  try {
+    for (const [index, prompt] of prompts.entries()) assert.equal((await run(base, prompt, `freeform-${index}`)).status, 303)
+    assert.deepEqual(received, prompts)
+    const state = await (await fetch(base + '/state')).json() as any
+    assert.equal(state.status, 'COMPLETED')
+    assert.deepEqual(state.axes, [])
+    assert.deepEqual(state.artifacts, [])
+    assert.doesNotMatch(JSON.stringify(state), /PASS/u)
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()))
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('host discovery exposes changed authorized xlsx files but ignores paths outside output', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'misen-web-changed-artifact-'))
+  await fixture(root)
+  await writeFile(join(root, 'output', 'existing.xlsx'), 'before')
+  const runner: AgentRunner = async () => {
+    await writeFile(join(root, 'output', 'existing.xlsx'), 'after')
+    await mkdir(join(root, 'output', 'nested'))
+    await writeFile(join(root, 'output', 'nested', 'new.xlsx'), 'nested')
+    await writeFile(join(root, 'escaped.xlsx'), 'outside authorized output')
+    await writeFile(join(root, 'output', 'notes.txt'), 'not a deliverable')
+    return { tools: ['spreadsheet_update'], status: 'COMPLETED' }
+  }
+  const { server, base } = await start(root, runner)
+  try {
+    assert.equal((await run(base, '既存成果物を更新して', 'changed-1')).status, 303)
+    const state = await (await fetch(base + '/state')).json() as any
+    assert.equal(state.status, 'COMPLETED')
+    assert.deepEqual(state.artifacts.map((artifact: any) => artifact.filename), ['existing.xlsx', 'new.xlsx'])
+    assert.equal(await (await fetch(base + '/download/' + state.artifacts[0].id)).text(), 'after')
+    assert.equal(await (await fetch(base + '/download/' + state.artifacts[1].id)).text(), 'nested')
+    assert.equal(JSON.stringify(state).includes('escaped.xlsx'), false)
+    assert.equal(JSON.stringify(state).includes('notes.txt'), false)
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()))
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('artifact discovery keeps count and byte bounds fail closed', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'misen-web-artifact-bounds-'))
+  await fixture(root)
+  const runner: AgentRunner = async () => {
+    for (let index = 0; index <= MAX_SESSION_ARTIFACTS; index++) await writeFile(join(root, 'output', `bounded-${index}.xlsx`), 'x')
+    return { tools: [], status: 'COMPLETED' }
+  }
+  const { server, base } = await start(root, runner)
+  try {
+    assert.equal((await run(base, '複数成果物を作成', 'bounds-count')).status, 500)
+    assert.deepEqual((await (await fetch(base + '/state')).json() as any).artifacts, [])
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()))
+    await rm(root, { recursive: true, force: true })
+  }
+
+  const byteRoot = await mkdtemp(join(tmpdir(), 'misen-web-artifact-bytes-'))
+  await fixture(byteRoot)
+  const byteRunner: AgentRunner = async () => {
+    await truncate(join(byteRoot, 'output', 'oversized.xlsx'), MAX_ARTIFACT_BYTES + 1)
+    return { tools: [], status: 'COMPLETED' }
+  }
+  const byteServer = await start(byteRoot, byteRunner)
+  try {
+    assert.equal((await run(byteServer.base, '大きすぎる成果物', 'bounds-bytes')).status, 500)
+    assert.deepEqual((await (await fetch(byteServer.base + '/state')).json() as any).artifacts, [])
+  } finally {
+    await new Promise<void>(resolve => byteServer.server.close(() => resolve()))
+    await rm(byteRoot, { recursive: true, force: true })
   }
 })

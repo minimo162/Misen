@@ -44,9 +44,9 @@ export class WorkspaceBoundary {
   }
 
   /** Read an existing output workbook through the same validated handle path. */
-  async readOutputFileBytes(userPath: string): Promise<{ absolute: string; bytes: Uint8Array }> {
+  async readOutputFileBytes(userPath: string, maxBytes?: number): Promise<{ absolute: string; bytes: Uint8Array }> {
     const absolute = await this.resolveOutputFile(userPath)
-    return { absolute, bytes: await this.readValidatedAbsolute(absolute) }
+    return { absolute, bytes: await this.readValidatedAbsolute(absolute, maxBytes, 'output') }
   }
 
   /**
@@ -92,7 +92,7 @@ export class WorkspaceBoundary {
 
     try {
       const real = await realpath(candidate)
-      this.assertInside(real, 'output path')
+      this.assertInsideOutput(real, 'output path')
       const info = await stat(real)
       if (!info.isFile()) throw new WorkspaceBoundaryError('output path is not a regular file')
       if (info.nlink !== 1) throw new WorkspaceBoundaryError('hard-linked output files are not allowed')
@@ -107,7 +107,7 @@ export class WorkspaceBoundary {
   async ensureOutputDirectory(): Promise<void> {
     await mkdir(this.outputRoot, { recursive: true })
     const real = await realpath(this.outputRoot)
-    this.assertInside(real, 'output directory')
+    this.assertInsideOutput(real, 'output directory')
   }
 
   /**
@@ -125,7 +125,7 @@ export class WorkspaceBoundary {
     const destination = await this.resolveOutputFile(userPath)
     const parent = dirname(destination)
     const parentRealBefore = await realpath(parent)
-    this.assertInside(parentRealBefore, 'output parent')
+    this.assertInsideOutput(parentRealBefore, 'output parent')
 
     let exists = false
     try {
@@ -147,7 +147,7 @@ export class WorkspaceBoundary {
       }
 
       const parentRealAfter = await realpath(parent)
-      this.assertInside(parentRealAfter, 'output parent')
+      this.assertInsideOutput(parentRealAfter, 'output parent')
       if (parentRealAfter !== parentRealBefore) throw new WorkspaceBoundaryError('output parent changed during write')
 
       if (!overwrite) {
@@ -195,6 +195,39 @@ export class WorkspaceBoundary {
     return result
   }
 
+  /** Recursively enumerate regular files below workspace/output without following links. */
+  async listOutputFiles(): Promise<string[]> {
+    await this.ensureOutputDirectory()
+    const start = await realpath(this.outputRoot)
+    this.assertInsideOutput(start, 'output directory')
+    const result: string[] = []
+    let entriesSeen = 0
+    const visit = async (directory: string): Promise<void> => {
+      const entries = await readdir(directory, { withFileTypes: true })
+      entries.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0)
+      for (const entry of entries) {
+        entriesSeen += 1
+        if (entriesSeen > 20000) throw new WorkspaceBoundaryError('output listing exceeds 20000 entries')
+        const path = join(directory, entry.name)
+        if (entry.isSymbolicLink()) continue
+        if (entry.isDirectory()) {
+          const real = await realpath(path)
+          this.assertInsideOutput(real, 'output directory')
+          await visit(real)
+          continue
+        }
+        if (!entry.isFile()) throw new WorkspaceBoundaryError('output scope contains an unsupported entry')
+        const real = await realpath(path)
+        this.assertInsideOutput(real, 'output file')
+        const info = await stat(real)
+        if (!info.isFile() || info.nlink !== 1) throw new WorkspaceBoundaryError('output path is not an independent regular file')
+        result.push(this.displayPath(real))
+      }
+    }
+    await visit(start)
+    return result
+  }
+
   private resolveLexical(userPath: string): string {
     if (typeof userPath !== 'string' || userPath.length === 0) {
       throw new WorkspaceBoundaryError('workspace path must be a non-empty relative path')
@@ -209,7 +242,7 @@ export class WorkspaceBoundary {
     return candidate
   }
 
-  private async readValidatedAbsolute(absolute: string, maxBytes?: number): Promise<Uint8Array> {
+  private async readValidatedAbsolute(absolute: string, maxBytes?: number, scope: 'workspace' | 'output' = 'workspace'): Promise<Uint8Array> {
     if (maxBytes !== undefined && (!Number.isSafeInteger(maxBytes) || maxBytes < 1)) {
       throw new WorkspaceBoundaryError('read limit must be a positive safe integer')
     }
@@ -229,7 +262,8 @@ export class WorkspaceBoundary {
         bytes = Uint8Array.from(buffer.subarray(0, bytesRead))
       }
       const namedReal = await realpath(absolute)
-      this.assertInside(namedReal, 'workspace file')
+      if (scope === 'output') this.assertInsideOutput(namedReal, 'output file')
+      else this.assertInside(namedReal, 'workspace file')
       const after = await stat(namedReal)
       if (after.nlink !== 1 || before.dev !== after.dev || before.ino !== after.ino) {
         throw new WorkspaceBoundaryError('workspace file changed during read')
@@ -244,6 +278,14 @@ export class WorkspaceBoundary {
     const rel = relative(this.root, candidate)
     if (rel === '..' || rel.startsWith('..' + sep) || isAbsolute(rel)) {
       throw new WorkspaceBoundaryError(`${label} escapes the selected workspace`)
+    }
+  }
+
+  private assertInsideOutput(candidate: string, label: string): void {
+    this.assertInside(candidate, label)
+    const rel = relative(this.outputRoot, candidate)
+    if (rel === '..' || rel.startsWith('..' + sep) || isAbsolute(rel)) {
+      throw new WorkspaceBoundaryError(`${label} escapes the output scope`)
     }
   }
 }
