@@ -3,9 +3,17 @@ import { strict as assert } from 'node:assert'
 import type { AgentEvent } from '@earendil-works/pi-agent-core'
 import type { AssistantMessage } from '@earendil-works/pi-ai'
 import { AXIS_NAMES, type ValidationResult } from '../src/acceptance/validator.js'
+import { aggregateStudy } from '../study/aggregate.js'
 import { assertRunRecord } from '../study/io.js'
 import { StudyObserver } from '../study/observer.js'
-import { PRODUCTION_BASELINE_SHA } from '../study/schema.js'
+import {
+  alternatingSchedule,
+  FROZEN_CONFIGURATION,
+  PRODUCTION_BASELINE_SHA,
+  STUDY_SCHEMA_VERSION,
+  type PaidAttemptReservation,
+  type StudyCheckpoint,
+} from '../study/schema.js'
 
 const metadata = {
   studyId: 'review-fix-study',
@@ -19,6 +27,33 @@ const metadata = {
 const integrity = { inputMutation: false, forbiddenCapability: false, credentialExposure: null, unexpectedNetwork: null }
 const axes = Object.fromEntries(AXIS_NAMES.map(axis => [axis, { status: 'PASS' as const, evidence: { axis } }])) as ValidationResult['axes']
 const validation: ValidationResult = { period: { year: 2024, month: 7 }, output: 'output/report.xlsx', passed: true, axes, diagnostics: [] }
+const checkpoint: StudyCheckpoint = {
+  schemaVersion: STUDY_SCHEMA_VERSION,
+  studyId: metadata.studyId,
+  productionBaselineSha: PRODUCTION_BASELINE_SHA,
+  observerSha: metadata.observerSha,
+  intendedValidRuns: 20,
+  maxPaidAttempts: 24,
+  hardSpendCapUsd: 10,
+  schedule: alternatingSchedule(),
+  configuration: FROZEN_CONFIGURATION,
+  restartRule: 'observer-change-restarts-at-run-1',
+  costAuthority: 'pi-catalog-estimate-from-public-usage',
+  providerHardCapConfirmed: true,
+  hardSpendEnforcement: 'provider-account-hard-cap-plus-observer-ledger',
+  createdAtUtc: '2026-09-01T00:00:00.000Z',
+}
+const reservation: PaidAttemptReservation = {
+  schemaVersion: STUDY_SCHEMA_VERSION,
+  studyId: metadata.studyId,
+  studyRunNumber: 1,
+  paidAttemptNumber: 1,
+  month: '7月',
+  productionBaselineSha: PRODUCTION_BASELINE_SHA,
+  observerSha: metadata.observerSha,
+  configuration: FROZEN_CONFIGURATION,
+  reservedAtUtc: '2026-09-01T00:00:00.500Z',
+}
 
 function assistant(costTotal = 0.03, provider = 'openai', model = 'gpt-5.6-luna'): AgentEvent {
   return {
@@ -85,7 +120,7 @@ test('INVALID evidence persists only bounded reason codes and distinguishes fail
   assert.throws(() => assertRunRecord({ ...rawRecord, invalidReason: 'raw observer detail' } as unknown), /summary evidence|invalid reason|INVALID invariants/u)
 })
 
-test('one unknown Pi catalog cost makes the whole run estimate unknown', () => {
+test('one unknown Pi catalog cost makes the run and study estimates unknown', () => {
   const finiteThenUnknown = new StudyObserver(metadata, () => '2026-09-01T00:00:01.000Z')
   beginWithTool(finiteThenUnknown)
   finiteThenUnknown.observe(assistant(0.03))
@@ -93,6 +128,9 @@ test('one unknown Pi catalog cost makes the whole run estimate unknown', () => {
   const first = finalizePass(finiteThenUnknown)
   assert.equal(first.usage.catalogEstimatedCostUsd, null)
   assert.doesNotThrow(() => assertRunRecord(first))
+  const aggregate = aggregateStudy([first], checkpoint, [reservation])
+  assert.equal(aggregate.budget.catalogEstimatedCostUsd, null)
+  assert.equal(aggregate.budget.recordsWithoutCatalogCostEstimate, 1)
 
   const unknownThenFinite = new StudyObserver(metadata, () => '2026-09-01T00:00:01.000Z')
   beginWithTool(unknownThenFinite)
