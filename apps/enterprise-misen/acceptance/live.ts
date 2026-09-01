@@ -19,6 +19,11 @@ if (!month) throw new Error('usage: npm run live -- july|august|7月|8月')
 const scenario = SYNTHETIC_MONTHS.find(candidate => candidate.month === month)!
 const root = await mkdtemp(join(tmpdir(), 'misen-pi-live-'))
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
+const toolStarts: string[] = []
+const toolEnds: string[] = []
+const spreadsheetUpdates: Array<{ id: string; workbook?: unknown; sheet?: unknown; range?: unknown; values?: unknown; status: string }> = []
+let failureClass: 'PROVIDER_OR_TRANSPORT' | 'TOOL' | 'ACCEPTANCE_FATAL' = 'ACCEPTANCE_FATAL'
+const started = performance.now()
 
 try {
   await fixture(root)
@@ -26,9 +31,6 @@ try {
   const before = new Map(await Promise.all(inputs.map(async file => [file, digest(await readFile(join(root, file)))] as const)))
   const outputBefore = await snapshotOutputScope(root)
   const agent = liveAgent(root)
-  const toolStarts: string[] = []
-  const toolEnds: string[] = []
-  const spreadsheetUpdates: Array<{ id: string; workbook?: unknown; sheet?: unknown; range?: unknown; values?: unknown; status: string }> = []
 
   agent.subscribe(event => {
     if (event.type === 'tool_execution_start') {
@@ -52,9 +54,11 @@ try {
     }
   })
 
-  const started = performance.now()
   await agent.prompt(PROMPTS[month])
-  if (agent.state.errorMessage) throw new Error('provider or tool failure')
+  if (agent.state.errorMessage) {
+    failureClass = spreadsheetUpdates.some(update => update.status === 'error') ? 'TOOL' : 'PROVIDER_OR_TRANSPORT'
+    throw new Error('agent run failed')
+  }
 
   const validation = await validateReport(root, scenario, before, outputBefore)
   const bytes = (await stat(join(root, validation.output))).size
@@ -77,7 +81,13 @@ try {
   console.error(JSON.stringify({
     month,
     status: 'FATAL',
-    failure: error instanceof Error ? error.message : 'fatal live acceptance failure'
+    failureClass,
+    toolStarts,
+    toolEnds,
+    toolBalance: toolStarts.length === toolEnds.length,
+    spreadsheetUpdates,
+    elapsedMs: Math.round(performance.now() - started),
+    failure: error instanceof Error && failureClass === 'ACCEPTANCE_FATAL' ? error.message : undefined
   }))
   process.exitCode = 1
 } finally {
