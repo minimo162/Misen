@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto'
 import { execFileSync, spawn } from 'node:child_process'
 import { cp, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
+import { fileURLToPath } from 'node:url'
 
 function parseArguments(argv) {
   const result = {}
@@ -17,19 +18,44 @@ async function hash(path) {
   return createHash('sha256').update(await readFile(path)).digest('hex')
 }
 
-async function verifyHashes(root) {
+async function walk(root) {
+  const files = []
+  async function visit(directory) {
+    const entries = await readdir(directory, { withFileTypes: true })
+    entries.sort((left, right) => left.name.localeCompare(right.name, 'en'))
+    for (const entry of entries) {
+      const path = join(directory, entry.name)
+      if (entry.isDirectory()) await visit(path)
+      else if (entry.isFile()) files.push(path)
+      else throw new Error(`unsupported filesystem entry: ${path}`)
+    }
+  }
+  await visit(root)
+  return files
+}
+
+const relativeName = (root, path) => path.slice(root.length + 1).replaceAll('\\', '/')
+
+export async function verifyHashes(root) {
   const lines = (await readFile(join(root, 'SHA256SUMS.txt'), 'utf8')).trim().split(/\r?\n/)
+  const listed = new Set()
   for (const line of lines) {
     const match = /^([0-9a-f]{64})  (.+)$/.exec(line)
     if (!match) throw new Error(`invalid hash line: ${line}`)
     const path = resolve(root, ...match[2].split('/'))
     if (path !== root && !path.startsWith(`${root}\\`) && !path.startsWith(`${root}/`)) throw new Error('hash path escapes runtime')
+    if (listed.has(match[2])) throw new Error(`duplicate hash path: ${match[2]}`)
+    listed.add(match[2])
     if (await hash(path) !== match[1]) throw new Error(`hash mismatch: ${match[2]}`)
   }
+  const actual = new Set((await walk(root)).filter(path => relativeName(root, path) !== 'SHA256SUMS.txt').map(path => relativeName(root, path)))
+  const missing = [...actual].filter(path => !listed.has(path))
+  const absent = [...listed].filter(path => !actual.has(path))
+  if (missing.length > 0 || absent.length > 0) throw new Error(`hash file-set mismatch: unlisted=${missing.join(',')} absent=${absent.join(',')}`)
   return lines.length
 }
 
-async function findForbiddenNames(root) {
+export async function findForbiddenNames(root) {
   const forbidden = []
   for (const relativePath of [
     ['app', 'dist', 'test'],
@@ -52,11 +78,30 @@ async function findForbiddenNames(root) {
       if (entry.isDirectory()) {
         if (['test', 'tests', '__tests__', 'coverage'].includes(entry.name.toLowerCase())) forbidden.push(path)
         await visit(path)
-      } else if (/^(esbuild|tsc|npm|npx)(\.cmd|\.ps1|\.exe)?$/i.test(entry.name) || /\.(ts|tsx|mts|cts|map|tsbuildinfo)$/i.test(entry.name)) forbidden.push(path)
+      } else if (/^(esbuild|tsc|npm|npx)(\.cmd|\.ps1|\.exe)?$/i.test(entry.name) || /\.(ts|tsx|mts|cts|map|tsbuildinfo)$/i.test(entry.name)
+        || (/\.(exe|dll|node|cmd|ps1|bat|com)$/i.test(entry.name) && resolve(path) !== resolve(root, 'run.cmd'))) forbidden.push(path)
     }
   }
   await visit(root)
   return forbidden
+}
+
+async function verifyManifestInventory(root, manifest) {
+  const files = (await walk(root)).filter(path => relativeName(root, path) !== 'SHA256SUMS.txt')
+  const byExtension = {}
+  const executableOrScriptFiles = []
+  let totalBytes = 0
+  let packageCount = 0
+  for (const path of files) {
+    const name = basename(path), dot = name.lastIndexOf('.'), extension = dot < 0 ? '<none>' : name.slice(dot).toLowerCase()
+    byExtension[extension] = (byExtension[extension] ?? 0) + 1
+    totalBytes += (await stat(path)).size
+    if (['.exe', '.dll', '.node', '.cmd', '.bat', '.com', '.ps1'].includes(extension)) executableOrScriptFiles.push(relativeName(root, path))
+    if (name === 'package.json' && relativeName(root, path).startsWith('app/node_modules/')) packageCount++
+  }
+  const actual = { fileCount: files.length, totalBytes, byExtension, executableOrScriptFiles, scope: 'all distributed files except SHA256SUMS.txt' }
+  if (JSON.stringify(actual) !== JSON.stringify(manifest.inventory)) throw new Error('manifest inventory mismatch')
+  if (packageCount !== manifest.dependencyProvenance?.productionDependencyPackageCount) throw new Error('production dependency count mismatch')
 }
 
 function powershellJson(script) {
@@ -92,7 +137,10 @@ async function main() {
     throw new Error('runtime policy is not fail-closed')
   }
   await stat(join(root, ...manifest.entrypoint.split('/')))
+  if (!Array.isArray(manifest.requiredPaths) || manifest.requiredPaths.length === 0) throw new Error('manifest requiredPaths missing')
+  for (const requiredPath of manifest.requiredPaths) await stat(join(root, ...requiredPath.split('/')))
   const hashCount = await verifyHashes(root)
+  await verifyManifestInventory(root, manifest)
   const forbidden = await findForbiddenNames(root)
   if (forbidden.length > 0) throw new Error(`development/test artifacts found: ${forbidden.join(', ')}`)
 
@@ -126,15 +174,25 @@ async function main() {
   try {
     const response = await poll('http://127.0.0.1:8787/', 10_000)
     if (!response.body.includes('Misen')) throw new Error('unexpected Composer response')
-    const processRows = powershellJson(`@(Get-CimInstance Win32_Process -Filter \"ParentProcessId = ${child.pid}\" | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine) | ConvertTo-Json -Compress`)
-    const processes = processRows === null ? [] : Array.isArray(processRows) ? processRows : [processRows]
+    const stateResponse = await fetch('http://127.0.0.1:8787/state')
+    const state = await stateResponse.json()
+    if (!stateResponse.ok || state.status !== 'idle' || !Array.isArray(state.tools) || !Array.isArray(state.axes) || !Array.isArray(state.artifacts)) throw new Error(`unexpected deterministic state response: ${JSON.stringify(state)}`)
+    const processRows = powershellJson(`@(Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine) | ConvertTo-Json -Compress`)
+    const allProcesses = processRows === null ? [] : Array.isArray(processRows) ? processRows : [processRows]
+    const descendantIds = new Set([child.pid])
+    let changed = true
+    while (changed) {
+      changed = false
+      for (const row of allProcesses) if (descendantIds.has(Number(row.ParentProcessId)) && !descendantIds.has(Number(row.ProcessId))) { descendantIds.add(Number(row.ProcessId)); changed = true }
+    }
+    const processes = allProcesses.filter(row => Number(row.ProcessId) !== child.pid && descendantIds.has(Number(row.ProcessId)))
     const applicationProcesses = processes.filter((row) => row.Name?.toLowerCase() !== 'conhost.exe')
     const nodeProcesses = applicationProcesses.filter((row) => row.Name?.toLowerCase() === 'node.exe')
     if (nodeProcesses.length !== 1 || applicationProcesses.length !== 1) throw new Error(`unexpected target process tree: ${JSON.stringify(processes)}`)
     targetNodePid = Number(nodeProcesses[0].ProcessId)
-    const connectionRows = powershellJson(`@(Get-NetTCPConnection -OwningProcess ${targetNodePid} -ErrorAction SilentlyContinue | Select-Object State,LocalAddress,LocalPort,RemoteAddress,RemotePort) | ConvertTo-Json -Compress`)
+    const connectionRows = powershellJson(`@(1..10 | ForEach-Object { Get-NetTCPConnection -OwningProcess ${targetNodePid} -ErrorAction SilentlyContinue | Select-Object State,LocalAddress,LocalPort,RemoteAddress,RemotePort; Start-Sleep -Milliseconds 100 }) | Sort-Object State,LocalAddress,LocalPort,RemoteAddress,RemotePort -Unique | ConvertTo-Json -Compress`)
     const connections = connectionRows === null ? [] : Array.isArray(connectionRows) ? connectionRows : [connectionRows]
-    const nonLoopback = connections.filter((row) => (row.State === 'Established' || Number(row.State) === 5) && !['127.0.0.1', '::1'].includes(row.RemoteAddress))
+    const nonLoopback = connections.filter((row) => !['0.0.0.0', '::', '127.0.0.1', '::1'].includes(row.RemoteAddress))
     if (nonLoopback.length > 0) throw new Error(`unexpected outbound connection: ${JSON.stringify(nonLoopback)}`)
     const listener = connections.find((row) => Number(row.LocalPort) === 8787 && row.LocalAddress === '127.0.0.1')
     if (!listener) throw new Error(`expected loopback listener missing: ${JSON.stringify(connections)}`)
@@ -144,9 +202,11 @@ async function main() {
     console.log(JSON.stringify({
       status: 'PASS',
       httpStatus: response.status,
+      stateStatus: state.status,
       hashCount,
       targetProcesses: processes,
       targetConnections: connections,
+      networkObservation: 'ten stable-startup TCP samples over one second; no non-loopback endpoint observed',
       pathEntries: [approvedNodeDirectory],
       npmOnPath: false,
       tscOnPath: false,
@@ -171,4 +231,4 @@ async function main() {
   }
 }
 
-await main()
+if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) await main()

@@ -14,6 +14,7 @@ import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const productionBaselineSha = '06804c5eb0c8f9e42322d66b11c2f5ae0153da69'
 const shaPattern = /^[0-9a-f]{40}$/
 const allowedDistRoots = Object.freeze([
   ['src'],
@@ -85,7 +86,26 @@ async function ensureCleanTarget(target) {
   } catch (error) {
     if (error?.code !== 'ENOENT') throw error
   }
-  await mkdir(target, { recursive: true })
+}
+
+function git(args) {
+  return execFileSync('git', args, { cwd: appRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+}
+
+function quietGitDiff(args) {
+  try { execFileSync('git', ['diff', '--quiet', ...args], { cwd: appRoot, stdio: 'ignore' }) }
+  catch { throw new Error('packaging repository provenance mismatch') }
+}
+
+function verifyPackagingProvenance(sourceSha, packagingSha) {
+  if (sourceSha !== productionBaselineSha) throw new Error(`--source-sha must equal frozen production baseline ${productionBaselineSha}`)
+  if (git(['rev-parse', 'HEAD']) !== packagingSha) throw new Error('--packaging-sha must equal current HEAD')
+  const protectedPaths = ['apps/enterprise-misen/src', 'apps/enterprise-misen/acceptance', 'apps/enterprise-misen/demo', 'apps/enterprise-misen/package-lock.json']
+  const packagingPaths = ['apps/enterprise-misen/package.json', 'apps/enterprise-misen/docs/prepared-runtime.md', 'apps/enterprise-misen/scripts/prepare-runtime.mjs', 'apps/enterprise-misen/scripts/verify-prepared-runtime.mjs']
+  quietGitDiff([sourceSha, 'HEAD', '--', ...protectedPaths])
+  quietGitDiff(['HEAD', '--', ...protectedPaths, ...packagingPaths])
+  quietGitDiff(['--cached', 'HEAD', '--', ...protectedPaths, ...packagingPaths])
+  if (git(['ls-files', '--others', '--exclude-standard', '--', ...protectedPaths, ...packagingPaths])) throw new Error('untracked production or packaging files reject provenance')
 }
 
 async function installProductionDependencies(appDirectory) {
@@ -168,6 +188,10 @@ async function buildInventory(target) {
   return { fileCount: files.length, totalBytes, byExtension, executableOrScriptFiles }
 }
 
+async function countInstalledPackages(nodeModules) {
+  return (await walk(nodeModules)).filter(path => basename(path) === 'package.json').length
+}
+
 function assertRuntimeBoundary(inventory) {
   const forbiddenNames = inventory.executableOrScriptFiles.filter((path) => path !== 'run.cmd')
   if (forbiddenNames.length > 0) throw new Error(`unexpected executable or script files: ${forbiddenNames.join(', ')}`)
@@ -189,6 +213,8 @@ export async function prepareRuntime({ output, sourceSha, packagingSha }) {
   if (!shaPattern.test(sourceSha)) throw new Error('--source-sha must be a lowercase 40-character Git SHA')
   if (!shaPattern.test(packagingSha)) throw new Error('--packaging-sha must be a lowercase 40-character Git SHA')
   await ensureCleanTarget(target)
+  verifyPackagingProvenance(sourceSha, packagingSha)
+  await mkdir(target, { recursive: true })
 
   try {
     const appDirectory = join(target, 'app')
@@ -214,6 +240,7 @@ export async function prepareRuntime({ output, sourceSha, packagingSha }) {
     await writeFile(join(target, 'run.cmd'), launcher, 'utf8')
 
     const lockHash = await sha256(join(appDirectory, 'dependency-lock.json'))
+    const productionDependencyPackageCount = await countInstalledPackages(join(appDirectory, 'node_modules'))
     const preliminaryInventory = await buildInventory(target)
     assertRuntimeBoundary(preliminaryInventory)
     const manifest = {
@@ -224,10 +251,23 @@ export async function prepareRuntime({ output, sourceSha, packagingSha }) {
       launcher: 'run.cmd',
       entrypoint: 'app/dist/src/web/server.js',
       defaultWorkspace: 'workspace',
+      requiredPaths: [
+        'run.cmd',
+        'app/package.json',
+        'app/dependency-lock.json',
+        'app/dist/src/web/server.js',
+        'app/dist/web/assets/client.js',
+        'app/dist/web/assets/client.css',
+        'app/node_modules',
+        'workspace/業務引継ぎ.md',
+        'workspace/master.xlsx',
+        'workspace/月次管理レポート_template.xlsx',
+      ],
       dependencyProvenance: {
         source: 'app/dependency-lock.json',
         sha256: lockHash,
         install: 'npm ci --omit=dev --ignore-scripts --no-audit --no-fund (packaging host only)',
+        productionDependencyPackageCount,
       },
       runtimePolicy: {
         installsAtRuntime: false,
@@ -235,12 +275,12 @@ export async function prepareRuntime({ output, sourceSha, packagingSha }) {
         downloadsAtRuntime: false,
         powershellFallback: false,
       },
-      inventory: preliminaryInventory,
+      inventory: { ...preliminaryInventory, scope: 'all distributed files except SHA256SUMS.txt' },
     }
     await writeFile(join(target, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
     const finalInventory = await buildInventory(target)
     assertRuntimeBoundary(finalInventory)
-    manifest.inventory = finalInventory
+    manifest.inventory = { ...finalInventory, scope: 'all distributed files except SHA256SUMS.txt' }
     await writeFile(join(target, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
     await writeHashes(target)
     return { target, manifest }
