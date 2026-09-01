@@ -1,0 +1,4 @@
+node_modules/
+output/*.xlsx
+work-plan.json
+
