@@ -42,6 +42,7 @@ test('assistant-ui composition keeps the conversation surface restrained and saf
 test('SSE preserves the Brain visible final answer instead of overwriting it', async () => {
   const root = await mkdtemp(join(tmpdir(), 'misen-ui-sse-'))
   await fixture(root)
+  await writeFile(join(root, 'output', '7月-月次管理レポート.xlsx'), 'xlsx')
   const runner: DemoRunner = async (_root, month, _prompt, context) => {
     context?.emit({ type: 'tool', phase: 'start', id: 't1', name: 'spreadsheet_read', detail: `${month}/Alpha.xlsx` })
     context?.emit({ type: 'assistant', text: '月次' })
@@ -88,6 +89,7 @@ test('SSE preserves the Brain visible final answer instead of overwriting it', a
 test('SSE uses the controlled success fallback only when the Brain emits no visible text', async () => {
   const root = await mkdtemp(join(tmpdir(), 'misen-ui-fallback-'))
   await fixture(root)
+  await writeFile(join(root, 'output', '7月-月次管理レポート.xlsx'), 'xlsx')
   const runner: DemoRunner = async (_root, month) => ({ output: `output/${month}-月次管理レポート.xlsx`, tools: [], axes: ['SHEET'], status: 'PASS' })
   const { server, base } = await start(root, runner)
   const stream = await fetch(`${base}/events`)
@@ -147,7 +149,9 @@ test('cancel endpoint invokes the current Pi run and never exposes an arbitrary 
     assert.equal(released, true)
     assert.match(received, /CANCELLED/)
     const download = await fetch(`${base}/download`)
-    assert.equal(download.status, 400)
+    assert.equal(download.status, 404)
+    const state = await (await fetch(`${base}/state`)).json() as { artifacts: unknown[] }
+    assert.deepEqual(state.artifacts, [])
   } finally {
     await reader.cancel()
     await new Promise<void>(resolve => server.close(() => resolve()))

@@ -23,16 +23,18 @@ type UiMessage = {
 type UiState = {
   status: 'idle' | 'running' | 'PASS' | 'FAIL' | 'CANCELLED'
   runId?: string
-  output?: string
+  artifacts: UiArtifact[]
   error?: string
 }
+
+type UiArtifact = { id: string; runId: string; filename: string }
 
 type ServerEvent =
   | { type: 'state'; state: UiState & { tools: string[]; axes: string[] } }
   | { type: 'user'; id: string; text: string }
   | { type: 'assistant'; text: string; done?: boolean }
   | { type: 'tool'; phase: 'start' | 'end'; id: string; name: string; detail?: string; status?: 'success' | 'error' }
-  | { type: 'status'; status: 'running' | 'PASS' | 'FAIL' | 'CANCELLED'; output?: string; error?: string }
+  | { type: 'status'; status: 'running' | 'PASS' | 'FAIL' | 'CANCELLED'; error?: string }
 
 const TOOL_PRESENTATION: Record<string, string> = {
   workspace_list_files: 'ファイル一覧を確認',
@@ -147,19 +149,18 @@ function Composer({ running, onCancel }: { running: boolean; onCancel: () => voi
   )
 }
 
-function Artifact({ output }: { output?: string }) {
-  if (!output) return null
-  const filename = output.replace(/\\/gu, '/').split('/').filter(Boolean).at(-1) ?? 'monthly-report.xlsx'
-  return <a className="artifact-row" href="/download" download aria-label={`${filename}をダウンロード`}><Icon name="file" className="artifact-icon" /><span>{filename}</span><Icon name="open" className="artifact-arrow" /></a>
+function Artifact({ artifact }: { artifact?: UiArtifact }) {
+  if (!artifact) return null
+  return <a className="artifact-row" href={`/download/${encodeURIComponent(artifact.id)}`} download aria-label={`${artifact.filename}をダウンロード`}><Icon name="file" className="artifact-icon" /><span>{artifact.filename}</span><Icon name="open" className="artifact-arrow" /></a>
 }
 
-function Conversation({ messages, tools, running, expandedRunId, onToggle, output, activeRunId, onCancel }: {
+function Conversation({ messages, tools, running, expandedRunId, onToggle, artifacts, activeRunId, onCancel }: {
   messages: UiMessage[]
   tools: ToolEvent[]
   running: boolean
   expandedRunId?: string
   onToggle: (runId: string) => void
-  output?: string
+  artifacts: UiArtifact[]
   activeRunId?: string
   onCancel: () => void
 }) {
@@ -177,17 +178,17 @@ function Conversation({ messages, tools, running, expandedRunId, onToggle, outpu
               const beforeAssistant = message.role === 'assistant'
               const runId = runIdFromMessage(message.id, message.role === 'user' ? 'user' : 'assistant')
               const runTools = processEventsForRun(tools, runId)
+              const runArtifact = artifacts.find(artifact => artifact.runId === runId)
               const runIsActive = running && activeRunId === runId
               const afterLastUser = message.role === 'user' && message.id === messages.at(-1)?.id && !messages.some(item => item.id === `assistant-${runId}`)
               return <Fragment key={message.id}>
                 {beforeAssistant && <ProcessRows tools={runTools} running={runIsActive} expanded={expandedRunId === runId} onToggle={() => onToggle(runId)} />}
-                {message.role === 'user' ? <UserMessage /> : <AssistantMessage />}
+                {message.role === 'user' ? <UserMessage /> : <><AssistantMessage /><Artifact artifact={runArtifact} /></>}
                 {afterLastUser && <ProcessRows tools={runTools} running={runIsActive} expanded={expandedRunId === runId} onToggle={() => onToggle(runId)} />}
                 {afterLastUser && showThinking && <div className="thinking-status" role="status"><span className="thinking-dot" aria-hidden="true">•</span>考えています…</div>}
               </Fragment>
             }}
           </ThreadPrimitive.Messages>
-          <Artifact output={output} />
         </div>
         <ThreadPrimitive.ViewportFooter className="composer-region">
           <ThreadPrimitive.ScrollToBottom className="back-to-bottom" aria-label="最新のメッセージへ移動"><Icon name="back" /></ThreadPrimitive.ScrollToBottom>
@@ -201,7 +202,7 @@ function Conversation({ messages, tools, running, expandedRunId, onToggle, outpu
 function MisenApp() {
   const [messages, setMessages] = useState<UiMessage[]>([])
   const [tools, setTools] = useState<ToolEvent[]>([])
-  const [state, setState] = useState<UiState>({ status: 'idle' })
+  const [state, setState] = useState<UiState>({ status: 'idle', artifacts: [] })
   const [expandedRunId, setExpandedRunId] = useState<string | undefined>()
   const runIdRef = useRef<string | undefined>(undefined)
   const eventSourceRef = useRef<EventSource | null>(null)
@@ -212,11 +213,11 @@ function MisenApp() {
   const handleEvent = useCallback((event: ServerEvent) => {
     if (event.type === 'state') {
       if (event.state.runId) runIdRef.current = event.state.runId
-      setState({ status: event.state.status, runId: event.state.runId, output: event.state.output, error: event.state.error })
+      setState({ status: event.state.status, runId: event.state.runId, artifacts: event.state.artifacts, error: event.state.error })
       return
     }
     if (event.type === 'status') {
-      setState(previous => ({ ...previous, status: event.status, output: event.output ?? previous.output, error: event.error }))
+      setState(previous => ({ ...previous, status: event.status, error: event.error }))
       if (event.status !== 'running') setExpandedRunId(undefined)
       return
     }
@@ -269,7 +270,7 @@ function MisenApp() {
     runIdRef.current = clientId
     setMessages(previous => [...previous, { id: clientId, role: 'user', text, optimistic: true }])
     setExpandedRunId(undefined)
-    setState({ status: 'running', runId: clientId })
+    setState(previous => ({ status: 'running', runId: clientId, artifacts: previous.artifacts }))
     try {
       const response = await fetch('/run', { method: 'POST', headers: { origin: globalThis.location.origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ prompt: text, clientId }) })
       if (!response.ok && response.status !== 202) setState(previous => ({ ...previous, status: 'FAIL', error: '依頼を開始できませんでした。' }))
@@ -296,7 +297,7 @@ function MisenApp() {
       <main className={`misen-shell ${hasConversation ? 'misen-shell--active' : 'misen-shell--empty'}`}>
         <header className="misen-header"><span className="misen-mark" aria-hidden="true">M</span><span>Misen</span></header>
         <section className="conversation" aria-label="Conversation">
-          <Conversation messages={messages} tools={tools} running={running} expandedRunId={expandedRunId} onToggle={runId => setExpandedRunId(value => value === runId ? undefined : runId)} output={state.output} activeRunId={state.runId} onCancel={cancel} />
+          <Conversation messages={messages} tools={tools} running={running} expandedRunId={expandedRunId} onToggle={runId => setExpandedRunId(value => value === runId ? undefined : runId)} artifacts={state.artifacts} activeRunId={state.runId} onCancel={cancel} />
           {state.status === 'FAIL' && <p className="error-note" role="alert">{state.error ?? '処理に失敗しました。'}</p>}
         </section>
       </main>

@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { readFile } from 'node:fs/promises'
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { basename, join } from 'node:path'
 import { PROMPTS } from '../../demo/enterprise-excel/fixtures.js'
 import { SYNTHETIC_MONTHS } from '../../demo/enterprise-excel/fixtures.js'
@@ -25,11 +25,17 @@ export type DemoEvent =
   | { type: 'user'; id: string; text: string }
   | { type: 'assistant'; text: string; done?: boolean }
   | { type: 'tool'; phase: 'start' | 'end'; id: string; name: string; detail?: string; status?: 'success' | 'error' }
-  | { type: 'status'; status: 'running' | 'PASS' | 'FAIL' | 'CANCELLED'; output?: string; error?: string }
+  | { type: 'status'; status: 'running' | 'PASS' | 'FAIL' | 'CANCELLED'; error?: string }
 
 export interface DemoRunContext {
   emit: (event: DemoEvent) => void
   setCancel: (cancel: () => void) => void
+}
+
+export type UiArtifact = {
+  id: string
+  runId: string
+  filename: string
 }
 
 export type DemoRunner = (root: string, month: '7月' | '8月', prompt: string, context?: DemoRunContext) => Promise<DemoResult>
@@ -116,15 +122,18 @@ type UiState = {
   runId?: string
   tools: string[]
   axes: string[]
-  output?: string
+  artifacts: UiArtifact[]
   error?: string
 }
 
 const MAX_BODY = 8192
 const RUN_ID_RE = /^[A-Za-z0-9_-]{1,80}$/u
+const ARTIFACT_ID_RE = /^[A-Za-z0-9_-]{24}$/u
+const MAX_SESSION_ARTIFACTS = 64
+const MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 
 function writeEvent(response: ServerResponse, event: DemoEvent | { type: 'state'; state: UiState }): void {
-  response.write(`event: ${event.type}\ndata: ${JSON.stringify(event.type === 'state' ? event.state : event)}\n\n`)
+  response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
 }
 
 function hostIsLoopback(value: string): boolean { return /^((127\.0\.0\.1)|(localhost)):\d+$/u.test(value) }
@@ -150,13 +159,25 @@ function clientAssetPath(name: string): URL {
 
 export function createDemoServer(root: string, runner: DemoRunner = liveDemoRunner) {
   const boundary = new WorkspaceBoundary(root)
-  let state: UiState = { status: 'idle', tools: [], axes: [] }
+  const artifactResources = new Map<string, { filename: string; bytes: Uint8Array }>()
+  const usedRunIds = new Set<string>()
+  let state: UiState = { status: 'idle', tools: [], axes: [], artifacts: [] }
   let active = false
   let activeCancel: (() => void) | undefined
   let nextRunId = 0
   const listeners = new Set<ServerResponse>()
   const emit = (event: DemoEvent) => { for (const response of listeners) writeEvent(response, event) }
   const emitState = () => { for (const response of listeners) writeEvent(response, { type: 'state', state }) }
+  const registerArtifact = async (output: string, runId: string): Promise<UiArtifact> => {
+    if (artifactResources.size >= MAX_SESSION_ARTIFACTS) throw new Error('artifact capacity')
+    const resource = await boundary.readOutputFileBytes(output)
+    const filename = basename(resource.absolute.replace(/\\/gu, '/'))
+    if (!/\.xlsx$/iu.test(filename) || resource.bytes.byteLength > MAX_ARTIFACT_BYTES) throw new Error('artifact')
+    let id = randomBytes(18).toString('base64url')
+    while (artifactResources.has(id)) id = randomBytes(18).toString('base64url')
+    artifactResources.set(id, { filename, bytes: Uint8Array.from(resource.bytes) })
+    return { id, runId, filename }
+  }
 
   return createServer(async (request, response) => {
     try {
@@ -192,9 +213,10 @@ export function createDemoServer(root: string, runner: DemoRunner = liveDemoRunn
         const prompt = params.get('prompt') ?? ''
         const clientId = params.get('clientId') ?? `server-${++nextRunId}`
         const month = Object.entries(PROMPTS).find(([, value]) => value === prompt)?.[0] as '7月' | '8月' | undefined
-        if (!month || !RUN_ID_RE.test(clientId)) throw new Error('prompt')
+        if (!month || !RUN_ID_RE.test(clientId) || usedRunIds.has(clientId)) throw new Error('prompt')
+        usedRunIds.add(clientId)
         active = true
-        state = { status: 'running', runId: clientId, tools: [], axes: [] }
+        state = { status: 'running', runId: clientId, tools: [], axes: [], artifacts: state.artifacts }
         emit({ type: 'status', status: 'running' }); emit({ type: 'user', id: clientId, text: prompt }); emitState()
         try {
           let hasVisibleAssistantText = false
@@ -205,11 +227,12 @@ export function createDemoServer(root: string, runner: DemoRunner = liveDemoRunn
           const result = await runner(root, month, prompt, { emit: runEmit, setCancel: cancel => { activeCancel = cancel } })
           const status = result.status ?? 'PASS'
           const terminalStatus: Exclude<UiState['status'], 'idle' | 'running'> = status
-          state = { status: terminalStatus, runId: clientId, tools: result.tools.slice(0, 20), axes: result.axes, output: status === 'PASS' ? result.output : undefined }
+          const artifact = status === 'PASS' ? await registerArtifact(result.output, clientId) : undefined
+          state = { status: terminalStatus, runId: clientId, tools: result.tools.slice(0, 20), axes: result.axes, artifacts: artifact ? [...state.artifacts, artifact] : state.artifacts }
           if (status !== 'PASS' || !hasVisibleAssistantText) {
             emit({ type: 'assistant', text: status === 'PASS' ? '月次管理レポートを作成しました。' : status === 'CANCELLED' ? '処理を停止しました。' : '処理を完了できませんでした。', done: true })
           }
-          emit({ type: 'status', status: terminalStatus, output: status === 'PASS' ? result.output : undefined }); emitState()
+          emit({ type: 'status', status: terminalStatus }); emitState()
         } catch (error) {
           // Keep provider/transport details out of the browser-facing state;
           // diagnostic evidence belongs to the server-side acceptance layer.
@@ -232,13 +255,14 @@ export function createDemoServer(root: string, runner: DemoRunner = liveDemoRunn
         response.statusCode = 202
         return response.end()
       }
-      if (request.method === 'GET' && url.pathname === '/download') {
-        if (!state.output) throw new Error('output')
-        const file = await boundary.readOutputFileBytes(state.output)
+      if (request.method === 'GET' && url.pathname.startsWith('/download/')) {
+        const id = url.pathname.slice('/download/'.length)
+        if (!ARTIFACT_ID_RE.test(id)) { response.statusCode = 404; return response.end('Not found') }
+        const artifact = artifactResources.get(id)
+        if (!artifact) { response.statusCode = 404; return response.end('Not found') }
         response.setHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        const filename = basename(state.output.replace(/\\/gu, '/'))
-        response.setHeader('content-disposition', `attachment; filename="monthly-report.xlsx"; filename*=UTF-8''${encodeRfc5987Value(filename)}`)
-        return response.end(file.bytes)
+        response.setHeader('content-disposition', `attachment; filename="monthly-report.xlsx"; filename*=UTF-8''${encodeRfc5987Value(artifact.filename)}`)
+        return response.end(artifact.bytes)
       }
       response.statusCode = 404
       return response.end()
