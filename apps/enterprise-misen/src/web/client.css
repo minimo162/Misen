@@ -255,6 +255,8 @@ button { cursor: pointer; }
   box-shadow: 0 4px 14px rgba(48, 43, 35, .1);
 }
 
+.back-to-bottom:disabled { visibility: hidden; pointer-events: none; }
+
 .error-note { width: min(100%, 760px); margin: 0 auto; color: #9c4d45; font-size: 13px; }
 
 :focus-visible { outline: 2px solid #6f6a62; outline-offset: 3px; }
