@@ -1,0 +1,19 @@
+# Decision 433-436 Pi Enterprise slice
+
+Decisions 433-436 retain Misen as the authority for Capability (the fixed five-tool roster), Resource (realpath-contained workspace), Mutation (output-only atomic replacement), Secret/Network (provider-bound `OPENAI_API_KEY` and configured OpenAI endpoint), and high-impact side effects (absent; fail closed). Pi supplies the Agent loop, OpenAI Responses provider, and TypeBox tools but is not the security root.
+
+The runtime-independent WorkspaceBoundary, Office Kit seam, synthetic data, formula policy, and atomic output design are carried forward from Decision 427/PR #71. DSH/Cordis composition, providers, session code, and UI are replaced by public Pi Agent/AI plus a restricted Node loopback server. The deterministic route uses Pi's public faux stream seam; the production UI and live runner use only Luna medium and Pi's official OpenAI provider with `maxRetries: 0`.
+
+Normal execution is Node in-process, the selected workspace, and the configured OpenAI endpoint. There is no shell, subprocess, browser/Web/MCP tool, plugin, subagent, runtime download, or network monitor capability. The external observer is intentionally outside Agent tools. Live provider/device/EDR/TCP evidence remains a deployment gate, not a deterministic-pass claim.
+
+## UI composition
+
+The demo presentation uses `@assistant-ui/react@0.15.17` through its public External Store Runtime and Thread, Message, and Composer primitives. Misen owns the event store and adapts allowlisted Pi events over loopback-only SSE. Pi Agent `abort()` backs the same-seat Stop action. Assistant Cloud is not instantiated or configured, and raw reasoning/provider payloads never cross the server's UI event boundary. The styling follows the restrained DSH conversation grammar without importing DSH UI: right-aligned user bubble, bare assistant text, compact deterministic Tool rows folded after completion, sticky rounded Composer, optimistic user reconciliation, streaming, and bottom-aware scrolling.
+
+## Current acceptance checkpoint
+
+- Deterministic tests: 19 PASS, 0 FAIL, 1 explicit Windows symlink-fixture EPERM SKIP. The suite includes sequential-turn process isolation, RFC 5987-safe artifact filename delivery, and rejection of a serialized malicious source workbook through the production create-output Tool.
+- Mechanical July/August workbook Acceptance: PASS for all eight business axes, one output, and unchanged input hashes.
+- Supply chain: clean `npm ci --ignore-scripts` PASS; the official-schema-validated CycloneDX 1.6 SBOM contains 247 resolved lockfile packages, including the development-only validator set; `npm audit --omit=dev --package-lock-only` reported 0 production vulnerabilities at the measurement time. The development-only esbuild package includes its Windows build executable; normal Agent work does not execute it.
+- July Luna/medium live run: BLOCKED by the independent output-name check. The Agent created exactly one file named `2024年7月_月次管理レポート.xlsx`; the validator requires `7月-月次管理レポート.xlsx`, while the current business handoff specifies only the output directory and no exact filename representation. No Acceptance change was made. August and rendered-browser acceptance are NOT RUN pending a human Decision on that hidden representation requirement.
+- The July PID-scoped observer saw the Node runtime connect only to `162.159.140.245:443` (plus non-remote `0.0.0.0:0` rows); endpoint attribution must remain hostname/config based rather than treating that point-in-time IP as an architecture pin.

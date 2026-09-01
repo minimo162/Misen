@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "target": "ES2024", "module": "NodeNext", "moduleResolution": "NodeNext", "jsx": "react-jsx",
+    "strict": true, "noImplicitAny": false, "esModuleInterop": true, "skipLibCheck": true,
+    "outDir": "dist", "rootDir": ".", "declaration": false
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "acceptance/**/*.ts", "test/**/*.ts", "test/**/*.tsx"]
+}
