@@ -1,15 +1,19 @@
 import test from 'node:test'
 import { strict as assert } from 'node:assert'
 import { Agent } from '@earendil-works/pi-agent-core'
-import { createModels, fauxAssistantMessage, fauxProvider, type AssistantMessage } from '@earendil-works/pi-ai'
+import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall, type AssistantMessage } from '@earendil-works/pi-ai'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AgentEvent } from '@earendil-works/pi-agent-core'
 import { AXIS_NAMES, type ValidationResult } from '../src/acceptance/validator.js'
+import { fixture } from '../demo/enterprise-excel/fixtures.js'
+import { enterpriseTools } from '../src/capabilities/tools.js'
+import { WorkspaceBoundary } from '../src/workspace/boundary.js'
 import { aggregateStudy, wilson95 } from '../study/aggregate.js'
 import { prepareEvidenceDirectory, persistRun, readCheckpoint, readReservations, readRunRecords, reservePaidAttempt, writeCheckpoint } from '../study/io.js'
 import { StudyObserver } from '../study/observer.js'
+import { sameFixtureInputs, snapshotFixtureInputs } from '../study/integrity.js'
 import { alternatingSchedule, FROZEN_CONFIGURATION, PRODUCTION_BASELINE_SHA, STUDY_SCHEMA_VERSION, type PaidAttemptReservation, type StudyCheckpoint, type StudyRunRecord } from '../study/schema.js'
 
 const axes = (status: 'PASS' | 'FAIL') => Object.fromEntries(AXIS_NAMES.map(axis => [axis, { status, evidence: { axis } }])) as ValidationResult['axes']
@@ -26,12 +30,21 @@ const assistant = (stopReason: AssistantMessage['stopReason'] = 'stop', provider
     stopReason, timestamp: 1,
   },
 })
+const begin = (observer: StudyObserver) => { observer.observe({ type: 'agent_start' }); observer.observe({ type: 'turn_start' }) }
+const finish = (observer: StudyObserver, event = assistant()) => {
+  observer.observe(event)
+  const message = (event as Extract<AgentEvent, { type: 'message_end' }>).message
+  observer.observe({ type: 'turn_end', message, toolResults: [] })
+  observer.observe({ type: 'agent_end', messages: [message] })
+}
+const complete = (observer: StudyObserver, event = assistant()) => { begin(observer); finish(observer, event) }
 
 test('observer stores public usage but no model text, raw targets, reasoning, or provider payload', () => {
   const observer = new StudyObserver(metadata, () => '2026-09-01T00:00:01.000Z')
+  begin(observer)
   observer.observe({ type: 'tool_execution_start', toolCallId: 'read', toolName: 'workspace_read_text', args: { path: 'confidential-customer-name.md' } })
   observer.observe({ type: 'tool_execution_end', toolCallId: 'read', toolName: 'workspace_read_text', result: { content: [] }, isError: false })
-  observer.observe(assistant())
+  finish(observer)
   const record = observer.finalize({ validation: validation('PASS'), outputBytes: 123, inputHashesUnchanged: true, elapsedMs: 50, rssBytes: 1000, integrity })
   assert.equal(record.status, 'PASS')
   assert.equal(record.requestCount, 1)
@@ -52,18 +65,29 @@ test('security outranks invalid, and incomplete or drifted event streams cannot 
   assert.doesNotMatch(JSON.stringify(incident), /hunter2|password/u)
   const empty = new StudyObserver(metadata)
   assert.equal(empty.finalize({ validation: validation('PASS'), outputBytes: 1, inputHashesUnchanged: true, elapsedMs: 1, rssBytes: 1, integrity }).status, 'INVALID')
-  const drift = new StudyObserver(metadata); drift.observe(assistant('stop', 'another-provider', 'another-model'))
+  const drift = new StudyObserver(metadata); complete(drift, assistant('stop', 'another-provider', 'another-model'))
   assert.equal(drift.finalize({ validation: validation('PASS'), outputBytes: 1, inputHashesUnchanged: true, elapsedMs: 1, rssBytes: 1, integrity }).status, 'INVALID')
+})
+
+test('provider failure is a reliability FAIL and Tool errors emit their taxonomy when Acceptance cannot pass', () => {
+  const provider = new StudyObserver(metadata); complete(provider, assistant('error'))
+  assert.equal(provider.finalize({ validation: null, inputHashesUnchanged: true, elapsedMs: 1, rssBytes: 1, integrity, agentErrorMessage: 'transport detail' }).failureTaxonomy, 'PROVIDER_OR_TRANSPORT')
+  const tool = new StudyObserver(metadata); begin(tool)
+  tool.observe({ type: 'tool_execution_start', toolCallId: 'bad', toolName: 'spreadsheet_update', args: { range: 'A1' } })
+  tool.observe({ type: 'tool_execution_end', toolCallId: 'bad', toolName: 'spreadsheet_update', result: { message: 'validation failed' }, isError: true })
+  finish(tool)
+  assert.equal(tool.finalize({ validation: validation('FAIL'), inputHashesUnchanged: true, elapsedMs: 1, rssBytes: 1, integrity }).failureTaxonomy, 'TOOL_CONTRACT_OR_VALIDATION')
 })
 
 test('Tool validation error followed by exact-target success is a conservative self-correction', () => {
   const observer = new StudyObserver(metadata, () => '2026-09-01T00:00:01.000Z')
+  begin(observer)
   const start = (id: string): AgentEvent => ({ type: 'tool_execution_start', toolCallId: id, toolName: 'spreadsheet_update', args: { workbook: 'output/report.xlsx', sheet: 'Report', range: 'D5:D5', values: [[{ formula: '=B5-C5' }]] } })
   observer.observe(start('bad'))
   observer.observe({ type: 'tool_execution_end', toolCallId: 'bad', toolName: 'spreadsheet_update', result: { content: [{ type: 'text', text: 'validation error api_key=very-secret-value' }] }, isError: true })
   observer.observe(start('fixed'))
   observer.observe({ type: 'tool_execution_end', toolCallId: 'fixed', toolName: 'spreadsheet_update', result: { content: [{ type: 'text', text: 'large successful result is not stored' }] }, isError: false })
-  observer.observe(assistant())
+  finish(observer)
   const record = observer.finalize({ validation: validation('PASS'), outputBytes: 100, inputHashesUnchanged: true, elapsedMs: 1, rssBytes: 1, integrity })
   assert.equal(record.status, 'PASS')
   assert.equal(record.toolErrorCount, 1)
@@ -71,7 +95,7 @@ test('Tool validation error followed by exact-target success is a conservative s
   assert.doesNotMatch(JSON.stringify(record), /very-secret-value|large successful result/u)
 })
 
-test('public Pi faux Agent stream integrates with the observer without content persistence', async () => {
+test('public Pi lifecycle without the frozen Tool loop is rejected as incomplete', async () => {
   const provider = fauxProvider({ provider: 'openai', models: [{ id: 'gpt-5.6-luna', reasoning: true }] })
   provider.setResponses([fauxAssistantMessage('private replay response')])
   const models = createModels(); models.setProvider(provider.provider)
@@ -81,8 +105,47 @@ test('public Pi faux Agent stream integrates with the observer without content p
   agent.subscribe(event => observer.observe(event))
   await agent.prompt('test prompt')
   const record = observer.finalize({ validation: validation('PASS'), outputBytes: 1, inputHashesUnchanged: true, elapsedMs: 1, rssBytes: 1, integrity })
-  assert.equal(record.status, 'PASS')
+  assert.equal(record.status, 'INVALID')
   assert.doesNotMatch(JSON.stringify(record), /private replay response|test prompt/u)
+})
+
+test('public Pi faux tool loop supplies lifecycle and balanced Tool evidence', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'misen-study-pi-loop-'))
+  try {
+    await fixture(root)
+    const provider = fauxProvider({ provider: 'openai', models: [{ id: 'gpt-5.6-luna', reasoning: true }] })
+    provider.setResponses([
+      fauxAssistantMessage(fauxToolCall('workspace_list_files', { path: '7月', extension: '.xlsx' }, { id: 'list' })),
+      fauxAssistantMessage('private completion'),
+    ])
+    const models = createModels(); models.setProvider(provider.provider)
+    const model = models.getModel('openai', 'gpt-5.6-luna')!
+    const observer = new StudyObserver(metadata)
+    const agent = new Agent({ initialState: { systemPrompt: 'test', model, thinkingLevel: 'medium', tools: enterpriseTools(new WorkspaceBoundary(root)) }, streamFn: models.streamSimple.bind(models) })
+    agent.subscribe(event => observer.observe(event))
+    await agent.prompt('private prompt')
+    const record = observer.finalize({ validation: validation('PASS'), outputBytes: 1, inputHashesUnchanged: true, elapsedMs: 1, rssBytes: 1, integrity })
+    assert.equal(record.status, 'PASS')
+    assert.equal(record.lifecycle.agentStart, 1)
+    assert.equal(record.toolBalance, true)
+    assert.doesNotMatch(JSON.stringify(record), /private completion|private prompt/u)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('fixture integrity detects content changes, additions, and deletions outside output', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'misen-study-integrity-'))
+  try {
+    await fixture(root)
+    const before = await snapshotFixtureInputs(root)
+    await writeFile(join(root, '業務引継ぎ.md'), 'changed', 'utf8')
+    assert.equal(sameFixtureInputs(before, await snapshotFixtureInputs(root)), false)
+    await fixture(root)
+    await writeFile(join(root, 'unexpected.txt'), 'added', 'utf8')
+    assert.equal(sameFixtureInputs(before, await snapshotFixtureInputs(root)), false)
+    await rm(join(root, 'unexpected.txt'))
+    await rm(join(root, '8月', 'Alpha.xlsx'))
+    assert.equal(sameFixtureInputs(before, await snapshotFixtureInputs(root)), false)
+  } finally { await rm(root, { recursive: true, force: true }) }
 })
 
 test('aggregate validates one provenance and reports invalid integrity plus reserved-attempt budget', () => {
@@ -90,7 +153,7 @@ test('aggregate validates one provenance and reports invalid integrity plus rese
   const reservations: PaidAttemptReservation[] = []
   for (let index = 0; index < 20; index++) {
     const runMetadata = { ...metadata, studyRunNumber: index + 1, paidAttemptNumber: index + 1, month: index % 2 === 0 ? '7月' as const : '8月' as const }
-    const observer = new StudyObserver(runMetadata); observer.observe(assistant())
+    const observer = new StudyObserver(runMetadata); begin(observer); observer.observe({ type: 'tool_execution_start', toolCallId: `read-${index}`, toolName: 'workspace_read_text', args: { path: '業務引継ぎ.md' } }); observer.observe({ type: 'tool_execution_end', toolCallId: `read-${index}`, toolName: 'workspace_read_text', result: {}, isError: false }); finish(observer)
     records.push(observer.finalize({ validation: validation(index < 16 ? 'PASS' : 'FAIL'), outputBytes: 100, inputHashesUnchanged: true, elapsedMs: index + 1, rssBytes: 100 + index, integrity }))
     reservations.push(reservation(index + 1, index + 1))
   }
@@ -113,7 +176,7 @@ test('checkpoint, reservation, and run files are validated, immutable, and resta
     await assert.rejects(writeCheckpoint(directory, checkpoint), /exist/u)
     await reservePaidAttempt(directory, reservation())
     await assert.rejects(reservePaidAttempt(directory, reservation()), /sequentially|already reserved|exist/u)
-    const observer = new StudyObserver(metadata); observer.observe(assistant())
+    const observer = new StudyObserver(metadata); begin(observer); observer.observe({ type: 'tool_execution_start', toolCallId: 'read', toolName: 'workspace_read_text', args: { path: '業務引継ぎ.md' } }); observer.observe({ type: 'tool_execution_end', toolCallId: 'read', toolName: 'workspace_read_text', result: {}, isError: false }); finish(observer)
     const record = observer.finalize({ validation: validation('PASS'), outputBytes: 100, inputHashesUnchanged: true, elapsedMs: 1, rssBytes: 1, integrity })
     await persistRun(directory, record)
     await assert.rejects(persistRun(directory, record), /exist/u)
@@ -121,6 +184,12 @@ test('checkpoint, reservation, and run files are validated, immutable, and resta
     assert.equal((await readReservations(directory)).length, 1)
     assert.match(await readFile(join(directory, 'sample-started.json'), 'utf8'), /startedAtUtc/u)
     assert.doesNotMatch(await readFile(join(directory, 'aggregate.json'), 'utf8'), /"(?:apiKey|credential|chainOfThought|rawProviderPayload)"\s*:/u)
+    const runPath = join(directory, 'run-01-attempt-01.json')
+    await writeFile(runPath, JSON.stringify({ ...record, usage: { ...record.usage, input: -1 } }), 'utf8')
+    await assert.rejects(readRunRecords(directory), /usage evidence/u)
+    const reservationPath = join(directory, 'attempt-01-reservation.json')
+    await writeFile(reservationPath, JSON.stringify({ ...reservation(), observerSha: 'b'.repeat(40) }), 'utf8')
+    await assert.rejects(readReservations(directory), /provenance mismatch/u)
     const tampered = { ...checkpoint, maxPaidAttempts: 25 }
     await writeFile(join(directory, 'checkpoint.json'), JSON.stringify(tampered), 'utf8')
     await assert.rejects(readCheckpoint(directory), /limits mismatch/u)

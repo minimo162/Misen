@@ -72,7 +72,7 @@ export interface SafeToolEnd {
 }
 
 export interface IntegrityObservation {
-  readonly inputMutation: boolean
+  readonly inputMutation: boolean | null
   readonly forbiddenCapability: boolean
   readonly credentialExposure: boolean | null
   readonly unexpectedNetwork: boolean | null
@@ -94,7 +94,7 @@ export interface StudyRunRecord {
   readonly failureSummary: string | null
   readonly axisMatrix: Readonly<Record<AxisName, AxisResult>> | null
   readonly output: { readonly basename: string; readonly bytes: number } | null
-  readonly inputHashesUnchanged: boolean
+  readonly inputHashesUnchanged: boolean | null
   readonly toolStarts: readonly SafeToolStart[]
   readonly toolResults: readonly SafeToolEnd[]
   readonly toolBalance: boolean
@@ -102,6 +102,7 @@ export interface StudyRunRecord {
   readonly toolValidationErrorCount: number
   readonly selfCorrectionCount: number | null
   readonly requestCount: number
+  readonly lifecycle: { readonly agentStart: number; readonly agentEnd: number; readonly turnStart: number; readonly turnEnd: number }
   readonly assistantStopReasons: readonly string[]
   readonly observedProviders: readonly string[]
   readonly observedModels: readonly string[]

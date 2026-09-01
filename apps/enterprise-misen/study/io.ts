@@ -1,6 +1,7 @@
 import { mkdir, open, readFile, readdir, realpath, rename, writeFile } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { aggregateStudy } from './aggregate.js'
+import { AXIS_NAMES } from '../src/acceptance/validator.js'
 import {
   FROZEN_CONFIGURATION,
   PRODUCTION_BASELINE_SHA,
@@ -46,7 +47,29 @@ export function assertRunRecord(value: unknown): asserts value is StudyRunRecord
   if (!['PASS', 'FAIL', 'INVALID'].includes(item.status)) throw new Error('invalid run status')
   if (typeof item.startedAtUtc !== 'string' || typeof item.endedAtUtc !== 'string') throw new Error('missing run timestamps')
   if (!Array.isArray(item.toolStarts) || !Array.isArray(item.toolResults) || !Array.isArray(item.assistantStopReasons)) throw new Error('invalid event evidence')
-  if (!item.integrity || typeof item.integrity.inputMutation !== 'boolean' || typeof item.integrity.forbiddenCapability !== 'boolean') throw new Error('invalid integrity evidence')
+  if (!item.integrity || ![true, false, null].includes(item.integrity.inputMutation) || typeof item.integrity.forbiddenCapability !== 'boolean'
+    || ![true, false, null].includes(item.integrity.credentialExposure) || ![true, false, null].includes(item.integrity.unexpectedNetwork)) throw new Error('invalid integrity evidence')
+  if (![true, false, null].includes(item.inputHashesUnchanged)) throw new Error('invalid input hash evidence')
+  if (!item.lifecycle || !Object.values(item.lifecycle).every(count => Number.isInteger(count) && count >= 0)) throw new Error('invalid lifecycle evidence')
+  if (!Number.isInteger(item.requestCount) || item.requestCount !== item.assistantStopReasons.length) throw new Error('request count mismatch')
+  const startIds = new Set(item.toolStarts.map(start => start.toolCallId)), endIds = new Set(item.toolResults.map(result => result.toolCallId))
+  const computedBalance = item.toolStarts.length === item.toolResults.length && item.toolStarts.every(start => endIds.has(start.toolCallId)) && item.toolResults.every(result => startIds.has(result.toolCallId))
+  if (item.toolBalance !== computedBalance) throw new Error('invalid tool balance evidence')
+  if (item.toolErrorCount !== item.toolResults.filter(result => result.isError).length || item.toolValidationErrorCount !== item.toolResults.filter(result => result.validationError).length) throw new Error('tool count mismatch')
+  const usageValues = [item.usage.input, item.usage.output, item.usage.cacheRead, item.usage.cacheWrite, item.usage.totalTokens, item.usage.reasoning, item.usage.catalogEstimatedCostUsd]
+  if (usageValues.some(number => number !== null && (!Number.isFinite(number) || number < 0))) throw new Error('invalid usage evidence')
+  const securityIncident = item.integrity.inputMutation === true || item.integrity.forbiddenCapability || item.integrity.credentialExposure === true || item.integrity.unexpectedNetwork === true
+  if (item.status === 'PASS') {
+    if (item.failureTaxonomy !== null || item.failureSummary !== null || item.invalidReason !== null || item.inputHashesUnchanged !== true || !item.output || item.requestCount < 1
+      || !item.toolBalance || item.toolStarts.length < 1 || item.lifecycle.agentStart !== 1 || item.lifecycle.agentEnd !== 1 || item.lifecycle.turnStart < 1 || item.lifecycle.turnStart !== item.lifecycle.turnEnd
+      || JSON.stringify(item.observedProviders) !== JSON.stringify([FROZEN_CONFIGURATION.provider]) || JSON.stringify(item.observedModels) !== JSON.stringify([FROZEN_CONFIGURATION.model])) throw new Error('PASS invariants violated')
+    if (!item.axisMatrix || JSON.stringify(Object.keys(item.axisMatrix).sort()) !== JSON.stringify([...AXIS_NAMES].sort()) || Object.values(item.axisMatrix).some(axis => axis.status !== 'PASS')) throw new Error('PASS axis matrix incomplete')
+  } else if (item.status === 'INVALID') {
+    if (item.failureTaxonomy !== 'INVALID_OBSERVER_OR_INFRA' || item.invalidReason === null || securityIncident) throw new Error('INVALID invariants violated')
+  } else {
+    if (item.failureTaxonomy === null || item.failureTaxonomy === 'INVALID_OBSERVER_OR_INFRA' || item.invalidReason !== null) throw new Error('FAIL invariants violated')
+    if (securityIncident && item.failureTaxonomy !== 'SECURITY_OR_INTEGRITY') throw new Error('security taxonomy mismatch')
+  }
 }
 
 export function assertReservation(value: unknown): asserts value is PaidAttemptReservation {
@@ -115,11 +138,17 @@ export async function readRunRecords(evidenceDirectory: string): Promise<StudyRu
 
 export async function readReservations(evidenceDirectory: string): Promise<PaidAttemptReservation[]> {
   const names = (await readdir(evidenceDirectory)).filter(name => /^attempt-\d{2}-reservation\.json$/u.test(name)).sort()
-  return Promise.all(names.map(async name => {
+  const reservations = await Promise.all(names.map(async name => {
     const value: unknown = JSON.parse(await readFile(resolve(evidenceDirectory, name), 'utf8'))
     assertReservation(value)
     return value
   }))
+  const checkpoint = await readCheckpoint(evidenceDirectory)
+  for (const reservation of reservations) {
+    if (reservation.studyId !== checkpoint.studyId || reservation.productionBaselineSha !== checkpoint.productionBaselineSha || reservation.observerSha !== checkpoint.observerSha || !sameConfiguration(reservation.configuration)) throw new Error('reservation/checkpoint provenance mismatch')
+  }
+  if (reservations.some((reservation, index) => reservation.paidAttemptNumber !== index + 1)) throw new Error('reservation sequence is not contiguous')
+  return reservations
 }
 
 export async function reservePaidAttempt(evidenceDirectory: string, reservation: PaidAttemptReservation): Promise<void> {

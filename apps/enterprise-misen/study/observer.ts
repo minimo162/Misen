@@ -97,7 +97,7 @@ export interface ObserverMetadata {
 export interface FinalizeObservation {
   readonly validation: ValidationResult | null
   readonly outputBytes?: number
-  readonly inputHashesUnchanged: boolean
+  readonly inputHashesUnchanged: boolean | null
   readonly elapsedMs: number
   readonly rssBytes: number
   readonly integrity: IntegrityObservation
@@ -116,10 +116,15 @@ export class StudyObserver {
   private usage = zeroUsage()
   private requestCount = 0
   private sequence = 0
+  private lifecycle = { agentStart: 0, agentEnd: 0, turnStart: 0, turnEnd: 0 }
 
   constructor(private readonly metadata: ObserverMetadata, private readonly now: () => string = () => new Date().toISOString()) {}
 
   observe(event: AgentEvent): void {
+    if (event.type === 'agent_start') { this.lifecycle.agentStart++; return }
+    if (event.type === 'agent_end') { this.lifecycle.agentEnd++; return }
+    if (event.type === 'turn_start') { this.lifecycle.turnStart++; return }
+    if (event.type === 'turn_end') { this.lifecycle.turnEnd++; return }
     if (event.type === 'tool_execution_start') {
       const safe = target(event.args)
       this.starts.push({ sequence: ++this.sequence, toolCallId: event.toolCallId, toolName: event.toolName, timestampUtc: this.now(), ...safe })
@@ -176,18 +181,21 @@ export class StudyObserver {
       || this.starts.some(item => !FROZEN_CONFIGURATION.tools.includes(item.toolName))
     const integrity = { ...input.integrity, forbiddenCapability }
     const providerFailure = this.stopReasons.includes('error') || Boolean(input.agentErrorMessage)
-    const incompleteEvidence = this.requestCount === 0 || !toolBalance
+    const incompleteEvidence = this.requestCount === 0 || this.starts.length === 0 || !toolBalance
+      || this.lifecycle.agentStart !== 1 || this.lifecycle.agentEnd !== 1
+      || this.lifecycle.turnStart < 1 || this.lifecycle.turnStart !== this.lifecycle.turnEnd
     const configurationDrift = this.providers.size !== 1 || !this.providers.has(FROZEN_CONFIGURATION.provider)
       || this.models.size !== 1 || !this.models.has(FROZEN_CONFIGURATION.model)
     let taxonomy: FailureTaxonomy | null = null
     let failureSummary: string | null = null
-    if (integrity.inputMutation || integrity.forbiddenCapability || integrity.credentialExposure || integrity.unexpectedNetwork) { taxonomy = 'SECURITY_OR_INTEGRITY'; failureSummary = 'integrity or security incident' }
+    if (integrity.inputMutation === true || integrity.forbiddenCapability || integrity.credentialExposure || integrity.unexpectedNetwork) { taxonomy = 'SECURITY_OR_INTEGRITY'; failureSummary = 'integrity or security incident' }
     else if (input.invalidReason) { taxonomy = 'INVALID_OBSERVER_OR_INFRA'; failureSummary = 'observer or infrastructure failure' }
     else if (input.acceptanceFatal) { taxonomy = 'ACCEPTANCE_FATAL'; failureSummary = 'acceptance evaluation failed' }
     else if (providerFailure) { taxonomy = 'PROVIDER_OR_TRANSPORT'; failureSummary = 'provider or transport error' }
     else if (configurationDrift) { taxonomy = 'INVALID_OBSERVER_OR_INFRA'; failureSummary = 'observed provider or model differs from frozen configuration' }
     else if (incompleteEvidence) { taxonomy = 'INVALID_OBSERVER_OR_INFRA'; failureSummary = 'incomplete observer event stream' }
     else if (this.stopReasons.includes('length') || this.stopReasons.includes('aborted')) { taxonomy = 'AGENT_INCOMPLETE'; failureSummary = 'agent did not complete' }
+    else if (this.ends.some(item => item.isError) && (!input.validation || !input.validation.passed)) { taxonomy = 'TOOL_CONTRACT_OR_VALIDATION'; failureSummary = 'Tool contract or validation error affected completion' }
     else if (input.validation && !input.validation.passed) { taxonomy = 'BUSINESS_SEMANTIC'; failureSummary = 'one or more business Acceptance axes failed' }
     if (taxonomy && !FAILURE_TAXONOMIES.includes(taxonomy)) throw new Error('unsupported failure taxonomy')
     const status = taxonomy === 'INVALID_OBSERVER_OR_INFRA' ? 'INVALID' : taxonomy === null ? 'PASS' : 'FAIL'
@@ -210,6 +218,7 @@ export class StudyObserver {
       toolValidationErrorCount: validationErrors.length,
       selfCorrectionCount,
       requestCount: this.requestCount,
+      lifecycle: { ...this.lifecycle },
       assistantStopReasons: this.stopReasons,
       observedProviders: [...this.providers].sort(),
       observedModels: [...this.models].sort(),

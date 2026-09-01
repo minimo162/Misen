@@ -23,12 +23,18 @@ baseline/configuration/observer evidence is rejected. Evidence is rejected when
 its directory is inside the Agent Workspace. A changed observer SHA invalidates
 the checkpoint and requires the formal sample to restart at run 1.
 
+Checkpoint creation and every live attempt also bind those declarations to the
+actual Git checkout: current `HEAD` must equal the observer SHA, observer paths
+must be clean, and the protected production `src`, Acceptance, fixtures, and
+lockfile trees must be byte-identical to the frozen production commit.
+
 Captured public surfaces are Pi `message_end` AssistantMessage
 provider/model/usage/stopReason plus Tool execution start/end/isError. Target
 strings are one-way hashed and values are reduced to shape counts. Error bodies
 are classified but never persisted. Successful Tool result bodies, Assistant
 text, raw reasoning, provider payloads, and credentials are never stored. A run
 cannot pass without a complete balanced event stream and the frozen observed
-provider/model.
+provider/model. The Agent/turn lifecycle, at least one Tool call, and the actual
+Agent model, thinking level, and exact five-Tool state are also checked.
 
 `credentialExposure` and `unexpectedNetwork` remain `null` unless a separate safe observer supplies evidence. Pi derives its public cost field from catalog pricing, so the record labels it a catalog estimate rather than provider billing. The checkpoint therefore requires confirmation of a provider-account USD 10 hard cap; the local estimate ledger is an additional stop control and never substitutes an absent billing control or guessed cost.

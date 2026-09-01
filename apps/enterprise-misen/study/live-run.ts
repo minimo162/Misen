@@ -1,5 +1,4 @@
-import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
+import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
@@ -9,12 +8,16 @@ import { liveAgent } from '../src/runtime/live.js'
 import { prepareEvidenceDirectory, persistRun, readCheckpoint, readReservations, readRunRecords, reservePaidAttempt } from './io.js'
 import { StudyObserver } from './observer.js'
 import { PRODUCTION_BASELINE_SHA, type StudyMonth } from './schema.js'
+import { FROZEN_CONFIGURATION } from './schema.js'
+import { verifyRepositoryProvenance } from './provenance.js'
+import { sameFixtureInputs, snapshotFixtureInputs } from './integrity.js'
 
 const args = new Map<string, string>()
 for (let index = 2; index < process.argv.length; index += 2) args.set(process.argv[index]!, process.argv[index + 1] ?? '')
 const evidenceArg = args.get('--evidence-dir'), observerSha = args.get('--observer-sha')
 const runNumber = Number(args.get('--run')), paidAttemptNumber = Number(args.get('--attempt'))
 if (!evidenceArg || !observerSha || !Number.isInteger(runNumber) || !Number.isInteger(paidAttemptNumber)) throw new Error('usage: study:live -- --evidence-dir <absolute> --observer-sha <40hex> --run <1..20> --attempt <1..24>')
+verifyRepositoryProvenance(observerSha)
 
 const evidenceDirectory = await prepareEvidenceDirectory(resolve(evidenceArg))
 const checkpoint = await readCheckpoint(evidenceDirectory)
@@ -33,39 +36,22 @@ if (spent >= checkpoint.hardSpendCapUsd) throw new Error('catalog-estimated spen
 
 const scenario = SYNTHETIC_MONTHS.find(candidate => candidate.month === month)!
 const workspace = await mkdtemp(join(tmpdir(), 'misen-pi-study-workspace-'))
-const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const startedAtUtc = new Date().toISOString(), started = performance.now()
 const observer = new StudyObserver({ studyId: checkpoint.studyId, studyRunNumber: runNumber, paidAttemptNumber, month, productionBaselineSha: PRODUCTION_BASELINE_SHA, observerSha, startedAtUtc })
 let validation: ValidationResult | null = null, outputBytes: number | undefined, agentErrorMessage: string | undefined, acceptanceFatal: string | undefined
-let inputHashesUnchanged = false
-let observerFailure: string | undefined, agentStarted = false
-
-async function snapshotInputs(root: string): Promise<Map<string, string>> {
-  const hashes = new Map<string, string>()
-  async function visit(relativeDirectory: string): Promise<void> {
-    const absolute = join(root, relativeDirectory)
-    const entries = await readdir(absolute, { withFileTypes: true })
-    for (const entry of entries) {
-      const relativePath = join(relativeDirectory, entry.name)
-      if (relativeDirectory === '' && entry.name === 'output') continue
-      if (entry.isDirectory()) await visit(relativePath)
-      else if (entry.isFile()) hashes.set(relativePath, digest(await readFile(join(root, relativePath))))
-      else throw new Error('unsupported fixture filesystem entry')
-    }
-  }
-  await visit('')
-  return hashes
-}
-
-function sameHashes(before: Map<string, string>, after: Map<string, string>): boolean {
-  return before.size === after.size && [...before].every(([path, hash]) => after.get(path) === hash)
-}
+let inputHashesUnchanged: boolean | null = null
+let observerFailure: string | undefined, agentStarted = false, persistenceStarted = false
 
 try {
   await fixture(workspace)
-  const before = await snapshotInputs(workspace)
+  const before = await snapshotFixtureInputs(workspace)
   const outputBefore = await snapshotOutputScope(workspace)
   const agent = liveAgent(workspace)
+  const actualTools = agent.state.tools.map(tool => tool.name)
+  if (agent.state.model.provider !== FROZEN_CONFIGURATION.provider || agent.state.model.id !== FROZEN_CONFIGURATION.model
+    || agent.state.thinkingLevel !== FROZEN_CONFIGURATION.reasoning || JSON.stringify(actualTools) !== JSON.stringify(FROZEN_CONFIGURATION.tools)) {
+    throw new Error('actual Agent state differs from frozen study configuration')
+  }
   agent.subscribe(event => { try { observer.observe(event) } catch (error) { observerFailure = error instanceof Error ? error.message : String(error); agent.abort() } })
   await reservePaidAttempt(evidenceDirectory, {
     schemaVersion: checkpoint.schemaVersion,
@@ -81,7 +67,7 @@ try {
   agentStarted = true
   try { await agent.prompt(PROMPTS[month]) } catch (error) { agentErrorMessage = error instanceof Error ? error.message : String(error) }
   agentErrorMessage = agent.state.errorMessage ?? agentErrorMessage
-  inputHashesUnchanged = sameHashes(before, await snapshotInputs(workspace))
+  inputHashesUnchanged = sameFixtureInputs(before, await snapshotFixtureInputs(workspace))
   try {
     validation = await validateReport(workspace, scenario, before, outputBefore)
     outputBytes = (await stat(join(workspace, validation.output))).size
@@ -104,19 +90,20 @@ try {
     acceptanceFatal,
     invalidReason: observerFailure,
   })
+  persistenceStarted = true
   await persistRun(evidenceDirectory, record)
   console.log(JSON.stringify({ status: record.status, run: runNumber, attempt: paidAttemptNumber, month, catalogEstimatedCostUsd: record.usage.catalogEstimatedCostUsd, evidenceDirectory }))
   if (record.status !== 'PASS') process.exitCode = 1
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error)
-  if (!agentStarted) throw error
+  if (!agentStarted || persistenceStarted) throw error
   const record = observer.finalize({
     validation: null,
     inputHashesUnchanged,
     elapsedMs: performance.now() - started,
     rssBytes: process.memoryUsage().rss,
-    integrity: { inputMutation: !inputHashesUnchanged && agentStarted, forbiddenCapability: false, credentialExposure: null, unexpectedNetwork: null },
-    ...(agentStarted ? { agentErrorMessage: message } : { invalidReason: message }),
+    integrity: { inputMutation: inputHashesUnchanged === false ? true : null, forbiddenCapability: false, credentialExposure: null, unexpectedNetwork: null },
+    invalidReason: message,
   })
   await persistRun(evidenceDirectory, record)
   console.error(JSON.stringify({ status: record.status, run: runNumber, attempt: paidAttemptNumber, month, failureTaxonomy: record.failureTaxonomy }))
