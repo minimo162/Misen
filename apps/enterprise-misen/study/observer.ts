@@ -6,6 +6,7 @@ import type { ValidationResult } from '../src/acceptance/validator.js'
 import {
   FAILURE_TAXONOMIES,
   FROZEN_CONFIGURATION,
+  SELECTED_SKILL_PATH,
   STUDY_SCHEMA_VERSION,
   type FailureTaxonomy,
   type IntegrityObservation,
@@ -18,6 +19,7 @@ import {
 
 const MAX_ERROR_CHARS = 240
 const VALIDATION_ERROR = /invalid|validation|schema|argument|must|required|bounded|dimensions|range|literal|formula|not allowed/iu
+const MONTHLY_REPORT_SKILL_TARGET = `sha256:${createHash('sha256').update(SELECTED_SKILL_PATH).digest('hex').slice(0, 16)}`
 
 function bounded(value: unknown): string {
   let text: string
@@ -179,6 +181,7 @@ export class StudyObserver {
     }
     const forbiddenCapability = input.integrity.forbiddenCapability
       || this.starts.some(item => !FROZEN_CONFIGURATION.tools.includes(item.toolName))
+    const progressiveSkillReadObserved = this.starts.some(item => item.toolName === 'workspace_read_text' && item.target.path === MONTHLY_REPORT_SKILL_TARGET)
     const integrity = { ...input.integrity, forbiddenCapability }
     const providerFailure = this.stopReasons.includes('error') || Boolean(input.agentErrorMessage)
     const incompleteEvidence = this.requestCount === 0 || this.starts.length === 0 || !toolBalance
@@ -220,6 +223,7 @@ export class StudyObserver {
       toolErrorCount: this.ends.filter(item => item.isError).length,
       toolValidationErrorCount: validationErrors.length,
       selfCorrectionCount,
+      progressiveSkillReadObserved,
       requestCount: this.requestCount,
       lifecycle: { ...this.lifecycle },
       assistantStopReasons: this.stopReasons,

@@ -16,6 +16,7 @@ import { StudyObserver } from '../study/observer.js'
 import { protectedTrackedFileCounts } from '../study/provenance.js'
 import { sameFixtureInputs, snapshotFixtureInputs } from '../study/integrity.js'
 import { alternatingSchedule, FROZEN_CONFIGURATION, PRODUCTION_BASELINE_SHA, STUDY_SCHEMA_VERSION, type PaidAttemptReservation, type StudyCheckpoint, type StudyRunRecord } from '../study/schema.js'
+import { assertFrozenRuntimeContext, captureRuntimeContextBinding } from '../study/context.js'
 
 const axes = (status: 'PASS' | 'FAIL') => Object.fromEntries(AXIS_NAMES.map(axis => [axis, { status, evidence: { axis } }])) as ValidationResult['axes']
 const validation = (status: 'PASS' | 'FAIL'): ValidationResult => ({ period: { year: 2024, month: 7 }, output: 'output/report.xlsx', passed: status === 'PASS', axes: axes(status), diagnostics: [] })
@@ -54,6 +55,41 @@ test('observer stores public usage but no model text, raw targets, reasoning, or
   const serialized = JSON.stringify(record)
   assert.doesNotMatch(serialized, /not persisted|confidential-customer-name|providerPayload|chainOfThought|reasoningContent/u)
   assert.match(serialized, /sha256:/u)
+})
+
+test('progressive monthly-report Skill read is observed without changing the five-Tool roster', () => {
+  const observer = new StudyObserver(metadata, () => '2026-09-01T00:00:01.000Z')
+  begin(observer)
+  observer.observe({ type: 'tool_execution_start', toolCallId: 'skill', toolName: 'workspace_read_text', args: { path: '.agents/skills/monthly-report/SKILL.md' } })
+  observer.observe({ type: 'tool_execution_end', toolCallId: 'skill', toolName: 'workspace_read_text', result: {}, isError: false })
+  finish(observer)
+  const record = observer.finalize({ validation: validation('PASS'), outputBytes: 1, inputHashesUnchanged: true, elapsedMs: 1, rssBytes: 1, integrity })
+  assert.equal(record.progressiveSkillReadObserved, true)
+  assert.equal(FROZEN_CONFIGURATION.tools.length, 5)
+  assert.doesNotThrow(() => assertRunRecord(record))
+  assert.throws(() => assertRunRecord({ ...record, progressiveSkillReadObserved: false }), /progressive Skill/u)
+})
+
+test('Thin Misen runtime context is frozen before any paid reservation or provider request', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'misen-study-context-'))
+  try {
+    await fixture(root)
+    const binding = await captureRuntimeContextBinding(root)
+    assert.deepEqual(binding, FROZEN_CONFIGURATION.context)
+    assert.doesNotThrow(() => assertFrozenRuntimeContext(binding))
+    for (const field of ['systemPromptSha256', 'toolContractSha256', 'hookConfigurationSha256'] as const) {
+      assert.throws(() => assertFrozenRuntimeContext({ ...binding, [field]: '0'.repeat(64) }), /runtime context/u)
+    }
+    await writeFile(join(root, 'AGENTS.md'), '# changed instructions', 'utf8')
+    await assert.rejects(async () => assertFrozenRuntimeContext(await captureRuntimeContextBinding(root)), /runtime context/u)
+    await fixture(root)
+    const skillPath = join(root, '.agents', 'skills', 'monthly-report', 'SKILL.md')
+    const originalSkill = await readFile(skillPath, 'utf8')
+    await writeFile(skillPath, originalSkill.replace('description: Create and verify', 'description: Changed metadata; create and verify'), 'utf8')
+    await assert.rejects(async () => assertFrozenRuntimeContext(await captureRuntimeContextBinding(root)), /runtime context/u)
+    await writeFile(skillPath, originalSkill.replace('This Skill is business guidance.', 'This Skill body changed. It is business guidance.'), 'utf8')
+    await assert.rejects(async () => assertFrozenRuntimeContext(await captureRuntimeContextBinding(root)), /runtime context/u)
+  } finally { await rm(root, { recursive: true, force: true }) }
 })
 
 test('security outranks invalid, and incomplete or drifted event streams cannot pass', () => {
@@ -220,6 +256,7 @@ test('aggregate validates one provenance and reports invalid integrity plus rese
   assert.equal(aggregate.performance.elapsedMs.median, 10.5)
   assert.equal(aggregate.budget.catalogEstimatedCostUsd, 0.6)
   assert.equal(aggregate.budget.paidAttemptsReserved, 20)
+  assert.equal(aggregate.behavior.progressiveSkillReadRuns, 0)
   const correctionUnknown = { ...records[0]!, selfCorrectionCount: null, toolValidationErrorCount: 5 }
   const correctionKnown = { ...records[1]!, selfCorrectionCount: 1, toolValidationErrorCount: 2 }
   const correctionAggregate = aggregateStudy([correctionUnknown, correctionKnown], checkpoint, [reservations[0]!, reservations[1]!])
@@ -237,6 +274,9 @@ test('checkpoint, reservation, and run files are validated, immutable, and resta
     await assert.rejects(prepareEvidenceDirectory(join(workspace, 'evidence'), workspace), /outside/u)
     await writeCheckpoint(directory, checkpoint)
     await assert.rejects(writeCheckpoint(directory, checkpoint), /exist/u)
+    await writeFile(join(directory, 'checkpoint.json'), JSON.stringify({ ...checkpoint, schemaVersion: 1 }), 'utf8')
+    await assert.rejects(readCheckpoint(directory), /schema/u)
+    await writeFile(join(directory, 'checkpoint.json'), JSON.stringify(checkpoint), 'utf8')
     await reservePaidAttempt(directory, reservation())
     await assert.rejects(reservePaidAttempt(directory, reservation()), /sequentially|already reserved|exist/u)
     const observer = new StudyObserver(metadata); begin(observer); observer.observe({ type: 'tool_execution_start', toolCallId: 'read', toolName: 'workspace_read_text', args: { path: '業務引継ぎ.md' } }); observer.observe({ type: 'tool_execution_end', toolCallId: 'read', toolName: 'workspace_read_text', result: {}, isError: false }); finish(observer)

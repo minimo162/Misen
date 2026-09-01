@@ -1,7 +1,8 @@
 import type { AxisName, AxisResult } from '../src/acceptance/validator.js'
 
-export const PRODUCTION_BASELINE_SHA = '06804c5eb0c8f9e42322d66b11c2f5ae0153da69'
-export const STUDY_SCHEMA_VERSION = 1 as const
+export const PRODUCTION_BASELINE_SHA = 'f3b772f7765206f75f7296e436d89c6a771b690a'
+export const STUDY_SCHEMA_VERSION = 2 as const
+export const SELECTED_SKILL_PATH = '.agents/skills/monthly-report/SKILL.md'
 export const FAILURE_TAXONOMIES = [
   'BUSINESS_SEMANTIC',
   'TOOL_CONTRACT_OR_VALIDATION',
@@ -24,6 +25,23 @@ export interface FrozenConfiguration {
   readonly providerRetry: 0
   readonly fallback: null
   readonly tools: readonly string[]
+  readonly context: RuntimeContextBinding
+  readonly source: {
+    readonly acceptanceTreeOid: string
+    readonly fixtureBlobOid: string
+    readonly packageLockBlobOid: string
+  }
+}
+
+export interface RuntimeContextBinding {
+  readonly promptsSha256: string
+  readonly fixtureInputsSha256: string
+  readonly systemPromptSha256: string
+  readonly workspaceInstructionsSha256: string
+  readonly skillCatalogSha256: string
+  readonly selectedSkillBodySha256: string
+  readonly toolContractSha256: string
+  readonly hookConfigurationSha256: string
 }
 
 export const FROZEN_CONFIGURATION: FrozenConfiguration = Object.freeze({
@@ -40,6 +58,21 @@ export const FROZEN_CONFIGURATION: FrozenConfiguration = Object.freeze({
     'spreadsheet_create_output',
     'spreadsheet_update',
   ]),
+  context: Object.freeze({
+    promptsSha256: '5ea8f22701b108db2b369f3dc0706571d1afad4042df12f17db8b8cdee6348c6',
+    fixtureInputsSha256: '99b45f6960c151287e6e10f81a59eac3e5d2ecec2bb506c7730117cd5070753a',
+    systemPromptSha256: 'a359beecace889e596eee1a7ebcea42053081e80cf2ddddd7e96c70b7305c7ef',
+    workspaceInstructionsSha256: '036d0ab99d944ad3eb00c6a1143313ecbae9adc4c97df5b8c9468e97e9d65e5b',
+    skillCatalogSha256: 'e2389dd414def4faa62dccd4bfe0ff1288bbf9e6c94ddcdb709bffe0024916a7',
+    selectedSkillBodySha256: 'e8ee7a76499a1915cdb1e6ac9471ee96a69de99203f741e64e0291712e833133',
+    toolContractSha256: '1a5b5f0e7c6fcc52ace45b2cbd9da7113558dd3a7513206c2c22a2ad8c0b454d',
+    hookConfigurationSha256: 'f02dc7005d5a2772e48d90b2378a461ac8c580466de839b17b444812bc51bd82',
+  }),
+  source: Object.freeze({
+    acceptanceTreeOid: '53fac17e753da5bb16d7264e0ce39a7bf69dc59f',
+    fixtureBlobOid: '7a8585bcacfacecdedd2ce0737094b22c26d4a54',
+    packageLockBlobOid: '14c0985705885be0258f67ea55787f87d4769ecc',
+  }),
 })
 
 export interface UsageTotals {
@@ -104,6 +137,7 @@ export interface StudyRunRecord {
   readonly toolErrorCount: number
   readonly toolValidationErrorCount: number
   readonly selfCorrectionCount: number | null
+  readonly progressiveSkillReadObserved: boolean
   readonly requestCount: number
   readonly lifecycle: { readonly agentStart: number; readonly agentEnd: number; readonly turnStart: number; readonly turnEnd: number }
   readonly assistantStopReasons: readonly string[]

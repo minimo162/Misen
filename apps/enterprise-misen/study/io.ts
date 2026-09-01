@@ -1,4 +1,5 @@
 import { mkdir, open, readFile, readdir, realpath, rename, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { aggregateStudy } from './aggregate.js'
 import { AXIS_NAMES } from '../src/acceptance/validator.js'
@@ -6,6 +7,7 @@ import {
   FROZEN_CONFIGURATION,
   FAILURE_TAXONOMIES,
   PRODUCTION_BASELINE_SHA,
+  SELECTED_SKILL_PATH,
   STUDY_SCHEMA_VERSION,
   alternatingSchedule,
   type PaidAttemptReservation,
@@ -38,7 +40,7 @@ function assertSafeEvidence(value: unknown, label: string, depth = 0): void {
   }
 }
 
-function assertCommon(value: unknown): asserts value is { schemaVersion: 1; studyId: string; productionBaselineSha: string; observerSha: string; configuration: unknown } {
+function assertCommon(value: unknown): asserts value is { schemaVersion: typeof STUDY_SCHEMA_VERSION; studyId: string; productionBaselineSha: string; observerSha: string; configuration: unknown } {
   if (!value || typeof value !== 'object') throw new Error('study evidence must be an object')
   const item = value as Record<string, unknown>
   if (item.schemaVersion !== STUDY_SCHEMA_VERSION) throw new Error('unsupported study schema')
@@ -63,7 +65,7 @@ export function assertCheckpoint(value: unknown): asserts value is StudyCheckpoi
 export function assertRunRecord(value: unknown): asserts value is StudyRunRecord {
   assertCommon(value)
   const item = value as unknown as StudyRunRecord
-  exactKeys(item, ['schemaVersion','studyId','studyRunNumber','paidAttemptNumber','month','productionBaselineSha','observerSha','configuration','startedAtUtc','endedAtUtc','status','failureTaxonomy','failureSummary','providerOrTransportErrorObserved','acceptanceFatalObserved','observerOrInfraErrorObserved','axisMatrix','output','inputHashesUnchanged','toolStarts','toolResults','toolBalance','toolErrorCount','toolValidationErrorCount','selfCorrectionCount','requestCount','lifecycle','assistantStopReasons','observedProviders','observedModels','usage','elapsedMs','rssBytes','integrity','invalidReason'], 'run')
+  exactKeys(item, ['schemaVersion','studyId','studyRunNumber','paidAttemptNumber','month','productionBaselineSha','observerSha','configuration','startedAtUtc','endedAtUtc','status','failureTaxonomy','failureSummary','providerOrTransportErrorObserved','acceptanceFatalObserved','observerOrInfraErrorObserved','axisMatrix','output','inputHashesUnchanged','toolStarts','toolResults','toolBalance','toolErrorCount','toolValidationErrorCount','selfCorrectionCount','progressiveSkillReadObserved','requestCount','lifecycle','assistantStopReasons','observedProviders','observedModels','usage','elapsedMs','rssBytes','integrity','invalidReason'], 'run')
   assertSafeEvidence(item, 'run')
   if (JSON.stringify(item).length > 1_000_000) throw new Error('run evidence exceeds size limit')
   if (!Number.isInteger(item.studyRunNumber) || item.studyRunNumber < 1 || item.studyRunNumber > 20) throw new Error('invalid study run number')
@@ -129,6 +131,9 @@ export function assertRunRecord(value: unknown): asserts value is StudyRunRecord
     if (recovered && computedSelfCorrectionCount !== null) computedSelfCorrectionCount++
   }
   if (item.selfCorrectionCount !== computedSelfCorrectionCount) throw new Error('invalid self-correction evidence')
+  const skillPathDigest = `sha256:${createHash('sha256').update(SELECTED_SKILL_PATH).digest('hex').slice(0, 16)}`
+  const computedProgressiveSkillRead = item.toolStarts.some(start => start.toolName === 'workspace_read_text' && start.target.path === skillPathDigest)
+  if (typeof item.progressiveSkillReadObserved !== 'boolean' || item.progressiveSkillReadObserved !== computedProgressiveSkillRead) throw new Error('invalid progressive Skill evidence')
   exactKeys(item.usage, ['input','output','cacheRead','cacheWrite','reasoning','totalTokens','catalogEstimatedCostUsd'], 'usage')
   const usageValues = [item.usage.input, item.usage.output, item.usage.cacheRead, item.usage.cacheWrite, item.usage.totalTokens, item.usage.reasoning, item.usage.catalogEstimatedCostUsd]
   if (usageValues.some(number => number !== null && (!Number.isFinite(number) || number < 0))) throw new Error('invalid usage evidence')

@@ -1,8 +1,10 @@
-# Issue 73 frozen reliability observer
+# Issue 73 Thin Misen reliability observer
 
-This observer is test/evidence infrastructure. It does not change the production Agent, prompt, handoff, fixtures, five Tool contracts, validator, model, retry, fallback, dependency versions, or UI.
+This observer is test/evidence infrastructure. It does not change the Thin Misen production Agent, prompt, handoff, fixtures, five Tool contracts, lifecycle hooks, validator, model, retry, fallback, dependency versions, or UI.
 
-The formal sample is fixed at production baseline `06804c5eb0c8f9e42322d66b11c2f5ae0153da69`, 20 valid runs in July/August alternating order, no more than 24 paid attempts, and a USD 10 provider spend cap. Create the checkpoint only after the observer commit has passed deterministic gates and independent review:
+The original observer was prepared against historical baseline `06804c5eb0c8f9e42322d66b11c2f5ae0153da69`. No formal paid sample was started on that baseline. After PR #78, schema version 2 supersedes that unused setup and freezes production baseline `f3b772f7765206f75f7296e436d89c6a771b690a`. Historical evidence, if any is found, must not be mixed with this baseline.
+
+The future formal sample remains 20 valid runs in July/August alternating order, no more than 24 paid attempts, and a USD 10 provider spend cap. This port performed deterministic validation only: do not create the checkpoint or run `study:live` until Issue #73 records a separate explicit authorization after the observer commit has passed all gates and review. At that later point, the commands are:
 
 ```text
 npm run study:checkpoint -- --evidence-dir C:\absolute\study-evidence --observer-sha <40-hex-observer-commit> --provider-hard-cap-confirmed true
@@ -28,6 +30,15 @@ actual Git checkout: current `HEAD` must equal the observer SHA, observer paths
 must be clean, and the protected production `src`, Acceptance, fixtures, and
 lockfile trees must be byte-identical to the frozen production commit.
 
+Before reserving an attempt or sending a provider request, the live runner also
+reconstructs and verifies the Thin Misen context binding. It covers the user
+prompts, complete fixture manifest, system prompt, root `AGENTS.md`, approved
+Skill catalog and selected monthly-report `SKILL.md`, exact Tool contracts, and
+static lifecycle-hook names/timeout. OOXML package timestamps are normalized for
+this baseline fingerprint; per-run input integrity still uses raw before/after
+file hashes. The protected source tree and frozen fixture blob keep the generator
+and acceptance oracle bound to the production commit.
+
 Captured public surfaces are Pi `message_end` AssistantMessage
 provider/model/usage/stopReason plus Tool execution start/end/isError. Target
 strings are one-way hashed and values are reduced to shape counts. Error bodies
@@ -36,5 +47,11 @@ text, raw reasoning, provider payloads, and credentials are never stored. A run
 cannot pass without a complete balanced event stream and the frozen observed
 provider/model. The Agent/turn lifecycle, at least one Tool call, and the actual
 Agent model, thinking level, and exact five-Tool state are also checked.
+
+The progressive monthly-report Skill read is recorded as a derived boolean from
+the already-hashed `workspace_read_text` target. It does not add a model-facing
+Tool, expose Skill contents, modify the static hook chain, or by itself determine
+PASS/FAIL. The production roster remains exactly five Tools; call count is a
+separate observed behavior metric.
 
 `credentialExposure` and `unexpectedNetwork` remain `null` unless a separate safe observer supplies evidence. Pi derives its public cost field from catalog pricing, so the record labels it a catalog estimate rather than provider billing. The checkpoint therefore requires confirmation of a provider-account USD 10 hard cap; the local estimate ledger is an additional stop control and never substitutes an absent billing control or guessed cost.

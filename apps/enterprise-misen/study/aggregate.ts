@@ -1,4 +1,4 @@
-import type { FailureTaxonomy, PaidAttemptReservation, StudyCheckpoint, StudyMonth, StudyRunRecord } from './schema.js'
+import { STUDY_SCHEMA_VERSION, type FailureTaxonomy, type PaidAttemptReservation, type StudyCheckpoint, type StudyMonth, type StudyRunRecord } from './schema.js'
 
 export function wilson95(pass: number, total: number): { low: number; high: number } | null {
   if (total === 0) return null
@@ -47,7 +47,7 @@ export function aggregateStudy(records: readonly StudyRunRecord[], checkpoint: S
   const knownCorrections = valid.filter(record => record.selfCorrectionCount !== null)
   const knownValidationErrors = knownCorrections.reduce((sum, record) => sum + record.toolValidationErrorCount, 0)
   return {
-    schemaVersion: 1,
+    schemaVersion: STUDY_SCHEMA_VERSION,
     studyId: ordered[0]?.studyId ?? null,
     productionBaselineSha: ordered[0]?.productionBaselineSha ?? null,
     observerSha: ordered[0]?.observerSha ?? null,
@@ -65,6 +65,8 @@ export function aggregateStudy(records: readonly StudyRunRecord[], checkpoint: S
       selfCorrectionAvailableRuns: knownCorrections.length,
       selfCorrections: knownCorrections.reduce((sum, record) => sum + (record.selfCorrectionCount ?? 0), 0),
       selfCorrectionFrequency: knownValidationErrors === 0 ? null : knownCorrections.reduce((sum, record) => sum + (record.selfCorrectionCount ?? 0), 0) / knownValidationErrors,
+      progressiveSkillReadRuns: valid.filter(record => record.progressiveSkillReadObserved).length,
+      progressiveSkillReadFrequency: valid.length === 0 ? null : valid.filter(record => record.progressiveSkillReadObserved).length / valid.length,
       failureTaxonomy: taxonomy,
       repeatedFailurePatterns: [...patternCounts].filter(([, count]) => count > 1).sort((left, right) => right[1] - left[1]).map(([signature, count]) => ({ signature, count })),
     },

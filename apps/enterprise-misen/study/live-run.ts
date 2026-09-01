@@ -11,6 +11,7 @@ import { PRODUCTION_BASELINE_SHA, type StudyMonth } from './schema.js'
 import { FROZEN_CONFIGURATION } from './schema.js'
 import { verifyRepositoryProvenance } from './provenance.js'
 import { sameFixtureInputs, snapshotFixtureInputs } from './integrity.js'
+import { assertFrozenRuntimeContext, captureRuntimeContextBinding } from './context.js'
 
 const args = new Map<string, string>()
 for (let index = 2; index < process.argv.length; index += 2) args.set(process.argv[index]!, process.argv[index + 1] ?? '')
@@ -46,7 +47,8 @@ try {
   await fixture(workspace)
   const before = await snapshotFixtureInputs(workspace)
   const outputBefore = await snapshotOutputScope(workspace)
-  const agent = liveAgent(workspace)
+  assertFrozenRuntimeContext(await captureRuntimeContextBinding(workspace))
+  const agent = await liveAgent(workspace)
   const actualTools = agent.state.tools.map(tool => tool.name)
   if (agent.state.model.provider !== FROZEN_CONFIGURATION.provider || agent.state.model.id !== FROZEN_CONFIGURATION.model
     || agent.state.thinkingLevel !== FROZEN_CONFIGURATION.reasoning || JSON.stringify(actualTools) !== JSON.stringify(FROZEN_CONFIGURATION.tools)) {
