@@ -22,7 +22,7 @@ jobs:
       - name: Reproduce Windows packaging paths at substantive port head
         shell: pwsh
         run: |
-          $TargetSha = '671a066484a7321b940fdcea29dde547b24615cc'
+          $TargetSha = 'ab6bc64ed97ecb1302c9cfed5885cdc83adde9a9'
           if (Test-Path 'C:\misen-pr76') { Remove-Item 'C:\misen-pr76' -Recurse -Force }
           if (Test-Path 'C:\misen-temp') { Remove-Item 'C:\misen-temp' -Recurse -Force }
           New-Item -ItemType Directory -Path 'C:\misen-temp' | Out-Null
@@ -31,7 +31,7 @@ jobs:
           if ((git -C 'C:\misen-pr76' rev-parse HEAD) -ne $TargetSha) { throw 'substantive port SHA mismatch' }
           'TEMP=C:\misen-temp' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           'TMP=C:\misen-temp' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          'PR76_TARGET_SHA=671a066484a7321b940fdcea29dde547b24615cc' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          'PR76_TARGET_SHA=ab6bc64ed97ecb1302c9cfed5885cdc83adde9a9' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install frozen dependencies
         shell: pwsh
         run: |
