@@ -12,6 +12,8 @@
     "test": "npm run build && node --test dist/test/**/*.test.js",
     "acceptance": "npm run build && node dist/acceptance/run.js",
     "live": "npm run build && node dist/acceptance/live.js",
+    "study:checkpoint": "npm run build && node dist/study/checkpoint.js",
+    "study:live": "npm run build && node dist/study/live-run.js",
     "demo": "npm run build && node dist/src/web/server.js",
     "prepare-runtime": "npm run build && node scripts/prepare-runtime.mjs",
     "verify:prepared-runtime": "node scripts/verify-prepared-runtime.mjs",
@@ -24,7 +26,8 @@
     "@earendil-works/pi-ai": "0.84.4",
     "@office-kit/xlsx": "0.9.0",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "yaml": "2.9.0"
   },
   "devDependencies": {
     "@cyclonedx/cyclonedx-library": "10.2.0",

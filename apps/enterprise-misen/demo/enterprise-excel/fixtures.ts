@@ -229,6 +229,32 @@ the template footer and existing styles must remain intact.
   changing the runtime code, system prompt, or tool implementation.
 `
 
+const WORKSPACE_INSTRUCTIONS = `# Enterprise Finance Workspace
+
+- Treat source workbooks as read-only inputs.
+- Create deliverables only under the output directory and never overwrite source files.
+- Keep the user's task scope; verify the completed workbook before reporting success.
+- Do not reveal credentials or claim that a failed check passed.
+`
+
+const MONTHLY_REPORT_SKILL = `---
+name: monthly-report
+description: Create and verify the synthetic July or August monthly management report from company actuals, master targets, and the approved workbook template.
+---
+
+# Monthly management report
+
+Use this Skill when the user asks for the synthetic monthly management report.
+
+- Each company workbook provides company, revenue, cost, and reporting date.
+- The master workbook provides the minimum profit target for each company.
+- Profit is revenue minus cost. Status is On target when profit meets or exceeds the company's target; otherwise it is Review.
+- Preserve the approved template, footer, styles, and number formats. Use spreadsheet formulas for row profit and totals.
+- Write only a new workbook under output and verify the result before reporting completion.
+
+This Skill is business guidance. It does not grant tools, process execution, network access, or permission to mutate input files.
+`
+
 /**
  * Create the complete synthetic workspace used by the vertical-slice tests.
  * Existing files are overwritten only at these explicitly named fixture paths;
@@ -237,6 +263,9 @@ the template footer and existing styles must remain intact.
 export async function createEnterpriseFixtureWorkspace(root: string): Promise<void> {
   await mkdir(root, { recursive: true })
   await mkdir(join(root, 'output'), { recursive: true })
+  await mkdir(join(root, '.agents', 'skills', 'monthly-report'), { recursive: true })
+  await writeFile(join(root, 'AGENTS.md'), WORKSPACE_INSTRUCTIONS, 'utf8')
+  await writeFile(join(root, '.agents', 'skills', 'monthly-report', 'SKILL.md'), MONTHLY_REPORT_SKILL, 'utf8')
   await writeFile(join(root, '業務引継ぎ.md'), HANDOFF, 'utf8')
   await makeMasterWorkbook(join(root, 'master.xlsx'))
   await makeReportTemplate(join(root, '月次管理レポート_template.xlsx'))
