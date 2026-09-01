@@ -19,13 +19,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22.19.0
-      - name: Re-clone to normal C drive path
+      - name: Re-clone and place temp workspaces on normal C drive paths
         shell: pwsh
         run: |
           if (Test-Path 'C:\misen-pr75') { Remove-Item 'C:\misen-pr75' -Recurse -Force }
+          if (Test-Path 'C:\misen-temp') { Remove-Item 'C:\misen-temp' -Recurse -Force }
+          New-Item -ItemType Directory -Path 'C:\misen-temp' | Out-Null
           git clone --no-local "$env:GITHUB_WORKSPACE" 'C:\misen-pr75'
           git -C 'C:\misen-pr75' checkout --detach $env:GITHUB_SHA
           if ((git -C 'C:\misen-pr75' rev-parse HEAD) -ne $env:GITHUB_SHA) { throw 'physical-path checkout SHA mismatch' }
+          'TEMP=C:\misen-temp' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          'TMP=C:\misen-temp' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install frozen dependencies
         shell: pwsh
         run: |
