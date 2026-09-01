@@ -1,9 +1,14 @@
 import test from 'node:test'
 import { strict as assert } from 'node:assert'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { AgentEvent } from '@earendil-works/pi-agent-core'
 import type { AssistantMessage } from '@earendil-works/pi-ai'
 import { AXIS_NAMES, type ValidationResult } from '../src/acceptance/validator.js'
+import { fixture } from '../demo/enterprise-excel/fixtures.js'
 import { aggregateStudy } from '../study/aggregate.js'
+import { captureRuntimeContextBinding } from '../study/context.js'
 import { assertRunRecord } from '../study/io.js'
 import { StudyObserver } from '../study/observer.js'
 import {
@@ -139,4 +144,18 @@ test('one unknown Pi catalog cost makes the run and study estimates unknown', ()
   const second = finalizePass(unknownThenFinite)
   assert.equal(second.usage.catalogEstimatedCostUsd, null)
   assert.doesNotThrow(() => assertRunRecord(second))
+})
+
+test('semantic fixture context is stable across fresh workbook serialization', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'misen-study-semantic-context-'))
+  try {
+    await fixture(root)
+    const first = await captureRuntimeContextBinding(root)
+    assert.deepEqual(first, FROZEN_CONFIGURATION.context)
+    await fixture(root)
+    const second = await captureRuntimeContextBinding(root)
+    assert.deepEqual(second, first)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
