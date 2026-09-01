@@ -2,11 +2,18 @@ import { createHash } from 'node:crypto'
 import { PROMPTS } from '../demo/enterprise-excel/fixtures.js'
 import { HOOK_TIMEOUT_MS } from '../src/customization/hooks.js'
 import { prepareAgentCustomization } from '../src/runtime/customized.js'
+import { openSpreadsheetBytes, titles, values } from '../src/spreadsheet/engine.js'
 import { snapshotFixtureInputs } from './integrity.js'
 import { FROZEN_CONFIGURATION, SELECTED_SKILL_PATH, type RuntimeContextBinding } from './schema.js'
 
+const FIXTURE_SEMANTIC_RANGE = 'A1:Z200'
+
 function canonical(value: unknown): string {
   const normalize = (item: unknown): unknown => {
+    if (item instanceof Date) {
+      if (Number.isNaN(item.getTime())) throw new TypeError('context fingerprint contains an invalid Date')
+      return item.toISOString()
+    }
     if (item === null || typeof item === 'string' || typeof item === 'boolean') return item
     if (typeof item === 'number') {
       if (!Number.isFinite(item)) throw new TypeError('context fingerprint contains a non-finite number')
@@ -26,25 +33,13 @@ export function contextDigest(value: unknown): string {
   return createHash('sha256').update(value instanceof Uint8Array ? value : typeof value === 'string' ? value : canonical(value)).digest('hex')
 }
 
-function canonicalWorkbookDigest(bytes: Uint8Array): string {
-  const copy = Uint8Array.from(bytes)
-  const view = new DataView(copy.buffer, copy.byteOffset, copy.byteLength)
-  let end = -1
-  for (let index = copy.length - 22; index >= Math.max(0, copy.length - 65_557); index--) {
-    if (view.getUint32(index, true) === 0x06054b50) { end = index; break }
-  }
-  if (end < 0) throw new Error('fixture workbook ZIP directory is missing')
-  const entries = view.getUint16(end + 10, true)
-  let cursor = view.getUint32(end + 16, true)
-  for (let entry = 0; entry < entries; entry++) {
-    if (cursor + 46 > copy.length || view.getUint32(cursor, true) !== 0x02014b50) throw new Error('fixture workbook ZIP directory is malformed')
-    copy.fill(0, cursor + 12, cursor + 16)
-    const local = view.getUint32(cursor + 42, true)
-    if (local + 30 > copy.length || view.getUint32(local, true) !== 0x04034b50) throw new Error('fixture workbook ZIP local header is malformed')
-    copy.fill(0, local + 10, local + 14)
-    cursor += 46 + view.getUint16(cursor + 28, true) + view.getUint16(cursor + 30, true) + view.getUint16(cursor + 32, true)
-  }
-  return contextDigest(copy)
+async function semanticWorkbookDigest(bytes: Uint8Array): Promise<string> {
+  const workbook = await openSpreadsheetBytes(bytes)
+  const sheets = titles(workbook).map(title => ({
+    title,
+    values: values(workbook, title, FIXTURE_SEMANTIC_RANGE),
+  }))
+  return contextDigest({ range: FIXTURE_SEMANTIC_RANGE, sheets })
 }
 
 export async function captureRuntimeContextBinding(root: string): Promise<RuntimeContextBinding> {
@@ -53,7 +48,7 @@ export async function captureRuntimeContextBinding(root: string): Promise<Runtim
     const path = rawPath.replaceAll('\\', '/')
     if (!path.toLowerCase().endsWith('.xlsx')) return { path, sha256: rawSha256 }
     const { bytes } = await customization.boundary.readFileBytes(path)
-    return { path, sha256: canonicalWorkbookDigest(bytes) }
+    return { path, sha256: await semanticWorkbookDigest(bytes) }
   }))
   fixtureInputs.sort((left, right) => left.path.localeCompare(right.path))
   const instructions = await customization.boundary.readFileBytes('AGENTS.md')
