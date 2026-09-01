@@ -9,12 +9,9 @@ permissions:
   contents: read
 
 jobs:
-  review-fixes-windows:
+  full-suite-windows-physical:
     runs-on: windows-latest
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: apps/enterprise-misen
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -22,48 +19,41 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22.19.0
-          cache: npm
-          cache-dependency-path: apps/enterprise-misen/package-lock.json
-      - name: Install frozen dependencies
-        run: npm ci
-      - name: Compile complete app
-        run: npm run build
-      - name: Review-fix regression tests
-        run: node --test dist/test/study-review-fixes.test.js
-      - name: Production provenance unchanged
-        working-directory: .
+      - name: Re-clone to normal C drive path
         shell: pwsh
         run: |
-          git diff --exit-code f3b772f7765206f75f7296e436d89c6a771b690a HEAD -- apps/enterprise-misen/src apps/enterprise-misen/acceptance apps/enterprise-misen/demo apps/enterprise-misen/package-lock.json
-          git diff --check
-
-  full-suite-portable:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: apps/enterprise-misen
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.19.0
-          cache: npm
-          cache-dependency-path: apps/enterprise-misen/package-lock.json
+          if (Test-Path 'C:\misen-pr75') { Remove-Item 'C:\misen-pr75' -Recurse -Force }
+          git clone --no-local "$env:GITHUB_WORKSPACE" 'C:\misen-pr75'
+          git -C 'C:\misen-pr75' checkout --detach $env:GITHUB_SHA
+          if ((git -C 'C:\misen-pr75' rev-parse HEAD) -ne $env:GITHUB_SHA) { throw 'physical-path checkout SHA mismatch' }
       - name: Install frozen dependencies
-        run: npm ci
-      - name: Unit and observer tests
-        run: npm test
-      - name: July/August acceptance
-        run: npm run acceptance
-      - name: Production provenance unchanged
-        working-directory: .
+        shell: pwsh
         run: |
+          Set-Location 'C:\misen-pr75\apps\enterprise-misen'
+          npm ci
+      - name: Unit and observer tests
+        shell: pwsh
+        run: |
+          Set-Location 'C:\misen-pr75\apps\enterprise-misen'
+          npm test
+      - name: July/August acceptance
+        shell: pwsh
+        run: |
+          Set-Location 'C:\misen-pr75\apps\enterprise-misen'
+          npm run acceptance
+      - name: Production provenance unchanged
+        shell: pwsh
+        run: |
+          Set-Location 'C:\misen-pr75'
           git diff --exit-code f3b772f7765206f75f7296e436d89c6a771b690a HEAD -- apps/enterprise-misen/src apps/enterprise-misen/acceptance apps/enterprise-misen/demo apps/enterprise-misen/package-lock.json
           git diff --check
       - name: Production dependency audit
-        run: npm audit --omit=dev --package-lock-only
+        shell: pwsh
+        run: |
+          Set-Location 'C:\misen-pr75\apps\enterprise-misen'
+          npm audit --omit=dev --package-lock-only
       - name: SBOM validation
-        run: npm run sbom
+        shell: pwsh
+        run: |
+          Set-Location 'C:\misen-pr75\apps\enterprise-misen'
+          npm run sbom
