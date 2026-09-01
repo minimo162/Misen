@@ -71,7 +71,7 @@ test('security outranks invalid, and incomplete or drifted event streams cannot 
 
 test('provider failure is a reliability FAIL and Tool errors emit their taxonomy when Acceptance cannot pass', () => {
   const provider = new StudyObserver(metadata); complete(provider, assistant('error'))
-  assert.equal(provider.finalize({ validation: null, inputHashesUnchanged: true, elapsedMs: 1, rssBytes: 1, integrity, agentErrorMessage: 'transport detail' }).failureTaxonomy, 'PROVIDER_OR_TRANSPORT')
+  assert.equal(provider.finalize({ validation: null, inputHashesUnchanged: true, elapsedMs: 1, rssBytes: 1, integrity, agentErrorMessage: 'transport detail', acceptanceFatal: 'missing output' }).failureTaxonomy, 'PROVIDER_OR_TRANSPORT')
   const tool = new StudyObserver(metadata); begin(tool)
   tool.observe({ type: 'tool_execution_start', toolCallId: 'bad', toolName: 'spreadsheet_update', args: { range: 'A1' } })
   tool.observe({ type: 'tool_execution_end', toolCallId: 'bad', toolName: 'spreadsheet_update', result: { message: 'validation failed' }, isError: true })
@@ -115,6 +115,7 @@ test('public Pi faux tool loop supplies lifecycle and balanced Tool evidence', a
     await fixture(root)
     const provider = fauxProvider({ provider: 'openai', models: [{ id: 'gpt-5.6-luna', reasoning: true }] })
     provider.setResponses([
+      fauxAssistantMessage(fauxToolCall('workspace_list_files', { path: '../', extension: '.xlsx' }, { id: 'bad-list' })),
       fauxAssistantMessage(fauxToolCall('workspace_list_files', { path: '7月', extension: '.xlsx' }, { id: 'list' })),
       fauxAssistantMessage('private completion'),
     ])
@@ -128,6 +129,7 @@ test('public Pi faux tool loop supplies lifecycle and balanced Tool evidence', a
     assert.equal(record.status, 'PASS')
     assert.equal(record.lifecycle.agentStart, 1)
     assert.equal(record.toolBalance, true)
+    assert.equal(record.toolErrorCount, 1)
     assert.doesNotMatch(JSON.stringify(record), /private completion|private prompt/u)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
@@ -163,6 +165,7 @@ test('aggregate validates one provenance and reports invalid integrity plus rese
   assert.equal(aggregate.budget.catalogEstimatedCostUsd, 0.6)
   assert.equal(aggregate.budget.paidAttemptsReserved, 20)
   assert.throws(() => aggregateStudy([{ ...records[0]!, observerSha: 'b'.repeat(40) }], checkpoint, [reservations[0]!]), /mixed study provenance/u)
+  assert.throws(() => aggregateStudy([records[0]!, { ...records[1]!, studyRunNumber: 1, month: '7月' }], checkpoint, [reservations[0]!, { ...reservations[1]!, studyRunNumber: 1, month: '7月' }]), /valid-run sequence/u)
 })
 
 test('checkpoint, reservation, and run files are validated, immutable, and restart-safe', async () => {
@@ -179,14 +182,14 @@ test('checkpoint, reservation, and run files are validated, immutable, and resta
     const observer = new StudyObserver(metadata); begin(observer); observer.observe({ type: 'tool_execution_start', toolCallId: 'read', toolName: 'workspace_read_text', args: { path: '業務引継ぎ.md' } }); observer.observe({ type: 'tool_execution_end', toolCallId: 'read', toolName: 'workspace_read_text', result: {}, isError: false }); finish(observer)
     const record = observer.finalize({ validation: validation('PASS'), outputBytes: 100, inputHashesUnchanged: true, elapsedMs: 1, rssBytes: 1, integrity })
     await persistRun(directory, record)
-    await assert.rejects(persistRun(directory, record), /exist/u)
+    await assert.rejects(persistRun(directory, record), /exist|valid-run sequence/u)
     assert.equal((await readRunRecords(directory)).length, 1)
     assert.equal((await readReservations(directory)).length, 1)
     assert.match(await readFile(join(directory, 'sample-started.json'), 'utf8'), /startedAtUtc/u)
     assert.doesNotMatch(await readFile(join(directory, 'aggregate.json'), 'utf8'), /"(?:apiKey|credential|chainOfThought|rawProviderPayload)"\s*:/u)
     const runPath = join(directory, 'run-01-attempt-01.json')
-    await writeFile(runPath, JSON.stringify({ ...record, usage: { ...record.usage, input: -1 } }), 'utf8')
-    await assert.rejects(readRunRecords(directory), /usage evidence/u)
+    await writeFile(runPath, JSON.stringify({ ...record, rawProviderPayload: { secret: true }, output: { basename: '../bad.xlsx', bytes: -1 }, integrity: { ...record.integrity, inputMutation: true, credentialExposure: true } }), 'utf8')
+    await assert.rejects(readRunRecords(directory), /fields mismatch|output evidence|PASS invariants/u)
     const reservationPath = join(directory, 'attempt-01-reservation.json')
     await writeFile(reservationPath, JSON.stringify({ ...reservation(), observerSha: 'b'.repeat(40) }), 'utf8')
     await assert.rejects(readReservations(directory), /provenance mismatch/u)

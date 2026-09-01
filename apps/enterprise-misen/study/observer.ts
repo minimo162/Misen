@@ -190,8 +190,8 @@ export class StudyObserver {
     let failureSummary: string | null = null
     if (integrity.inputMutation === true || integrity.forbiddenCapability || integrity.credentialExposure || integrity.unexpectedNetwork) { taxonomy = 'SECURITY_OR_INTEGRITY'; failureSummary = 'integrity or security incident' }
     else if (input.invalidReason) { taxonomy = 'INVALID_OBSERVER_OR_INFRA'; failureSummary = 'observer or infrastructure failure' }
-    else if (input.acceptanceFatal) { taxonomy = 'ACCEPTANCE_FATAL'; failureSummary = 'acceptance evaluation failed' }
     else if (providerFailure) { taxonomy = 'PROVIDER_OR_TRANSPORT'; failureSummary = 'provider or transport error' }
+    else if (input.acceptanceFatal) { taxonomy = 'ACCEPTANCE_FATAL'; failureSummary = 'acceptance evaluation failed' }
     else if (configurationDrift) { taxonomy = 'INVALID_OBSERVER_OR_INFRA'; failureSummary = 'observed provider or model differs from frozen configuration' }
     else if (incompleteEvidence) { taxonomy = 'INVALID_OBSERVER_OR_INFRA'; failureSummary = 'incomplete observer event stream' }
     else if (this.stopReasons.includes('length') || this.stopReasons.includes('aborted')) { taxonomy = 'AGENT_INCOMPLETE'; failureSummary = 'agent did not complete' }

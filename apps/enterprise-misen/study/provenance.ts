@@ -3,7 +3,8 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PRODUCTION_BASELINE_SHA } from './schema.js'
 
-const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+// Runtime code is emitted to dist/study; two levels return to the app root.
+const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const protectedPaths = [
   'apps/enterprise-misen/src',
   'apps/enterprise-misen/acceptance',

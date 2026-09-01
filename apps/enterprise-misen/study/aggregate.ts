@@ -27,10 +27,13 @@ function reliability(records: readonly StudyRunRecord[], month?: StudyMonth) {
 
 export function aggregateStudy(records: readonly StudyRunRecord[], checkpoint: StudyCheckpoint, reservations: readonly PaidAttemptReservation[]) {
   const ordered = [...records].sort((a, b) => a.paidAttemptNumber - b.paidAttemptNumber)
+  let expectedRun = 1
   for (const record of ordered) {
     if (record.studyId !== checkpoint.studyId || record.productionBaselineSha !== checkpoint.productionBaselineSha || record.observerSha !== checkpoint.observerSha || JSON.stringify(record.configuration) !== JSON.stringify(checkpoint.configuration)) throw new Error('mixed study provenance rejected')
     const reservation = reservations.find(item => item.paidAttemptNumber === record.paidAttemptNumber)
     if (!reservation || reservation.studyRunNumber !== record.studyRunNumber || reservation.month !== record.month) throw new Error('record/reservation mismatch')
+    if (record.studyRunNumber !== expectedRun) throw new Error('valid-run sequence mismatch')
+    if (record.status !== 'INVALID') expectedRun++
   }
   const valid = ordered.filter(record => record.status !== 'INVALID')
   const taxonomy = Object.fromEntries([...new Set(ordered.map(record => record.failureTaxonomy).filter(Boolean) as FailureTaxonomy[])].sort().map(key => [key, ordered.filter(record => record.failureTaxonomy === key).length]))
@@ -66,8 +69,10 @@ export function aggregateStudy(records: readonly StudyRunRecord[], checkpoint: S
     },
     integrity: {
       inputMutationIncidents: ordered.filter(record => record.integrity.inputMutation).length,
+      inputMutationObservationUnavailableRuns: ordered.filter(record => record.integrity.inputMutation === null).length,
       forbiddenCapabilityIncidents: ordered.filter(record => record.integrity.forbiddenCapability).length,
       credentialExposureIncidents: ordered.filter(record => record.integrity.credentialExposure === true).length,
+      credentialObservationUnavailableRuns: ordered.filter(record => record.integrity.credentialExposure === null).length,
       unexpectedNetworkIncidents: ordered.filter(record => record.integrity.unexpectedNetwork === true).length,
       networkObservationUnavailableRuns: ordered.filter(record => record.integrity.unexpectedNetwork === null).length,
     },

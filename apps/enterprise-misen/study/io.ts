@@ -16,6 +16,10 @@ const inside = (parent: string, child: string) => { const rel = relative(parent,
 const hex40 = /^[0-9a-f]{40}$/u
 const safeStudyId = /^[a-z0-9][a-z0-9._-]{0,79}$/u
 const sameConfiguration = (value: unknown): boolean => JSON.stringify(value) === JSON.stringify(FROZEN_CONFIGURATION)
+const exactKeys = (value: object, keys: readonly string[], label: string): void => {
+  const actual = Object.keys(value).sort(), expected = [...keys].sort()
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`${label} fields mismatch`)
+}
 
 function assertCommon(value: unknown): asserts value is { schemaVersion: 1; studyId: string; productionBaselineSha: string; observerSha: string; configuration: unknown } {
   if (!value || typeof value !== 'object') throw new Error('study evidence must be an object')
@@ -41,6 +45,7 @@ export function assertCheckpoint(value: unknown): asserts value is StudyCheckpoi
 export function assertRunRecord(value: unknown): asserts value is StudyRunRecord {
   assertCommon(value)
   const item = value as unknown as StudyRunRecord
+  exactKeys(item, ['schemaVersion','studyId','studyRunNumber','paidAttemptNumber','month','productionBaselineSha','observerSha','configuration','startedAtUtc','endedAtUtc','status','failureTaxonomy','failureSummary','axisMatrix','output','inputHashesUnchanged','toolStarts','toolResults','toolBalance','toolErrorCount','toolValidationErrorCount','selfCorrectionCount','requestCount','lifecycle','assistantStopReasons','observedProviders','observedModels','usage','elapsedMs','rssBytes','integrity','invalidReason'], 'run')
   if (!Number.isInteger(item.studyRunNumber) || item.studyRunNumber < 1 || item.studyRunNumber > 20) throw new Error('invalid study run number')
   if (!Number.isInteger(item.paidAttemptNumber) || item.paidAttemptNumber < 1 || item.paidAttemptNumber > 24) throw new Error('invalid paid attempt number')
   if (!['7月', '8月'].includes(item.month) || item.month !== alternatingSchedule()[item.studyRunNumber - 1]) throw new Error('run schedule mismatch')
@@ -51,18 +56,36 @@ export function assertRunRecord(value: unknown): asserts value is StudyRunRecord
     || ![true, false, null].includes(item.integrity.credentialExposure) || ![true, false, null].includes(item.integrity.unexpectedNetwork)) throw new Error('invalid integrity evidence')
   if (![true, false, null].includes(item.inputHashesUnchanged)) throw new Error('invalid input hash evidence')
   if (!item.lifecycle || !Object.values(item.lifecycle).every(count => Number.isInteger(count) && count >= 0)) throw new Error('invalid lifecycle evidence')
+  exactKeys(item.lifecycle, ['agentStart','agentEnd','turnStart','turnEnd'], 'lifecycle')
   if (!Number.isInteger(item.requestCount) || item.requestCount !== item.assistantStopReasons.length) throw new Error('request count mismatch')
   const startIds = new Set(item.toolStarts.map(start => start.toolCallId)), endIds = new Set(item.toolResults.map(result => result.toolCallId))
   const computedBalance = item.toolStarts.length === item.toolResults.length && item.toolStarts.every(start => endIds.has(start.toolCallId)) && item.toolResults.every(result => startIds.has(result.toolCallId))
   if (item.toolBalance !== computedBalance) throw new Error('invalid tool balance evidence')
   if (item.toolErrorCount !== item.toolResults.filter(result => result.isError).length || item.toolValidationErrorCount !== item.toolResults.filter(result => result.validationError).length) throw new Error('tool count mismatch')
+  for (const start of item.toolStarts) {
+    if (!FROZEN_CONFIGURATION.tools.includes(start.toolName) || !Number.isInteger(start.sequence) || start.sequence < 1 || typeof start.toolCallId !== 'string') throw new Error('invalid Tool start evidence')
+    if (Object.keys(start).some(key => !['sequence','toolCallId','toolName','timestampUtc','target','valuesShape'].includes(key))) throw new Error('Tool start fields mismatch')
+    for (const [key, target] of Object.entries(start.target)) if (!['path','extension','workbook','sheet','range','source','output','offset','limit','overwrite'].includes(key)
+      || !['string','number','boolean'].includes(typeof target) || (typeof target === 'string' && !/^sha256:[0-9a-f]{16}$/u.test(target))) throw new Error('invalid Tool target evidence')
+    if (start.valuesShape && (Object.keys(start.valuesShape).sort().join(',') !== 'columns,formulas,literals,rows' || Object.values(start.valuesShape).some(count => typeof count !== 'number' || !Number.isInteger(count) || count < 0))) throw new Error('invalid values-shape evidence')
+  }
+  for (const result of item.toolResults) {
+    const start = item.toolStarts.find(candidate => candidate.toolCallId === result.toolCallId)
+    if (!start || start.toolName !== result.toolName || !Number.isInteger(result.sequence) || result.sequence < 1) throw new Error('Tool start/result mismatch')
+    if (Object.keys(result).some(key => !['sequence','toolCallId','toolName','timestampUtc','isError','validationError','error'].includes(key)) || result.isError !== Boolean(result.error) || (result.validationError && !result.isError)) throw new Error('Tool result fields mismatch')
+  }
+  if (item.selfCorrectionCount !== null && (!Number.isInteger(item.selfCorrectionCount) || item.selfCorrectionCount < 0 || item.selfCorrectionCount > item.toolValidationErrorCount)) throw new Error('invalid self-correction evidence')
+  exactKeys(item.usage, ['input','output','cacheRead','cacheWrite','reasoning','totalTokens','catalogEstimatedCostUsd'], 'usage')
   const usageValues = [item.usage.input, item.usage.output, item.usage.cacheRead, item.usage.cacheWrite, item.usage.totalTokens, item.usage.reasoning, item.usage.catalogEstimatedCostUsd]
   if (usageValues.some(number => number !== null && (!Number.isFinite(number) || number < 0))) throw new Error('invalid usage evidence')
   const securityIncident = item.integrity.inputMutation === true || item.integrity.forbiddenCapability || item.integrity.credentialExposure === true || item.integrity.unexpectedNetwork === true
+  exactKeys(item.integrity, ['inputMutation','forbiddenCapability','credentialExposure','unexpectedNetwork'], 'integrity')
+  if (!Number.isFinite(item.elapsedMs) || item.elapsedMs < 0 || !Number.isFinite(item.rssBytes) || item.rssBytes < 0) throw new Error('invalid performance evidence')
+  if (item.output && (!Number.isInteger(item.output.bytes) || item.output.bytes < 0 || !/^[^\\/]+\.xlsx$/iu.test(item.output.basename))) throw new Error('invalid output evidence')
   if (item.status === 'PASS') {
     if (item.failureTaxonomy !== null || item.failureSummary !== null || item.invalidReason !== null || item.inputHashesUnchanged !== true || !item.output || item.requestCount < 1
       || !item.toolBalance || item.toolStarts.length < 1 || item.lifecycle.agentStart !== 1 || item.lifecycle.agentEnd !== 1 || item.lifecycle.turnStart < 1 || item.lifecycle.turnStart !== item.lifecycle.turnEnd
-      || JSON.stringify(item.observedProviders) !== JSON.stringify([FROZEN_CONFIGURATION.provider]) || JSON.stringify(item.observedModels) !== JSON.stringify([FROZEN_CONFIGURATION.model])) throw new Error('PASS invariants violated')
+      || securityIncident || JSON.stringify(item.observedProviders) !== JSON.stringify([FROZEN_CONFIGURATION.provider]) || JSON.stringify(item.observedModels) !== JSON.stringify([FROZEN_CONFIGURATION.model])) throw new Error('PASS invariants violated')
     if (!item.axisMatrix || JSON.stringify(Object.keys(item.axisMatrix).sort()) !== JSON.stringify([...AXIS_NAMES].sort()) || Object.values(item.axisMatrix).some(axis => axis.status !== 'PASS')) throw new Error('PASS axis matrix incomplete')
   } else if (item.status === 'INVALID') {
     if (item.failureTaxonomy !== 'INVALID_OBSERVER_OR_INFRA' || item.invalidReason === null || securityIncident) throw new Error('INVALID invariants violated')
@@ -170,6 +193,13 @@ export async function persistRun(evidenceDirectory: string, record: StudyRunReco
   const reservations = await readReservations(evidenceDirectory)
   const reservation = reservations.find(item => item.paidAttemptNumber === record.paidAttemptNumber)
   if (!reservation || reservation.studyRunNumber !== record.studyRunNumber || reservation.month !== record.month) throw new Error('run has no matching paid-attempt reservation')
+  const existing = await readRunRecords(evidenceDirectory)
+  let expectedRun = 1
+  for (const prior of [...existing].sort((left, right) => left.paidAttemptNumber - right.paidAttemptNumber)) {
+    if (prior.studyRunNumber !== expectedRun) throw new Error('existing valid-run sequence mismatch')
+    if (prior.status !== 'INVALID') expectedRun++
+  }
+  if (record.studyRunNumber !== expectedRun) throw new Error('valid-run sequence mismatch')
   const name = `run-${String(record.studyRunNumber).padStart(2, '0')}-attempt-${String(record.paidAttemptNumber).padStart(2, '0')}.json`
   await immutableJson(resolve(evidenceDirectory, name), record)
   const records = await readRunRecords(evidenceDirectory)
