@@ -33,8 +33,9 @@ if (paidAttemptNumber !== reservations.length + 1) throw new Error('paid attempt
 const nextRun = existing.filter(record => record.status !== 'INVALID').length + 1
 if (runNumber !== nextRun) throw new Error('study run number must follow the valid-run sequence')
 const catalogCosts = existing.map(record => record.usage.catalogEstimatedCostUsd)
-if (catalogCosts.some(cost => cost === null)) throw new Error('catalog cost estimate unavailable; stop and audit before any further request')
-const spent = catalogCosts.reduce((sum, cost) => sum + (cost ?? 0), 0)
+const knownCatalogCosts = catalogCosts.filter((cost): cost is number => cost !== null)
+if (knownCatalogCosts.length !== catalogCosts.length) throw new Error('catalog cost estimate unavailable; stop and audit before any further request')
+const spent = knownCatalogCosts.reduce((sum, cost) => sum + cost, 0)
 if (spent >= checkpoint.hardSpendCapUsd) throw new Error('catalog-estimated spend has reached the hard-cap threshold')
 
 const scenario = SYNTHETIC_MONTHS.find(candidate => candidate.month === month)!
