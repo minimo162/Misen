@@ -9,9 +9,37 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  review-fixes-windows:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/enterprise-misen
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+          cache-dependency-path: apps/enterprise-misen/package-lock.json
+      - name: Install frozen dependencies
+        run: npm ci
+      - name: Compile complete app
+        run: npm run build
+      - name: Review-fix regression tests
+        run: node --test dist/test/study-review-fixes.test.js
+      - name: Production provenance unchanged
+        working-directory: .
+        shell: pwsh
+        run: |
+          git diff --exit-code f3b772f7765206f75f7296e436d89c6a771b690a HEAD -- apps/enterprise-misen/src apps/enterprise-misen/acceptance apps/enterprise-misen/demo apps/enterprise-misen/package-lock.json
+          git diff --check
+
+  full-suite-portable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: apps/enterprise-misen
@@ -32,7 +60,6 @@ jobs:
         run: npm run acceptance
       - name: Production provenance unchanged
         working-directory: .
-        shell: pwsh
         run: |
           git diff --exit-code f3b772f7765206f75f7296e436d89c6a771b690a HEAD -- apps/enterprise-misen/src apps/enterprise-misen/acceptance apps/enterprise-misen/demo apps/enterprise-misen/package-lock.json
           git diff --check
