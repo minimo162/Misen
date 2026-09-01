@@ -12,8 +12,15 @@ export const FAILURE_TAXONOMIES = [
   'SECURITY_OR_INTEGRITY',
   'INVALID_OBSERVER_OR_INFRA',
 ] as const
+export const INVALID_REASONS = [
+  'OBSERVER_CAPTURE_FAILURE',
+  'INFRASTRUCTURE_FAILURE',
+  'CONFIGURATION_DRIFT',
+  'INCOMPLETE_EVENT_STREAM',
+] as const
 
 export type FailureTaxonomy = typeof FAILURE_TAXONOMIES[number]
+export type InvalidReason = typeof INVALID_REASONS[number]
 export type StudyMonth = '7月' | '8月'
 export type StudyRunStatus = 'PASS' | 'FAIL' | 'INVALID'
 
@@ -147,7 +154,7 @@ export interface StudyRunRecord {
   readonly elapsedMs: number
   readonly rssBytes: number
   readonly integrity: IntegrityObservation
-  readonly invalidReason: string | null
+  readonly invalidReason: InvalidReason | null
 }
 
 export interface StudyCheckpoint {
