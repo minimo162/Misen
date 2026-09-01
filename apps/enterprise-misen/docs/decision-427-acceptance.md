@@ -296,6 +296,62 @@ that observer conclusion and is the reason this study is incomplete.
 reliability threshold or production-readiness conclusion is inferred from four
 runs.
 
+### Decision 432 observer repair and Luna/medium study — stopped
+
+Decision 432 first repaired the Decision 431 observer without changing
+production `src`, the Agent prompt/persona/handoff, fixtures/template, the five
+Tool contracts, Spreadsheet behavior, or Business Acceptance. The repair uses
+the pinned DSH opaque identity pair `tool/call.data.callId` and
+`tool/result.data.message.source.callId`, records one bounded outcome for every
+Tool call, requires exact aggregate/outcome consistency, separates validation
+from other Tool errors, counts changed-argument same-operation Agent
+self-corrections separately from provider retries, and separates Business from
+provider/transport failure codes. A DSH scheduled/started retry pair counts as
+one provider retry.
+
+Pre-live evidence on repair commit
+`dcee73ed34bc6d0628aa9a53d1da1bd1fae1bedd`:
+
+- `npm run test`: 58 PASS / 0 FAIL / 1 Windows symlink `EPERM` SKIP
+- `npm run acceptance`: PASS — 1 / 1
+- `npm audit --omit=dev --package-lock-only`: 0 vulnerabilities
+- working `git diff --check`: PASS
+- PowerShell observer parse: PASS
+- fresh re-review: BLOCKER 0 / MUST FIX 0 / NON-BLOCKING 0
+
+The new study then started with exact `gpt-5.6-luna` and
+`reasoningEffort: medium`. July run 1 created one output workbook, preserved
+all input hashes, exposed only the five expected Tools, and recorded balanced
+25 Tool calls / 25 results. The repaired observer recorded 8 Tool errors, 3
+validation errors, 3 changed-argument self-corrections, 3 successful
+self-corrections, zero missing/orphan results, and zero provider retries. The
+run took 89,214.781 ms; provider usage reported 3,974 input tokens, 4,148
+output tokens, 18,010 cache-write tokens, 135,378 cache-read tokens, and
+161,510 total tokens. Provider/transport failure was false.
+
+This run is **not a valid Business reliability result**. The historical
+thinking-off guard observed 15 DSH reasoning blocks under the newly authorized
+`medium` setting and returned before independent output inspection. Therefore
+the mandatory `Report!B2`, `Report!A5:C7`, and SHEET / MONTH / ROWS /
+PROFIT_FORMULAS / STATUS / TOTAL / FOOTER / FORMAT results were absent. Only
+the block count was observed; raw reasoning content and raw provider payloads
+were not collected or retained.
+
+Per Decision 432's no-mid-study-repair rule, the process was interrupted before
+July run 2. The exact Node root was confirmed stopped with no surviving
+descendants. July runs 2–5 and all five August runs are **NOT RUN**. Because the
+observer was interrupted before its terminal record, a complete PID/TCP
+observation summary is unavailable and no network PASS is claimed. No API key
+value, live workbook, raw live log, or secret was committed.
+
+Historical `off` evidence remains separate at 3 PASS / 1 FAIL / 6 NOT RUN; it
+is an incomplete study and is not combined with the invalid first `medium`
+run. No new reliability rate or production threshold is inferred.
+
+**Decision 432 status: STOPPED — INFRASTRUCTURE/OBSERVER BLOCKER.** A new human
+Decision is required before changing the medium-run observation/Acceptance
+ordering or starting another live execution.
+
 ## Process and network observation
 
 An external PowerShell acceptance launched the compiled Phase D test directly
