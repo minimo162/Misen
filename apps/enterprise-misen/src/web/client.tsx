@@ -38,7 +38,7 @@ type ServerEvent =
 
 const TOOL_PRESENTATION: Record<string, string> = {
   workspace_list_files: 'ファイル一覧を確認',
-  workspace_read_text: '引継ぎ資料を確認',
+  workspace_read_text: '業務ガイドを確認',
   spreadsheet_read: 'Excelを確認',
   spreadsheet_create_output: 'Excelを作成',
   spreadsheet_update: 'Excelを更新',

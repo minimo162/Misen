@@ -30,7 +30,7 @@ try {
   const inputs = ['master.xlsx', '月次管理レポート_template.xlsx', ...scenario.companies.map(company => `${month}/${company.company}.xlsx`)]
   const before = new Map(await Promise.all(inputs.map(async file => [file, digest(await readFile(join(root, file)))] as const)))
   const outputBefore = await snapshotOutputScope(root)
-  const agent = liveAgent(root)
+  const agent = await liveAgent(root)
 
   agent.subscribe(event => {
     if (event.type === 'tool_execution_start') {
