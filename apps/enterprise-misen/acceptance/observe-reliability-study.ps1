@@ -25,7 +25,7 @@ $process = Start-Process `
     -PassThru
 
 $rootPid = $process.Id
-Write-Output "DECISION_431_MONITOR_ACTIVE rootPid=$rootPid"
+Write-Output "DECISION_432_MONITOR_ACTIVE rootPid=$rootPid"
 $samples = 0
 
 do {
@@ -91,7 +91,7 @@ do {
 
 $process.WaitForExit()
 $observation = [ordered]@{
-    Schema = 'misen.decision-431.reliability-observation.v1'
+    Schema = 'misen.decision-432.medium-reliability-observation.v1'
     StartedAt = $startedAt.ToString('o')
     FinishedAt = (Get-Date).ToString('o')
     RootPID = $rootPid
@@ -104,7 +104,7 @@ $observation = [ordered]@{
     TcpConnections = @($connections | Sort-Object PID, RemoteAddress, RemotePort -Unique)
     SecurityIntegrityViolation = $violation
 }
-Write-Output ("DECISION_431_PROCESS_NETWORK " + ($observation | ConvertTo-Json -Depth 8 -Compress))
+Write-Output ("DECISION_432_PROCESS_NETWORK " + ($observation | ConvertTo-Json -Depth 8 -Compress))
 
 if ($null -ne $violation) { exit 3 }
 if ($process.ExitCode -ne 0) { exit $process.ExitCode }

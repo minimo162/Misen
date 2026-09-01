@@ -72,7 +72,8 @@ export interface MonthResult {
   month: string
   status: 'PASS' | 'FAIL'
   reason?: string
-  failureCode?: string
+  businessFailureCode?: string
+  providerFailureCode?: string
   failureDiagnostic?: FailureDiagnostic
   finalText?: string
   output?: string
@@ -90,12 +91,18 @@ export interface MonthResult {
   sessionEventCounts?: Record<string, number>
   toolResultErrors?: ToolResultError[]
   retryEventCount?: number
+  toolOutcomes?: ToolOutcomeDiagnostic[]
   spreadsheetUpdates?: SpreadsheetUpdateDiagnostic[]
   outputDiagnosis?: OutputDiagnosis
   toolErrorCount?: number
   toolValidationErrorCount?: number
+  toolMissingResultCount?: number
+  toolOrphanResultCount?: number
+  toolCorrelationBalanced?: boolean
   agentSelfCorrection?: boolean
   agentSelfCorrectionSucceeded?: boolean
+  agentSelfCorrectionCount?: number
+  agentSelfCorrectionSucceededCount?: number
 }
 
 interface ToolResultError {
@@ -619,8 +626,29 @@ export function collectSpreadsheetUpdateDiagnostics(events: readonly unknown[]):
 export interface ToolCorrectionSummary {
   readonly toolErrorCount: number
   readonly validationErrorCount: number
+  readonly missingResultCount: number
+  readonly orphanResultCount: number
+  readonly correlationBalanced: boolean
   readonly selfCorrectionAttempted: boolean
   readonly selfCorrectionSucceeded: boolean
+  readonly selfCorrectionCount: number
+  readonly selfCorrectionSucceededCount: number
+  readonly outcomes: readonly ToolOutcomeDiagnostic[]
+}
+
+export interface ToolOutcomeDiagnostic {
+  readonly sequence: number
+  readonly tool?: string
+  readonly result: 'success' | 'error' | 'missing-result'
+  readonly validationError: boolean
+  readonly errorCode?: string
+  readonly errorCategory?: string
+}
+
+function opaqueToolCallId(value: unknown): string | undefined {
+  // DSH ToolCallId is an opaque provider-issued string. It is identity data,
+  // not a display/log field, so correlation must preserve it byte-for-byte.
+  return typeof value === 'string' ? value : undefined
 }
 
 function toolOperationKey(data: JsonRecord): string | undefined {
@@ -670,10 +698,20 @@ export function collectToolCorrectionSummary(events: readonly unknown[]): ToolCo
     callId?: string
     name?: string
     operationKey?: string
+    argumentsFingerprint?: string
+    turn?: number
     result: 'success' | 'error' | 'missing-result'
     validationError: boolean
+    errorCode?: string
+    errorCategory?: string
   }> = []
-  const results = new Map<string, { result: 'success' | 'error'; validationError: boolean }>()
+  const results = new Map<string, {
+    result: 'success' | 'error'
+    validationError: boolean
+    errorCode?: string
+    errorCategory?: string
+  }>()
+  let duplicateResultCount = 0
   for (const event of events) {
     if ((event as { type?: unknown }).type !== 'tool/result') continue
     const data = eventData(event)
@@ -687,45 +725,95 @@ export function collectToolCorrectionSummary(events: readonly unknown[]): ToolCo
     const resultBlock = typeof content[0] === 'object' && content[0] !== null && !Array.isArray(content[0])
       ? content[0] as JsonRecord
       : {}
-    const callId = safeIdentifier(source.callId)
+    const callId = opaqueToolCallId(source.callId)
     if (callId === undefined) continue
     const hasError = (typeof data.error === 'object' && data.error !== null) || resultBlock.isError === true
+    const rawError = typeof data.error === 'object' && data.error !== null && !Array.isArray(data.error)
+      ? data.error as JsonRecord
+      : undefined
+    const errorCode = rawError === undefined ? undefined : safeIdentifier(rawError.code)
+    const errorCategory = rawError === undefined ? undefined : safeIdentifier(rawError.name)
+    if (results.has(callId)) duplicateResultCount += 1
     results.set(callId, {
       result: hasError ? 'error' : 'success',
       validationError: hasError && isToolValidationError(data, resultBlock),
+      ...(errorCode === undefined ? {} : { errorCode }),
+      ...(errorCategory === undefined ? {} : { errorCategory }),
     })
   }
+  const callIds = new Set<string>()
+  let duplicateCallCount = 0
   for (const event of events) {
     if ((event as { type?: unknown }).type !== 'tool/call') continue
     const data = eventData(event)
-    const callId = safeIdentifier(data.callId)
+    const callId = opaqueToolCallId(data.callId)
     const name = typeof data.name === 'string' ? data.name : undefined
     const operationKey = toolOperationKey(data)
+    const argumentsFingerprint = typeof data.arguments === 'string'
+      ? createHash('sha256').update(data.arguments).digest('hex')
+      : undefined
     const outcome = callId === undefined ? undefined : results.get(callId)
+    if (callId !== undefined) {
+      if (callIds.has(callId)) duplicateCallCount += 1
+      callIds.add(callId)
+    }
+    const turn = typeof data.turn === 'number' && Number.isSafeInteger(data.turn) ? data.turn : undefined
     calls.push({
       ...(callId === undefined ? {} : { callId }),
       ...(name === undefined ? {} : { name }),
       ...(operationKey === undefined ? {} : { operationKey }),
+      ...(argumentsFingerprint === undefined ? {} : { argumentsFingerprint }),
+      ...(turn === undefined ? {} : { turn }),
       result: outcome?.result ?? 'missing-result',
       validationError: outcome?.validationError ?? false,
+      ...(outcome?.errorCode === undefined ? {} : { errorCode: outcome.errorCode }),
+      ...(outcome?.errorCategory === undefined ? {} : { errorCategory: outcome.errorCategory }),
     })
   }
 
-  let selfCorrectionAttempted = false
-  let selfCorrectionSucceeded = false
+  let selfCorrectionCount = 0
+  let selfCorrectionSucceededCount = 0
   for (const [index, call] of calls.entries()) {
-    if (!call.validationError || call.name === undefined || call.operationKey === undefined) continue
-    const next = calls[index + 1]
-    if (next?.name !== call.name || next.operationKey !== call.operationKey) continue
-    selfCorrectionAttempted = true
-    if (next.result === 'success') selfCorrectionSucceeded = true
+    if (call.result !== 'error' || call.name === undefined || call.operationKey === undefined) continue
+    const correction = calls.slice(index + 1).find(candidate =>
+      candidate.turn === call.turn &&
+      candidate.name === call.name &&
+      candidate.operationKey === call.operationKey &&
+      candidate.argumentsFingerprint !== call.argumentsFingerprint)
+    if (correction === undefined) continue
+    selfCorrectionCount += 1
+    if (correction.result === 'success') selfCorrectionSucceededCount += 1
   }
+  const missingResultCount = calls.filter(call => call.result === 'missing-result').length
+  const orphanResultCount = [...results.keys()].filter(callId => !callIds.has(callId)).length
+  const correlationBalanced = missingResultCount === 0 && orphanResultCount === 0 &&
+    duplicateCallCount === 0 && duplicateResultCount === 0
+  const outcomes = calls.map<ToolOutcomeDiagnostic>((call, index) => ({
+    sequence: index + 1,
+    ...(call.name === undefined ? {} : { tool: call.name }),
+    result: call.result,
+    validationError: call.validationError,
+    ...(call.errorCode === undefined ? {} : { errorCode: call.errorCode }),
+    ...(call.errorCategory === undefined ? {} : { errorCategory: call.errorCategory }),
+  }))
   return {
     toolErrorCount: calls.filter(call => call.result === 'error').length,
     validationErrorCount: calls.filter(call => call.validationError).length,
-    selfCorrectionAttempted,
-    selfCorrectionSucceeded,
+    missingResultCount,
+    orphanResultCount,
+    correlationBalanced,
+    selfCorrectionAttempted: selfCorrectionCount > 0,
+    selfCorrectionSucceeded: selfCorrectionSucceededCount > 0,
+    selfCorrectionCount,
+    selfCorrectionSucceededCount,
+    outcomes,
   }
+}
+
+export function collectProviderRetryCount(events: readonly unknown[]): number {
+  // One retry attempt has both a scheduled `llm/retry` record and, after the
+  // wait, an `llm/retry-started` transition. Count the scheduled attempt once.
+  return events.filter(event => (event as { type?: unknown }).type === 'llm/retry').length
 }
 
 function collectResult(
@@ -758,7 +846,7 @@ function collectResult(
   const toolNamesByCallId = new Map<string, string>()
   for (const event of toolEvents) {
     const data = eventData(event)
-    const callId = safeIdentifier(data.callId)
+    const callId = opaqueToolCallId(data.callId)
     const name = typeof data.name === 'string' ? data.name : undefined
     if (callId !== undefined && name !== undefined) toolNamesByCallId.set(callId, name)
   }
@@ -766,7 +854,11 @@ function collectResult(
     const data = eventData(event)
     const rawMessage = data.message
     const callId = typeof rawMessage === 'object' && rawMessage !== null && !Array.isArray(rawMessage)
-      ? safeIdentifier((rawMessage as JsonRecord).callId)
+      ? opaqueToolCallId(typeof (rawMessage as JsonRecord).source === 'object' &&
+        (rawMessage as JsonRecord).source !== null &&
+        !Array.isArray((rawMessage as JsonRecord).source)
+        ? ((rawMessage as JsonRecord).source as JsonRecord).callId
+        : undefined)
       : undefined
     const rawError = data.error
     if (typeof rawError !== 'object' || rawError === null || Array.isArray(rawError)) return []
@@ -780,10 +872,7 @@ function collectResult(
       ...(category === undefined ? {} : { category }),
     }]
   })
-  const retryEventCount = events.filter(event => {
-    const type = (event as { type?: unknown }).type
-    return type === 'llm/retry' || type === 'llm/retry-started'
-  }).length
+  const retryEventCount = collectProviderRetryCount(events)
   const spreadsheetUpdates = collectSpreadsheetUpdateDiagnostics(events)
   const correctionSummary = collectToolCorrectionSummary(events)
   const reasoningBlocks = assistantEvents.reduce<number>(
@@ -838,8 +927,9 @@ function collectResult(
       !Array.isArray((turnEndData.reason as JsonRecord).error)
     ? (turnEndData.reason as JsonRecord).error as JsonRecord
     : undefined
-  const failureCode = typeof endFailure?.code === 'string' ? endFailure.code : undefined
-  const failureDiagnostic = diagnoseFailure(endFailure?.message)
+  const providerFailure = executionError instanceof LlmError
+  const providerFailureCode = providerFailure && typeof endFailure?.code === 'string' ? endFailure.code : undefined
+  const failureDiagnostic = providerFailure ? diagnoseFailure(endFailure?.message) : undefined
   const executionErrorCode = safeErrorCode(executionError)
   const finalAssistant = [...assistantEvents].reverse().find(event => {
     const data = eventData(event)
@@ -852,7 +942,7 @@ function collectResult(
     ? `agent execution error (${safeFailureReason(executionError)})`
     : endReason !== 'completed'
     ? endReason === 'error'
-      ? `turn error${failureCode === undefined ? '' : ` (${failureCode})`}`
+      ? `turn error${providerFailureCode === undefined ? '' : ` (${providerFailureCode})`}`
       : `turn ended ${String(endReason ?? 'without turn/end')}`
     : forbiddenToolNames.length > 0
       ? `forbidden tool requested: ${forbiddenToolNames.join(', ')}`
@@ -863,7 +953,7 @@ function collectResult(
     month,
     status: reason === undefined ? 'PASS' : 'FAIL',
     ...(reason === undefined ? {} : { reason }),
-    ...(failureCode === undefined ? {} : { failureCode }),
+    ...(providerFailureCode === undefined ? {} : { providerFailureCode }),
     ...(failureDiagnostic === undefined ? {} : { failureDiagnostic }),
     ...(finalText === undefined ? {} : { finalText }),
     ...(outputRelative === undefined ? {} : { output: outputRelative }),
@@ -888,15 +978,25 @@ function collectResult(
     sessionEventCounts,
     ...(toolResultErrors.length === 0 ? {} : { toolResultErrors }),
     retryEventCount,
+    toolOutcomes: [...correctionSummary.outcomes],
     ...(spreadsheetUpdates.length === 0 ? {} : { spreadsheetUpdates }),
     toolErrorCount: correctionSummary.toolErrorCount,
     toolValidationErrorCount: correctionSummary.validationErrorCount,
+    toolMissingResultCount: correctionSummary.missingResultCount,
+    toolOrphanResultCount: correctionSummary.orphanResultCount,
+    toolCorrelationBalanced: correctionSummary.correlationBalanced,
     agentSelfCorrection: correctionSummary.selfCorrectionAttempted,
     agentSelfCorrectionSucceeded: correctionSummary.selfCorrectionSucceeded,
+    agentSelfCorrectionCount: correctionSummary.selfCorrectionCount,
+    agentSelfCorrectionSucceededCount: correctionSummary.selfCorrectionSucceededCount,
   }
 }
 
-export async function runMonth(month: string, runIdentity?: string): Promise<MonthResult> {
+export async function runMonth(
+  month: string,
+  runIdentity?: string,
+  reasoningEffort: 'off' | 'medium' = 'off',
+): Promise<MonthResult> {
   const root = await mkdtemp(join(tmpdir(), 'misen-enterprise-live-'))
   const startedAt = performance.now()
   let ctx: Awaited<ReturnType<typeof createEnterpriseBrainContext>> | undefined
@@ -924,7 +1024,7 @@ export async function runMonth(month: string, runIdentity?: string): Promise<Mon
     const agent = ctx.agentLoop.create(createLiveSessionId(month, runIdentity), {
       provider: LIVE_PROVIDER,
       model: LIVE_MODEL,
-      reasoningEffort: ReasoningEffortId('off'),
+      reasoningEffort: ReasoningEffortId(reasoningEffort),
       maxTokens: 4_096,
     })
     // Keep the live request intentionally minimal and identical across months.
@@ -997,7 +1097,7 @@ export async function runMonth(month: string, runIdentity?: string): Promise<Mon
         const failureCode = outputValidationFailureCode(error) ?? 'UNKNOWN'
         terminal.status = 'FAIL'
         terminal.reason = `output validation failed (${failureCode})`
-        terminal.failureCode = failureCode
+        terminal.businessFailureCode = failureCode
         terminal.output = outputRelative
         terminal.metrics.outputBytes = outputBytes
         return terminal
@@ -1108,7 +1208,8 @@ export async function runLiveAcceptance(): Promise<LiveAcceptanceResult> {
       month: month.month,
       status: month.status,
       ...(month.reason === undefined ? {} : { reason: month.reason }),
-      ...(month.failureCode === undefined ? {} : { failureCode: month.failureCode }),
+      ...(month.businessFailureCode === undefined ? {} : { businessFailureCode: month.businessFailureCode }),
+      ...(month.providerFailureCode === undefined ? {} : { providerFailureCode: month.providerFailureCode }),
       ...(month.failureDiagnostic === undefined ? {} : { failureDiagnostic: month.failureDiagnostic }),
       ...(month.executionErrorClass === undefined ? {} : { executionErrorClass: month.executionErrorClass }),
       ...(month.executionErrorCode === undefined ? {} : { executionErrorCode: month.executionErrorCode }),
@@ -1121,10 +1222,16 @@ export async function runLiveAcceptance(): Promise<LiveAcceptanceResult> {
       ...(month.sessionEventCounts === undefined ? {} : { sessionEventCounts: month.sessionEventCounts }),
       ...(month.toolResultErrors === undefined ? {} : { toolResultErrors: month.toolResultErrors }),
       ...(month.retryEventCount === undefined ? {} : { retryEventCount: month.retryEventCount }),
+      ...(month.toolOutcomes === undefined ? {} : { toolOutcomes: month.toolOutcomes }),
       ...(month.toolErrorCount === undefined ? {} : { toolErrorCount: month.toolErrorCount }),
       ...(month.toolValidationErrorCount === undefined ? {} : { toolValidationErrorCount: month.toolValidationErrorCount }),
+      ...(month.toolMissingResultCount === undefined ? {} : { toolMissingResultCount: month.toolMissingResultCount }),
+      ...(month.toolOrphanResultCount === undefined ? {} : { toolOrphanResultCount: month.toolOrphanResultCount }),
+      ...(month.toolCorrelationBalanced === undefined ? {} : { toolCorrelationBalanced: month.toolCorrelationBalanced }),
       ...(month.agentSelfCorrection === undefined ? {} : { agentSelfCorrection: month.agentSelfCorrection }),
       ...(month.agentSelfCorrectionSucceeded === undefined ? {} : { agentSelfCorrectionSucceeded: month.agentSelfCorrectionSucceeded }),
+      ...(month.agentSelfCorrectionCount === undefined ? {} : { agentSelfCorrectionCount: month.agentSelfCorrectionCount }),
+      ...(month.agentSelfCorrectionSucceededCount === undefined ? {} : { agentSelfCorrectionSucceededCount: month.agentSelfCorrectionSucceededCount }),
       ...(month.outputDiagnosis === undefined ? {} : { outputDiagnosis: month.outputDiagnosis }),
       inputUnchanged: Object.entries(month.inputHashesBefore).every(([path, before]) => month.inputHashesAfter[path] === before),
       ...(month.turnEnd === undefined ? {} : { turnEnd: month.turnEnd }),
@@ -1176,7 +1283,8 @@ async function runSingleJulyDiagnosis(
     prompt: createLivePrompt(month),
     month: monthResult.month,
     ...(monthResult.reason === undefined ? {} : { reason: monthResult.reason }),
-    ...(monthResult.failureCode === undefined ? {} : { failureCode: monthResult.failureCode }),
+    ...(monthResult.businessFailureCode === undefined ? {} : { businessFailureCode: monthResult.businessFailureCode }),
+    ...(monthResult.providerFailureCode === undefined ? {} : { providerFailureCode: monthResult.providerFailureCode }),
     toolNames: monthResult.toolNames,
     ...(monthResult.spreadsheetUpdates === undefined ? {} : { spreadsheetUpdates: monthResult.spreadsheetUpdates }),
     ...(monthResult.outputDiagnosis === undefined ? {} : { outputDiagnosis: monthResult.outputDiagnosis }),
@@ -1186,10 +1294,16 @@ async function runSingleJulyDiagnosis(
     forbiddenToolNames: monthResult.forbiddenToolNames,
     reasoningBlocks: monthResult.reasoningBlocks,
     retryEventCount: monthResult.retryEventCount ?? 0,
+    toolOutcomes: monthResult.toolOutcomes ?? [],
     toolErrorCount: monthResult.toolErrorCount ?? 0,
     toolValidationErrorCount: monthResult.toolValidationErrorCount ?? 0,
+    toolMissingResultCount: monthResult.toolMissingResultCount ?? 0,
+    toolOrphanResultCount: monthResult.toolOrphanResultCount ?? 0,
+    toolCorrelationBalanced: monthResult.toolCorrelationBalanced ?? false,
     agentSelfCorrection: monthResult.agentSelfCorrection ?? false,
     agentSelfCorrectionSucceeded: monthResult.agentSelfCorrectionSucceeded ?? false,
+    agentSelfCorrectionCount: monthResult.agentSelfCorrectionCount ?? 0,
+    agentSelfCorrectionSucceededCount: monthResult.agentSelfCorrectionSucceededCount ?? 0,
     ...(monthResult.turnEnd === undefined ? {} : { turnEnd: monthResult.turnEnd }),
   })}`)
   return result

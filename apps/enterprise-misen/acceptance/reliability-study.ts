@@ -9,10 +9,12 @@ import {
   type MonthResult,
   type OutputDiagnosis,
   type SpreadsheetUpdateDiagnostic,
+  type ToolOutcomeDiagnostic,
 } from './live-brain.js'
 
 const PROVIDER = 'openai'
 const MODEL = 'gpt-5.6-luna'
+export const RELIABILITY_REASONING_EFFORT = 'medium' as const
 export const RELIABILITY_MONTHS = Object.freeze(['7月', '8月'] as const)
 export const RELIABILITY_RUNS_PER_MONTH = 5
 const AXES = Object.freeze([
@@ -34,6 +36,7 @@ export interface ReliabilityRunSummary {
   readonly runNumber: number
   readonly status: 'PASS' | 'FAIL'
   readonly failureAxis?: string
+  readonly businessFailureCode?: string
   readonly reason?: string
   readonly checks?: OutputDiagnosis['checks']
   readonly outputWorkbookCount?: number
@@ -44,11 +47,17 @@ export interface ReliabilityRunSummary {
   readonly toolNames: readonly string[]
   readonly toolErrorCount: number
   readonly toolValidationErrorCount: number
+  readonly toolMissingResultCount: number
+  readonly toolOrphanResultCount: number
+  readonly toolCorrelationBalanced: boolean
   readonly agentSelfCorrection: boolean
   readonly agentSelfCorrectionSucceeded: boolean
+  readonly agentSelfCorrectionCount: number
+  readonly agentSelfCorrectionSucceededCount: number
   readonly providerRetryCount: number
   readonly providerOrTransportFailure: boolean
   readonly providerFailureCode?: string
+  readonly toolOutcomes: readonly ToolOutcomeDiagnostic[]
   readonly metrics: LiveMetrics
   readonly actualB2?: unknown
   readonly actualRows?: readonly unknown[][]
@@ -69,6 +78,7 @@ export interface ReliabilityStudySummary {
   readonly blocker?: string
   readonly provider: string
   readonly model: string
+  readonly reasoningEffort: typeof RELIABILITY_REASONING_EFFORT
   readonly runsPerMonth: number
   readonly runs: readonly ReliabilityRunSummary[]
   readonly passCounts: Readonly<Record<string, number>>
@@ -78,6 +88,8 @@ export interface ReliabilityStudySummary {
   readonly toolValidationErrorRuns: number
   readonly selfCorrectionAttemptRuns: number
   readonly selfCorrectionSucceededRuns: number
+  readonly selfCorrectionCount: number
+  readonly selfCorrectionSucceededCount: number
   readonly providerOrTransportFailureRuns: number
   readonly performance: Readonly<{
     elapsedMs: NumericSummary
@@ -98,24 +110,35 @@ function firstFailureAxis(result: MonthResult): string | undefined {
     const failed = AXES.find(axis => checks[axis] === 'FAIL')
     if (failed !== undefined) return failed
   }
-  if (result.failureCode !== undefined) return result.failureCode
+  if (result.businessFailureCode !== undefined) return result.businessFailureCode
   if (result.status === 'FAIL') return 'RUNTIME_OR_OUTPUT'
   return undefined
 }
 
 function providerOrTransportFailure(result: MonthResult): boolean {
   return result.executionErrorClass === 'LlmError' ||
-    result.failureDiagnostic !== undefined ||
-    result.turnEnd === 'error'
+    result.providerFailureCode !== undefined ||
+    result.failureDiagnostic !== undefined
 }
 
-function infrastructureBlocker(result: MonthResult): string | undefined {
+export function reliabilityInfrastructureBlocker(result: MonthResult): string | undefined {
   const status = result.failureDiagnostic?.status
   if (status === 401 || status === 403 || status === 429) return `provider status ${status}`
   if (result.failureDiagnostic?.modelNotFound === true) return 'provider model not found'
   if (result.failureDiagnostic?.unsupportedReasoning === true) return 'provider rejected reasoning setting'
   if (result.failureDiagnostic?.invalidRequest === true) return 'provider rejected the fixed request contract'
-  if (result.failureCode === 'AUTH') return 'provider authentication failure'
+  if (result.providerFailureCode === 'AUTH') return 'provider authentication failure'
+  if (result.toolCorrelationBalanced === false) return 'Tool call/result identity correlation is not balanced'
+  const outcomes = result.toolOutcomes
+  if (outcomes === undefined || outcomes.length !== result.metrics.toolCallCount) {
+    return 'bounded Tool outcomes do not cover every Tool call'
+  }
+  if (outcomes.filter(outcome => outcome.result === 'error').length !== (result.toolErrorCount ?? 0)) {
+    return 'aggregate Tool-error count contradicts bounded Tool evidence'
+  }
+  if (outcomes.filter(outcome => outcome.validationError).length !== (result.toolValidationErrorCount ?? 0)) {
+    return 'aggregate Tool-validation-error count contradicts bounded Tool evidence'
+  }
   return undefined
 }
 
@@ -141,6 +164,7 @@ export function summarizeReliabilityRun(result: MonthResult, runNumber: number):
     runNumber,
     status: result.status,
     ...(failed ? { failureAxis: firstFailureAxis(result) ?? 'UNKNOWN' } : {}),
+    ...(result.businessFailureCode === undefined ? {} : { businessFailureCode: result.businessFailureCode }),
     ...(result.reason === undefined ? {} : { reason: result.reason }),
     ...(result.outputDiagnosis === undefined ? {} : { checks: result.outputDiagnosis.checks }),
     ...(result.outputWorkbookCount === undefined ? {} : { outputWorkbookCount: result.outputWorkbookCount }),
@@ -151,15 +175,21 @@ export function summarizeReliabilityRun(result: MonthResult, runNumber: number):
     toolNames: result.toolNames,
     toolErrorCount: result.toolErrorCount ?? 0,
     toolValidationErrorCount: validationErrorCount,
+    toolMissingResultCount: result.toolMissingResultCount ?? 0,
+    toolOrphanResultCount: result.toolOrphanResultCount ?? 0,
+    toolCorrelationBalanced: result.toolCorrelationBalanced ?? false,
     agentSelfCorrection: result.agentSelfCorrection ?? false,
     agentSelfCorrectionSucceeded: result.agentSelfCorrectionSucceeded ?? false,
+    agentSelfCorrectionCount: result.agentSelfCorrectionCount ?? 0,
+    agentSelfCorrectionSucceededCount: result.agentSelfCorrectionSucceededCount ?? 0,
     providerRetryCount: result.retryEventCount ?? 0,
     providerOrTransportFailure: providerOrTransportFailure(result),
-    ...(result.failureCode === undefined ? {} : { providerFailureCode: result.failureCode }),
+    ...(result.providerFailureCode === undefined ? {} : { providerFailureCode: result.providerFailureCode }),
+    toolOutcomes: result.toolOutcomes ?? [],
     metrics: result.metrics,
-    ...(failed && result.outputDiagnosis?.actualB2 !== undefined ? { actualB2: result.outputDiagnosis.actualB2 } : {}),
-    ...(failed && result.outputDiagnosis?.actualRows !== undefined ? { actualRows: result.outputDiagnosis.actualRows } : {}),
-    ...((failed || validationErrorCount > 0) && result.spreadsheetUpdates !== undefined
+    ...(result.outputDiagnosis?.actualB2 === undefined ? {} : { actualB2: result.outputDiagnosis.actualB2 }),
+    ...(result.outputDiagnosis?.actualRows === undefined ? {} : { actualRows: result.outputDiagnosis.actualRows }),
+    ...((failed || (result.toolErrorCount ?? 0) > 0) && result.spreadsheetUpdates !== undefined
       ? { spreadsheetUpdates: result.spreadsheetUpdates }
       : {}),
     reasoningBlocks: result.reasoningBlocks,
@@ -200,6 +230,7 @@ export function summarizeReliabilityStudy(
     ...(blocker === undefined ? {} : { blocker }),
     provider: PROVIDER,
     model: MODEL,
+    reasoningEffort: RELIABILITY_REASONING_EFFORT,
     runsPerMonth: RELIABILITY_RUNS_PER_MONTH,
     runs,
     passCounts,
@@ -209,6 +240,8 @@ export function summarizeReliabilityStudy(
     toolValidationErrorRuns: runs.filter(run => run.toolValidationErrorCount > 0).length,
     selfCorrectionAttemptRuns: runs.filter(run => run.agentSelfCorrection).length,
     selfCorrectionSucceededRuns: runs.filter(run => run.agentSelfCorrectionSucceeded).length,
+    selfCorrectionCount: runs.reduce((total, run) => total + run.agentSelfCorrectionCount, 0),
+    selfCorrectionSucceededCount: runs.reduce((total, run) => total + run.agentSelfCorrectionSucceededCount, 0),
     providerOrTransportFailureRuns: runs.filter(run => run.providerOrTransportFailure).length,
     performance: {
       elapsedMs: numericSummary(runs.map(run => run.metrics.elapsedMs)),
@@ -230,16 +263,16 @@ export async function runReliabilityStudy(): Promise<ReliabilityStudySummary | u
     for (let runNumber = 1; runNumber <= RELIABILITY_RUNS_PER_MONTH; runNumber += 1) {
       let result: MonthResult
       try {
-        result = await runMonth(month, `decision-431-${month}-${runNumber}`)
+        result = await runMonth(month, `decision-432-${month}-${runNumber}`, RELIABILITY_REASONING_EFFORT)
       } catch (error) {
         const blocker = error instanceof Error ? error.name : 'UnknownError'
         const summary = summarizeReliabilityStudy(runs, 'STOPPED_INFRASTRUCTURE', `study runner stage failure (${blocker})`)
-        console.log(`DECISION_431_RELIABILITY_SUMMARY ${JSON.stringify(summary)}`)
+        console.log(`DECISION_432_RELIABILITY_SUMMARY ${JSON.stringify(summary)}`)
         return summary
       }
       const run = summarizeReliabilityRun(result, runNumber)
       runs.push(run)
-      console.log(`DECISION_431_RUN ${JSON.stringify({
+      console.log(`DECISION_432_RUN ${JSON.stringify({
         prompt: createLivePrompt(month),
         ...run,
       })}`)
@@ -247,20 +280,20 @@ export async function runReliabilityStudy(): Promise<ReliabilityStudySummary | u
       const securityBlocker = securityOrIntegrityBlocker(result)
       if (securityBlocker !== undefined) {
         const summary = summarizeReliabilityStudy(runs, 'STOPPED_SECURITY_INTEGRITY', securityBlocker)
-        console.log(`DECISION_431_RELIABILITY_SUMMARY ${JSON.stringify(summary)}`)
+        console.log(`DECISION_432_RELIABILITY_SUMMARY ${JSON.stringify(summary)}`)
         return summary
       }
-      const providerBlocker = infrastructureBlocker(result)
+      const providerBlocker = reliabilityInfrastructureBlocker(result)
       if (providerBlocker !== undefined) {
         const summary = summarizeReliabilityStudy(runs, 'STOPPED_INFRASTRUCTURE', providerBlocker)
-        console.log(`DECISION_431_RELIABILITY_SUMMARY ${JSON.stringify(summary)}`)
+        console.log(`DECISION_432_RELIABILITY_SUMMARY ${JSON.stringify(summary)}`)
         return summary
       }
     }
   }
 
   const summary = summarizeReliabilityStudy(runs)
-  console.log(`DECISION_431_RELIABILITY_SUMMARY ${JSON.stringify(summary)}`)
+  console.log(`DECISION_432_RELIABILITY_SUMMARY ${JSON.stringify(summary)}`)
   return summary
 }
 
