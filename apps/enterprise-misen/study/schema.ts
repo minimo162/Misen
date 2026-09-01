@@ -67,7 +67,7 @@ export const FROZEN_CONFIGURATION: FrozenConfiguration = Object.freeze({
   ]),
   context: Object.freeze({
     promptsSha256: '5ea8f22701b108db2b369f3dc0706571d1afad4042df12f17db8b8cdee6348c6',
-    fixtureInputsSha256: '99b45f6960c151287e6e10f81a59eac3e5d2ecec2bb506c7730117cd5070753a',
+    fixtureInputsSha256: '2cc132658fd0cc8ba295320c00862e5a191ebdab76caa8318816480e0eb0a707',
     systemPromptSha256: 'a359beecace889e596eee1a7ebcea42053081e80cf2ddddd7e96c70b7305c7ef',
     workspaceInstructionsSha256: '036d0ab99d944ad3eb00c6a1143313ecbae9adc4c97df5b8c9468e97e9d65e5b',
     skillCatalogSha256: 'e2389dd414def4faa62dccd4bfe0ff1288bbf9e6c94ddcdb709bffe0024916a7',
