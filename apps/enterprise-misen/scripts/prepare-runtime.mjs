@@ -14,7 +14,8 @@ import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const productionBaselineSha = '06804c5eb0c8f9e42322d66b11c2f5ae0153da69'
+const preparedRuntimeSourceSha = 'df2859c471fac035be062703f59f69e07d55b208'
+const thinMisenBehaviorBaselineSha = 'f3b772f7765206f75f7296e436d89c6a771b690a'
 const shaPattern = /^[0-9a-f]{40}$/
 const allowedDistRoots = Object.freeze([
   ['src'],
@@ -98,10 +99,20 @@ function quietGitDiff(args) {
 }
 
 function verifyPackagingProvenance(sourceSha, packagingSha) {
-  if (sourceSha !== productionBaselineSha) throw new Error(`--source-sha must equal frozen production baseline ${productionBaselineSha}`)
+  if (sourceSha !== preparedRuntimeSourceSha) throw new Error(`--source-sha must equal frozen prepared-runtime source ${preparedRuntimeSourceSha}`)
   if (git(['rev-parse', 'HEAD']) !== packagingSha) throw new Error('--packaging-sha must equal current HEAD')
   const protectedPaths = ['apps/enterprise-misen/src', 'apps/enterprise-misen/acceptance', 'apps/enterprise-misen/demo', 'apps/enterprise-misen/package-lock.json']
-  const packagingPaths = ['apps/enterprise-misen/package.json', 'apps/enterprise-misen/docs/prepared-runtime.md', 'apps/enterprise-misen/scripts/prepare-runtime.mjs', 'apps/enterprise-misen/scripts/verify-prepared-runtime.mjs']
+  const packagingPaths = [
+    'apps/enterprise-misen/package.json',
+    'apps/enterprise-misen/docs/prepared-runtime.md',
+    'apps/enterprise-misen/scripts/prepare-runtime.d.mts',
+    'apps/enterprise-misen/scripts/prepare-runtime.mjs',
+    'apps/enterprise-misen/scripts/verify-prepared-runtime.mjs',
+    'apps/enterprise-misen/test/prepared-runtime.test.ts',
+  ]
+  // #75 adds observer/test/evidence infrastructure only. The runtime paths in
+  // its merged source must still be exactly the Thin Misen #78 behavior tree.
+  quietGitDiff([thinMisenBehaviorBaselineSha, sourceSha, '--', ...protectedPaths])
   quietGitDiff([sourceSha, 'HEAD', '--', ...protectedPaths])
   quietGitDiff(['HEAD', '--', ...protectedPaths, ...packagingPaths])
   quietGitDiff(['--cached', 'HEAD', '--', ...protectedPaths, ...packagingPaths])
@@ -244,13 +255,18 @@ export async function prepareRuntime({ output, sourceSha, packagingSha }) {
     const preliminaryInventory = await buildInventory(target)
     assertRuntimeBoundary(preliminaryInventory)
     const manifest = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       sourceSha,
+      thinMisenBehaviorBaselineSha,
       packagingSha,
       node: { requirement: '>=22.19.0', executable: 'node', resolution: 'PATH' },
       launcher: 'run.cmd',
       entrypoint: 'app/dist/src/web/server.js',
       defaultWorkspace: 'workspace',
+      modelVisibleWorkspacePaths: [
+        'workspace/AGENTS.md',
+        'workspace/.agents/skills/monthly-report/SKILL.md',
+      ],
       requiredPaths: [
         'run.cmd',
         'app/package.json',
@@ -259,6 +275,8 @@ export async function prepareRuntime({ output, sourceSha, packagingSha }) {
         'app/dist/web/assets/client.js',
         'app/dist/web/assets/client.css',
         'app/node_modules',
+        'workspace/AGENTS.md',
+        'workspace/.agents/skills/monthly-report/SKILL.md',
         'workspace/業務引継ぎ.md',
         'workspace/master.xlsx',
         'workspace/月次管理レポート_template.xlsx',
@@ -274,6 +292,7 @@ export async function prepareRuntime({ output, sourceSha, packagingSha }) {
         buildsAtRuntime: false,
         downloadsAtRuntime: false,
         powershellFallback: false,
+        observerOrStudyCodeDistributed: false,
       },
       inventory: { ...preliminaryInventory, scope: 'all distributed files except SHA256SUMS.txt' },
     }
