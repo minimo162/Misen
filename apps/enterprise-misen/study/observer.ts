@@ -106,7 +106,8 @@ export interface FinalizeObservation {
   readonly integrity: IntegrityObservation
   readonly agentErrorMessage?: string
   readonly acceptanceFatal?: string
-  readonly invalidReason?: InvalidReason
+  readonly invalidReason?: string
+  readonly invalidReasonCode?: InvalidReason
   readonly endedAtUtc?: string
 }
 
@@ -192,11 +193,12 @@ export class StudyObserver {
       || this.lifecycle.turnStart < 1 || this.lifecycle.turnStart !== this.lifecycle.turnEnd
     const configurationDrift = this.providers.size !== 1 || !this.providers.has(FROZEN_CONFIGURATION.provider)
       || this.models.size !== 1 || !this.models.has(FROZEN_CONFIGURATION.model)
+    const externalInvalidReason = input.invalidReasonCode ?? (input.invalidReason ? 'INFRASTRUCTURE_FAILURE' : null)
     let taxonomy: FailureTaxonomy | null = null
     let failureSummary: string | null = null
     let invalidReason: InvalidReason | null = null
     if (integrity.inputMutation === true || integrity.forbiddenCapability || integrity.credentialExposure || integrity.unexpectedNetwork) { taxonomy = 'SECURITY_OR_INTEGRITY'; failureSummary = 'integrity or security incident' }
-    else if (input.invalidReason) { taxonomy = 'INVALID_OBSERVER_OR_INFRA'; failureSummary = 'observer or infrastructure failure'; invalidReason = input.invalidReason }
+    else if (externalInvalidReason) { taxonomy = 'INVALID_OBSERVER_OR_INFRA'; failureSummary = 'observer or infrastructure failure'; invalidReason = externalInvalidReason }
     else if (providerFailure) { taxonomy = 'PROVIDER_OR_TRANSPORT'; failureSummary = 'provider or transport error' }
     else if (input.acceptanceFatal) { taxonomy = 'ACCEPTANCE_FATAL'; failureSummary = 'acceptance evaluation failed' }
     else if (configurationDrift) { taxonomy = 'INVALID_OBSERVER_OR_INFRA'; failureSummary = 'observed provider or model differs from frozen configuration'; invalidReason = 'CONFIGURATION_DRIFT' }
@@ -217,7 +219,7 @@ export class StudyObserver {
       failureSummary,
       providerOrTransportErrorObserved: providerFailure,
       acceptanceFatalObserved: Boolean(input.acceptanceFatal),
-      observerOrInfraErrorObserved: Boolean(input.invalidReason),
+      observerOrInfraErrorObserved: externalInvalidReason !== null,
       axisMatrix: input.validation?.axes ?? null,
       output: input.validation && input.outputBytes !== undefined ? { basename: basename(input.validation.output), bytes: input.outputBytes } : null,
       inputHashesUnchanged: input.inputHashesUnchanged,
