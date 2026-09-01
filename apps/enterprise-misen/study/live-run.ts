@@ -41,7 +41,7 @@ const startedAtUtc = new Date().toISOString(), started = performance.now()
 const observer = new StudyObserver({ studyId: checkpoint.studyId, studyRunNumber: runNumber, paidAttemptNumber, month, productionBaselineSha: PRODUCTION_BASELINE_SHA, observerSha, startedAtUtc })
 let validation: ValidationResult | null = null, outputBytes: number | undefined, agentErrorMessage: string | undefined, acceptanceFatal: string | undefined
 let inputHashesUnchanged: boolean | null = null
-let observerFailure: string | undefined, agentStarted = false, persistenceStarted = false
+let observerFailure = false, agentStarted = false, persistenceStarted = false
 
 try {
   await fixture(workspace)
@@ -54,7 +54,7 @@ try {
     || agent.state.thinkingLevel !== FROZEN_CONFIGURATION.reasoning || JSON.stringify(actualTools) !== JSON.stringify(FROZEN_CONFIGURATION.tools)) {
     throw new Error('actual Agent state differs from frozen study configuration')
   }
-  agent.subscribe(event => { try { observer.observe(event) } catch (error) { observerFailure = error instanceof Error ? error.message : String(error); agent.abort() } })
+  agent.subscribe(event => { try { observer.observe(event) } catch { observerFailure = true; agent.abort() } })
   await reservePaidAttempt(evidenceDirectory, {
     schemaVersion: checkpoint.schemaVersion,
     studyId: checkpoint.studyId,
@@ -90,14 +90,13 @@ try {
     },
     agentErrorMessage,
     acceptanceFatal,
-    invalidReason: observerFailure,
+    invalidReason: observerFailure ? 'OBSERVER_CAPTURE_FAILURE' : undefined,
   })
   persistenceStarted = true
   await persistRun(evidenceDirectory, record)
   console.log(JSON.stringify({ status: record.status, run: runNumber, attempt: paidAttemptNumber, month, catalogEstimatedCostUsd: record.usage.catalogEstimatedCostUsd, evidenceDirectory }))
   if (record.status !== 'PASS') process.exitCode = 1
 } catch (error) {
-  const message = error instanceof Error ? error.message : String(error)
   if (!agentStarted || persistenceStarted) throw error
   const record = observer.finalize({
     validation: null,
@@ -105,10 +104,10 @@ try {
     elapsedMs: performance.now() - started,
     rssBytes: process.memoryUsage().rss,
     integrity: { inputMutation: inputHashesUnchanged === false ? true : null, forbiddenCapability: false, credentialExposure: null, unexpectedNetwork: null },
-    invalidReason: message,
+    invalidReason: 'INFRASTRUCTURE_FAILURE',
   })
   await persistRun(evidenceDirectory, record)
-  console.error(JSON.stringify({ status: record.status, run: runNumber, attempt: paidAttemptNumber, month, failureTaxonomy: record.failureTaxonomy }))
+  console.error(JSON.stringify({ status: record.status, run: runNumber, attempt: paidAttemptNumber, month, failureTaxonomy: record.failureTaxonomy, invalidReason: record.invalidReason }))
   process.exitCode = 1
 } finally {
   await rm(workspace, { recursive: true, force: true })
