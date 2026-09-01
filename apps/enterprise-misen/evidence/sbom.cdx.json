@@ -82,6 +82,29 @@
     },
     {
       "type": "library",
+      "bom-ref": "@assistant-ui/react-markdown@0.14.13",
+      "name": "@assistant-ui/react-markdown",
+      "version": "0.14.13",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/@assistant-ui/react-markdown"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "@assistant-ui/store@0.3.11",
       "name": "@assistant-ui/store",
       "version": "0.3.11",
@@ -3440,6 +3463,144 @@
     },
     {
       "type": "library",
+      "bom-ref": "@types/debug@4.1.13",
+      "name": "@types/debug",
+      "version": "4.1.13",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/@types/debug"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "@types/estree@1.0.9",
+      "name": "@types/estree",
+      "version": "1.0.9",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/@types/estree"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "@types/estree-jsx@1.0.5",
+      "name": "@types/estree-jsx",
+      "version": "1.0.5",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/@types/estree-jsx"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "@types/hast@3.0.5",
+      "name": "@types/hast",
+      "version": "3.0.5",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/@types/hast"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "@types/mdast@4.0.4",
+      "name": "@types/mdast",
+      "version": "4.0.4",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/@types/mdast"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "@types/ms@2.1.0",
+      "name": "@types/ms",
+      "version": "2.1.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/@types/ms"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "@types/node@24.13.3",
       "name": "@types/node",
       "version": "24.13.3",
@@ -3523,6 +3684,52 @@
         {
           "name": "misen:package-lock-path",
           "value": "node_modules/@types/retry"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "@types/unist@3.0.3",
+      "name": "@types/unist",
+      "version": "3.0.3",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/@types/unist"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "@ungap/structured-clone@1.4.0",
+      "name": "@ungap/structured-clone",
+      "version": "1.4.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "ISC"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/@ungap/structured-clone"
         },
         {
           "name": "misen:has-install-script",
@@ -3716,6 +3923,29 @@
     },
     {
       "type": "library",
+      "bom-ref": "bail@2.0.2",
+      "name": "bail",
+      "version": "2.0.2",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/bail"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "base64-js@1.5.1",
       "name": "base64-js",
       "version": "1.5.1",
@@ -3799,6 +4029,167 @@
         {
           "name": "misen:package-lock-path",
           "value": "node_modules/buffer-equal-constant-time"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "ccount@2.0.1",
+      "name": "ccount",
+      "version": "2.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/ccount"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "character-entities@2.0.2",
+      "name": "character-entities",
+      "version": "2.0.2",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/character-entities"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "character-entities-html4@2.1.0",
+      "name": "character-entities-html4",
+      "version": "2.1.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/character-entities-html4"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "character-entities-legacy@3.0.0",
+      "name": "character-entities-legacy",
+      "version": "3.0.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/character-entities-legacy"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "character-reference-invalid@2.0.1",
+      "name": "character-reference-invalid",
+      "version": "2.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/character-reference-invalid"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "classnames@2.5.1",
+      "name": "classnames",
+      "version": "2.5.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/classnames"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "comma-separated-tokens@2.0.3",
+      "name": "comma-separated-tokens",
+      "version": "2.0.3",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/comma-separated-tokens"
         },
         {
           "name": "misen:has-install-script",
@@ -3900,6 +4291,52 @@
     },
     {
       "type": "library",
+      "bom-ref": "decode-named-character-reference@1.3.0",
+      "name": "decode-named-character-reference",
+      "version": "1.3.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/decode-named-character-reference"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "dequal@2.0.3",
+      "name": "dequal",
+      "version": "2.0.3",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/dequal"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "detect-node-es@1.1.0",
       "name": "detect-node-es",
       "version": "1.1.0",
@@ -3914,6 +4351,29 @@
         {
           "name": "misen:package-lock-path",
           "value": "node_modules/detect-node-es"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "devlop@1.1.0",
+      "name": "devlop",
+      "version": "1.1.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/devlop"
         },
         {
           "name": "misen:has-install-script",
@@ -4010,6 +4470,29 @@
         {
           "name": "misen:has-install-script",
           "value": "true"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "estree-util-is-identifier-name@3.0.0",
+      "name": "estree-util-is-identifier-name",
+      "version": "3.0.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/estree-util-is-identifier-name"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
         }
       ]
     },
@@ -4314,6 +4797,75 @@
     },
     {
       "type": "library",
+      "bom-ref": "hast-util-to-jsx-runtime@2.3.6",
+      "name": "hast-util-to-jsx-runtime",
+      "version": "2.3.6",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/hast-util-to-jsx-runtime"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "hast-util-whitespace@3.0.0",
+      "name": "hast-util-whitespace",
+      "version": "3.0.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/hast-util-whitespace"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "html-url-attributes@3.0.1",
+      "name": "html-url-attributes",
+      "version": "3.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/html-url-attributes"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "http-proxy-agent@7.0.2",
       "name": "http-proxy-agent",
       "version": "7.0.2",
@@ -4374,6 +4926,144 @@
         {
           "name": "misen:package-lock-path",
           "value": "node_modules/ignore"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "inline-style-parser@0.2.7",
+      "name": "inline-style-parser",
+      "version": "0.2.7",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/inline-style-parser"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "is-alphabetical@2.0.1",
+      "name": "is-alphabetical",
+      "version": "2.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/is-alphabetical"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "is-alphanumerical@2.0.1",
+      "name": "is-alphanumerical",
+      "version": "2.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/is-alphanumerical"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "is-decimal@2.0.1",
+      "name": "is-decimal",
+      "version": "2.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/is-decimal"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "is-hexadecimal@2.0.1",
+      "name": "is-hexadecimal",
+      "version": "2.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/is-hexadecimal"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "is-plain-obj@4.1.0",
+      "name": "is-plain-obj",
+      "version": "4.1.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/is-plain-obj"
         },
         {
           "name": "misen:has-install-script",
@@ -4535,6 +5225,696 @@
         {
           "name": "misen:package-lock-path",
           "value": "node_modules/long"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "longest-streak@3.1.0",
+      "name": "longest-streak",
+      "version": "3.1.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/longest-streak"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "mdast-util-from-markdown@2.0.3",
+      "name": "mdast-util-from-markdown",
+      "version": "2.0.3",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/mdast-util-from-markdown"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "mdast-util-mdx-expression@2.0.1",
+      "name": "mdast-util-mdx-expression",
+      "version": "2.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/mdast-util-mdx-expression"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "mdast-util-mdx-jsx@3.2.0",
+      "name": "mdast-util-mdx-jsx",
+      "version": "3.2.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/mdast-util-mdx-jsx"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "mdast-util-mdxjs-esm@2.0.1",
+      "name": "mdast-util-mdxjs-esm",
+      "version": "2.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/mdast-util-mdxjs-esm"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "mdast-util-phrasing@4.1.0",
+      "name": "mdast-util-phrasing",
+      "version": "4.1.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/mdast-util-phrasing"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "mdast-util-to-hast@13.2.1",
+      "name": "mdast-util-to-hast",
+      "version": "13.2.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/mdast-util-to-hast"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "mdast-util-to-markdown@2.1.2",
+      "name": "mdast-util-to-markdown",
+      "version": "2.1.2",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/mdast-util-to-markdown"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "mdast-util-to-string@4.0.0",
+      "name": "mdast-util-to-string",
+      "version": "4.0.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/mdast-util-to-string"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "micromark@4.0.2",
+      "name": "micromark",
+      "version": "4.0.2",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/micromark"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "micromark-core-commonmark@2.0.3",
+      "name": "micromark-core-commonmark",
+      "version": "2.0.3",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/micromark-core-commonmark"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "micromark-factory-destination@2.0.1",
+      "name": "micromark-factory-destination",
+      "version": "2.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/micromark-factory-destination"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "micromark-factory-label@2.0.1",
+      "name": "micromark-factory-label",
+      "version": "2.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/micromark-factory-label"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "micromark-factory-space@2.0.1",
+      "name": "micromark-factory-space",
+      "version": "2.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/micromark-factory-space"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "micromark-factory-title@2.0.1",
+      "name": "micromark-factory-title",
+      "version": "2.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/micromark-factory-title"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "micromark-factory-whitespace@2.0.1",
+      "name": "micromark-factory-whitespace",
+      "version": "2.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/micromark-factory-whitespace"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "micromark-util-character@2.1.1",
+      "name": "micromark-util-character",
+      "version": "2.1.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/micromark-util-character"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "micromark-util-chunked@2.0.1",
+      "name": "micromark-util-chunked",
+      "version": "2.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/micromark-util-chunked"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "micromark-util-classify-character@2.0.1",
+      "name": "micromark-util-classify-character",
+      "version": "2.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/micromark-util-classify-character"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "micromark-util-combine-extensions@2.0.1",
+      "name": "micromark-util-combine-extensions",
+      "version": "2.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/micromark-util-combine-extensions"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "micromark-util-decode-numeric-character-reference@2.0.2",
+      "name": "micromark-util-decode-numeric-character-reference",
+      "version": "2.0.2",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/micromark-util-decode-numeric-character-reference"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "micromark-util-decode-string@2.0.1",
+      "name": "micromark-util-decode-string",
+      "version": "2.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/micromark-util-decode-string"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "micromark-util-encode@2.0.1",
+      "name": "micromark-util-encode",
+      "version": "2.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/micromark-util-encode"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "micromark-util-html-tag-name@2.0.1",
+      "name": "micromark-util-html-tag-name",
+      "version": "2.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/micromark-util-html-tag-name"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "micromark-util-normalize-identifier@2.0.1",
+      "name": "micromark-util-normalize-identifier",
+      "version": "2.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/micromark-util-normalize-identifier"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "micromark-util-resolve-all@2.0.1",
+      "name": "micromark-util-resolve-all",
+      "version": "2.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/micromark-util-resolve-all"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "micromark-util-sanitize-uri@2.0.1",
+      "name": "micromark-util-sanitize-uri",
+      "version": "2.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/micromark-util-sanitize-uri"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "micromark-util-subtokenize@2.1.0",
+      "name": "micromark-util-subtokenize",
+      "version": "2.1.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/micromark-util-subtokenize"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "micromark-util-symbol@2.0.1",
+      "name": "micromark-util-symbol",
+      "version": "2.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/micromark-util-symbol"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "micromark-util-types@2.0.2",
+      "name": "micromark-util-types",
+      "version": "2.0.2",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/micromark-util-types"
         },
         {
           "name": "misen:has-install-script",
@@ -4728,6 +6108,52 @@
     },
     {
       "type": "library",
+      "bom-ref": "parse-entities@4.0.2",
+      "name": "parse-entities",
+      "version": "4.0.2",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/parse-entities"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "parse-entities/node_modules/@types/unist@2.0.11",
+      "name": "parse-entities/node_modules/@types/unist",
+      "version": "2.0.11",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/parse-entities/node_modules/@types/unist"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "partial-json@0.1.7",
       "name": "partial-json",
       "version": "0.1.7",
@@ -4765,6 +6191,29 @@
         {
           "name": "misen:package-lock-path",
           "value": "node_modules/path-expression-matcher"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "property-information@7.2.0",
+      "name": "property-information",
+      "version": "7.2.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/property-information"
         },
         {
           "name": "misen:has-install-script",
@@ -4935,6 +6384,29 @@
     },
     {
       "type": "library",
+      "bom-ref": "react-markdown@10.1.0",
+      "name": "react-markdown",
+      "version": "10.1.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/react-markdown"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "react-remove-scroll@2.7.2",
       "name": "react-remove-scroll",
       "version": "2.7.2",
@@ -5018,6 +6490,52 @@
         {
           "name": "misen:package-lock-path",
           "value": "node_modules/react-textarea-autosize"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "remark-parse@11.0.0",
+      "name": "remark-parse",
+      "version": "11.0.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/remark-parse"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "remark-rehype@11.1.2",
+      "name": "remark-rehype",
+      "version": "11.1.2",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/remark-rehype"
         },
         {
           "name": "misen:has-install-script",
@@ -5257,6 +6775,52 @@
     },
     {
       "type": "library",
+      "bom-ref": "space-separated-tokens@2.0.2",
+      "name": "space-separated-tokens",
+      "version": "2.0.2",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/space-separated-tokens"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "stringify-entities@4.0.4",
+      "name": "stringify-entities",
+      "version": "4.0.4",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/stringify-entities"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "strnum@2.4.2",
       "name": "strnum",
       "version": "2.4.2",
@@ -5271,6 +6835,98 @@
         {
           "name": "misen:package-lock-path",
           "value": "node_modules/strnum"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "style-to-js@1.1.21",
+      "name": "style-to-js",
+      "version": "1.1.21",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/style-to-js"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "style-to-object@1.0.14",
+      "name": "style-to-object",
+      "version": "1.0.14",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/style-to-object"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "trim-lines@3.0.1",
+      "name": "trim-lines",
+      "version": "3.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/trim-lines"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "trough@2.2.0",
+      "name": "trough",
+      "version": "2.2.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/trough"
         },
         {
           "name": "misen:has-install-script",
@@ -5386,6 +7042,144 @@
         {
           "name": "misen:package-lock-path",
           "value": "node_modules/undici-types"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "unified@11.0.5",
+      "name": "unified",
+      "version": "11.0.5",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/unified"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "unist-util-is@6.0.1",
+      "name": "unist-util-is",
+      "version": "6.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/unist-util-is"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "unist-util-position@5.0.0",
+      "name": "unist-util-position",
+      "version": "5.0.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/unist-util-position"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "unist-util-stringify-position@4.0.0",
+      "name": "unist-util-stringify-position",
+      "version": "4.0.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/unist-util-stringify-position"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "unist-util-visit@5.1.0",
+      "name": "unist-util-visit",
+      "version": "5.1.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/unist-util-visit"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "unist-util-visit-parents@6.0.2",
+      "name": "unist-util-visit-parents",
+      "version": "6.0.2",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/unist-util-visit-parents"
         },
         {
           "name": "misen:has-install-script",
@@ -5524,6 +7318,52 @@
         {
           "name": "misen:package-lock-path",
           "value": "node_modules/use-sidecar"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "vfile@6.0.3",
+      "name": "vfile",
+      "version": "6.0.3",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/vfile"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "vfile-message@4.0.3",
+      "name": "vfile-message",
+      "version": "4.0.3",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/vfile-message"
         },
         {
           "name": "misen:has-install-script",
@@ -5685,6 +7525,29 @@
         {
           "name": "misen:package-lock-path",
           "value": "node_modules/zustand"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "zwitch@2.0.4",
+      "name": "zwitch",
+      "version": "2.0.4",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/zwitch"
         },
         {
           "name": "misen:has-install-script",

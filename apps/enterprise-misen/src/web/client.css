@@ -106,6 +106,12 @@ button { cursor: pointer; }
 }
 
 .assistant-copy span { white-space: pre-wrap; }
+.assistant-markdown > :first-child { margin-top: 0; }
+.assistant-markdown > :last-child { margin-bottom: 0; }
+.assistant-markdown p { margin: 0 0 16px; }
+.assistant-markdown ul, .assistant-markdown ol { margin: 0 0 16px; padding-left: 22px; }
+.assistant-markdown li + li { margin-top: 4px; }
+.assistant-markdown code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .92em; }
 
 .thinking-status {
   display: flex;

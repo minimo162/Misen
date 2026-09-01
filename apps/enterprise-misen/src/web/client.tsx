@@ -9,6 +9,7 @@ import {
   useExternalStoreRuntime,
   type ThreadMessageLike,
 } from '@assistant-ui/react'
+import { MarkdownTextPrimitive } from '@assistant-ui/react-markdown'
 import './client.css'
 import { processEventsForRun, runIdFromMessage, shouldShowThinkingPlaceholder, type ToolEvent } from './process.js'
 
@@ -60,11 +61,22 @@ function toThreadMessage(message: UiMessage): ThreadMessageLike {
 }
 
 const TextPart = () => <MessagePartPrimitive.Text component="span" smooth={false} />
+const MarkdownTextPart = () => (
+  <MarkdownTextPrimitive
+    className="assistant-markdown"
+    components={{
+      // Brain-authored links and images are presentation text only. They must
+      // not create a browser network or navigation authority.
+      a: ({ children }) => <span>{children}</span>,
+      img: ({ alt }) => <span>{alt ?? ''}</span>,
+    }}
+  />
+)
 const HiddenPart = () => null
-const Parts = () => (
+const Parts = ({ markdown = false }: { markdown?: boolean }) => (
   <MessagePrimitive.Parts
     components={{
-      Text: TextPart,
+      Text: markdown ? MarkdownTextPart : TextPart,
       Reasoning: HiddenPart,
       Image: HiddenPart,
       File: HiddenPart,
@@ -83,7 +95,7 @@ const UserMessage = () => (
 
 const AssistantMessage = () => (
   <MessagePrimitive.Root className="message message--assistant">
-    <div className="assistant-copy"><Parts /></div>
+    <div className="assistant-copy"><Parts markdown /></div>
   </MessagePrimitive.Root>
 )
 
