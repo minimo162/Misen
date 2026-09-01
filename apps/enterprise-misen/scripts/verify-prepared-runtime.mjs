@@ -5,6 +5,13 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
+const preparedRuntimeSourceSha = 'df2859c471fac035be062703f59f69e07d55b208'
+const thinMisenBehaviorBaselineSha = 'f3b772f7765206f75f7296e436d89c6a771b690a'
+const modelVisibleWorkspacePaths = [
+  'workspace/AGENTS.md',
+  'workspace/.agents/skills/monthly-report/SKILL.md',
+]
+
 function parseArguments(argv) {
   const result = {}
   for (let index = 0; index < argv.length; index += 2) {
@@ -60,6 +67,7 @@ export async function findForbiddenNames(root) {
   for (const relativePath of [
     ['app', 'dist', 'test'],
     ['app', 'dist', 'acceptance'],
+    ['app', 'dist', 'study'],
     ['app', 'node_modules', '.bin'],
     ['app', 'node_modules', 'esbuild'],
     ['app', 'node_modules', 'typescript'],
@@ -104,6 +112,20 @@ async function verifyManifestInventory(root, manifest) {
   if (packageCount !== manifest.dependencyProvenance?.productionDependencyPackageCount) throw new Error('production dependency count mismatch')
 }
 
+function verifyManifestContract(manifest) {
+  if (manifest.schemaVersion !== 2) throw new Error('unsupported prepared-runtime manifest schema')
+  if (manifest.sourceSha !== preparedRuntimeSourceSha) throw new Error('unexpected prepared-runtime source SHA')
+  if (manifest.thinMisenBehaviorBaselineSha !== thinMisenBehaviorBaselineSha) throw new Error('unexpected Thin Misen behavior baseline SHA')
+  if (manifest.entrypoint !== 'app/dist/src/web/server.js') throw new Error('unexpected runtime entrypoint')
+  if (manifest.runtimePolicy?.installsAtRuntime !== false || manifest.runtimePolicy?.buildsAtRuntime !== false || manifest.runtimePolicy?.downloadsAtRuntime !== false
+    || manifest.runtimePolicy?.powershellFallback !== false || manifest.runtimePolicy?.observerOrStudyCodeDistributed !== false) {
+    throw new Error('runtime policy is not fail-closed')
+  }
+  if (JSON.stringify(manifest.modelVisibleWorkspacePaths) !== JSON.stringify(modelVisibleWorkspacePaths)) throw new Error('model-visible workspace context mismatch')
+  if (!Array.isArray(manifest.requiredPaths) || manifest.requiredPaths.length === 0) throw new Error('manifest requiredPaths missing')
+  for (const path of modelVisibleWorkspacePaths) if (!manifest.requiredPaths.includes(path)) throw new Error(`required model-visible path missing: ${path}`)
+}
+
 function powershellJson(script) {
   const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
   const text = execFileSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8' }).trim()
@@ -132,17 +154,13 @@ async function main() {
   if (!args.runtime) throw new Error('usage: verify-prepared-runtime --runtime <directory>')
   const root = resolve(args.runtime)
   const manifest = JSON.parse(await readFile(join(root, 'manifest.json'), 'utf8'))
-  if (manifest.entrypoint !== 'app/dist/src/web/server.js') throw new Error('unexpected runtime entrypoint')
-  if (manifest.runtimePolicy?.installsAtRuntime !== false || manifest.runtimePolicy?.buildsAtRuntime !== false || manifest.runtimePolicy?.downloadsAtRuntime !== false) {
-    throw new Error('runtime policy is not fail-closed')
-  }
+  verifyManifestContract(manifest)
   await stat(join(root, ...manifest.entrypoint.split('/')))
-  if (!Array.isArray(manifest.requiredPaths) || manifest.requiredPaths.length === 0) throw new Error('manifest requiredPaths missing')
   for (const requiredPath of manifest.requiredPaths) await stat(join(root, ...requiredPath.split('/')))
   const hashCount = await verifyHashes(root)
   await verifyManifestInventory(root, manifest)
   const forbidden = await findForbiddenNames(root)
-  if (forbidden.length > 0) throw new Error(`development/test artifacts found: ${forbidden.join(', ')}`)
+  if (forbidden.length > 0) throw new Error(`development/test/study artifacts found: ${forbidden.join(', ')}`)
 
   const scratch = await mkdtemp(join(tmpdir(), 'misen-prepared-verify-'))
   const approvedNodeDirectory = join(scratch, 'approved-node')
@@ -201,6 +219,8 @@ async function main() {
     }
     console.log(JSON.stringify({
       status: 'PASS',
+      sourceSha: manifest.sourceSha,
+      thinMisenBehaviorBaselineSha: manifest.thinMisenBehaviorBaselineSha,
       httpStatus: response.status,
       stateStatus: state.status,
       hashCount,
@@ -211,6 +231,7 @@ async function main() {
       npmOnPath: false,
       tscOnPath: false,
       esbuildOnPath: false,
+      observerOrStudyCodeDistributed: false,
     }, null, 2))
   } finally {
     const taskkill = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe')
