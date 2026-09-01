@@ -78,9 +78,19 @@ async function walk(root) {
   return files
 }
 
+async function ensureDirectory(path) {
+  try {
+    const info = await stat(path)
+    if (!info.isDirectory()) throw new Error(`parent path is not a directory: ${path}`)
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+    await mkdir(path, { recursive: true })
+  }
+}
+
 async function ensureCleanTarget(target) {
   const parent = dirname(target)
-  await mkdir(parent, { recursive: true })
+  await ensureDirectory(parent)
   try {
     const entries = await readdir(target)
     if (entries.length > 0) throw new Error(`output directory must be absent or empty: ${target}`)
@@ -110,8 +120,6 @@ function verifyPackagingProvenance(sourceSha, packagingSha) {
     'apps/enterprise-misen/scripts/verify-prepared-runtime.mjs',
     'apps/enterprise-misen/test/prepared-runtime.test.ts',
   ]
-  // #75 adds observer/test/evidence infrastructure only. The runtime paths in
-  // its merged source must still be exactly the Thin Misen #78 behavior tree.
   quietGitDiff([thinMisenBehaviorBaselineSha, sourceSha, '--', ...protectedPaths])
   quietGitDiff([sourceSha, 'HEAD', '--', ...protectedPaths])
   quietGitDiff(['HEAD', '--', ...protectedPaths, ...packagingPaths])
@@ -129,10 +137,7 @@ async function installProductionDependencies(appDirectory) {
     cwd: appDirectory,
     stdio: 'inherit',
   })
-  // Package-manager command shims are unnecessary for the server and would
-  // broaden the executable surface on the target machine.
   await rm(join(appDirectory, 'node_modules', '.bin'), { recursive: true, force: true })
-  // Type declarations are packaging-host metadata and are not loaded by Node.
   await rm(join(appDirectory, 'node_modules', '@types'), { recursive: true, force: true })
   await pruneDependencyDevelopmentArtifacts(join(appDirectory, 'node_modules'))
   await rename(join(appDirectory, 'package-lock.json'), join(appDirectory, 'dependency-lock.json'))
@@ -182,7 +187,8 @@ function inventoryEntry(path, root) {
 }
 
 async function buildInventory(target) {
-  const files = await walk(target)
+  const files = []
+  for (const path of await walk(target)) files.push(path)
   const byExtension = {}
   const executableOrScriptFiles = []
   let totalBytes = 0
@@ -192,9 +198,7 @@ async function buildInventory(target) {
     const extension = dot < 0 ? '<none>' : name.slice(dot).toLowerCase()
     byExtension[extension] = (byExtension[extension] ?? 0) + 1
     totalBytes += (await stat(path)).size
-    if (['.exe', '.dll', '.node', '.cmd', '.bat', '.com', '.ps1'].includes(extension)) {
-      executableOrScriptFiles.push(inventoryEntry(path, target))
-    }
+    if (['.exe', '.dll', '.node', '.cmd', '.bat', '.com', '.ps1'].includes(extension)) executableOrScriptFiles.push(inventoryEntry(path, target))
   }
   return { fileCount: files.length, totalBytes, byExtension, executableOrScriptFiles }
 }
@@ -207,9 +211,7 @@ function assertRuntimeBoundary(inventory) {
   const forbiddenNames = inventory.executableOrScriptFiles.filter((path) => path !== 'run.cmd')
   if (forbiddenNames.length > 0) throw new Error(`unexpected executable or script files: ${forbiddenNames.join(', ')}`)
   const extensions = inventory.byExtension
-  if ((extensions['.node'] ?? 0) !== 0 || (extensions['.dll'] ?? 0) !== 0 || (extensions['.exe'] ?? 0) !== 0) {
-    throw new Error('native runtime files are not permitted')
-  }
+  if ((extensions['.node'] ?? 0) !== 0 || (extensions['.dll'] ?? 0) !== 0 || (extensions['.exe'] ?? 0) !== 0) throw new Error('native runtime files are not permitted')
 }
 
 async function writeHashes(target) {
@@ -235,9 +237,7 @@ export async function prepareRuntime({ output, sourceSha, packagingSha }) {
 
     const fixtureModule = await import(pathToFileURL(join(appRoot, 'dist', 'demo', 'enterprise-excel', 'fixtures.js')).href)
     await fixtureModule.createEnterpriseFixtureWorkspace(join(target, 'workspace'))
-    for (const path of await walk(join(target, 'workspace'))) {
-      if (path.toLowerCase().endsWith('.xlsx')) await canonicalizeZipTimestamps(path)
-    }
+    for (const path of await walk(join(target, 'workspace'))) if (path.toLowerCase().endsWith('.xlsx')) await canonicalizeZipTimestamps(path)
 
     const launcher = [
       '@echo off',
@@ -311,13 +311,7 @@ export async function prepareRuntime({ output, sourceSha, packagingSha }) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = parseArguments(process.argv.slice(2))
-  if (!args.output || !args['source-sha'] || !args['packaging-sha']) {
-    throw new Error('usage: prepare-runtime --output <clean-directory> --source-sha <sha> --packaging-sha <sha>')
-  }
-  const result = await prepareRuntime({
-    output: args.output,
-    sourceSha: args['source-sha'],
-    packagingSha: args['packaging-sha'],
-  })
+  if (!args.output || !args['source-sha'] || !args['packaging-sha']) throw new Error('usage: prepare-runtime --output <clean-directory> --source-sha <sha> --packaging-sha <sha>')
+  const result = await prepareRuntime({ output: args.output, sourceSha: args['source-sha'], packagingSha: args['packaging-sha'] })
   console.log(JSON.stringify(result.manifest, null, 2))
 }
