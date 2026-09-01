@@ -38,9 +38,9 @@ export class WorkspaceBoundary {
    * names the same file afterwards. This closes model-triggerable check/use
    * substitutions without a native helper.
    */
-  async readFileBytes(userPath: string): Promise<{ absolute: string; bytes: Uint8Array }> {
+  async readFileBytes(userPath: string, maxBytes?: number): Promise<{ absolute: string; bytes: Uint8Array }> {
     const absolute = await this.resolveFile(userPath)
-    return { absolute, bytes: await this.readValidatedAbsolute(absolute) }
+    return { absolute, bytes: await this.readValidatedAbsolute(absolute, maxBytes) }
   }
 
   /** Read an existing output workbook through the same validated handle path. */
@@ -209,13 +209,25 @@ export class WorkspaceBoundary {
     return candidate
   }
 
-  private async readValidatedAbsolute(absolute: string): Promise<Uint8Array> {
+  private async readValidatedAbsolute(absolute: string, maxBytes?: number): Promise<Uint8Array> {
+    if (maxBytes !== undefined && (!Number.isSafeInteger(maxBytes) || maxBytes < 1)) {
+      throw new WorkspaceBoundaryError('read limit must be a positive safe integer')
+    }
     const handle = await open(absolute, 'r')
     try {
       const before = await handle.stat()
       if (!before.isFile()) throw new WorkspaceBoundaryError('workspace path is not a regular file')
       if (before.nlink !== 1) throw new WorkspaceBoundaryError('hard-linked workspace files are not allowed')
-      const bytes = new Uint8Array(await handle.readFile())
+      if (maxBytes !== undefined && before.size > maxBytes) throw new WorkspaceBoundaryError('workspace file exceeds the read limit')
+      let bytes: Uint8Array
+      if (maxBytes === undefined) {
+        bytes = new Uint8Array(await handle.readFile())
+      } else {
+        const buffer = Buffer.allocUnsafe(maxBytes + 1)
+        const { bytesRead } = await handle.read(buffer, 0, buffer.byteLength, 0)
+        if (bytesRead > maxBytes) throw new WorkspaceBoundaryError('workspace file exceeds the read limit')
+        bytes = Uint8Array.from(buffer.subarray(0, bytesRead))
+      }
       const namedReal = await realpath(absolute)
       this.assertInside(namedReal, 'workspace file')
       const after = await stat(namedReal)

@@ -42,7 +42,7 @@ export type DemoRunner = (root: string, month: '7月' | '8月', prompt: string, 
 
 const TOOL_LABELS: Record<string, string> = {
   workspace_list_files: 'List workspace files',
-  workspace_read_text: 'Read handoff',
+  workspace_read_text: 'Read workspace guidance',
   spreadsheet_read: 'Read spreadsheet',
   spreadsheet_create_output: 'Create workbook',
   spreadsheet_update: 'Update spreadsheet',
@@ -99,7 +99,7 @@ export const liveDemoRunner: DemoRunner = async (root, month, prompt, context) =
   const inputs = ['master.xlsx', '月次管理レポート_template.xlsx', ...scenario.companies.map(company => `${month}/${company.company}.xlsx`)]
   const before = new Map(await Promise.all(inputs.map(async path => [path, hash(await readFile(join(root, path)))] as const)))
   const outputBefore = await snapshotOutputScope(root)
-  const agent = liveAgent(root)
+  const agent = await liveAgent(root)
   const tools: string[] = []
   context?.setCancel(() => agent.abort())
   const unsubscribe = agent.subscribe(event => { if (context) forwardAgentEvent(event, context, tools) })

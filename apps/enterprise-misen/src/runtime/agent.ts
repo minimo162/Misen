@@ -2,8 +2,7 @@ import { Agent } from '@earendil-works/pi-agent-core'
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from '@earendil-works/pi-ai'
 import { createModels } from '@earendil-works/pi-ai'
 import type { AgentEvent } from '@earendil-works/pi-agent-core'
-import { enterpriseTools } from '../capabilities/tools.js'
-import { WorkspaceBoundary } from '../workspace/boundary.js'
+import { prepareAgentCustomization } from './customized.js'
 
 const call = (name: string, arguments_: Record<string, unknown>) => fauxAssistantMessage(fauxToolCall(name, arguments_, { id: `misen-${name}` }))
 /** Pi's public faux stream seam drives the real Agent loop; it is test-only. */
@@ -13,6 +12,7 @@ export async function runReplay(root: string, month: '7月'|'8月', prompt: stri
   const reportRows = rows.map((r, i) => [r[0], r[1], r[2], { formula: `=B${i + 5}-C${i + 5}` }, Number(r[1]) - Number(r[2]) >= ([400, 455, 380][i] ?? 0) ? 'On target' : 'Review'])
   faux.setResponses([
     call('workspace_list_files', { path: month, extension: '.xlsx' }),
+    call('workspace_read_text', { path: '.agents/skills/monthly-report/SKILL.md' }),
     call('workspace_read_text', { path: '業務引継ぎ.md' }),
     call('spreadsheet_read', { workbook: 'master.xlsx', sheet: 'Targets', range: 'A1:B4' }),
     call('spreadsheet_read', { workbook: `${month}/Alpha.xlsx`, sheet: 'Actuals', range: 'A1:B4' }),
@@ -24,7 +24,8 @@ export async function runReplay(root: string, month: '7月'|'8月', prompt: stri
   ])
   const model=models.getModel('misen-replay','gpt-5.6-luna'); if(!model) throw new Error('replay model missing')
   const events: Array<Pick<AgentEvent,'type'> & { name?:string }> = []
-  const agent=new Agent({initialState:{systemPrompt:'General enterprise workspace assistant.',model,thinkingLevel:'medium',tools:enterpriseTools(new WorkspaceBoundary(root))},streamFn:models.streamSimple.bind(models),toolExecution:'sequential'})
+  const customization = await prepareAgentCustomization(root)
+  const agent=new Agent({initialState:{systemPrompt:customization.systemPrompt,model,thinkingLevel:'medium',tools:[...customization.tools]},streamFn:models.streamSimple.bind(models),toolExecution:'sequential',beforeToolCall:customization.hooks.beforeToolCall,afterToolCall:customization.hooks.afterToolCall})
   agent.subscribe(e=>{ if(e.type==='tool_execution_start') events.push({type:e.type,name:e.toolName}); else if(e.type==='tool_execution_end') events.push({type:e.type,name:e.toolName}); else events.push({type:e.type}) })
   await agent.prompt(prompt); return { agent, events, output:file }
 }
