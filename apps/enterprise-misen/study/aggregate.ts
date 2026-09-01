@@ -46,6 +46,7 @@ export function aggregateStudy(records: readonly StudyRunRecord[], checkpoint: S
   const toolCalls = valid.map(record => record.toolStarts.length)
   const knownCorrections = valid.filter(record => record.selfCorrectionCount !== null)
   const knownValidationErrors = knownCorrections.reduce((sum, record) => sum + record.toolValidationErrorCount, 0)
+  const recordsWithoutCatalogCostEstimate = ordered.filter(record => record.usage.catalogEstimatedCostUsd === null).length
   return {
     schemaVersion: STUDY_SCHEMA_VERSION,
     studyId: ordered[0]?.studyId ?? null,
@@ -82,8 +83,10 @@ export function aggregateStudy(records: readonly StudyRunRecord[], checkpoint: S
     budget: {
       paidAttemptsReserved: reservations.length,
       paidAttemptsWithRecords: ordered.length,
-      catalogEstimatedCostUsd: Number(ordered.reduce((sum, record) => sum + (record.usage.catalogEstimatedCostUsd ?? 0), 0).toFixed(12)),
-      recordsWithoutCatalogCostEstimate: ordered.filter(record => record.usage.catalogEstimatedCostUsd === null).length,
+      catalogEstimatedCostUsd: recordsWithoutCatalogCostEstimate > 0
+        ? null
+        : Number(ordered.reduce((sum, record) => sum + (record.usage.catalogEstimatedCostUsd ?? 0), 0).toFixed(12)),
+      recordsWithoutCatalogCostEstimate,
     },
     invalidAttempts: ordered.filter(record => record.status === 'INVALID').map(record => ({ paidAttemptNumber: record.paidAttemptNumber, reason: record.invalidReason })),
   }
