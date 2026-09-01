@@ -25,6 +25,7 @@ test('Decision 438 grades the sole new xlsx without imposing filename semantics'
     await rename(join(root, replay.output), join(root, 'output', 'report.xlsx'))
     const result = await validateReport(root, scenario, before, outputBefore)
     assert.equal(result.output, 'output/report.xlsx')
+    assert.equal(result.passed, true, JSON.stringify(result.axes))
   } finally {
     await rm(root, { recursive: true, force: true })
   }

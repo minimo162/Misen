@@ -103,7 +103,7 @@ export const liveDemoRunner: DemoRunner = async (root, month, prompt, context) =
       return { output: `output/${month}-月次管理レポート.xlsx`, tools, axes: [], status: cancelled ? 'CANCELLED' : 'FAIL' }
     }
     const validation = await validateReport(root, scenario, before, outputBefore)
-    return { output: validation.output, tools, axes: ['SHEET', 'MONTH', 'ROWS', 'PROFIT_FORMULAS', 'STATUS', 'TOTAL', 'FOOTER', 'FORMAT'], status: 'PASS' }
+    return { output: validation.output, tools, axes: Object.entries(validation.axes).map(([axis, result]) => `${axis}:${result.status}`), status: validation.passed ? 'PASS' : 'FAIL' }
   } finally {
     unsubscribe()
   }
