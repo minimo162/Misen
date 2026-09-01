@@ -20,6 +20,18 @@ const exactKeys = (value: object, keys: readonly string[], label: string): void 
   const actual = Object.keys(value).sort(), expected = [...keys].sort()
   if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`${label} fields mismatch`)
 }
+const forbiddenEvidenceKey = /^(?:rawProviderPayload|chainOfThought|reasoningContent|credential|apiKey|authorization|password|secret|token|cookie)$/iu
+function assertSafeEvidence(value: unknown, label: string, depth = 0): void {
+  if (depth > 12) throw new Error(`${label} nesting exceeds limit`)
+  if (value === null || ['string','boolean'].includes(typeof value)) return
+  if (typeof value === 'number' && Number.isFinite(value)) return
+  if (Array.isArray(value)) { for (const item of value) assertSafeEvidence(item, label, depth + 1); return }
+  if (!value || typeof value !== 'object') throw new Error(`${label} contains unsupported evidence`)
+  for (const [key, item] of Object.entries(value)) {
+    if (forbiddenEvidenceKey.test(key)) throw new Error(`${label} contains forbidden evidence field`)
+    assertSafeEvidence(item, label, depth + 1)
+  }
+}
 
 function assertCommon(value: unknown): asserts value is { schemaVersion: 1; studyId: string; productionBaselineSha: string; observerSha: string; configuration: unknown } {
   if (!value || typeof value !== 'object') throw new Error('study evidence must be an object')
@@ -51,7 +63,9 @@ export function assertRunRecord(value: unknown): asserts value is StudyRunRecord
   if (!Number.isInteger(item.paidAttemptNumber) || item.paidAttemptNumber < 1 || item.paidAttemptNumber > 24) throw new Error('invalid paid attempt number')
   if (!['7月', '8月'].includes(item.month) || item.month !== alternatingSchedule()[item.studyRunNumber - 1]) throw new Error('run schedule mismatch')
   if (!['PASS', 'FAIL', 'INVALID'].includes(item.status)) throw new Error('invalid run status')
-  if (typeof item.startedAtUtc !== 'string' || typeof item.endedAtUtc !== 'string') throw new Error('missing run timestamps')
+  if (typeof item.startedAtUtc !== 'string' || typeof item.endedAtUtc !== 'string'
+    || !Number.isFinite(Date.parse(item.startedAtUtc)) || !Number.isFinite(Date.parse(item.endedAtUtc))
+    || Date.parse(item.endedAtUtc) < Date.parse(item.startedAtUtc)) throw new Error('invalid run timestamps')
   if (!Array.isArray(item.toolStarts) || !Array.isArray(item.toolResults) || !Array.isArray(item.assistantStopReasons)) throw new Error('invalid event evidence')
   if (!item.integrity || ![true, false, null].includes(item.integrity.inputMutation) || typeof item.integrity.forbiddenCapability !== 'boolean'
     || ![true, false, null].includes(item.integrity.credentialExposure) || ![true, false, null].includes(item.integrity.unexpectedNetwork)) throw new Error('invalid integrity evidence')
@@ -76,7 +90,7 @@ export function assertRunRecord(value: unknown): asserts value is StudyRunRecord
   }
   for (const result of item.toolResults) {
     const start = item.toolStarts.find(candidate => candidate.toolCallId === result.toolCallId)
-    if (!start || start.toolName !== result.toolName || !Number.isInteger(result.sequence) || result.sequence < 1) throw new Error('Tool start/result mismatch')
+    if (!start || start.toolName !== result.toolName || !Number.isInteger(result.sequence) || result.sequence <= start.sequence) throw new Error('Tool start/result mismatch')
     exactKeys(result, result.isError ? ['sequence','toolCallId','toolName','timestampUtc','isError','validationError','error'] : ['sequence','toolCallId','toolName','timestampUtc','isError','validationError'], 'Tool result')
     if (typeof result.timestampUtc !== 'string' || !Number.isFinite(Date.parse(result.timestampUtc)) || typeof result.isError !== 'boolean' || typeof result.validationError !== 'boolean' || result.isError !== Boolean(result.error) || (result.validationError && !result.isError)) throw new Error('Tool result fields mismatch')
     if (result.error) {
@@ -104,7 +118,16 @@ export function assertRunRecord(value: unknown): asserts value is StudyRunRecord
   const securityIncident = item.integrity.inputMutation === true || item.integrity.forbiddenCapability || item.integrity.credentialExposure === true || item.integrity.unexpectedNetwork === true
   exactKeys(item.integrity, ['inputMutation','forbiddenCapability','credentialExposure','unexpectedNetwork'], 'integrity')
   if (!Number.isFinite(item.elapsedMs) || item.elapsedMs < 0 || !Number.isFinite(item.rssBytes) || item.rssBytes < 0) throw new Error('invalid performance evidence')
-  if (item.output && (!Number.isInteger(item.output.bytes) || item.output.bytes < 0 || !/^[^\\/]+\.xlsx$/iu.test(item.output.basename))) throw new Error('invalid output evidence')
+  if (item.output) {
+    exactKeys(item.output, ['basename','bytes'], 'output')
+    if (!Number.isInteger(item.output.bytes) || item.output.bytes < 0 || !/^[^\\/]+\.xlsx$/iu.test(item.output.basename)) throw new Error('invalid output evidence')
+  }
+  if (item.axisMatrix) for (const [axisName, axis] of Object.entries(item.axisMatrix)) {
+    if (!AXIS_NAMES.includes(axisName as typeof AXIS_NAMES[number]) || !axis || typeof axis !== 'object') throw new Error('invalid axis evidence')
+    exactKeys(axis, ['status','evidence'], 'axis')
+    if (!['PASS','FAIL'].includes(axis.status)) throw new Error('invalid axis evidence')
+    assertSafeEvidence(axis.evidence, 'axis')
+  }
   if (item.status === 'PASS') {
     if (item.failureTaxonomy !== null || item.failureSummary !== null || item.invalidReason !== null || item.inputHashesUnchanged !== true || !item.output || item.requestCount < 1
       || !item.toolBalance || item.toolStarts.length < 1 || item.lifecycle.agentStart !== 1 || item.lifecycle.agentEnd !== 1 || item.lifecycle.turnStart < 1 || item.lifecycle.turnStart !== item.lifecycle.turnEnd

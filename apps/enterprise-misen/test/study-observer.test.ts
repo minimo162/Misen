@@ -108,6 +108,12 @@ test('persisted Tool evidence rejects fabricated correction, nested payloads, an
   assert.throws(() => assertRunRecord({ ...record, selfCorrectionCount: 1 }), /self-correction/u)
   assert.throws(() => assertRunRecord({ ...record, toolResults: [{ ...record.toolResults[0]!, error: { ...record.toolResults[0]!.error!, rawProviderPayload: 'secret' } }] }), /Tool error fields/u)
   assert.throws(() => assertRunRecord({ ...record, toolResults: [{ ...record.toolResults[0]!, sequence: record.toolStarts[0]!.sequence }] }), /sequence/u)
+  assert.throws(() => assertRunRecord({ ...record, toolStarts: [{ ...record.toolStarts[0]!, sequence: 2 }], toolResults: [{ ...record.toolResults[0]!, sequence: 1 }] }), /start\/result/u)
+  assert.throws(() => assertRunRecord({ ...record, startedAtUtc: 'not-a-time' }), /timestamps/u)
+  const passObserver = new StudyObserver(metadata); begin(passObserver); passObserver.observe({ type: 'tool_execution_start', toolCallId: 'read', toolName: 'workspace_read_text', args: { path: '業務引継ぎ.md' } }); passObserver.observe({ type: 'tool_execution_end', toolCallId: 'read', toolName: 'workspace_read_text', result: {}, isError: false }); finish(passObserver)
+  const pass = passObserver.finalize({ validation: validation('PASS'), outputBytes: 10, inputHashesUnchanged: true, elapsedMs: 1, rssBytes: 1, integrity })
+  assert.throws(() => assertRunRecord({ ...pass, output: { ...pass.output!, rawProviderPayload: 'secret' } }), /output fields/u)
+  assert.throws(() => assertRunRecord({ ...pass, axisMatrix: { ...pass.axisMatrix!, SHEET: { ...pass.axisMatrix!.SHEET, evidence: { rawProviderPayload: 'secret' } } } }), /forbidden evidence/u)
 })
 
 test('provenance protected pathspecs resolve to tracked repository files', () => {
