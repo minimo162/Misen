@@ -24,9 +24,11 @@ const exactKeys = (value: object, keys: readonly string[], label: string): void 
   if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`${label} fields mismatch`)
 }
 const forbiddenEvidenceKey = /^(?:rawProviderPayload|chainOfThought|reasoningContent|credential|apiKey|authorization|password|secret|token|cookie)$/iu
+const sensitiveEvidenceText = /(?:\bsk-[A-Za-z0-9_-]{8,}\b|\bBearer\s+\S+|\b[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b)/iu
 function assertSafeEvidence(value: unknown, label: string, depth = 0): void {
   if (depth > 12) throw new Error(`${label} nesting exceeds limit`)
-  if (value === null || ['string','boolean'].includes(typeof value)) return
+  if (value === null || typeof value === 'boolean') return
+  if (typeof value === 'string') { if (sensitiveEvidenceText.test(value)) throw new Error(`${label} contains sensitive evidence text`); return }
   if (typeof value === 'number' && Number.isFinite(value)) return
   if (Array.isArray(value)) { for (const item of value) assertSafeEvidence(item, label, depth + 1); return }
   if (!value || typeof value !== 'object') throw new Error(`${label} contains unsupported evidence`)
@@ -145,6 +147,16 @@ export function assertRunRecord(value: unknown): asserts value is StudyRunRecord
     assertSafeEvidence(axis.evidence, 'axis')
     }
   }
+  const allowedSummaries: Readonly<Record<string, readonly string[]>> = {
+    BUSINESS_SEMANTIC: ['one or more business Acceptance axes failed'],
+    TOOL_CONTRACT_OR_VALIDATION: ['Tool contract or validation error affected completion'],
+    AGENT_INCOMPLETE: ['agent did not complete'],
+    PROVIDER_OR_TRANSPORT: ['provider or transport error'],
+    ACCEPTANCE_FATAL: ['acceptance evaluation failed'],
+    SECURITY_OR_INTEGRITY: ['integrity or security incident'],
+    INVALID_OBSERVER_OR_INFRA: ['observer or infrastructure failure','observed provider or model differs from frozen configuration','incomplete observer event stream'],
+  }
+  if (item.failureTaxonomy === null ? item.failureSummary !== null : !allowedSummaries[item.failureTaxonomy]?.includes(item.failureSummary ?? '')) throw new Error('failure summary/taxonomy mismatch')
   if (item.status === 'PASS') {
     if (item.failureTaxonomy !== null || item.failureSummary !== null || item.invalidReason !== null || item.inputHashesUnchanged !== true || !item.output || item.requestCount < 1
       || !item.toolBalance || item.toolStarts.length < 1 || item.lifecycle.agentStart !== 1 || item.lifecycle.agentEnd !== 1 || item.lifecycle.turnStart < 1 || item.lifecycle.turnStart !== item.lifecycle.turnEnd
@@ -231,8 +243,10 @@ export async function readRunRecords(evidenceDirectory: string): Promise<StudyRu
     if (Date.parse(record.startedAtUtc) < Date.parse(checkpoint.createdAtUtc) || Date.parse(reservation.reservedAtUtc) < Date.parse(record.startedAtUtc) || Date.parse(reservation.reservedAtUtc) > Date.parse(record.endedAtUtc)) throw new Error('run/checkpoint/reservation chronology mismatch')
   }
   let expectedRun = 1
-  for (const record of [...records].sort((left, right) => left.paidAttemptNumber - right.paidAttemptNumber)) {
+  const orderedRecords = [...records].sort((left, right) => left.paidAttemptNumber - right.paidAttemptNumber)
+  for (const [index, record] of orderedRecords.entries()) {
     if (record.studyRunNumber !== expectedRun) throw new Error('valid-run sequence mismatch')
+    if (index > 0 && Date.parse(record.startedAtUtc) < Date.parse(orderedRecords[index - 1]!.endedAtUtc)) throw new Error('run timestamp sequence mismatch')
     if (record.status !== 'INVALID') expectedRun++
   }
   return records

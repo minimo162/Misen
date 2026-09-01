@@ -67,7 +67,9 @@ test('security outranks invalid, and incomplete or drifted event streams cannot 
   const empty = new StudyObserver(metadata)
   assert.equal(empty.finalize({ validation: validation('PASS'), outputBytes: 1, inputHashesUnchanged: true, elapsedMs: 1, rssBytes: 1, integrity }).status, 'INVALID')
   const drift = new StudyObserver(metadata); complete(drift, assistant('stop', 'another-provider', 'another-model'))
-  assert.equal(drift.finalize({ validation: validation('PASS'), outputBytes: 1, inputHashesUnchanged: true, elapsedMs: 1, rssBytes: 1, integrity }).status, 'INVALID')
+  const driftRecord = drift.finalize({ validation: validation('PASS'), outputBytes: 1, inputHashesUnchanged: true, elapsedMs: 1, rssBytes: 1, integrity })
+  assert.equal(driftRecord.status, 'INVALID')
+  assert.doesNotThrow(() => assertRunRecord(driftRecord))
 })
 
 test('provider failure is a reliability FAIL and Tool errors emit their taxonomy when Acceptance cannot pass', () => {
@@ -113,6 +115,7 @@ test('persisted Tool evidence rejects fabricated correction, nested payloads, an
   assert.throws(() => assertRunRecord({ ...record, startedAtUtc: '2026-09-01' }), /timestamps/u)
   assert.throws(() => assertRunRecord({ ...record, startedAtUtc: '2026-02-31T00:00:00.000Z' }), /timestamps/u)
   assert.throws(() => assertRunRecord({ ...record, failureTaxonomy: 'MADE_UP' }), /taxonomy/u)
+  assert.throws(() => assertRunRecord({ ...record, failureSummary: 'Bearer private-value' }), /sensitive evidence/u)
   assert.throws(() => assertRunRecord({ ...record, failureSummary: { rawProviderPayload: 'secret' } }), /forbidden evidence|summary/u)
   assert.throws(() => assertRunRecord({ ...record, assistantStopReasons: [{ bad: true }] }), /provider or stop-reason/u)
   assert.throws(() => assertRunRecord({ ...record, observedProviders: { openai: true } }), /provider or stop-reason/u)

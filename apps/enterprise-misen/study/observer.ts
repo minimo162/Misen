@@ -226,7 +226,7 @@ export class StudyObserver {
       elapsedMs: Math.max(0, Math.round(input.elapsedMs)),
       rssBytes: input.rssBytes,
       integrity,
-      invalidReason: input.invalidReason ? 'observer or infrastructure failure' : null,
+      invalidReason: status === 'INVALID' ? 'observer or infrastructure failure' : null,
     }
   }
 }
