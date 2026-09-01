@@ -35,11 +35,25 @@ type ServerEvent =
   | { type: 'status'; status: 'running' | 'PASS' | 'FAIL' | 'CANCELLED'; output?: string; error?: string }
 
 const TOOL_PRESENTATION: Record<string, string> = {
-  workspace_list_files: 'List workspace files',
-  workspace_read_text: 'Read handoff',
-  spreadsheet_read: 'Read spreadsheet',
-  spreadsheet_create_output: 'Create workbook',
-  spreadsheet_update: 'Update spreadsheet',
+  workspace_list_files: 'ファイル一覧を確認',
+  workspace_read_text: '引継ぎ資料を確認',
+  spreadsheet_read: 'Excelを確認',
+  spreadsheet_create_output: 'Excelを作成',
+  spreadsheet_update: 'Excelを更新',
+}
+
+function Icon({ name, className }: { name: 'send' | 'stop' | 'running' | 'success' | 'error' | 'chevron-right' | 'chevron-down' | 'file' | 'open' | 'back'; className?: string }) {
+  const common = { className: className ?? 'icon', viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true }
+  if (name === 'send') return <svg {...common}><path d="M10 15V5m0 0L6.5 8.5M10 5l3.5 3.5" /></svg>
+  if (name === 'stop') return <svg {...common} fill="currentColor" stroke="none"><rect x="6" y="6" width="8" height="8" rx="1.5" /></svg>
+  if (name === 'running') return <svg {...common}><circle cx="10" cy="10" r="6.5" opacity=".28" /><path d="M10 3.5a6.5 6.5 0 0 1 6.5 6.5" /></svg>
+  if (name === 'success') return <svg {...common}><path d="m5.5 10 3 3 6-6" /></svg>
+  if (name === 'error') return <svg {...common}><path d="m6.5 6.5 7 7m0-7-7 7" /></svg>
+  if (name === 'chevron-right') return <svg {...common}><path d="m8 6 4 4-4 4" /></svg>
+  if (name === 'chevron-down') return <svg {...common}><path d="m6 8 4 4 4-4" /></svg>
+  if (name === 'file') return <svg {...common}><path d="M6 3.5h5l3 3V16.5H6z" /><path d="M11 3.5v3h3" /></svg>
+  if (name === 'open') return <svg {...common}><path d="M8 5h7v7M15 5 7 13" /><path d="M13 11v4H5V7h4" /></svg>
+  return <svg {...common}><path d="m6 8 4 4 4-4" /></svg>
 }
 
 function contentText(content: unknown): string {
@@ -104,15 +118,15 @@ const MESSAGE_COMPONENTS = { UserMessage, AssistantMessage }
 function ProcessRows({ tools, running, expanded, onToggle }: { tools: ToolEvent[]; running: boolean; expanded: boolean; onToggle: () => void }) {
   if (tools.length === 0) return null
   if (!running && !expanded) {
-    return <button className="process-disclosure" type="button" onClick={onToggle} aria-expanded="false"><span>{tools.length}件の操作</span><span aria-hidden="true">›</span></button>
+    return <button className="process-disclosure" type="button" onClick={onToggle} aria-expanded="false"><span>{tools.length}件の操作</span><Icon name="chevron-right" /></button>
   }
   return (
     <div className="process-stack" aria-label="操作履歴">
-      {!running && <button className="process-disclosure process-disclosure--open" type="button" onClick={onToggle} aria-expanded="true"><span>{tools.length}件の操作</span><span aria-hidden="true">⌄</span></button>}
+      {!running && <button className="process-disclosure process-disclosure--open" type="button" onClick={onToggle} aria-expanded="true"><span>{tools.length}件の操作</span><Icon name="chevron-down" /></button>}
       {tools.map(tool => (
         <div className={`process-row process-row--${tool.status}`} key={tool.id}>
-          <span className="process-icon" aria-hidden="true">{tool.status === 'running' ? '◌' : tool.status === 'error' ? '×' : '✓'}</span>
-          <span className="process-label">{TOOL_PRESENTATION[tool.name] ?? 'Operation'}</span>
+          <span className="process-icon" aria-hidden="true"><Icon name={tool.status === 'running' ? 'running' : tool.status === 'error' ? 'error' : 'success'} /></span>
+          <span className="process-label">{TOOL_PRESENTATION[tool.name] ?? '操作'}</span>
           {tool.detail && <span className="process-detail">{tool.detail}</span>}
         </div>
       ))}
@@ -125,9 +139,9 @@ function Composer({ running, onCancel }: { running: boolean; onCancel: () => voi
     <ComposerPrimitive.Root className="composer" compact={false}>
       <ComposerPrimitive.Input aria-label="依頼" placeholder="何をお手伝いしましょう？" submitMode="enter" maxRows={8} />
       {running ? (
-        <button className="composer-action composer-action--stop" type="button" onClick={onCancel} aria-label="停止">■</button>
+        <button className="composer-action composer-action--stop" type="button" onClick={onCancel} aria-label="停止"><Icon name="stop" /></button>
       ) : (
-        <ComposerPrimitive.Send className="composer-action" type="submit" aria-label="送信"><span aria-hidden="true">↑</span></ComposerPrimitive.Send>
+        <ComposerPrimitive.Send className="composer-action" type="submit" aria-label="送信"><Icon name="send" /></ComposerPrimitive.Send>
       )}
     </ComposerPrimitive.Root>
   )
@@ -136,7 +150,7 @@ function Composer({ running, onCancel }: { running: boolean; onCancel: () => voi
 function Artifact({ output }: { output?: string }) {
   if (!output) return null
   const filename = output.replace(/\\/gu, '/').split('/').filter(Boolean).at(-1) ?? 'monthly-report.xlsx'
-  return <a className="artifact-row" href="/download" download aria-label={`${filename}をダウンロード`}><span className="artifact-icon" aria-hidden="true">▣</span><span>{filename}</span><span className="artifact-arrow" aria-hidden="true">↗</span></a>
+  return <a className="artifact-row" href="/download" download aria-label={`${filename}をダウンロード`}><Icon name="file" className="artifact-icon" /><span>{filename}</span><Icon name="open" className="artifact-arrow" /></a>
 }
 
 function Conversation({ messages, tools, running, expandedRunId, onToggle, output, activeRunId, onCancel }: {
@@ -176,7 +190,7 @@ function Conversation({ messages, tools, running, expandedRunId, onToggle, outpu
           <Artifact output={output} />
         </div>
         <ThreadPrimitive.ViewportFooter className="composer-region">
-          <ThreadPrimitive.ScrollToBottom className="back-to-bottom" aria-label="最新のメッセージへ移動">↓</ThreadPrimitive.ScrollToBottom>
+          <ThreadPrimitive.ScrollToBottom className="back-to-bottom" aria-label="最新のメッセージへ移動"><Icon name="back" /></ThreadPrimitive.ScrollToBottom>
           <Composer running={running} onCancel={onCancel} />
         </ThreadPrimitive.ViewportFooter>
       </ThreadPrimitive.Viewport>

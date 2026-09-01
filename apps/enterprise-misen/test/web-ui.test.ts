@@ -33,6 +33,9 @@ test('assistant-ui composition keeps the conversation surface restrained and saf
   assert.doesNotMatch(composerRegion, /position:\s*fixed/u)
   assert.match(source, /process-disclosure/)
   assert.match(source, /artifact-row/)
+  for (const label of ['ファイル一覧を確認', '引継ぎ資料を確認', 'Excelを確認', 'Excelを作成', 'Excelを更新']) assert.match(source, new RegExp(label, 'u'))
+  assert.match(source, /function Icon/u)
+  assert.doesNotMatch(source, /[▣↗◌✓↑■›⌄↓]/u)
   assert.doesNotMatch(source, /assistant-cloud|pi-web|Vercel AI SDK/iu)
 })
 
