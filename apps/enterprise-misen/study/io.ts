@@ -4,6 +4,7 @@ import { aggregateStudy } from './aggregate.js'
 import { AXIS_NAMES } from '../src/acceptance/validator.js'
 import {
   FROZEN_CONFIGURATION,
+  FAILURE_TAXONOMIES,
   PRODUCTION_BASELINE_SHA,
   STUDY_SCHEMA_VERSION,
   alternatingSchedule,
@@ -15,6 +16,8 @@ import {
 const inside = (parent: string, child: string) => { const rel = relative(parent, child); return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel)) }
 const hex40 = /^[0-9a-f]{40}$/u
 const safeStudyId = /^[a-z0-9][a-z0-9._-]{0,79}$/u
+const utcTimestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u
+const validUtc = (value: unknown): value is string => typeof value === 'string' && utcTimestamp.test(value) && Number.isFinite(Date.parse(value))
 const sameConfiguration = (value: unknown): boolean => JSON.stringify(value) === JSON.stringify(FROZEN_CONFIGURATION)
 const exactKeys = (value: object, keys: readonly string[], label: string): void => {
   const actual = Object.keys(value).sort(), expected = [...keys].sort()
@@ -52,21 +55,27 @@ export function assertCheckpoint(value: unknown): asserts value is StudyCheckpoi
   if (item.restartRule !== 'observer-change-restarts-at-run-1') throw new Error('restart rule mismatch')
   if (item.costAuthority !== 'pi-catalog-estimate-from-public-usage') throw new Error('cost authority mismatch')
   if (item.providerHardCapConfirmed !== true || item.hardSpendEnforcement !== 'provider-account-hard-cap-plus-observer-ledger') throw new Error('hard-cap confirmation missing')
-  if (typeof item.createdAtUtc !== 'string' || !Number.isFinite(Date.parse(item.createdAtUtc))) throw new Error('invalid checkpoint timestamp')
+  if (!validUtc(item.createdAtUtc)) throw new Error('invalid checkpoint timestamp')
 }
 
 export function assertRunRecord(value: unknown): asserts value is StudyRunRecord {
   assertCommon(value)
   const item = value as unknown as StudyRunRecord
   exactKeys(item, ['schemaVersion','studyId','studyRunNumber','paidAttemptNumber','month','productionBaselineSha','observerSha','configuration','startedAtUtc','endedAtUtc','status','failureTaxonomy','failureSummary','axisMatrix','output','inputHashesUnchanged','toolStarts','toolResults','toolBalance','toolErrorCount','toolValidationErrorCount','selfCorrectionCount','requestCount','lifecycle','assistantStopReasons','observedProviders','observedModels','usage','elapsedMs','rssBytes','integrity','invalidReason'], 'run')
+  assertSafeEvidence(item, 'run')
   if (!Number.isInteger(item.studyRunNumber) || item.studyRunNumber < 1 || item.studyRunNumber > 20) throw new Error('invalid study run number')
   if (!Number.isInteger(item.paidAttemptNumber) || item.paidAttemptNumber < 1 || item.paidAttemptNumber > 24) throw new Error('invalid paid attempt number')
   if (!['7月', '8月'].includes(item.month) || item.month !== alternatingSchedule()[item.studyRunNumber - 1]) throw new Error('run schedule mismatch')
   if (!['PASS', 'FAIL', 'INVALID'].includes(item.status)) throw new Error('invalid run status')
-  if (typeof item.startedAtUtc !== 'string' || typeof item.endedAtUtc !== 'string'
-    || !Number.isFinite(Date.parse(item.startedAtUtc)) || !Number.isFinite(Date.parse(item.endedAtUtc))
+  if (!validUtc(item.startedAtUtc) || !validUtc(item.endedAtUtc)
     || Date.parse(item.endedAtUtc) < Date.parse(item.startedAtUtc)) throw new Error('invalid run timestamps')
+  if (item.failureTaxonomy !== null && !FAILURE_TAXONOMIES.includes(item.failureTaxonomy)) throw new Error('invalid failure taxonomy')
+  if (item.failureSummary !== null && typeof item.failureSummary !== 'string' || item.invalidReason !== null && typeof item.invalidReason !== 'string') throw new Error('invalid run summary evidence')
   if (!Array.isArray(item.toolStarts) || !Array.isArray(item.toolResults) || !Array.isArray(item.assistantStopReasons)) throw new Error('invalid event evidence')
+  if (item.assistantStopReasons.some(reason => typeof reason !== 'string')
+    || !Array.isArray(item.observedProviders) || item.observedProviders.some(provider => typeof provider !== 'string')
+    || !Array.isArray(item.observedModels) || item.observedModels.some(model => typeof model !== 'string')
+    || new Set(item.observedProviders).size !== item.observedProviders.length || new Set(item.observedModels).size !== item.observedModels.length) throw new Error('invalid provider or stop-reason evidence')
   if (!item.integrity || ![true, false, null].includes(item.integrity.inputMutation) || typeof item.integrity.forbiddenCapability !== 'boolean'
     || ![true, false, null].includes(item.integrity.credentialExposure) || ![true, false, null].includes(item.integrity.unexpectedNetwork)) throw new Error('invalid integrity evidence')
   if (![true, false, null].includes(item.inputHashesUnchanged)) throw new Error('invalid input hash evidence')
@@ -83,7 +92,8 @@ export function assertRunRecord(value: unknown): asserts value is StudyRunRecord
   for (const start of item.toolStarts) {
     if (!FROZEN_CONFIGURATION.tools.includes(start.toolName) || !Number.isInteger(start.sequence) || start.sequence < 1 || typeof start.toolCallId !== 'string') throw new Error('invalid Tool start evidence')
     exactKeys(start, start.valuesShape === undefined ? ['sequence','toolCallId','toolName','timestampUtc','target'] : ['sequence','toolCallId','toolName','timestampUtc','target','valuesShape'], 'Tool start')
-    if (!start.toolCallId || typeof start.timestampUtc !== 'string' || !Number.isFinite(Date.parse(start.timestampUtc)) || !start.target || typeof start.target !== 'object' || Array.isArray(start.target)) throw new Error('invalid Tool start evidence')
+    if (!start.toolCallId || !validUtc(start.timestampUtc) || Date.parse(start.timestampUtc) < Date.parse(item.startedAtUtc) || Date.parse(start.timestampUtc) > Date.parse(item.endedAtUtc)
+      || !start.target || typeof start.target !== 'object' || Array.isArray(start.target)) throw new Error('invalid Tool start evidence')
     for (const [key, target] of Object.entries(start.target)) if (!['path','extension','workbook','sheet','range','source','output','offset','limit','overwrite'].includes(key)
       || !['string','number','boolean'].includes(typeof target) || (typeof target === 'string' && !/^sha256:[0-9a-f]{16}$/u.test(target))) throw new Error('invalid Tool target evidence')
     if (start.valuesShape && (Object.keys(start.valuesShape).sort().join(',') !== 'columns,formulas,literals,rows' || Object.values(start.valuesShape).some(count => typeof count !== 'number' || !Number.isInteger(count) || count < 0))) throw new Error('invalid values-shape evidence')
@@ -92,7 +102,8 @@ export function assertRunRecord(value: unknown): asserts value is StudyRunRecord
     const start = item.toolStarts.find(candidate => candidate.toolCallId === result.toolCallId)
     if (!start || start.toolName !== result.toolName || !Number.isInteger(result.sequence) || result.sequence <= start.sequence) throw new Error('Tool start/result mismatch')
     exactKeys(result, result.isError ? ['sequence','toolCallId','toolName','timestampUtc','isError','validationError','error'] : ['sequence','toolCallId','toolName','timestampUtc','isError','validationError'], 'Tool result')
-    if (typeof result.timestampUtc !== 'string' || !Number.isFinite(Date.parse(result.timestampUtc)) || typeof result.isError !== 'boolean' || typeof result.validationError !== 'boolean' || result.isError !== Boolean(result.error) || (result.validationError && !result.isError)) throw new Error('Tool result fields mismatch')
+    if (!validUtc(result.timestampUtc) || Date.parse(result.timestampUtc) < Date.parse(start.timestampUtc) || Date.parse(result.timestampUtc) > Date.parse(item.endedAtUtc)
+      || typeof result.isError !== 'boolean' || typeof result.validationError !== 'boolean' || result.isError !== Boolean(result.error) || (result.validationError && !result.isError)) throw new Error('Tool result fields mismatch')
     if (result.error) {
       exactKeys(result.error, ['class','code','message'], 'Tool error')
       if (result.error.class !== 'ToolError' || result.error.code !== null || !['tool validation error','tool execution error'].includes(result.error.message)
@@ -122,11 +133,14 @@ export function assertRunRecord(value: unknown): asserts value is StudyRunRecord
     exactKeys(item.output, ['basename','bytes'], 'output')
     if (!Number.isInteger(item.output.bytes) || item.output.bytes < 0 || !/^[^\\/]+\.xlsx$/iu.test(item.output.basename)) throw new Error('invalid output evidence')
   }
-  if (item.axisMatrix) for (const [axisName, axis] of Object.entries(item.axisMatrix)) {
+  if (item.axisMatrix) {
+    exactKeys(item.axisMatrix, AXIS_NAMES, 'axis matrix')
+    for (const [axisName, axis] of Object.entries(item.axisMatrix)) {
     if (!AXIS_NAMES.includes(axisName as typeof AXIS_NAMES[number]) || !axis || typeof axis !== 'object') throw new Error('invalid axis evidence')
     exactKeys(axis, ['status','evidence'], 'axis')
     if (!['PASS','FAIL'].includes(axis.status)) throw new Error('invalid axis evidence')
     assertSafeEvidence(axis.evidence, 'axis')
+    }
   }
   if (item.status === 'PASS') {
     if (item.failureTaxonomy !== null || item.failureSummary !== null || item.invalidReason !== null || item.inputHashesUnchanged !== true || !item.output || item.requestCount < 1
@@ -148,7 +162,7 @@ export function assertReservation(value: unknown): asserts value is PaidAttemptR
   if (!Number.isInteger(item.studyRunNumber) || item.studyRunNumber < 1 || item.studyRunNumber > 20) throw new Error('invalid reserved run number')
   if (!Number.isInteger(item.paidAttemptNumber) || item.paidAttemptNumber < 1 || item.paidAttemptNumber > 24) throw new Error('invalid reserved attempt number')
   if (item.month !== alternatingSchedule()[item.studyRunNumber - 1]) throw new Error('reservation schedule mismatch')
-  if (typeof item.reservedAtUtc !== 'string' || !Number.isFinite(Date.parse(item.reservedAtUtc))) throw new Error('invalid reservation timestamp')
+  if (!validUtc(item.reservedAtUtc)) throw new Error('invalid reservation timestamp')
 }
 
 export async function prepareEvidenceDirectory(evidenceDirectory: string, workspaceRoot?: string): Promise<string> {
@@ -200,9 +214,18 @@ export async function readRunRecords(evidenceDirectory: string): Promise<StudyRu
   const records = await Promise.all(names.map(async name => {
     const value: unknown = JSON.parse(await readFile(resolve(evidenceDirectory, name), 'utf8'))
     assertRunRecord(value)
+    const expectedName = `run-${String(value.studyRunNumber).padStart(2, '0')}-attempt-${String(value.paidAttemptNumber).padStart(2, '0')}.json`
+    if (name !== expectedName) throw new Error('run filename does not match record')
     return value
   }))
   if (new Set(records.map(record => record.paidAttemptNumber)).size !== records.length) throw new Error('duplicate paid attempt evidence')
+  const checkpoint = await readCheckpoint(evidenceDirectory)
+  const reservations = await readReservations(evidenceDirectory)
+  for (const record of records) {
+    if (record.studyId !== checkpoint.studyId || record.productionBaselineSha !== checkpoint.productionBaselineSha || record.observerSha !== checkpoint.observerSha || !sameConfiguration(record.configuration)) throw new Error('run/checkpoint provenance mismatch')
+    const reservation = reservations.find(item => item.paidAttemptNumber === record.paidAttemptNumber)
+    if (!reservation || reservation.studyRunNumber !== record.studyRunNumber || reservation.month !== record.month) throw new Error('run/reservation mismatch')
+  }
   return records
 }
 
@@ -211,6 +234,7 @@ export async function readReservations(evidenceDirectory: string): Promise<PaidA
   const reservations = await Promise.all(names.map(async name => {
     const value: unknown = JSON.parse(await readFile(resolve(evidenceDirectory, name), 'utf8'))
     assertReservation(value)
+    if (name !== `attempt-${String(value.paidAttemptNumber).padStart(2, '0')}-reservation.json`) throw new Error('reservation filename does not match record')
     return value
   }))
   const checkpoint = await readCheckpoint(evidenceDirectory)
