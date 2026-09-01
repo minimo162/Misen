@@ -15,6 +15,7 @@ const observerPaths = [
   'apps/enterprise-misen/study',
   'apps/enterprise-misen/docs/reliability-study.md',
   'apps/enterprise-misen/test/study-observer.test.ts',
+  'apps/enterprise-misen/test/study-review-fixes.test.ts',
   'apps/enterprise-misen/package.json',
   'apps/enterprise-misen/tsconfig.json',
 ]
