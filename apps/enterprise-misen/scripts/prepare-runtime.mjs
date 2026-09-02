@@ -351,6 +351,7 @@ export async function prepareRuntime({ output, sourceSha, packagingSha, nodeRunt
         'app/package.json',
         'app/dependency-lock.json',
         'app/dist/src/web/server.js',
+        'app/dist/src/web/artifacts.js',
         'app/dist/web/assets/client.js',
         'app/dist/web/assets/client.css',
         'app/node_modules',

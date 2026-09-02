@@ -120,6 +120,7 @@ test('manifest verifier rejects modified Node and runtime hash disagreement', as
       sourceSha: distributionSource,
       thinMisenBehaviorBaselineSha: thinMisenBehaviorBaseline,
       productBehaviorBaselineSha: distributionSource,
+      packagingSha: distributionSource,
       launcher: 'run.cmd',
       entrypoint: 'app/dist/src/web/server.js',
       modelVisibleWorkspacePaths: ['workspace/AGENTS.md', 'workspace/.agents/skills/monthly-report/SKILL.md'],

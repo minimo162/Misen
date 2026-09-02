@@ -145,6 +145,7 @@ export async function verifyManifestContract(root, manifest) {
   if (manifest.sourceSha !== preparedRuntimeSourceSha) throw new Error('unexpected prepared-runtime source SHA')
   if (manifest.thinMisenBehaviorBaselineSha !== thinMisenBehaviorBaselineSha) throw new Error('unexpected Thin Misen behavior baseline SHA')
   if (manifest.productBehaviorBaselineSha !== productBehaviorBaselineSha) throw new Error('unexpected free-form product behavior baseline SHA')
+  if (!/^[0-9a-f]{40}$/u.test(manifest.packagingSha ?? '')) throw new Error('invalid packaging SHA')
   if (manifest.entrypoint !== 'app/dist/src/web/server.js' || manifest.launcher !== 'run.cmd') throw new Error('unexpected runtime entrypoint or launcher')
   const expectedNode = {
     version: nodeRuntimeContract.version,
