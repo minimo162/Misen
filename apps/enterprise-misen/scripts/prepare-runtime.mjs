@@ -12,10 +12,12 @@ import {
 } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { nodeRuntimeContract, nodeRuntimeInputManifest } from './node-runtime-contract.mjs'
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const preparedRuntimeSourceSha = 'df2859c471fac035be062703f59f69e07d55b208'
+const preparedRuntimeSourceSha = '4eef951bb4f37735dcac2800ccf38a6add5d08e1'
 const thinMisenBehaviorBaselineSha = 'f3b772f7765206f75f7296e436d89c6a771b690a'
+const productBehaviorBaselineSha = preparedRuntimeSourceSha
 const shaPattern = /^[0-9a-f]{40}$/
 const allowedDistRoots = Object.freeze([
   ['src'],
@@ -66,7 +68,7 @@ async function walk(root) {
   const files = []
   async function visit(directory) {
     const entries = await readdir(directory, { withFileTypes: true })
-    entries.sort((left, right) => left.name.localeCompare(right.name, 'en'))
+    entries.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0)
     for (const entry of entries) {
       const path = join(directory, entry.name)
       if (entry.isDirectory()) await visit(path)
@@ -108,6 +110,11 @@ function quietGitDiff(args) {
   catch { throw new Error('packaging repository provenance mismatch') }
 }
 
+function requireGitAncestor(ancestor, descendant) {
+  try { execFileSync('git', ['merge-base', '--is-ancestor', ancestor, descendant], { cwd: appRoot, stdio: 'ignore' }) }
+  catch { throw new Error(`required Git ancestry missing: ${ancestor} -> ${descendant}`) }
+}
+
 function verifyPackagingProvenance(sourceSha, packagingSha) {
   if (sourceSha !== preparedRuntimeSourceSha) throw new Error(`--source-sha must equal frozen prepared-runtime source ${preparedRuntimeSourceSha}`)
   if (git(['rev-parse', 'HEAD']) !== packagingSha) throw new Error('--packaging-sha must equal current HEAD')
@@ -115,16 +122,61 @@ function verifyPackagingProvenance(sourceSha, packagingSha) {
   const packagingPaths = [
     'apps/enterprise-misen/package.json',
     'apps/enterprise-misen/docs/prepared-runtime.md',
+    'apps/enterprise-misen/scripts/acquire-node-runtime.mjs',
+    'apps/enterprise-misen/scripts/generate-sbom.mjs',
+    'apps/enterprise-misen/scripts/node-runtime-contract.mjs',
     'apps/enterprise-misen/scripts/prepare-runtime.d.mts',
     'apps/enterprise-misen/scripts/prepare-runtime.mjs',
     'apps/enterprise-misen/scripts/verify-prepared-runtime.mjs',
     'apps/enterprise-misen/test/prepared-runtime.test.ts',
   ]
-  quietGitDiff([thinMisenBehaviorBaselineSha, sourceSha, '--', ...protectedPaths])
+  requireGitAncestor(thinMisenBehaviorBaselineSha, sourceSha)
+  requireGitAncestor(sourceSha, packagingSha)
   quietGitDiff([sourceSha, 'HEAD', '--', ...protectedPaths])
   quietGitDiff(['HEAD', '--', ...protectedPaths, ...packagingPaths])
   quietGitDiff(['--cached', 'HEAD', '--', ...protectedPaths, ...packagingPaths])
   if (git(['ls-files', '--others', '--exclude-standard', '--', ...protectedPaths, ...packagingPaths])) throw new Error('untracked production or packaging files reject provenance')
+}
+
+async function verifiedNodeRuntimeInput(nodeRuntime) {
+  const root = resolve(nodeRuntime)
+  const provenance = JSON.parse(await readFile(join(root, nodeRuntimeInputManifest), 'utf8'))
+  const exact = {
+    schemaVersion: 1,
+    version: nodeRuntimeContract.version,
+    releaseName: nodeRuntimeContract.releaseName,
+    platform: nodeRuntimeContract.platform,
+    arch: nodeRuntimeContract.arch,
+    sourceArchive: nodeRuntimeContract.sourceArchive,
+    sourceRelease: nodeRuntimeContract.sourceRelease,
+    sourceArchiveUrl: nodeRuntimeContract.sourceArchiveUrl,
+    shasumsUrl: nodeRuntimeContract.shasumsUrl,
+    archiveSha256: nodeRuntimeContract.archiveSha256,
+    executableSha256: nodeRuntimeContract.executableSha256,
+    licenseSha256: nodeRuntimeContract.licenseSha256,
+    executable: 'node.exe',
+    license: 'LICENSE',
+    resolution: nodeRuntimeContract.resolution,
+    externalRuntimeRequired: false,
+    verifiedAgainstOfficialShasums: true,
+  }
+  for (const [key, value] of Object.entries(exact)) if (provenance[key] !== value) throw new Error(`Node runtime provenance mismatch: ${key}`)
+  const executable = join(root, 'node.exe')
+  const license = join(root, 'LICENSE')
+  if (await sha256(executable) !== nodeRuntimeContract.executableSha256) throw new Error('Node runtime executable SHA-256 mismatch')
+  if (await sha256(license) !== nodeRuntimeContract.licenseSha256) throw new Error('Node runtime license SHA-256 mismatch')
+  const version = execFileSync(executable, ['--version'], { encoding: 'utf8' }).trim()
+  if (version !== `v${nodeRuntimeContract.version}`) throw new Error(`Node runtime version mismatch: ${version}`)
+  return { root, provenance }
+}
+
+async function copyNodeRuntime(target, nodeRuntime) {
+  const verified = await verifiedNodeRuntimeInput(nodeRuntime)
+  const destination = join(target, 'runtime', 'node')
+  await mkdir(destination, { recursive: true })
+  await cp(join(verified.root, 'node.exe'), join(destination, 'node.exe'))
+  await cp(join(verified.root, 'LICENSE'), join(destination, 'LICENSE'))
+  return verified.provenance
 }
 
 async function installProductionDependencies(appDirectory) {
@@ -208,10 +260,11 @@ async function countInstalledPackages(nodeModules) {
 }
 
 function assertRuntimeBoundary(inventory) {
-  const forbiddenNames = inventory.executableOrScriptFiles.filter((path) => path !== 'run.cmd')
+  const allowed = new Set(['run.cmd', nodeRuntimeContract.executable])
+  const forbiddenNames = inventory.executableOrScriptFiles.filter((path) => !allowed.has(path))
   if (forbiddenNames.length > 0) throw new Error(`unexpected executable or script files: ${forbiddenNames.join(', ')}`)
   const extensions = inventory.byExtension
-  if ((extensions['.node'] ?? 0) !== 0 || (extensions['.dll'] ?? 0) !== 0 || (extensions['.exe'] ?? 0) !== 0) throw new Error('native runtime files are not permitted')
+  if ((extensions['.node'] ?? 0) !== 0 || (extensions['.dll'] ?? 0) !== 0 || (extensions['.exe'] ?? 0) !== 1) throw new Error('native runtime inventory must contain exactly the approved Node executable')
 }
 
 async function writeHashes(target) {
@@ -221,10 +274,11 @@ async function writeHashes(target) {
   await writeFile(join(target, 'SHA256SUMS.txt'), `${lines.join('\n')}\n`, 'utf8')
 }
 
-export async function prepareRuntime({ output, sourceSha, packagingSha }) {
+export async function prepareRuntime({ output, sourceSha, packagingSha, nodeRuntime }) {
   const target = resolve(output)
   if (!shaPattern.test(sourceSha)) throw new Error('--source-sha must be a lowercase 40-character Git SHA')
   if (!shaPattern.test(packagingSha)) throw new Error('--packaging-sha must be a lowercase 40-character Git SHA')
+  if (!nodeRuntime) throw new Error('--node-runtime is required')
   await ensureCleanTarget(target)
   verifyPackagingProvenance(sourceSha, packagingSha)
   await mkdir(target, { recursive: true })
@@ -234,6 +288,7 @@ export async function prepareRuntime({ output, sourceSha, packagingSha }) {
     await mkdir(appDirectory, { recursive: true })
     await copyRuntimeDist(appDirectory)
     await installProductionDependencies(appDirectory)
+    await copyNodeRuntime(target, nodeRuntime)
 
     const fixtureModule = await import(pathToFileURL(join(appRoot, 'dist', 'demo', 'enterprise-excel', 'fixtures.js')).href)
     await fixtureModule.createEnterpriseFixtureWorkspace(join(target, 'workspace'))
@@ -243,8 +298,13 @@ export async function prepareRuntime({ output, sourceSha, packagingSha }) {
       '@echo off',
       'setlocal',
       'set "MISEN_ROOT=%~dp0"',
+      'set "MISEN_NODE=%MISEN_ROOT%runtime\\node\\node.exe"',
+      'if not exist "%MISEN_NODE%" (',
+      '  echo Misen bundled Node.js runtime is missing. 1>&2',
+      '  exit /b 1',
+      ')',
       'if "%~1"=="" (set "MISEN_WORKSPACE=%MISEN_ROOT%workspace") else set "MISEN_WORKSPACE=%~f1"',
-      'node "%MISEN_ROOT%app\\dist\\src\\web\\server.js" "%MISEN_WORKSPACE%"',
+      '"%MISEN_NODE%" "%MISEN_ROOT%app\\dist\\src\\web\\server.js" "%MISEN_WORKSPACE%"',
       'exit /b %errorlevel%',
       '',
     ].join('\r\n')
@@ -255,11 +315,28 @@ export async function prepareRuntime({ output, sourceSha, packagingSha }) {
     const preliminaryInventory = await buildInventory(target)
     assertRuntimeBoundary(preliminaryInventory)
     const manifest = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       sourceSha,
       thinMisenBehaviorBaselineSha,
+      productBehaviorBaselineSha,
       packagingSha,
-      node: { requirement: '>=22.19.0', executable: 'node', resolution: 'PATH' },
+      node: {
+        version: nodeRuntimeContract.version,
+        releaseName: nodeRuntimeContract.releaseName,
+        platform: nodeRuntimeContract.platform,
+        arch: nodeRuntimeContract.arch,
+        sourceArchive: nodeRuntimeContract.sourceArchive,
+        sourceRelease: nodeRuntimeContract.sourceRelease,
+        sourceArchiveUrl: nodeRuntimeContract.sourceArchiveUrl,
+        shasumsUrl: nodeRuntimeContract.shasumsUrl,
+        archiveSha256: nodeRuntimeContract.archiveSha256,
+        executable: nodeRuntimeContract.executable,
+        executableSha256: nodeRuntimeContract.executableSha256,
+        license: nodeRuntimeContract.license,
+        licenseSha256: nodeRuntimeContract.licenseSha256,
+        resolution: nodeRuntimeContract.resolution,
+        externalRuntimeRequired: false,
+      },
       launcher: 'run.cmd',
       entrypoint: 'app/dist/src/web/server.js',
       defaultWorkspace: 'workspace',
@@ -269,9 +346,12 @@ export async function prepareRuntime({ output, sourceSha, packagingSha }) {
       ],
       requiredPaths: [
         'run.cmd',
+        nodeRuntimeContract.executable,
+        nodeRuntimeContract.license,
         'app/package.json',
         'app/dependency-lock.json',
         'app/dist/src/web/server.js',
+        'app/dist/src/web/artifacts.js',
         'app/dist/web/assets/client.js',
         'app/dist/web/assets/client.css',
         'app/node_modules',
@@ -311,7 +391,7 @@ export async function prepareRuntime({ output, sourceSha, packagingSha }) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = parseArguments(process.argv.slice(2))
-  if (!args.output || !args['source-sha'] || !args['packaging-sha']) throw new Error('usage: prepare-runtime --output <clean-directory> --source-sha <sha> --packaging-sha <sha>')
-  const result = await prepareRuntime({ output: args.output, sourceSha: args['source-sha'], packagingSha: args['packaging-sha'] })
+  if (!args.output || !args['source-sha'] || !args['packaging-sha'] || !args['node-runtime']) throw new Error('usage: prepare-runtime --output <clean-directory> --source-sha <sha> --packaging-sha <sha> --node-runtime <verified-node-input>')
+  const result = await prepareRuntime({ output: args.output, sourceSha: args['source-sha'], packagingSha: args['packaging-sha'], nodeRuntime: args['node-runtime'] })
   console.log(JSON.stringify(result.manifest, null, 2))
 }

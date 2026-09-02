@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { JsonValidator } from '@cyclonedx/cyclonedx-library/Validation'
 import { Version } from '@cyclonedx/cyclonedx-library/Spec'
+import { nodeRuntimeContract } from './node-runtime-contract.mjs'
 
 const lock = JSON.parse(await readFile(new URL('../package-lock.json', import.meta.url), 'utf8'))
 const packages = Object.entries(lock.packages)
@@ -16,7 +17,31 @@ const packages = Object.entries(lock.packages)
       { name: 'misen:has-install-script', value: String(Boolean(value.hasInstallScript)) },
     ],
   }))
-  .sort((a, b) => a.name.localeCompare(b.name))
+  .sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
+
+const nodeRuntime = {
+  type: 'framework',
+  'bom-ref': `nodejs-host-runtime@${nodeRuntimeContract.version}-win-x64`,
+  name: 'Node.js',
+  version: nodeRuntimeContract.version,
+  description: 'Bundled Windows x64 host runtime for Enterprise Misen; not a model-facing capability',
+  hashes: [{ alg: 'SHA-256', content: nodeRuntimeContract.executableSha256 }],
+  licenses: [{ license: { name: 'Node.js distribution LICENSE (MIT plus bundled third-party notices)' } }],
+  externalReferences: [{ type: 'distribution', url: nodeRuntimeContract.sourceArchiveUrl }],
+  properties: [
+    { name: 'misen:component-role', value: 'host-runtime' },
+    { name: 'misen:platform', value: 'windows' },
+    { name: 'misen:architecture', value: nodeRuntimeContract.arch },
+    { name: 'misen:release-name', value: nodeRuntimeContract.releaseName },
+    { name: 'misen:source-release', value: nodeRuntimeContract.sourceRelease },
+    { name: 'misen:source-archive', value: nodeRuntimeContract.sourceArchive },
+    { name: 'misen:source-archive-sha256', value: nodeRuntimeContract.archiveSha256 },
+    { name: 'misen:bundled-executable', value: nodeRuntimeContract.executable },
+    { name: 'misen:bundled-license', value: nodeRuntimeContract.license },
+    { name: 'misen:bundled-license-sha256', value: nodeRuntimeContract.licenseSha256 },
+    { name: 'misen:resolution', value: nodeRuntimeContract.resolution },
+  ],
+}
 
 const out = {
   bomFormat: 'CycloneDX',
@@ -24,7 +49,7 @@ const out = {
   serialNumber: 'urn:uuid:4d697365-6e2d-4f53-8342-4f4d2d302e32',
   version: 1,
   metadata: { component: { type: 'application', name: '@misen/enterprise-runtime-poc', version: '0.2.0' } },
-  components: packages,
+  components: [...packages, nodeRuntime],
 }
 
 const validator = new JsonValidator(Version.v1dot6)
@@ -37,4 +62,4 @@ if (await validator.validate(JSON.stringify(invalidControl)) === null) throw new
 const evidence = new URL('../evidence/', import.meta.url)
 await mkdir(evidence, { recursive: true })
 await writeFile(new URL('sbom.cdx.json', evidence), serialized)
-console.log(`SBOM ${packages.length} resolved packages; official CycloneDX 1.6 schema PASS; negative control PASS`)
+console.log(`SBOM ${packages.length} npm packages + 1 bundled Node runtime component; official CycloneDX 1.6 schema PASS; negative control PASS`)

@@ -7554,6 +7554,78 @@
           "value": "false"
         }
       ]
+    },
+    {
+      "type": "framework",
+      "bom-ref": "nodejs-host-runtime@24.20.0-win-x64",
+      "name": "Node.js",
+      "version": "24.20.0",
+      "description": "Bundled Windows x64 host runtime for Enterprise Misen; not a model-facing capability",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5c976096e04e5c2c1f091938926234cc9fbebfe9787ddd149351b3b0ecc707b5"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "Node.js distribution LICENSE (MIT plus bundled third-party notices)"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://nodejs.org/dist/v24.20.0/node-v24.20.0-win-x64.zip"
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:component-role",
+          "value": "host-runtime"
+        },
+        {
+          "name": "misen:platform",
+          "value": "windows"
+        },
+        {
+          "name": "misen:architecture",
+          "value": "x64"
+        },
+        {
+          "name": "misen:release-name",
+          "value": "Krypton"
+        },
+        {
+          "name": "misen:source-release",
+          "value": "https://nodejs.org/dist/v24.20.0/"
+        },
+        {
+          "name": "misen:source-archive",
+          "value": "node-v24.20.0-win-x64.zip"
+        },
+        {
+          "name": "misen:source-archive-sha256",
+          "value": "6cac9ffbca8f6a47091e4b5c772e0606049c3871cb67d900c0cedde630e545ba"
+        },
+        {
+          "name": "misen:bundled-executable",
+          "value": "runtime/node/node.exe"
+        },
+        {
+          "name": "misen:bundled-license",
+          "value": "runtime/node/LICENSE"
+        },
+        {
+          "name": "misen:bundled-license-sha256",
+          "value": "ed34dd8e3f0a78dbaf00d0444ce8e285b015b765379c2e17880455f70370f8e9"
+        },
+        {
+          "name": "misen:resolution",
+          "value": "bundled-only"
+        }
+      ]
     }
   ]
 }
