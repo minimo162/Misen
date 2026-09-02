@@ -25,8 +25,10 @@ x64 runtime input:
 - `node.exe` SHA-256: `5c976096e04e5c2c1f091938926234cc9fbebfe9787ddd149351b3b0ecc707b5`
 - `LICENSE` SHA-256: `ed34dd8e3f0a78dbaf00d0444ce8e285b015b765379c2e17880455f70370f8e9`
 
-These values are exact pins from the official release SHASUMS. Floating `lts`,
-`24`, `current`, or `latest` identities are not accepted.
+The archive hash and the matching standalone `win-x64/node.exe` hash are exact
+pins published in the official release SHASUMS. The `LICENSE` hash is derived
+from the license file inside that hash-verified official archive. Floating
+`lts`, `24`, `current`, or `latest` identities are not accepted.
 
 ## Build-time acquisition boundary
 
