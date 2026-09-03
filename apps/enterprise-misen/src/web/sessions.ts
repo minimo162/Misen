@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
+import { mkdir, open, readdir, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -136,9 +136,20 @@ export class LocalSessionStore {
   async get(id: string): Promise<StoredSession | undefined> {
     if (!SESSION_ID_RE.test(id)) return undefined
     try {
-      const bytes = await readFile(this.path(id))
-      if (bytes.byteLength > MAX_SESSION_FILE_BYTES) return undefined
-      return parseStoredSession(JSON.parse(bytes.toString('utf8')))
+      const handle = await open(this.path(id), 'r')
+      try {
+        const bytes = Buffer.allocUnsafe(MAX_SESSION_FILE_BYTES + 1)
+        let offset = 0
+        while (offset < bytes.byteLength) {
+          const { bytesRead } = await handle.read(bytes, offset, bytes.byteLength - offset, null)
+          if (bytesRead === 0) break
+          offset += bytesRead
+        }
+        if (offset > MAX_SESSION_FILE_BYTES) return undefined
+        return parseStoredSession(JSON.parse(bytes.subarray(0, offset).toString('utf8')))
+      } finally {
+        await handle.close()
+      }
     } catch {
       return undefined
     }

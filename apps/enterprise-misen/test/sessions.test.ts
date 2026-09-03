@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fixture } from '../demo/enterprise-excel/fixtures.js'
 import { createDemoServer, type AgentRunner } from '../src/web/server.js'
-import { DEFAULT_SESSION_TITLE, LocalSessionStore, MAX_SESSION_TITLE_LENGTH, localSessionDirectory, titleFromFirstUserMessage } from '../src/web/sessions.js'
+import { DEFAULT_SESSION_TITLE, LocalSessionStore, MAX_SESSION_FILE_BYTES, MAX_SESSION_TITLE_LENGTH, localSessionDirectory, titleFromFirstUserMessage } from '../src/web/sessions.js'
 
 async function listen(root: string, sessionDirectory: string, runner: AgentRunner, now?: () => Date) {
   const server = createDemoServer(root, runner, undefined, { sessionDirectory, now })
@@ -111,6 +111,20 @@ test('one corrupt session is ignored and runtime/provider secrets are never seri
       if (previous === undefined) delete process.env.OPENAI_API_KEY
       else process.env.OPENAI_API_KEY = previous
     }
+  } finally {
+    await rm(local, { recursive: true, force: true })
+  }
+})
+
+test('one oversized session is read with a hard bound and does not break valid history', async () => {
+  const local = await mkdtemp(join(tmpdir(), 'misen-history-oversized-'))
+  const directory = join(local, 'sessions')
+  const store = new LocalSessionStore(directory, () => new Date('2026-09-03T03:30:00.000Z'))
+  try {
+    const valid = await store.create()
+    await writeFile(join(directory, 'BBBBBBBBBBBBBBBBBBBBBBBB.json'), Buffer.alloc(MAX_SESSION_FILE_BYTES + 2, 0x20))
+    assert.equal(await store.get('BBBBBBBBBBBBBBBBBBBBBBBB'), undefined)
+    assert.deepEqual((await store.list()).map(session => session.id), [valid.id])
   } finally {
     await rm(local, { recursive: true, force: true })
   }

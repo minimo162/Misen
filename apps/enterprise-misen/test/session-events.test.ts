@@ -1,6 +1,6 @@
 import test from 'node:test'
 import { strict as assert } from 'node:assert'
-import { eventAppliesToActiveSession, sessionIdForEvent, type SessionEventShape } from '../src/web/session-events.js'
+import { beginSessionSelection, eventAppliesToActiveSession, isCurrentSessionSelection, sessionIdForEvent, type SessionEventShape } from '../src/web/session-events.js'
 
 type ProjectedState = {
   status: 'idle' | 'running' | 'COMPLETED'
@@ -43,4 +43,17 @@ test('sessionless events are startup-global and fail closed once a session is ac
   const globalState = { type: 'state', state: { status: 'idle', artifacts: [] } }
   assert.equal(eventAppliesToActiveSession(globalState, undefined), true)
   assert.equal(eventAppliesToActiveSession(globalState, 'session-b'), false)
+})
+
+test('a stale history response cannot replace a newer session selection', () => {
+  const guard = { revision: 0 }
+  const openingA = beginSessionSelection(guard)
+  const creatingB = beginSessionSelection(guard)
+
+  assert.equal(isCurrentSessionSelection(guard, openingA), false, 'late session A response is stale')
+  assert.equal(isCurrentSessionSelection(guard, creatingB), true, 'new chat B remains authoritative')
+
+  const reopeningB = beginSessionSelection(guard)
+  assert.equal(isCurrentSessionSelection(guard, creatingB), false, 'a reconnect/reopen cannot be overwritten by an older response')
+  assert.equal(isCurrentSessionSelection(guard, reopeningB), true)
 })

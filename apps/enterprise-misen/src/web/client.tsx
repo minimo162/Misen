@@ -12,7 +12,7 @@ import {
 import { MarkdownTextPrimitive } from '@assistant-ui/react-markdown'
 import './client.css'
 import { processEventsForRun, runIdFromMessage, shouldShowThinkingPlaceholder, type ToolEvent } from './process.js'
-import { eventAppliesToActiveSession } from './session-events.js'
+import { beginSessionSelection, eventAppliesToActiveSession, isCurrentSessionSelection } from './session-events.js'
 
 type UiMessage = {
   id: string
@@ -267,6 +267,7 @@ function MisenApp() {
   const [expandedRunId, setExpandedRunId] = useState<string | undefined>()
   const runIdRef = useRef<string | undefined>(undefined)
   const activeSessionIdRef = useRef<string | undefined>(undefined)
+  const sessionSelectionRef = useRef({ revision: 0 })
   const eventSourceRef = useRef<EventSource | null>(null)
 
   const running = state.status === 'running'
@@ -274,10 +275,13 @@ function MisenApp() {
   const readOnly = hasConversation && !running
 
   const openSession = useCallback(async (id: string) => {
+    const selection = beginSessionSelection(sessionSelectionRef.current)
     const response = await fetch(`/sessions/${encodeURIComponent(id)}`)
     if (!response.ok) return false
     const session = await response.json() as UiSession
+    if (!isCurrentSessionSelection(sessionSelectionRef.current, selection)) return false
     activeSessionIdRef.current = session.id
+    runIdRef.current = undefined
     setActiveSessionId(session.id)
     globalThis.localStorage?.setItem('misen.activeSessionId', session.id)
     setMessages(session.messages)
@@ -301,10 +305,13 @@ function MisenApp() {
   }, [])
 
   const createSession = useCallback(async () => {
+    const selection = beginSessionSelection(sessionSelectionRef.current)
     const response = await fetch('/sessions', { method: 'POST', headers: { origin: globalThis.location.origin } })
     if (!response.ok) throw new Error('session')
     const session = await response.json() as UiSession
+    if (!isCurrentSessionSelection(sessionSelectionRef.current, selection)) return activeSessionIdRef.current
     activeSessionIdRef.current = session.id
+    runIdRef.current = undefined
     setActiveSessionId(session.id)
     globalThis.localStorage?.setItem('misen.activeSessionId', session.id)
     setMessages([])
@@ -400,6 +407,7 @@ function MisenApp() {
     let sessionId = activeSessionIdRef.current
     if (!sessionId) {
       try { sessionId = await createSession() } catch { setState(previous => ({ ...previous, status: 'FAIL', error: '新しいチャットを開始できませんでした。' })); return }
+      if (!sessionId) return
     }
     const clientId = `client-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`
     runIdRef.current = clientId
