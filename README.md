@@ -4,8 +4,9 @@
 
 | アプリ | 役割 | 利用者の入口 |
 | --- | --- | --- |
-| Enterprise Misen（`apps/enterprise-misen`） | Excel / Word / PowerPoint を扱う財務本部向けエージェント。同梱 Node.js と OfficeCLI で動く自己完結ランタイム。**主力** | 共有フォルダーの **`Misen起動.cmd`** |
-| coding-agent（`apps/coding-agent`） | Copilot / Ollama を使うコーディングエージェント。実験用 | 共有フォルダーの `start-coding-agent.cmd` |
+| Enterprise Misen（`apps/enterprise-misen`） | Excel / Word / PowerPoint を扱う財務本部向けエージェント。同梱 Node.js と OfficeCLI で動く自己完結ランタイム | 共有フォルダーの **`Misen起動.cmd`** |
+
+`apps/coding-agent` は 2026 年 8 月の実験（Copilot / Ollama を頭脳にしたコーディングエージェント、Computer Use の試作）で、現在は凍結中です。Enterprise Misen とは配布経路も起動入口も別で、設計第7版では「将来 PC 操作が必要になったときの実験場」として残しています。使い方は `apps/coding-agent/README-*.md` と `DEPLOY.md` 末尾を参照してください。
 
 ## 設計の要点
 
@@ -24,16 +25,16 @@ launcher\                利用者用（共有フォルダーへそのまま公�
   Misen起動.cmd            Enterprise Misen の唯一の起動入口
   launch.ps1               起動スクリプト本体（manifest 比較・SHA-256 検証・ローカル版の起動）
   test\launch.test.mjs     初回起動・2回目起動・版更新後の起動・改ざん検出の自動テスト
-  start-coding-agent.cmd / コーディングエージェント起動.cmd / launch-coding-agent.*   coding-agent 用
+  start-coding-agent.cmd / コーディングエージェント起動.cmd / launch-coding-agent.*   coding-agent 用（凍結中）
 scripts\                 管理者用
   Publish-Release.ps1                                      配布物を生成して GitHub Release に添付（推奨）
   Expand-MisenShare.ps1                                    社内 PC で Release の zip を検証して共有フォルダーへ展開
   prepare-misen.cmd / Prepare-Misen.ps1 / New-Misen.ps1    共有フォルダーへ直接公開（開発 PC が社内ネットワークにある場合）
-  prepare-coding-agent.cmd / Prepare-CodingAgent.ps1 / New-CodingAgent.ps1   coding-agent 用
+  prepare-coding-agent.cmd / Prepare-CodingAgent.ps1 / New-CodingAgent.ps1   coding-agent 用（凍結中）
   get-node.ps1 / get-llama.ps1 / start-llama.cmd / package-release.ps1       開発用
 .github\workflows\release-share.yml   GitHub Actions で同じ Release を作る予備（手動実行専用）
 apps\enterprise-misen\   Enterprise Misen 本体
-apps\coding-agent\       coding-agent 本体
+apps\coding-agent\       coding-agent 本体（凍結中の実験）
 ```
 
 ## 配布（管理者）
@@ -82,10 +83,6 @@ Enterprise Misen が接続する LLM（プロバイダー種別・モデル名�
 ```
 
 初回の `Misen起動.cmd` で、このファイルが無ければ日本語コメント付きのテンプレートを作成してメモ帳で開き、起動を止めます。記入して保存し、もう一度ダブルクリックしてください。社内 GPU の OpenAI 互換 API なら `provider` を `openai-compatible` にして `baseUrl` を書きます。設定項目と検証規則は `apps/enterprise-misen/docs/brain-profile.md` を参照してください。API キーはログ・manifest・共有フォルダー・画面には出ません。
-
-## coding-agent の起動
-
-`launcher\コーディングエージェント起動.cmd` をダブルクリックすると、既定の workspace として `%USERPROFILE%\Documents\エージェント作業場` を作成・使用します。別の既存フォルダーを workspace にする場合は、そのフォルダーをドラッグ＆ドロップします。起動時は `launcher\launch-coding-agent.cmd` が共有 `apps\coding-agent` の版を確認し、初回または更新時にローカルの版別領域へ取得して SHA-256 を検証してから起動します。
 
 ## テスト
 
