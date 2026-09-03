@@ -7,3 +7,5 @@ runtime/llama-cpp/
 runtime/models/*.gguf
 *.log
 startup-log.txt
+.worktrees/
+.artifacts/

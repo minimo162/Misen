@@ -1,11 +1,11 @@
 import test from 'node:test'
 import { strict as assert } from 'node:assert'
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { cp, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fixture, PROMPTS, SYNTHETIC_MONTHS } from '../demo/enterprise-excel/fixtures.js'
-import { AXIS_NAMES, snapshotOutputScope, validateReport } from '../src/acceptance/validator.js'
+import { AXIS_NAMES, snapshotOutputScope, validateReport, type OutputScopeSnapshot } from '../src/acceptance/validator.js'
 import { runReplay } from '../src/runtime/agent.js'
 import { officeCli, type OfficeCliBatchItem } from '../src/spreadsheet/engine.js'
 import { rangeBoundaries, tupleToCoordinate } from '../src/spreadsheet/range.js'
@@ -18,15 +18,35 @@ async function hashes(root: string) {
   return new Map(await Promise.all(paths.map(async path => [path, digest(await readFile(join(root, path)))] as const)))
 }
 
-async function prepared() {
-  const root = await mkdtemp(join(tmpdir(), 'misen-semantic-validator-'))
-  await fixture(root)
-  const before = await hashes(root)
-  const outputBefore = await snapshotOutputScope(root)
-  const replay = await runReplay(root, '7月', PROMPTS['7月'])
-  const outputPath = join(root, replay.output)
-  return { root, before, outputBefore, outputPath }
+type Baseline = { root: string; before: Map<string, string>; outputBefore: OutputScopeSnapshot; output: string }
+
+// Issue #93 C: the July replay (fixture + faux Pi Agent run through OfficeCLI) costs roughly 14 s. It used to be
+// repeated for every variant below (11 replays). The replay is deterministic, so it is produced once per test
+// process and each case works on a private copy of the replayed workspace. Input hashes and the pre-run output
+// snapshot are relative to the workspace root, so they remain valid for the copy.
+let baselinePromise: Promise<Baseline> | undefined
+function baseline(): Promise<Baseline> {
+  baselinePromise ??= (async () => {
+    const root = await mkdtemp(join(tmpdir(), 'misen-semantic-baseline-'))
+    await fixture(root)
+    const before = await hashes(root)
+    const outputBefore = await snapshotOutputScope(root)
+    const replay = await runReplay(root, '7月', PROMPTS['7月'])
+    return { root, before, outputBefore, output: replay.output }
+  })()
+  return baselinePromise
 }
+
+async function prepared() {
+  const base = await baseline()
+  const root = await mkdtemp(join(tmpdir(), 'misen-semantic-validator-'))
+  await cp(base.root, root, { recursive: true })
+  return { root, before: base.before, outputBefore: base.outputBefore, outputPath: join(root, base.output) }
+}
+
+test.after(async () => {
+  if (baselinePromise) await rm((await baselinePromise).root, { recursive: true, force: true })
+})
 
 function rangeItems(sheet: string, range: string, values: readonly (readonly (string | number | boolean | null)[])[]): OfficeCliBatchItem[] {
   const bounds = rangeBoundaries(range)
@@ -113,6 +133,7 @@ test('Decision 441 permits harmless extra sheets while preserving the required r
 })
 
 test('Decision 441 derives preservation from the actual template and detects footer/style drift', async () => {
+  // This case mutates the template before the replay, so it needs its own replay rather than the shared baseline.
   const root = await mkdtemp(join(tmpdir(), 'misen-template-derived-'))
   try {
     await fixture(root)
@@ -121,8 +142,8 @@ test('Decision 441 derives preservation from the actual template and detects foo
     const before = await hashes(root)
     const outputBefore = await snapshotOutputScope(root)
     const replay = await runReplay(root, '7月', PROMPTS['7月'])
-    const baseline = await validateReport(root, scenario, before, outputBefore)
-    assert.equal(baseline.passed, true, JSON.stringify(baseline.axes))
+    const baselineResult = await validateReport(root, scenario, before, outputBefore)
+    assert.equal(baselineResult.passed, true, JSON.stringify(baselineResult.axes))
 
     await mutate(join(root, replay.output), rangeItems('Report', 'A11:A11', [['changed footer']]))
     const footer = await validateReport(root, scenario, before, outputBefore)

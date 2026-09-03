@@ -75,7 +75,7 @@ The live measurement is opt-in and never runs as part of the normal gate:
 
 ```powershell
 npm run flex:measure:ollama
-npm run gate -- --live-ollama
+npm run test:live -- --live-ollama
 ```
 
 ## 16 GB CPU agent optimisation (Issue #56)
@@ -119,7 +119,7 @@ existing browser profile or tab and it does not use pixel clicks.
 
 ```powershell
 npm run computer-use:measure:ollama -- --seed 53028 --budget 512
-npm run gate -- --live-computer-use --seed 53028 --budget 512
+npm run test:live -- --live-computer-use --seed 53028 --budget 512
 ```
 
 Supported visual-budget tiers are 512, 768, and 1024 estimated Qwen grid

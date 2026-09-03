@@ -5,7 +5,7 @@
 `apps/coding-agent` で次の1コマンドを実行すると、通常の回帰ゲートを順番に実行します。各段の出力はリアルタイムに表示され、最後に PASS / FAIL / SKIP と所要時間の表が出ます。途中の段が失敗しても可能な後続段を続け、1段でも失敗した場合は終了コード1になります。
 
 ```powershell
-npm run gate
+npm test
 ```
 
 | 段 | 実行内容 | 通常実行 |
@@ -19,12 +19,12 @@ npm run gate
 | live-copilot | `node test/measure-flex-copilot.mjs` | フラグなしはSKIP |
 | live-copilot-v2 | `node test/measure-flex-copilot-v2.mjs` | フラグなしはSKIP |
 
-4B変換係まで実行する場合は、llama.cppサーバーを `127.0.0.1:8080` で起動してから `npm run gate -- --live-converter` を使います。
+4B変換係まで実行する場合は、llama.cppサーバーを `127.0.0.1:8080` で起動してから `npm run test:live -- --live-converter` を使います。
 
-実Copilot 5種の計測まで実行する場合は、`dist/server.js` のサーバーとEdge Copilotセッションを準備してから `npm run gate -- --live-copilot` を使います。既存計測スクリプトのbaseURL、workspace、結果パスはフラグの後へ同じ順番で渡せます。
+実Copilot 5種の計測まで実行する場合は、`dist/server.js` のサーバーとEdge Copilotセッションを準備してから `npm run test:live -- --live-copilot` を使います。既存計測スクリプトのbaseURL、workspace、結果パスはフラグの後へ同じ順番で渡せます。
 
 ```powershell
-npm run gate -- --live-copilot http://127.0.0.1:3951 .tmp/flex-copilot-performance .tmp/flex-performance/result.json
+npm run test:live -- --live-copilot http://127.0.0.1:3951 .tmp/flex-copilot-performance .tmp/flex-performance/result.json
 ```
 
 機械可読な全段の結果は、実行のたびに `.tmp/gate-result.json` へUTF-8のJSONとして保存されます。
@@ -55,10 +55,10 @@ v2を試すローカル設定では、Copilot OpenAI互換bridgeの `/v1` を `b
 }
 ```
 
-通常の `npm run gate` にはモックOpenAI互換応答を使うv2決定論テストが含まれ、実サービスには接続しません。実Copilotの5種計測は、Edge Copilotセッションを使うbridgeと、上記v2設定で起動した `dist/server.js` を準備してから、次のopt-inフラグで実行します。baseURL、workspace、結果パスの追加引数はv1計測と同じです。
+通常の `npm test`（unit 層）にはモックOpenAI互換応答を使うv2決定論テストが含まれ、実サービスには接続しません。実Copilotの5種計測は、Edge Copilotセッションを使うbridgeと、上記v2設定で起動した `dist/server.js` を準備してから、次のopt-inフラグで実行します。baseURL、workspace、結果パスの追加引数はv1計測と同じです。
 
 ```powershell
-npm run gate -- --live-copilot-v2 http://127.0.0.1:3951 .tmp/flex-copilot-v2-performance .tmp/flex-copilot-v2-result.json
+npm run test:live -- --live-copilot-v2 http://127.0.0.1:3951 .tmp/flex-copilot-v2-performance .tmp/flex-copilot-v2-result.json
 ```
 
 llama.cppサーバーは `--live-converter` のときだけ必要です。フラグを付けないlive段はSKIPとなり、全段の結果は `.tmp/gate-result.json` に保存されます。
