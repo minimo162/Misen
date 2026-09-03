@@ -1,6 +1,6 @@
 # 社内PCへの配布
 
-Enterprise Misen を共有フォルダーへ公開し、利用者が `Misen起動.cmd` だけで使えるようにする手順です。coding-agent の配布は末尾の「coding-agent の配布」を参照してください。
+Enterprise Misen を共有フォルダーへ公開し、利用者が `Misen起動.cmd` だけで使えるようにする手順です。
 
 ## 共有フォルダーのレイアウト
 
@@ -137,7 +137,8 @@ scripts\prepare-misen.cmd "\\fileserver\CompanyApps\Misen" -CleanDestination
 | `brain.baseUrl` | openai-compatible のときだけ必須（http/https）。公式プロバイダーでは指定不可 |
 | `brain.thinkingLevel` | 省略可（既定 medium） |
 
-記入して保存したあと、もう一度 `Misen起動.cmd` をダブルクリックします。設定に誤りがあると日本語のメッセージで停止します（API キーは表示しません）。管理者が事前に確認する場合は、ローカル版の `appdistsrcuntimesettings-cli.js check --settings <path>` を同梱 Node.js で実行してください。
+記入して保存したあと、もう一度 `Misen起動.cmd` をダブルクリックします。設定に誤りがあると日本語のメッセージで停止します（API キーは表示しません）。管理者が事前に確認する場合は、ローカル版の `appdistsrc
+untimesettings-cli.js check --settings <path>` を同梱 Node.js で実行してください。
 
 API キーは共有フォルダー・manifest・ログ・画面・セッション履歴に出ません。共有フォルダーには利用者の設定を置かないでください。
 
@@ -160,19 +161,3 @@ node --test launcher/test/launch.test.mjs
 - 管理者PC: Git、Node.js/npm、Windows PowerShell 5.1、ランタイム取得のためのインターネット接続（取得済み入力フォルダーを渡す場合は不要）
 - 利用者PC: Windows、共有フォルダーへの読み取り権限。Node.js や Office のインストールは不要
 - 利用者側の管理者権限は不要（ローカル同期先は `%LOCALAPPDATA%\Misen`）
-
-## coding-agent の配布
-
-coding-agent は従来どおり `scripts\prepare-coding-agent.cmd`（`Prepare-CodingAgent.ps1` / `New-CodingAgent.ps1`）で公開します。共有先には `launcher\launch-coding-agent.*`、`apps\coding-agent`、`runtime\node-v...\node.exe`、`start-coding-agent.cmd` が配置され、利用者は `start-coding-agent.cmd` を実行します。ローカル同期先は `%LOCALAPPDATA%\CompanyApps` です。
-
-```cmd
-scripts\prepare-coding-agent.cmd "\\fileserver\CompanyApps\CodingAgent" -CleanDestination
-```
-
-### Edge接続の分離
-
-coding-agentは通常、空きポートと専用Edgeプロファイルを自動で割り当てます。既に動作中の別アプリのEdgeや固定CDPポートへは接続しません。`copilot.reuseExistingEdge` を `true` にした場合だけ、指定した `copilot.cdpPort` の既存Edgeへ明示的に接続します。
-
-### 天気取得
-
-天気・気温の質問は、地域を設定した `weather.defaultLocation`（例: `広島市`）を使ってOpen-Meteoから取得します。既定地域を使わない場合は質問に市区町村名を含めてください。

@@ -12,7 +12,7 @@
     %LOCALAPPDATA%\Misen\state\launch.json     直近の配布状態（監査用。秘密情報は含まない）
     %LOCALAPPDATA%\Misen\workspace\            既定の作業フォルダー（初回に雛形からコピー）
 
-  manifest 比較・SHA-256 検証・ロールバックの流れは launch-coding-agent.ps1 と同じ設計です。
+  manifest 比較・SHA-256 検証・ロールバックの流れは、2026 年 8 月の coding-agent 用ランチャー（タグ archive/coding-agent-be614a6）から引き継いだ設計です。
 #>
 [CmdletBinding()]
 param(
