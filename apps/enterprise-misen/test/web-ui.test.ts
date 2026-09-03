@@ -22,8 +22,13 @@ async function runSession(base: string, prompt: string, clientId: string) {
 }
 
 test('assistant-ui composition keeps the conversation surface restrained and safe', async () => {
-  const source = await readFile(join(process.cwd(), 'src', 'web', 'client.tsx'), 'utf8')
+  const componentNames = ['thread.tsx', 'composer.tsx', 'tool-fallback.tsx', 'markdown-text.tsx', 'thread-list.tsx', 'icons.tsx']
+  const source = [
+    await readFile(join(process.cwd(), 'src', 'web', 'client.tsx'), 'utf8'),
+    ...await Promise.all(componentNames.map(name => readFile(join(process.cwd(), 'src', 'web', 'components', name), 'utf8'))),
+  ].join('\n')
   const styles = await readFile(join(process.cwd(), 'src', 'web', 'client.css'), 'utf8')
+  const clientBuild = await readFile(join(process.cwd(), 'scripts', 'build-client.mjs'), 'utf8')
   const server = await readFile(join(process.cwd(), 'src', 'web', 'server.ts'), 'utf8')
   const pkg = JSON.parse(await readFile(join(process.cwd(), 'package.json'), 'utf8')) as { dependencies: Record<string, string> }
 
@@ -48,7 +53,7 @@ test('assistant-ui composition keeps the conversation surface restrained and saf
   assert.match(source, /ThreadPrimitive\.If running>/)
   assert.match(source, /ThreadPrimitive\.If running=\{false\}>/)
   assert.match(source, /ThreadPrimitive\.If disabled>/)
-  assert.match(source, /className="thread-viewport" autoScroll turnAnchor="bottom"/)
+  assert.match(source, /autoScroll turnAnchor="bottom"/)
   assert.match(source, /ComposerPrimitive\.Input/)
   assert.match(source, /ComposerPrimitive\.Send/)
   assert.match(source, /ComposerPrimitive\.Cancel/)
@@ -56,7 +61,7 @@ test('assistant-ui composition keeps the conversation surface restrained and saf
 
   // Message vocabulary: tool-call parts, ToolGroup folding, custom metadata artifacts, error status.
   assert.match(source, /MessagePrimitive\.Parts/)
-  assert.match(source, /tools:\s*\{\s*Fallback:\s*ToolCallRow\s*\}/u)
+  assert.match(source, /tools:\s*\{\s*Fallback:\s*ToolFallback\s*\}/u)
   assert.match(source, /ToolGroup/)
   assert.match(source, /件の操作/u)
   assert.match(source, /MessagePrimitive\.If last hasContent=\{false\}/)
@@ -92,25 +97,26 @@ test('assistant-ui composition keeps the conversation surface restrained and saf
   assert.match(source, /File:\s*HiddenPart/u)
   assert.match(source, /Source:\s*HiddenPart/u)
   assert.match(source, /Unstable_Audio:\s*HiddenPart/u)
-  assert.match(source, /a: \(\{ children \}\) => <span>\{children\}<\/span>/u)
+  assert.match(source, /a: \(\{ children \}\) => <span[^>]*>\{children\}<\/span>/u)
   assert.match(source, /img: \(\{ alt \}\) => <span>\{alt \?\? ''\}<\/span>/u)
   assert.doesNotMatch(source, /viewportRef|scrollHeight|scrollTop|clientHeight/)
   assert.doesNotMatch(source, /assistant-cloud|AssistantCloud|pi-web|Vercel AI SDK|react-ai-sdk|useChatRuntime/iu)
   assert.doesNotMatch(source, /model|settings|terminal|attachment|Dictate|feedback/iu)
   for (const forbidden of ['@assistant-ui/react-ui', '@assistant-ui/react-ai-sdk', 'assistant-cloud', 'ai', '@ai-sdk/react', 'tailwindcss', 'shadcn']) assert.equal(pkg.dependencies[forbidden], undefined, forbidden)
 
-  // Styling grammar: Misen-owned CSS, sticky footer, reduced motion, narrow breakpoint, SVG icons.
+  // Styling grammar: local Tailwind source, sticky footer, reduced motion, narrow breakpoint, SVG icons.
+  assert.match(styles, /@import "tailwindcss"/u)
+  assert.match(styles, /@source "\.\/\*\*\/\*\.\{ts,tsx\}"/u)
+  assert.match(clientBuild, /@tailwindcss\/postcss/u)
+  assert.match(clientBuild, /plugins:\s*\[tailwindPlugin\]/u)
   assert.match(styles, /prefers-reduced-motion/)
-  const composerRegion = styles.match(/\.composer-region\s*\{(?<rules>[^}]*)\}/u)?.groups?.rules ?? ''
-  assert.match(composerRegion, /position:\s*sticky/u)
-  assert.doesNotMatch(composerRegion, /position:\s*fixed/u)
+  assert.match(source, /sticky bottom-0/u)
   assert.doesNotMatch(styles, /position:\s*fixed/u)
-  assert.match(source, /process-disclosure/)
-  assert.match(source, /artifact-row/)
-  assert.match(styles, /\.history-panel/u)
-  assert.match(styles, /\.process-row/u)
-  assert.match(styles, /\.artifact-row/u)
-  assert.match(styles, /@media \(max-width: 760px\)/u)
+  assert.match(source, /aui-tool-group/u)
+  assert.match(source, /aria-label="成果物"/u)
+  assert.match(source, /aui-thread-root/u)
+  assert.match(source, /aui-tool-row/u)
+  assert.match(styles, /@media \(max-width: 720px\)/u)
   assert.match(server, /<link rel="icon" href="data:,">/u)
   assert.match(source, /function Icon/u)
   assert.doesNotMatch(source, /[▣↗◌✓↑■›⌄↓]/u)
