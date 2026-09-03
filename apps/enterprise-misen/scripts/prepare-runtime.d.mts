@@ -1,7 +1,5 @@
 export interface PrepareRuntimeOptions {
   output: string
-  sourceSha: string
-  packagingSha: string
   nodeRuntime: string
 }
 

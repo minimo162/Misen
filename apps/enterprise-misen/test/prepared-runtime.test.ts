@@ -1,14 +1,11 @@
 import test from 'node:test'
 import { strict as assert } from 'node:assert'
 import { createHash } from 'node:crypto'
-import { execFileSync } from 'node:child_process'
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const distributionSource = '4eef951bb4f37735dcac2800ccf38a6add5d08e1'
-const thinMisenBehaviorBaseline = 'f3b772f7765206f75f7296e436d89c6a771b690a'
 const archiveSha256 = '6cac9ffbca8f6a47091e4b5c772e0606049c3871cb67d900c0cedde630e545ba'
 const executableSha256 = '5c976096e04e5c2c1f091938926234cc9fbebfe9787ddd149351b3b0ecc707b5'
 const licenseSha256 = 'ed34dd8e3f0a78dbaf00d0444ce8e285b015b765379c2e17880455f70370f8e9'
@@ -58,20 +55,26 @@ test('acquisition fails closed before extraction when the official archive hash 
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-test('prepared-runtime generator binds the free-form source and requires an explicit verified Node input', async () => {
+test('prepared-runtime generator requires an explicit verified Node input and clean target', async () => {
   const module = await import(pathToFileURL(join(process.cwd(), 'scripts', 'prepare-runtime.mjs')).href) as any
   const root = await mkdtemp(join(tmpdir(), 'misen-prepare-contract-'))
   const output = join(root, 'output')
-  const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
   try {
-    await assert.rejects(module.prepareRuntime({ output, sourceSha: 'invalid', packagingSha: head, nodeRuntime: root }), /source-sha/u)
-    await assert.rejects(module.prepareRuntime({ output, sourceSha: thinMisenBehaviorBaseline, packagingSha: head, nodeRuntime: root }), /frozen prepared-runtime source/u)
-    await assert.rejects(module.prepareRuntime({ output, sourceSha: distributionSource, packagingSha: head }), /node-runtime/u)
+    await assert.rejects(module.prepareRuntime({ output }), /node-runtime/u)
     await writeFile(join(root, 'marker.txt'), 'preserve', 'utf8')
-    await assert.rejects(module.prepareRuntime({ output: root, sourceSha: distributionSource, packagingSha: head, nodeRuntime: root }), /absent or empty/u)
+    await assert.rejects(module.prepareRuntime({ output: root, nodeRuntime: root }), /absent or empty/u)
     assert.equal(await readFile(join(root, 'marker.txt'), 'utf8'), 'preserve')
-    await assert.rejects(module.prepareRuntime({ output, sourceSha: distributionSource, packagingSha: thinMisenBehaviorBaseline, nodeRuntime: root }), /current HEAD/u)
   } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('Git metadata is informational and commit ancestry cannot allow or deny packaging', async () => {
+  const prepare = await readFile(join('scripts', 'prepare-runtime.mjs'), 'utf8')
+  const verify = await readFile(join('scripts', 'verify-prepared-runtime.mjs'), 'utf8')
+  const declaration = await readFile(join('scripts', 'prepare-runtime.d.mts'), 'utf8')
+  const combined = `${prepare}\n${verify}\n${declaration}`
+  assert.doesNotMatch(combined, /merge-base|is-ancestor|--source-sha|--packaging-sha|preparedRuntimeSourceSha|productBehaviorBaselineSha|packagingSha/u)
+  assert.match(prepare, /buildGitSha:\s*informationalBuildGitSha\(\)/u)
+  assert.match(prepare, /gitMetadataPolicy:\s*'informational-only'/u)
 })
 
 test('hash verification requires exact equality and executable policy allows only run.cmd plus bundled node.exe', async () => {
@@ -116,11 +119,10 @@ test('manifest verifier rejects modified Node and runtime hash disagreement', as
     await writeFile(join(root, 'runtime', 'node', 'LICENSE'), 'license', 'utf8')
     await writeFile(join(root, 'run.cmd'), module.expectedLauncher(), 'utf8')
     const manifest = {
-      schemaVersion: 3,
-      sourceSha: distributionSource,
-      thinMisenBehaviorBaselineSha: thinMisenBehaviorBaseline,
-      productBehaviorBaselineSha: distributionSource,
-      packagingSha: distributionSource,
+      schemaVersion: 4,
+      applicationVersion: '0.2.0',
+      buildGitSha: 'a'.repeat(40),
+      gitMetadataPolicy: 'informational-only',
       launcher: 'run.cmd',
       entrypoint: 'app/dist/src/web/server.js',
       modelVisibleWorkspacePaths: ['workspace/AGENTS.md', 'workspace/.agents/skills/monthly-report/SKILL.md'],
@@ -135,6 +137,7 @@ test('manifest verifier rejects modified Node and runtime hash disagreement', as
         licenseSha256, resolution: 'bundled-only', externalRuntimeRequired: false,
       },
     }
+    await assert.rejects(module.verifyManifestContract(root, { ...manifest, buildGitSha: 'not-a-sha' }), /informational build Git SHA/u)
     await assert.rejects(module.verifyManifestContract(root, manifest), /executable hash mismatch/u)
     manifest.node.executableSha256 = createHash('sha256').update('modified').digest('hex')
     await assert.rejects(module.verifyManifestContract(root, manifest), /manifest mismatch: executableSha256/u)

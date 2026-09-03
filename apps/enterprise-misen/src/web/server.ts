@@ -1,16 +1,26 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { readFile } from 'node:fs/promises'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { liveAgent } from '../runtime/live.js'
 import { WorkspaceBoundary } from '../workspace/boundary.js'
 import type { AgentEvent } from '@earendil-works/pi-agent-core'
 import {
   discoverOutputArtifacts,
+  MAX_ARTIFACT_BYTES,
   MAX_SESSION_ARTIFACTS,
   snapshotOutputArtifacts,
   type DiscoveredArtifact,
   type OutputScopeSnapshot,
 } from './artifacts.js'
+import {
+  LocalSessionStore,
+  SESSION_ID_RE,
+  titleFromFirstUserMessage,
+  type StoredArtifact,
+  type StoredMessage,
+  type StoredSession,
+  type StoredToolEvent,
+} from './sessions.js'
 
 export interface AgentRunResult {
   tools: string[]
@@ -23,10 +33,10 @@ export interface AgentRunResult {
  * process labels are emitted.
  */
 export type DemoEvent =
-  | { type: 'user'; id: string; text: string }
-  | { type: 'assistant'; text: string; done?: boolean }
-  | { type: 'tool'; phase: 'start' | 'end'; id: string; name: string; detail?: string; status?: 'success' | 'error' }
-  | { type: 'status'; status: 'running' | 'COMPLETED' | 'FAIL' | 'CANCELLED'; error?: string }
+  | { type: 'user'; sessionId?: string; id: string; text: string }
+  | { type: 'assistant'; sessionId?: string; text: string; done?: boolean }
+  | { type: 'tool'; sessionId?: string; phase: 'start' | 'end'; id: string; name: string; detail?: string; status?: 'success' | 'error' }
+  | { type: 'status'; sessionId?: string; status: 'running' | 'COMPLETED' | 'FAIL' | 'CANCELLED'; error?: string }
 
 export interface DemoRunContext {
   emit: (event: DemoEvent) => void
@@ -37,7 +47,10 @@ export type UiArtifact = {
   id: string
   runId: string
   filename: string
+  available: boolean
 }
+
+export type UiSession = Omit<StoredSession, 'artifacts'> & { artifacts: UiArtifact[] }
 
 export type AgentRunner = (root: string, prompt: string, context?: DemoRunContext) => Promise<AgentRunResult>
 
@@ -131,6 +144,7 @@ export const liveAgentRunner = createAgentRunner(liveAgent)
 type UiState = {
   status: 'idle' | 'running' | 'COMPLETED' | 'FAIL' | 'CANCELLED'
   runId?: string
+  sessionId?: string
   tools: string[]
   axes: string[]
   artifacts: UiArtifact[]
@@ -140,6 +154,11 @@ type UiState = {
 const MAX_BODY = 8192
 const RUN_ID_RE = /^[A-Za-z0-9_-]{1,80}$/u
 const ARTIFACT_ID_RE = /^[A-Za-z0-9_-]{24}$/u
+
+export interface DemoServerOptions {
+  sessionDirectory?: string
+  now?: () => Date
+}
 
 function writeEvent(response: ServerResponse, event: DemoEvent | { type: 'state'; state: UiState }): void {
   response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
@@ -166,8 +185,14 @@ function clientAssetPath(name: string): URL {
   return new URL(`../../web/assets/${name}`, import.meta.url)
 }
 
-export function createDemoServer(root: string, runner: AgentRunner = liveAgentRunner, artifactObserver: ArtifactObserver = defaultArtifactObserver) {
+export function createDemoServer(
+  root: string,
+  runner: AgentRunner = liveAgentRunner,
+  artifactObserver: ArtifactObserver = defaultArtifactObserver,
+  options: DemoServerOptions = {},
+) {
   const boundary = new WorkspaceBoundary(root)
+  const sessions = new LocalSessionStore(options.sessionDirectory, options.now)
   const artifactResources = new Map<string, { filename: string; bytes: Uint8Array }>()
   const usedRunIds = new Set<string>()
   let state: UiState = { status: 'idle', tools: [], axes: [], artifacts: [] }
@@ -183,8 +208,28 @@ export function createDemoServer(root: string, runner: AgentRunner = liveAgentRu
       let id = randomBytes(18).toString('base64url')
       while (artifactResources.has(id)) id = randomBytes(18).toString('base64url')
       artifactResources.set(id, { filename: artifact.filename, bytes: artifact.bytes })
-      return { id, runId, filename: artifact.filename }
+      return { id, runId, filename: artifact.filename, available: true }
     })
+  }
+  const projectSession = async (session: StoredSession): Promise<UiSession> => {
+    artifactResources.clear()
+    const artifacts: UiArtifact[] = []
+    for (const artifact of session.artifacts.slice(0, MAX_SESSION_ARTIFACTS)) {
+      try {
+        const resource = await boundary.readOutputFileBytes(artifact.path, MAX_ARTIFACT_BYTES)
+        const sha256 = createHash('sha256').update(resource.bytes).digest('hex')
+        if (sha256 !== artifact.sha256) throw new Error('artifact changed')
+        artifacts.push(registerArtifacts([{ path: artifact.path, filename: artifact.filename, bytes: resource.bytes }], artifact.runId)[0])
+      } catch {
+        artifacts.push({ id: '', runId: artifact.runId, filename: artifact.filename, available: false })
+      }
+    }
+    return { ...session, artifacts }
+  }
+  const persist = async (session: StoredSession, update: Partial<StoredSession>): Promise<StoredSession> => {
+    const next = { ...session, ...update, updatedAt: sessions.timestamp() }
+    await sessions.save(next)
+    return next
   }
 
   return createServer(async (request, response) => {
@@ -195,13 +240,32 @@ export function createDemoServer(root: string, runner: AgentRunner = liveAgentRu
 
       if (request.method === 'GET' && url.pathname === '/') {
         response.setHeader('content-type', 'text/html; charset=utf-8')
-        return response.end(`<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Misen</title><link rel="stylesheet" href="/assets/client.css"></head><body><div id="root"></div><script type="module" src="/assets/client.js"></script></body></html>`)
+        return response.end(`<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>Misen</title><link rel="stylesheet" href="/assets/client.css"></head><body><div id="root"></div><script type="module" src="/assets/client.js"></script></body></html>`)
       }
       if (request.method === 'GET' && (url.pathname === '/assets/client.js' || url.pathname === '/assets/client.css')) {
         const name = url.pathname.endsWith('.css') ? 'client.css' : 'client.js'
         const bytes = await readFile(clientAssetPath(name))
         response.setHeader('content-type', name.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8')
         return response.end(bytes)
+      }
+      if (request.method === 'GET' && url.pathname === '/sessions') {
+        response.setHeader('content-type', 'application/json; charset=utf-8')
+        return response.end(JSON.stringify(await sessions.list()))
+      }
+      if (request.method === 'POST' && url.pathname === '/sessions') {
+        if (request.headers.origin !== `http://${host}` || active) throw new Error('origin')
+        const session = await sessions.create()
+        response.statusCode = 201
+        response.setHeader('content-type', 'application/json; charset=utf-8')
+        return response.end(JSON.stringify(await projectSession(session)))
+      }
+      if (request.method === 'GET' && url.pathname.startsWith('/sessions/')) {
+        const id = url.pathname.slice('/sessions/'.length)
+        if (!SESSION_ID_RE.test(id)) { response.statusCode = 404; return response.end('Not found') }
+        const session = await sessions.get(id)
+        if (!session) { response.statusCode = 404; return response.end('Not found') }
+        response.setHeader('content-type', 'application/json; charset=utf-8')
+        return response.end(JSON.stringify(await projectSession(session)))
       }
       if (request.method === 'GET' && url.pathname === '/events') {
         response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', connection: 'keep-alive' })
@@ -240,24 +304,44 @@ export function createDemoServer(root: string, runner: AgentRunner = liveAgentRu
           }
           const prompt = params.get('prompt') ?? ''
           const clientId = params.get('clientId') ?? `server-${++nextRunId}`
-          if (prompt.trim().length === 0 || !RUN_ID_RE.test(clientId) || usedRunIds.has(clientId)) {
+          const sessionId = params.get('sessionId') ?? ''
+          const existingSession = await sessions.get(sessionId)
+          if (prompt.trim().length === 0 || !RUN_ID_RE.test(clientId) || usedRunIds.has(clientId) || !existingSession || existingSession.status !== 'NEW' || existingSession.messages.length !== 0) {
             response.statusCode = 400
             return response.end('Request failed')
           }
           usedRunIds.add(clientId)
-          state = { status: 'running', runId: clientId, tools: [], axes: [], artifacts: state.artifacts }
-          emit({ type: 'status', status: 'running' }); emit({ type: 'user', id: clientId, text: prompt }); emitState()
+          const startedAt = sessions.timestamp()
+          const userMessage: StoredMessage = { id: clientId, role: 'user', text: prompt, timestamp: startedAt }
+          let session = await persist(existingSession, {
+            title: titleFromFirstUserMessage(prompt),
+            status: 'RUNNING',
+            messages: [userMessage],
+          })
+          state = { status: 'running', runId: clientId, sessionId, tools: [], axes: [], artifacts: [] }
+          emit({ type: 'status', sessionId, status: 'running' }); emit({ type: 'user', sessionId, id: clientId, text: prompt }); emitState()
           try {
             const outputBefore = await artifactObserver.snapshot(boundary)
             if (cancelRequested) {
+              const text = '処理を停止しました。'
+              session = await persist(session, { status: 'CANCELLED', messages: [...session.messages, { id: `assistant-${clientId}`, role: 'assistant', text, timestamp: sessions.timestamp() }] })
               state = { ...state, status: 'CANCELLED' }
-              emit({ type: 'assistant', text: '処理を停止しました。', done: true })
-              emit({ type: 'status', status: 'CANCELLED' }); emitState()
+              emit({ type: 'assistant', sessionId, text, done: true })
+              emit({ type: 'status', sessionId, status: 'CANCELLED' }); emitState()
             } else {
               let hasVisibleAssistantText = false
+              let visibleAssistantText = ''
+              const storedTools = new Map<string, StoredToolEvent>()
               const runEmit = (event: DemoEvent) => {
-                if (event.type === 'assistant' && event.text.trim().length > 0) hasVisibleAssistantText = true
-                emit(event)
+                if (event.type === 'assistant' && event.text.trim().length > 0) {
+                  hasVisibleAssistantText = true
+                  visibleAssistantText = event.text
+                }
+                if (event.type === 'tool') {
+                  if (event.phase === 'start') storedTools.set(event.id, { id: event.id, runId: clientId, name: event.name, detail: event.detail, status: 'success' })
+                  else storedTools.set(event.id, { id: event.id, runId: clientId, name: event.name, detail: storedTools.get(event.id)?.detail, status: event.status === 'error' ? 'error' : 'success' })
+                }
+                emit({ ...event, sessionId })
               }
               const result = await runner(root, prompt, {
                 emit: runEmit,
@@ -275,17 +359,33 @@ export function createDemoServer(root: string, runner: AgentRunner = liveAgentRu
               const status = cancelRequested ? 'CANCELLED' : runnerStatus
               const terminalStatus: Exclude<UiState['status'], 'idle' | 'running'> = status
               const artifacts = status === 'COMPLETED' ? registerArtifacts(discovered, clientId) : []
-              state = { status: terminalStatus, runId: clientId, tools: result.tools.slice(0, 20), axes: [], artifacts: [...state.artifacts, ...artifacts] }
+              const fallbackText = status === 'COMPLETED' ? '処理が完了しました。' : status === 'CANCELLED' ? '処理を停止しました。' : '処理を完了できませんでした。'
+              const assistantText = hasVisibleAssistantText ? visibleAssistantText : fallbackText
+              const storedArtifacts: StoredArtifact[] = status === 'COMPLETED' ? discovered.map(artifact => ({
+                runId: clientId,
+                path: artifact.path,
+                filename: artifact.filename,
+                sha256: createHash('sha256').update(artifact.bytes).digest('hex'),
+              })) : []
+              session = await persist(session, {
+                status: terminalStatus,
+                messages: [...session.messages, { id: `assistant-${clientId}`, role: 'assistant', text: assistantText, timestamp: sessions.timestamp() }],
+                tools: [...storedTools.values()],
+                artifacts: storedArtifacts,
+              })
+              state = { status: terminalStatus, runId: clientId, sessionId, tools: result.tools.slice(0, 20), axes: [], artifacts }
               if (status !== 'COMPLETED' || !hasVisibleAssistantText) {
-                emit({ type: 'assistant', text: status === 'COMPLETED' ? '処理が完了しました。' : status === 'CANCELLED' ? '処理を停止しました。' : '処理を完了できませんでした。', done: true })
+                emit({ type: 'assistant', sessionId, text: fallbackText, done: true })
               }
-              emit({ type: 'status', status: terminalStatus }); emitState()
+              emit({ type: 'status', sessionId, status: terminalStatus }); emitState()
             }
           } catch {
             // Keep provider/transport details out of the browser-facing state;
             // diagnostic evidence belongs to the server-side acceptance layer.
-            state = { ...state, status: 'FAIL', error: '処理に失敗しました。' }
-            emit({ type: 'status', status: 'FAIL', error: '処理に失敗しました。' }); emitState()
+            const text = '処理に失敗しました。'
+            session = await persist(session, { status: 'FAIL', messages: [...session.messages, { id: `assistant-${clientId}`, role: 'assistant', text, timestamp: sessions.timestamp() }] })
+            state = { ...state, status: 'FAIL', error: text }
+            emit({ type: 'status', sessionId, status: 'FAIL', error: text }); emitState()
             response.statusCode = 500
             return response.end('Run failed')
           }

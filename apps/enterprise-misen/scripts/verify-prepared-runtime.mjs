@@ -5,10 +5,6 @@ import { basename, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { nodeRuntimeContract } from './node-runtime-contract.mjs'
-
-const preparedRuntimeSourceSha = '4eef951bb4f37735dcac2800ccf38a6add5d08e1'
-const thinMisenBehaviorBaselineSha = 'f3b772f7765206f75f7296e436d89c6a771b690a'
-const productBehaviorBaselineSha = preparedRuntimeSourceSha
 const modelVisibleWorkspacePaths = [
   'workspace/AGENTS.md',
   'workspace/.agents/skills/monthly-report/SKILL.md',
@@ -141,11 +137,10 @@ async function verifyManifestInventory(root, manifest) {
 }
 
 export async function verifyManifestContract(root, manifest) {
-  if (manifest.schemaVersion !== 3) throw new Error('unsupported prepared-runtime manifest schema')
-  if (manifest.sourceSha !== preparedRuntimeSourceSha) throw new Error('unexpected prepared-runtime source SHA')
-  if (manifest.thinMisenBehaviorBaselineSha !== thinMisenBehaviorBaselineSha) throw new Error('unexpected Thin Misen behavior baseline SHA')
-  if (manifest.productBehaviorBaselineSha !== productBehaviorBaselineSha) throw new Error('unexpected free-form product behavior baseline SHA')
-  if (!/^[0-9a-f]{40}$/u.test(manifest.packagingSha ?? '')) throw new Error('invalid packaging SHA')
+  if (manifest.schemaVersion !== 4) throw new Error('unsupported prepared-runtime manifest schema')
+  if (typeof manifest.applicationVersion !== 'string' || manifest.applicationVersion.length === 0) throw new Error('application version missing')
+  if (manifest.buildGitSha !== null && !/^[0-9a-f]{40}$/u.test(manifest.buildGitSha ?? '')) throw new Error('invalid informational build Git SHA')
+  if (manifest.gitMetadataPolicy !== 'informational-only') throw new Error('Git metadata must be informational only')
   if (manifest.entrypoint !== 'app/dist/src/web/server.js' || manifest.launcher !== 'run.cmd') throw new Error('unexpected runtime entrypoint or launcher')
   const expectedNode = {
     version: nodeRuntimeContract.version,
@@ -303,9 +298,9 @@ async function main() {
   const missingNodeNegative = await verifyMissingBundledNodeFailsClosed(root)
   console.log(JSON.stringify({
     status: 'PASS',
-    sourceSha: manifest.sourceSha,
-    productBehaviorBaselineSha: manifest.productBehaviorBaselineSha,
-    packagingSha: manifest.packagingSha,
+    applicationVersion: manifest.applicationVersion,
+    buildGitSha: manifest.buildGitSha,
+    gitMetadataPolicy: manifest.gitMetadataPolicy,
     node: manifest.node,
     hashCount,
     startup: [noPathNode, fakePathNode],

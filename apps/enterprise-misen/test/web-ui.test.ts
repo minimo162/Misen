@@ -8,15 +8,23 @@ import { fixture } from '../demo/enterprise-excel/fixtures.js'
 import { createDemoServer, type AgentRunner } from '../src/web/server.js'
 
 async function start(root: string, runner: AgentRunner) {
-  const server = createDemoServer(root, runner)
+  const server = createDemoServer(root, runner, undefined, { sessionDirectory: join(root, '.test-data', 'sessions') })
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   const address = server.address() as { port: number }
   return { server, base: `http://127.0.0.1:${address.port}` }
 }
 
+async function runSession(base: string, prompt: string, clientId: string) {
+  const created = await fetch(`${base}/sessions`, { method: 'POST', headers: { origin: base } })
+  assert.equal(created.status, 201)
+  const session = await created.json() as { id: string }
+  return fetch(`${base}/run`, { method: 'POST', redirect: 'manual', headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ prompt, clientId, sessionId: session.id }) })
+}
+
 test('assistant-ui composition keeps the conversation surface restrained and safe', async () => {
   const source = await readFile(join(process.cwd(), 'src', 'web', 'client.tsx'), 'utf8')
   const styles = await readFile(join(process.cwd(), 'src', 'web', 'client.css'), 'utf8')
+  const server = await readFile(join(process.cwd(), 'src', 'web', 'server.ts'), 'utf8')
   assert.match(source, /useExternalStoreRuntime/)
   assert.match(source, /ThreadPrimitive\.Viewport/)
   assert.match(source, /ThreadPrimitive\.ViewportFooter/)
@@ -33,6 +41,14 @@ test('assistant-ui composition keeps the conversation surface restrained and saf
   assert.doesNotMatch(composerRegion, /position:\s*fixed/u)
   assert.match(source, /process-disclosure/)
   assert.match(source, /artifact-row/)
+  assert.match(source, /aria-label="会話履歴"/u)
+  assert.match(source, /新しいチャット/u)
+  assert.match(source, /このPCにのみ保存/u)
+  assert.match(source, /過去の会話は閲覧のみです/u)
+  assert.match(source, /fetch\('\/sessions'\)/u)
+  assert.match(styles, /\.history-panel/u)
+  assert.match(styles, /@media \(max-width: 760px\)/u)
+  assert.match(server, /<link rel="icon" href="data:,">/u)
   for (const label of ['ファイル一覧を確認', '業務ガイドを確認', 'Excelを確認', 'Excelを作成', 'Excelを更新']) assert.match(source, new RegExp(label, 'u'))
   assert.match(source, /function Icon/u)
   assert.doesNotMatch(source, /[▣↗◌✓↑■›⌄↓]/u)
@@ -68,7 +84,7 @@ test('SSE preserves the Brain visible final answer instead of overwriting it', a
     void read()
   })
   try {
-    const response = await fetch(`${base}/run`, { method: 'POST', redirect: 'manual', headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ prompt: '8月の利益状況を説明して', clientId: 'ui-test-1' }) })
+    const response = await runSession(base, '8月の利益状況を説明して', 'ui-test-1')
     assert.equal(response.status, 303)
     await done
     assert.match(received, /event: user/)
@@ -103,7 +119,7 @@ test('SSE uses the controlled success fallback only when the Brain emits no visi
     }
   })()
   try {
-    const response = await fetch(`${base}/run`, { method: 'POST', redirect: 'manual', headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ prompt: '自由形式の質問', clientId: 'ui-fallback-1' }) })
+    const response = await runSession(base, '自由形式の質問', 'ui-fallback-1')
     assert.equal(response.status, 303)
     await done
     assert.match(received, /処理が完了しました/u)
@@ -145,7 +161,7 @@ test('cancel endpoint invokes the current Pi run and never exposes an arbitrary 
     }
   })()
   try {
-    const run = fetch(`${base}/run`, { method: 'POST', redirect: 'manual', headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ prompt: 'この処理を開始して', clientId: 'ui-cancel-1' }) })
+    const run = runSession(base, 'この処理を開始して', 'ui-cancel-1')
     await runnerStarted
     const cancelResponse = await fetch(`${base}/cancel`, { method: 'POST', headers: { origin: base } })
     assert.equal(cancelResponse.status, 202)
