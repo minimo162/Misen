@@ -1600,9 +1600,9 @@
     },
     {
       "type": "library",
-      "bom-ref": "@nodable/entities@3.0.0",
+      "bom-ref": "@nodable/entities@2.2.0",
       "name": "@nodable/entities",
-      "version": "3.0.0",
+      "version": "2.2.0",
       "licenses": [
         {
           "license": {
@@ -1614,29 +1614,6 @@
         {
           "name": "misen:package-lock-path",
           "value": "node_modules/@nodable/entities"
-        },
-        {
-          "name": "misen:has-install-script",
-          "value": "false"
-        }
-      ]
-    },
-    {
-      "type": "library",
-      "bom-ref": "@office-kit/xlsx@0.9.0",
-      "name": "@office-kit/xlsx",
-      "version": "0.9.0",
-      "licenses": [
-        {
-          "license": {
-            "name": "MIT"
-          }
-        }
-      ],
-      "properties": [
-        {
-          "name": "misen:package-lock-path",
-          "value": "node_modules/@office-kit/xlsx"
         },
         {
           "name": "misen:has-install-script",
@@ -4590,9 +4567,32 @@
     },
     {
       "type": "library",
-      "bom-ref": "fast-xml-parser@5.11.1",
+      "bom-ref": "fast-xml-builder/node_modules/xml-naming@0.3.0",
+      "name": "fast-xml-builder/node_modules/xml-naming",
+      "version": "0.3.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/fast-xml-builder/node_modules/xml-naming"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "fast-xml-parser@5.9.3",
       "name": "fast-xml-parser",
-      "version": "5.11.1",
+      "version": "5.9.3",
       "licenses": [
         {
           "license": {
@@ -5073,9 +5073,9 @@
     },
     {
       "type": "library",
-      "bom-ref": "is-unsafe@2.0.2",
+      "bom-ref": "is-unsafe@1.0.1",
       "name": "is-unsafe",
-      "version": "2.0.2",
+      "version": "1.0.1",
       "licenses": [
         {
           "license": {
@@ -6660,29 +6660,6 @@
     },
     {
       "type": "library",
-      "bom-ref": "saxes@6.0.0",
-      "name": "saxes",
-      "version": "6.0.0",
-      "licenses": [
-        {
-          "license": {
-            "name": "ISC"
-          }
-        }
-      ],
-      "properties": [
-        {
-          "name": "misen:package-lock-path",
-          "value": "node_modules/saxes"
-        },
-        {
-          "name": "misen:has-install-script",
-          "value": "false"
-        }
-      ]
-    },
-    {
-      "type": "library",
       "bom-ref": "scheduler@0.27.0",
       "name": "scheduler",
       "version": "0.27.0",
@@ -7419,9 +7396,9 @@
     },
     {
       "type": "library",
-      "bom-ref": "xml-naming@0.3.0",
+      "bom-ref": "xml-naming@0.1.0",
       "name": "xml-naming",
-      "version": "0.3.0",
+      "version": "0.1.0",
       "licenses": [
         {
           "license": {
@@ -7433,29 +7410,6 @@
         {
           "name": "misen:package-lock-path",
           "value": "node_modules/xml-naming"
-        },
-        {
-          "name": "misen:has-install-script",
-          "value": "false"
-        }
-      ]
-    },
-    {
-      "type": "library",
-      "bom-ref": "xmlchars@2.2.0",
-      "name": "xmlchars",
-      "version": "2.2.0",
-      "licenses": [
-        {
-          "license": {
-            "name": "MIT"
-          }
-        }
-      ],
-      "properties": [
-        {
-          "name": "misen:package-lock-path",
-          "value": "node_modules/xmlchars"
         },
         {
           "name": "misen:has-install-script",
@@ -7620,6 +7574,86 @@
         {
           "name": "misen:bundled-license-sha256",
           "value": "ed34dd8e3f0a78dbaf00d0444ce8e285b015b765379c2e17880455f70370f8e9"
+        },
+        {
+          "name": "misen:resolution",
+          "value": "bundled-only"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "bom-ref": "officecli@1.0.147-win-x64",
+      "name": "OfficeCLI",
+      "version": "1.0.147",
+      "description": "Bundled Office document process engine behind Misen typed spreadsheet capabilities",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "724056e5ff079c3585df79c8afc386f08ef7d5f956cf4e2723534e129aab6e80"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/iOfficeAI/OfficeCLI#b94f3906fd52d450c64f8e40370e376b9e15079e"
+        },
+        {
+          "type": "distribution",
+          "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.147/officecli-win-x64.exe"
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:component-role",
+          "value": "office-engine"
+        },
+        {
+          "name": "misen:platform",
+          "value": "windows"
+        },
+        {
+          "name": "misen:architecture",
+          "value": "x64"
+        },
+        {
+          "name": "misen:release-tag",
+          "value": "v1.0.147"
+        },
+        {
+          "name": "misen:source-commit",
+          "value": "b94f3906fd52d450c64f8e40370e376b9e15079e"
+        },
+        {
+          "name": "misen:bundled-executable",
+          "value": "runtime/officecli/officecli.exe"
+        },
+        {
+          "name": "misen:bundled-license",
+          "value": "runtime/officecli/LICENSE"
+        },
+        {
+          "name": "misen:bundled-license-sha256",
+          "value": "0ef10002c77f6f3672795877e8a276f5a2840105474c87aa6c0bcd8904b12fc7"
+        },
+        {
+          "name": "misen:bundled-notice",
+          "value": "runtime/officecli/NOTICE"
+        },
+        {
+          "name": "misen:bundled-notice-sha256",
+          "value": "762d2098c370da58737a2f235ddf962f041762b803e5bf6f10cd921894836586"
+        },
+        {
+          "name": "misen:runtime-network-required",
+          "value": "false"
         },
         {
           "name": "misen:resolution",
