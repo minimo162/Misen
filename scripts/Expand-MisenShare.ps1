@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
   社内 PC 用: GitHub Release からダウンロードした共有フォルダー配布物（misen-share-*.zip）を
   検証して共有フォルダーへ展開する。管理者権限は不要。git も Node.js も不要。
