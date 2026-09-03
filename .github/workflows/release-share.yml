@@ -88,27 +88,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = '${{ steps.ver.outputs.tag }}'
-          $notes = @"
-# Enterprise Misen 共有フォルダー配布物 v${{ steps.ver.outputs.version }}
-
-GitHub Actions（windows-latest）で main の ``${{ github.sha }}`` から生成。開発 PC のファイルは含まない。
-
-- 配布物: ``${{ steps.zip.outputs.name }}.zip``（${{ steps.zip.outputs.size }} bytes、${{ steps.zip.outputs.files }} files）
-- zip SHA-256: ``${{ steps.zip.outputs.hash }}``
-- Node.js と OfficeCLI は公式配布物を取得し、契約ファイルの SHA-256 で検証済み
-
-## 社内 PC での展開
-
-1. この Release から zip、``.sha256.txt``、``Expand-MisenShare.ps1`` の 3 つを同じフォルダーへダウンロードする
-2. PowerShell で次を実行する（共有フォルダーのパスは置き換える）
-
-``````
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Expand-MisenShare.ps1 -Zip .\${{ steps.zip.outputs.name }}.zip -Destination "\\fileserver\財務\Misen"
-``````
-
-3. 利用者は共有フォルダーの ``Misen起動.cmd`` をダブルクリックする
-
-詳細は DEPLOY.md の「GitHub 経由の配布」を参照。
-"@
+          $notes = @(
+            '# Enterprise Misen 共有フォルダー配布物 v${{ steps.ver.outputs.version }}',
+            '',
+            'GitHub Actions（windows-latest）で main の `${{ github.sha }}` から生成。開発 PC のファイルは含まない。',
+            '',
+            '- 配布物: `${{ steps.zip.outputs.name }}.zip`（${{ steps.zip.outputs.size }} bytes、${{ steps.zip.outputs.files }} files）',
+            '- zip SHA-256: `${{ steps.zip.outputs.hash }}`',
+            '- Node.js と OfficeCLI は公式配布物を取得し、契約ファイルの SHA-256 で検証済み',
+            '',
+            '## 社内 PC での展開',
+            '',
+            '1. この Release から zip、`.sha256.txt`、`Expand-MisenShare.ps1` の 3 つを同じフォルダーへダウンロードする',
+            '2. PowerShell で次を実行する（共有フォルダーのパスは置き換える）',
+            '',
+            '```',
+            'powershell -NoProfile -ExecutionPolicy Bypass -File .\Expand-MisenShare.ps1 -Zip .\${{ steps.zip.outputs.name }}.zip -Destination "\fileserver\財務\Misen"',
+            '```',
+            '',
+            '3. 利用者は共有フォルダーの `Misen起動.cmd` をダブルクリックする',
+            '',
+            '詳細は DEPLOY.md の「GitHub 経由の配布」を参照。'
+          ) -join "`n"
           $pre = if ('${{ github.event.inputs.prerelease }}' -eq 'false') { @() } else { @('--prerelease') }
           gh release create $tag '${{ steps.zip.outputs.path }}' '${{ steps.zip.outputs.path }}.sha256.txt' 'scripts/Expand-MisenShare.ps1' --title "共有フォルダー配布物 v${{ steps.ver.outputs.version }} (${{ steps.ver.outputs.sha }})" --notes $notes --target '${{ github.sha }}' @pre
