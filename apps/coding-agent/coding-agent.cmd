@@ -2,9 +2,9 @@
 rem coding-agent 起動（共有フォルダー用ランチャー経由）
 chcp 65001 >nul
 setlocal
-set "LAUNCH=%~dp0..\..\launcher\launch.cmd"
+set "LAUNCH=%~dp0..\..\launcher\launch-coding-agent.cmd"
 if not exist "%LAUNCH%" (
-  echo launcher\launch.cmd が見つかりません。
+  echo launcher\launch-coding-agent.cmd が見つかりません。
   echo   %LAUNCH%
   echo 共有フォルダー構成（launcher^/runtime^/apps）ごと配置してください。
   pause

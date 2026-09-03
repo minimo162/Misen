@@ -2,11 +2,11 @@
 chcp 65001 >nul
 setlocal EnableExtensions DisableDelayedExpansion
 set "ROOT=%~dp0"
-set "LAUNCHER=%ROOT%launcher\launch.cmd"
+set "LAUNCHER=%ROOT%launch-coding-agent.cmd"
 
 if not exist "%LAUNCHER%" (
-  echo launcher\launch.cmd が見つかりません。
-  echo 配布フォルダーのルートから実行してください。
+  echo launch-coding-agent.cmd が見つかりません。
+  echo launcher フォルダーごと配置してください。
   pause
   exit /b 1
 )
