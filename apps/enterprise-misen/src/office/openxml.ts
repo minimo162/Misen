@@ -68,12 +68,15 @@ function parseXml(entries: Readonly<Record<string, Uint8Array>>, name: string): 
   if (!bytes) throw new Error('required OpenXML part is missing: ' + name)
   try {
     const xml = Buffer.from(bytes).toString('utf8')
-    const validation = XMLValidator.validate(xml)
-    if (validation !== true) throw new Error(validation.err.msg)
     return parser.parse(xml) as XmlRecord
   } catch (error) {
     throw new Error('malformed OpenXML part ' + name + ': ' + (error instanceof Error ? error.message : String(error)))
   }
+}
+
+function validateXmlPart(entries: Readonly<Record<string, Uint8Array>>, name: string): void {
+  const validation = XMLValidator.validate(Buffer.from(entries[name]!).toString('utf8'))
+  if (validation !== true) throw new Error('malformed OpenXML part ' + name + ': ' + validation.err.msg)
 }
 
 function resolvedRelationshipTarget(relationship: OfficePackageRelationship, entries: Readonly<Record<string, Uint8Array>>): string {
@@ -143,13 +146,16 @@ function preservation(entries: Readonly<Record<string, Uint8Array>>, kind: Offic
 
 export function inspectOfficePackage(bytes: Uint8Array, kind: OfficeDocumentKind): OfficePackageSnapshot {
   const entries = unzip(bytes)
+  for (const name of Object.keys(entries).filter(value => /\.(?:xml|rels)$/iu.test(value))) validateXmlPart(entries, name)
   const mainPart = kind === 'docx' ? 'word/document.xml' : 'ppt/presentation.xml'
-  const expectedType = kind === 'docx' ? 'wordprocessingml.document.main+xml' : 'presentationml.presentation.main+xml'
+  const expectedType = kind === 'docx'
+    ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml'
+    : 'application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml'
   const contentTypes = parseXml(entries, '[Content_Types].xml').Types
   const overrides = array<XmlRecord>(contentTypes?.Override)
   const defaults = array<XmlRecord>(contentTypes?.Default)
-  const mainTypeDeclared = overrides.some(item => String(item['@_PartName'] ?? '').replace(/^\//u, '') === mainPart && String(item['@_ContentType'] ?? '').endsWith(expectedType))
-    || defaults.some(item => String(item['@_Extension'] ?? '').toLowerCase() === mainPart.slice(mainPart.lastIndexOf('.') + 1) && String(item['@_ContentType'] ?? '').endsWith(expectedType))
+  const mainTypeDeclared = overrides.some(item => String(item['@_PartName'] ?? '').replace(/^\//u, '') === mainPart && String(item['@_ContentType'] ?? '') === expectedType)
+    || defaults.some(item => String(item['@_Extension'] ?? '').toLowerCase() === mainPart.slice(mainPart.lastIndexOf('.') + 1) && String(item['@_ContentType'] ?? '') === expectedType)
   if (!entries[mainPart] || !mainTypeDeclared) {
     throw new Error(`Office package is not a ${kind} document`)
   }

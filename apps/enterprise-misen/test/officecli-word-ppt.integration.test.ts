@@ -32,15 +32,15 @@ test('typed Word and PowerPoint tools create, update, read, and independently in
     const before = await snapshotOutputArtifacts(boundary)
     await tool(root, 'document_create_output').execute('word-create', {
       output: 'output/日本語 業務メモ.docx',
-      paragraphs: [{ text: '{{表題}}', style: 'Heading1' }, { text: '担当: {{担当者}}' }],
+      paragraphs: [{ text: '{{表題}}', style: 'Heading1' }, { text: '担当: {{担当者}}' }, { text: '記号: a.b [x] (y) * ? +' }],
     }, undefined)
     await tool(root, 'document_update').execute('word-update', {
       document: 'output/日本語 業務メモ.docx',
-      replacements: [{ find: '{{表題}}', replace: '業務メモ' }, { find: '{{担当者}}', replace: 'ミセン担当' }],
+      replacements: [{ find: '{{表題}}', replace: '業務メモ' }, { find: '{{担当者}}', replace: 'ミセン担当' }, { find: 'a.b [x] (y) * ? +', replace: 'literal match' }],
       appendParagraphs: [{ text: '確認済みです。' }],
     }, undefined)
     const word = await tool(root, 'document_read').execute('word-read', { document: 'output/日本語 業務メモ.docx', start: 1, end: 20 }, undefined) as any
-    assert.deepEqual(word.details.elements.map((item: any) => item.text), ['業務メモ', '担当: ミセン担当', '確認済みです。'])
+    assert.deepEqual(word.details.elements.map((item: any) => item.text), ['業務メモ', '担当: ミセン担当', '記号: literal match', '確認済みです。'])
     const wordPackage = inspectOfficePackage(await readFile(join(root, 'output', '日本語 業務メモ.docx')), 'docx')
     assert.match(wordPackage.text.join('\n'), /業務メモ[\s\S]*ミセン担当[\s\S]*確認済み/u)
 
@@ -118,6 +118,10 @@ test('malformed, cross-format, active-content, overbroad reads, and failed valid
     entries['word/document.xml'] = Buffer.from('<w:document><broken></w:document>')
     assert.throws(() => validateOfficePackage(zipSync(entries), 'docx'), /malformed/u)
     entries['word/document.xml'] = documentXml
+    const stylesXml = entries['word/styles.xml']!
+    entries['word/styles.xml'] = Buffer.from('<w:styles><broken></w:styles>')
+    assert.throws(() => validateOfficePackage(zipSync(entries), 'docx'), /malformed.*styles/u)
+    entries['word/styles.xml'] = stylesXml
     const relationships = entries['word/_rels/document.xml.rels']!
     const relationshipXml = Buffer.from(relationships).toString('utf8')
     const escapedRelationshipXml = relationshipXml.replace(/Target="[^"]+"/u, 'Target="../../../../outside.xml"')
@@ -125,6 +129,11 @@ test('malformed, cross-format, active-content, overbroad reads, and failed valid
     entries['word/_rels/document.xml.rels'] = Buffer.from(escapedRelationshipXml)
     assert.throws(() => validateOfficePackage(zipSync(entries), 'docx'), /escapes|missing/u)
     entries['word/_rels/document.xml.rels'] = relationships
+    const rootRelationships = entries['_rels/.rels']!
+    const rootRelationshipXml = Buffer.from(rootRelationships).toString('utf8')
+    entries['_rels/.rels'] = Buffer.from(rootRelationshipXml.replace(/<Relationship /u, '<Relationship TargetMode="External" '))
+    assert.throws(() => validateOfficePackage(zipSync(entries), 'docx'), /external/u)
+    entries['_rels/.rels'] = rootRelationships
     entries['word/vbaProject.bin'] = Uint8Array.from([1, 2, 3])
     assert.throws(() => validateOfficePackage(zipSync(entries), 'docx'), /active|embedded/u)
   } finally { await rm(root, { recursive: true, force: true }) }

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { OfficeCliProcessError } from '../spreadsheet/officecli-process.js'
 import { OfficeCliSpreadsheet, officeCli, type OfficeCliBatchItem } from '../spreadsheet/officecli.js'
-import { validateOfficePackage, type OfficeDocumentKind } from './openxml.js'
+import type { OfficeDocumentKind } from './openxml.js'
 
 export interface WordParagraphInput {
   readonly text: string
@@ -104,9 +104,7 @@ export class OfficeCliDocuments {
       if (!source) await this.client.json(['create', file, '--type', 'docx', '--locale', 'ja-JP'], { cwd: dirname(file), signal })
       if (paragraphs.length > 0) await this.client.batchFile(file, paragraphs.map(paragraph => ({ command: 'add', parent: '/body', type: 'paragraph', props: { text: paragraph.text, ...(paragraph.style ? { style: paragraph.style } : {}) } })), signal)
       await this.client.validateFile(file, signal)
-      const output = new Uint8Array(await readFile(file))
-      validateOfficePackage(output, 'docx')
-      return output
+      return new Uint8Array(await readFile(file))
     })
   }
 
@@ -119,9 +117,7 @@ export class OfficeCliDocuments {
       const receipts = await this.client.batchFile(file, items, signal)
       requireReplacementMatches(receipts, replacements.length)
       await this.client.validateFile(file, signal)
-      const output = new Uint8Array(await readFile(file))
-      validateOfficePackage(output, 'docx')
-      return output
+      return new Uint8Array(await readFile(file))
     })
   }
 
@@ -130,9 +126,7 @@ export class OfficeCliDocuments {
       if (!source) await this.client.json(['create', file, '--type', 'pptx'], { cwd: dirname(file), signal })
       if (slides.length > 0) await this.client.batchFile(file, slides.map(slide => ({ command: 'add', parent: '/', type: 'slide', props: { title: slide.title, ...(slide.text === undefined ? {} : { text: slide.text }), ...(slide.layout ? { layout: slide.layout } : {}) } })), signal)
       await this.client.validateFile(file, signal)
-      const output = new Uint8Array(await readFile(file))
-      validateOfficePackage(output, 'pptx')
-      return output
+      return new Uint8Array(await readFile(file))
     })
   }
 
@@ -145,9 +139,7 @@ export class OfficeCliDocuments {
       const receipts = await this.client.batchFile(file, items, signal)
       requireReplacementMatches(receipts, replacements.length)
       await this.client.validateFile(file, signal)
-      const output = new Uint8Array(await readFile(file))
-      validateOfficePackage(output, 'pptx')
-      return output
+      return new Uint8Array(await readFile(file))
     })
   }
 }

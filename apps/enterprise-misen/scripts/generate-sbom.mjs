@@ -49,7 +49,7 @@ const officeCliRuntime = {
   'bom-ref': `officecli@${officeCliRuntimeContract.version}-win-x64`,
   name: 'OfficeCLI',
   version: officeCliRuntimeContract.version,
-  description: 'Bundled Office document process engine behind Misen typed spreadsheet capabilities',
+  description: 'Bundled Office document process engine behind Misen typed spreadsheet, Word, and PowerPoint capabilities',
   hashes: [{ alg: 'SHA-256', content: officeCliRuntimeContract.releaseArtifactSha256 }],
   licenses: [{ license: { id: officeCliRuntimeContract.licenseName } }],
   externalReferences: [
