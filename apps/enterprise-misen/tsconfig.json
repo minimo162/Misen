@@ -3,8 +3,13 @@
     "target": "ES2024",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
     "jsx": "react-jsx",
     "strict": true,
+    "paths": {
+      "@/*": ["src/web/*"]
+    },
     "noImplicitAny": false,
     "esModuleInterop": true,
     "skipLibCheck": true,

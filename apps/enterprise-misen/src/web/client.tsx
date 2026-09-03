@@ -2,9 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { AssistantRuntimeProvider, useAuiState, useExternalStoreRuntime, type ExternalStoreThreadListAdapter, type ThreadMessageLike } from '@assistant-ui/react'
 import './client.css'
-import { Thread } from './components/thread.js'
-import { ThreadList } from './components/thread-list.js'
-import { applyServerEvent, emptyThreadStore, failRun, RUN_START_FAILED_TEXT, SESSION_START_FAILED_TEXT, startRun, threadListThreads, threadStoreFromSession, type ServerEvent, type SessionSnapshot, type SessionSummary, type ThreadStore } from './thread-store.js'
+import { Thread } from '@/components/assistant-ui/elements/thread.aui.js'
+import { ThreadListItems, ThreadListNew, ThreadListRoot } from '@/components/assistant-ui/elements/thread-list.aui.js'
+import { TooltipIconButton } from '@/components/assistant-ui/elements/tooltip-icon-button.js'
+import { TooltipProvider } from '@/components/ui/tooltip.js'
+import { MessageSquareIcon, PanelLeftIcon } from 'lucide-react'
+import { applyServerEvent, emptyThreadStore, failRun, RUN_START_FAILED_TEXT, SESSION_START_FAILED_TEXT, startRun, threadListThreads, threadStoreFromSession, type AssistantCustomMetadata, type ServerEvent, type SessionSnapshot, type SessionSummary, type ThreadStore } from './thread-store.js'
 import { beginSessionSelection, eventAppliesToActiveSession, isCurrentSessionSelection } from './session-events.js'
 
 function contentText(content: unknown): string {
@@ -14,11 +17,53 @@ function contentText(content: unknown): string {
 }
 
 const Shell = () => {
-  const isEmpty = useAuiState(s => s.thread.isEmpty)
-  return <main className={`flex h-dvh min-h-0 bg-[#fbfaf8] ${isEmpty ? 'is-empty' : 'is-active'}`}><ThreadList /><section className="min-w-0 flex-1" aria-label="会話"><Thread /></section></main>
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const title = useAuiState(s => s.threads.threadItems.find(thread => thread.id === s.threads.mainThreadId)?.title)
+  return (
+    <main className="bg-muted/30 text-foreground flex h-dvh min-h-0 overflow-hidden">
+      <aside className={`${sidebarCollapsed ? 'w-0 opacity-0' : 'w-64'} flex shrink-0 flex-col overflow-hidden transition-[width,opacity] duration-200`} aria-hidden={sidebarCollapsed}>
+        <div className="flex h-12 shrink-0 items-center gap-2 px-4 text-sm font-medium">
+          <MessageSquareIcon className="size-5 shrink-0" aria-hidden />
+          <span className="truncate">Misen</span>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+          <ThreadListRoot>
+            <ThreadListNew />
+            <ThreadListItems />
+          </ThreadListRoot>
+        </div>
+      </aside>
+      <div className={`flex min-w-0 flex-1 flex-col overflow-hidden p-2 ${sidebarCollapsed ? '' : 'pl-0'}`}>
+        <div className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg">
+          <header className="flex h-12 shrink-0 items-center gap-2 px-4">
+            <TooltipIconButton variant="ghost" size="icon" tooltip={sidebarCollapsed ? 'サイドバーを表示' : 'サイドバーを隠す'} side="bottom" onClick={() => setSidebarCollapsed(value => !value)} className="size-8 shrink-0">
+              <PanelLeftIcon className="size-4" />
+            </TooltipIconButton>
+            <span className="min-w-0 truncate text-sm font-medium">{title ?? '新しいチャット'}</span>
+          </header>
+          <section className="min-h-0 min-w-0 flex-1 overflow-hidden" aria-label="会話"><Thread /></section>
+        </div>
+      </div>
+    </main>
+  )
 }
 
-const convertMessage = (message: ThreadMessageLike): ThreadMessageLike => message
+const artifactMimeType = (filename: string): string => {
+  const extension = filename.split('.').at(-1)?.toLowerCase()
+  if (extension === 'pdf') return 'application/pdf'
+  if (extension === 'docx') return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  if (extension === 'xlsx') return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  if (extension === 'pptx') return 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+  return 'application/octet-stream'
+}
+
+const convertMessage = (message: ThreadMessageLike): ThreadMessageLike => {
+  if (message.role !== 'assistant') return message
+  const artifacts = (message.metadata?.custom as Partial<AssistantCustomMetadata> | undefined)?.artifacts?.filter(artifact => artifact.available)
+  if (!artifacts?.length) return message
+  const content = typeof message.content === 'string' ? [{ type: 'text' as const, text: message.content }] : message.content
+  return { ...message, content: [...content, ...artifacts.map(artifact => ({ type: 'file' as const, filename: artifact.filename, mimeType: artifactMimeType(artifact.filename), sourceType: 'url' as const, data: new URL(`/download/${encodeURIComponent(artifact.id)}`, globalThis.location.origin).href }))] }
+}
 
 function MisenApp() {
   const [store, setStore] = useState<ThreadStore>(() => emptyThreadStore())
@@ -73,6 +118,19 @@ function MisenApp() {
     return session.id
   }, [activateSession, refreshHistory])
 
+  const deleteSession = useCallback(async (id: string) => {
+    const response = await fetch(`/sessions/${encodeURIComponent(id)}`, { method: 'DELETE', headers: { origin: globalThis.location.origin } })
+    if (!response.ok) throw new Error('session delete')
+    const available = await refreshHistory()
+    if (activeSessionIdRef.current !== id) return
+    const selection = beginSessionSelection(sessionSelectionRef.current)
+    activeSessionIdRef.current = undefined
+    globalThis.localStorage?.removeItem('misen.activeSessionId')
+    const next = available[0]?.id
+    if (next && isCurrentSessionSelection(sessionSelectionRef.current, selection)) await openSession(next)
+    else if (isCurrentSessionSelection(sessionSelectionRef.current, selection)) setStore(emptyThreadStore())
+  }, [openSession, refreshHistory])
+
   useEffect(() => {
     let cancelled = false
     void (async () => {
@@ -120,9 +178,9 @@ function MisenApp() {
 
   const cancel = useCallback(async () => { try { await fetch('/cancel', { method: 'POST', headers: { origin: globalThis.location.origin } }) } catch { /* connection close is folded through SSE */ } }, [])
   const threads = useMemo(() => threadListThreads(sessions), [sessions])
-  const threadList = useMemo<ExternalStoreThreadListAdapter>(() => ({ threadId: sessionId, isLoading: !historyReady, threads, onSwitchToNewThread: async () => { await createSession() }, onSwitchToThread: async id => { await openSession(id) } }), [createSession, historyReady, openSession, sessionId, threads])
+  const threadList = useMemo<ExternalStoreThreadListAdapter>(() => ({ threadId: sessionId, isLoading: !historyReady, threads, onSwitchToNewThread: async () => { await createSession() }, onSwitchToThread: async id => { await openSession(id) }, onDelete: deleteSession }), [createSession, deleteSession, historyReady, openSession, sessionId, threads])
   const runtime = useExternalStoreRuntime<ThreadMessageLike>({ messages: store.messages, convertMessage, isRunning: running, isDisabled: readOnly, isSendDisabled: running || readOnly || !historyReady, onNew: send, onCancel: cancel, adapters: { threadList } })
-  return <AssistantRuntimeProvider runtime={runtime}><Shell /></AssistantRuntimeProvider>
+  return <AssistantRuntimeProvider runtime={runtime}><TooltipProvider><Shell /></TooltipProvider></AssistantRuntimeProvider>
 }
 
 const root = document.getElementById('root')

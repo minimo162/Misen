@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { mkdir, open, readdir, rename, writeFile } from 'node:fs/promises'
+import { mkdir, open, readdir, rename, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -180,6 +180,17 @@ export class LocalSessionStore {
     const temporary = join(this.directory, `.${validated.id}.${randomBytes(8).toString('hex')}.tmp`)
     await writeFile(temporary, `${JSON.stringify(validated, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
     await rename(temporary, target)
+  }
+
+  async delete(id: string): Promise<boolean> {
+    if (!SESSION_ID_RE.test(id)) return false
+    try {
+      await unlink(this.path(id))
+      return true
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+      throw error
+    }
   }
 
   timestamp(): string { return this.now().toISOString() }

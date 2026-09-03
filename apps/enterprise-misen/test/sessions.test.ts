@@ -94,6 +94,65 @@ test('empty history, persistence, ordering, safe reopen, and distinct new chat s
   }
 })
 
+test('session delete removes only local conversation data and leaves output artifacts intact', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'misen-history-delete-root-'))
+  const local = await mkdtemp(join(tmpdir(), 'misen-history-delete-local-'))
+  const directory = join(local, 'sessions')
+  await fixture(root)
+  const output = join(root, 'output', '削除後も残る成果物.xlsx')
+  const server = await listen(root, directory, async (_root, _prompt, context) => {
+    await writeFile(output, 'keep output')
+    context?.emit({ type: 'assistant', text: '成果物を作成しました。', done: true })
+    return { tools: ['spreadsheet_create_output'], status: 'COMPLETED' }
+  })
+  try {
+    const session = await createSession(server.base)
+    assert.equal((await run(server.base, session.id, '成果物を作成', 'delete-session-1')).status, 303)
+    const projected = await (await fetch(`${server.base}/sessions/${session.id}`)).json() as any
+    const downloadId = projected.artifacts[0].id as string
+
+    const deleted = await fetch(`${server.base}/sessions/${session.id}`, { method: 'DELETE', headers: { origin: server.base } })
+    assert.equal(deleted.status, 204)
+    assert.deepEqual(await (await fetch(`${server.base}/sessions`)).json(), [])
+    assert.equal((await fetch(`${server.base}/sessions/${session.id}`)).status, 404)
+    assert.equal((await fetch(`${server.base}/download/${downloadId}`)).status, 404)
+    assert.equal(await readFile(output, 'utf8'), 'keep output')
+    assert.equal((await fetch(`${server.base}/sessions/${session.id}`, { method: 'DELETE', headers: { origin: server.base } })).status, 404)
+  } finally {
+    await close(server.server)
+    await rm(root, { recursive: true, force: true })
+    await rm(local, { recursive: true, force: true })
+  }
+})
+
+test('session delete is rejected while a run is active', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'misen-history-delete-active-root-'))
+  const local = await mkdtemp(join(tmpdir(), 'misen-history-delete-active-local-'))
+  await fixture(root)
+  let release!: () => void
+  let markStarted!: () => void
+  const started = new Promise<void>(resolve => { markStarted = resolve })
+  const server = await listen(root, join(local, 'sessions'), async () => {
+    markStarted()
+    await new Promise<void>(resolve => { release = resolve })
+    return { tools: [], status: 'COMPLETED' }
+  })
+  try {
+    const session = await createSession(server.base)
+    const running = run(server.base, session.id, '長い処理', 'delete-active-1')
+    await started
+    assert.equal((await fetch(`${server.base}/sessions/${session.id}`, { method: 'DELETE', headers: { origin: server.base } })).status, 409)
+    release()
+    assert.equal((await running).status, 303)
+    assert.equal((await fetch(`${server.base}/sessions/${session.id}`)).status, 200)
+  } finally {
+    release?.()
+    await close(server.server)
+    await rm(root, { recursive: true, force: true })
+    await rm(local, { recursive: true, force: true })
+  }
+})
+
 test('one corrupt session is ignored and runtime/provider secrets are never serialized', async () => {
   const local = await mkdtemp(join(tmpdir(), 'misen-history-corrupt-'))
   const directory = join(local, 'sessions')

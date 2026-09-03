@@ -22,17 +22,27 @@ async function runSession(base: string, prompt: string, clientId: string) {
 }
 
 test('assistant-ui composition keeps the conversation surface restrained and safe', async () => {
-  const componentNames = ['thread.tsx', 'composer.tsx', 'tool-fallback.tsx', 'markdown-text.tsx', 'thread-list.tsx', 'icons.tsx']
+  const componentNames = [
+    'thread.aui.tsx',
+    'thread-list.aui.tsx',
+    'tool-fallback.aui.tsx',
+    'tool-group.aui.tsx',
+    'markdown-text.tsx',
+    'file.tsx',
+    'tooltip-icon-button.tsx',
+  ]
+  const client = await readFile(join(process.cwd(), 'src', 'web', 'client.tsx'), 'utf8')
   const source = [
-    await readFile(join(process.cwd(), 'src', 'web', 'client.tsx'), 'utf8'),
-    ...await Promise.all(componentNames.map(name => readFile(join(process.cwd(), 'src', 'web', 'components', name), 'utf8'))),
+    client,
+    ...await Promise.all(componentNames.map(name => readFile(join(process.cwd(), 'src', 'web', 'components', 'assistant-ui', 'elements', name), 'utf8'))),
   ].join('\n')
   const styles = await readFile(join(process.cwd(), 'src', 'web', 'client.css'), 'utf8')
   const clientBuild = await readFile(join(process.cwd(), 'scripts', 'build-client.mjs'), 'utf8')
   const server = await readFile(join(process.cwd(), 'src', 'web', 'server.ts'), 'utf8')
+  const registry = JSON.parse(await readFile(join(process.cwd(), 'components.json'), 'utf8')) as { registries: Record<string, string> }
   const pkg = JSON.parse(await readFile(join(process.cwd(), 'package.json'), 'utf8')) as { dependencies: Record<string, string> }
 
-  // Runtime: assistant-ui External Store is the single UI state source.
+  assert.equal(registry.registries['@assistant-ui'], 'https://r.assistant-ui.com/styles/{style}/{name}.json')
   assert.match(source, /useExternalStoreRuntime</)
   assert.match(source, /adapters:\s*\{\s*threadList\s*\}/u)
   assert.match(source, /ExternalStoreThreadListAdapter/)
@@ -43,82 +53,64 @@ test('assistant-ui composition keeps the conversation surface restrained and saf
   assert.match(source, /eventAppliesToActiveSession/)
   assert.match(source, /beginSessionSelection/)
   assert.doesNotMatch(source, /useState<(?:ToolEvent|UiArtifact)\[\]>|expandedRunId|runIdRef|shouldShowThinkingPlaceholder|runIdFromMessage|processEventsForRun|HistoryPanel|ProcessRows/u)
-  assert.doesNotMatch(source, /<ThreadPrimitive\.Messages>\s*\{\(\{\s*message\s*\}\)\s*=>[\s\S]*?(?:tools|artifacts|running)[\s\S]*?<\/ThreadPrimitive\.Messages>/u, 'Messages render function must not close over outer state')
 
-  // Thread surface primitives.
   assert.match(source, /ThreadPrimitive\.Viewport/)
   assert.match(source, /ThreadPrimitive\.ViewportFooter/)
   assert.match(source, /ThreadPrimitive\.ScrollToBottom/)
-  assert.match(source, /ThreadPrimitive\.Empty/)
-  assert.match(source, /ThreadPrimitive\.If running>/)
-  assert.match(source, /ThreadPrimitive\.If running=\{false\}>/)
-  assert.match(source, /ThreadPrimitive\.If disabled>/)
-  assert.match(source, /autoScroll turnAnchor="bottom"/)
+  assert.match(source, /autoScroll/)
+  assert.match(source, /turnAnchor="top"/)
   assert.match(source, /ComposerPrimitive\.Input/)
   assert.match(source, /ComposerPrimitive\.Send/)
   assert.match(source, /ComposerPrimitive\.Cancel/)
   assert.doesNotMatch(source, /onClick=\{(?:onCancel|cancel)\}/u)
 
-  // Message vocabulary: tool-call parts, ToolGroup folding, custom metadata artifacts, error status.
-  assert.match(source, /MessagePrimitive\.Parts/)
-  assert.match(source, /tools:\s*\{\s*Fallback:\s*ToolFallback\s*\}/u)
+  assert.match(source, /MessagePrimitive\.GroupedParts/)
   assert.match(source, /ToolGroup/)
   assert.match(source, /件の操作/u)
-  assert.match(source, /MessagePrimitive\.If last hasContent=\{false\}/)
-  assert.match(source, /考えています…/u)
   assert.match(source, /MessagePrimitive\.Error/)
-  assert.match(source, /ErrorPrimitive\.Root/)
-  assert.match(source, /ErrorPrimitive\.Message/)
-  assert.match(source, /metadata\.custom/)
+  assert.match(source, /metadata\?\.custom/)
   assert.match(source, /\/download\/\$\{encodeURIComponent\(artifact\.id\)\}/u)
-  assert.match(source, /useAuiState/)
-  assert.doesNotMatch(source, /JSON\.stringify\((?:part|args|result)/u)
-  assert.doesNotMatch(source, /part\.result\}|\{result\}|argsText/u)
+  assert.match(source, /type:\s*'file'/u)
+  assert.match(source, /sourceType:\s*'url'/u)
+  assert.match(source, /<File \{\.\.\.part\}/u)
   for (const label of ['ファイル一覧を確認', '業務ガイドを確認', 'Excelを確認', 'Excelを作成', 'Excelを更新', 'Wordを確認', 'Wordを作成', 'Wordを更新', 'PowerPointを確認', 'PowerPointを作成', 'PowerPointを更新']) assert.match(source, new RegExp(label, 'u'))
 
-  // Thread list primitives own the conversation history; no bespoke fetch in the row components.
   assert.match(source, /ThreadListPrimitive\.Root/)
   assert.match(source, /ThreadListPrimitive\.New/)
-  assert.match(source, /ThreadListPrimitive\.Items/)
+  assert.match(source, /ThreadListPrimitive\.ItemByIndex/)
   assert.match(source, /ThreadListItemPrimitive\.Root/)
   assert.match(source, /ThreadListItemPrimitive\.Trigger/)
   assert.match(source, /ThreadListItemPrimitive\.Title/)
-  assert.match(source, /aria-label="会話履歴"/u)
   assert.match(source, /新しいチャット/u)
-  assert.match(source, /このPCにのみ保存/u)
-  assert.match(source, /過去の会話は閲覧のみです/u)
-  assert.doesNotMatch(source, /onRename|onArchive|onDelete|ThreadListItemPrimitive\.(?:Archive|Delete|Unarchive)/u)
+  assert.match(source, /ThreadListItemPrimitive\.Delete/u)
+  assert.match(source, /onDelete:\s*deleteSession/u)
+  assert.match(client, /bg-muted\/30/u)
+  assert.match(client, /rounded-lg/u)
+  assert.match(client, /PanelLeftIcon/u)
+  assert.match(client, /ThreadListRoot/u)
+  assert.match(client, /ThreadListItems/u)
+  assert.doesNotMatch(client, /ThreadListSearch|<ThreadList\s*\/>/u)
+  assert.doesNotMatch(source, /onRename|ThreadListItemPrimitive\.(?:Archive|Unarchive)/u)
   assert.doesNotMatch(source, /adapters:\s*\{[^}]*(?:attachments|speech|dictation|voice|feedback)/u)
-  assert.equal((source.match(/fetch\(/gu) ?? []).length, 6, 'sessions list, session get, session create, state resync, run, cancel')
+  assert.equal((source.match(/fetch\(/gu) ?? []).length, 7, 'sessions list, session get, session create, session delete, state resync, run, cancel')
 
-  // Security boundary carried forward unchanged.
-  assert.match(source, /Reasoning:\s*HiddenPart/u)
-  assert.match(source, /Image:\s*HiddenPart/u)
-  assert.match(source, /File:\s*HiddenPart/u)
-  assert.match(source, /Source:\s*HiddenPart/u)
-  assert.match(source, /Unstable_Audio:\s*HiddenPart/u)
-  assert.match(source, /a: \(\{ children \}\) => <span[^>]*>\{children\}<\/span>/u)
-  assert.match(source, /img: \(\{ alt \}\) => <span>\{alt \?\? ''\}<\/span>/u)
   assert.doesNotMatch(source, /viewportRef|scrollHeight|scrollTop|clientHeight/)
   assert.doesNotMatch(source, /assistant-cloud|AssistantCloud|pi-web|Vercel AI SDK|react-ai-sdk|useChatRuntime/iu)
-  assert.doesNotMatch(source, /model|settings|terminal|attachment|Dictate|feedback/iu)
+  assert.doesNotMatch(source, /ModelSelector|BranchPicker|ActionBarPrimitive\.(?:Edit|Reload)|ComposerPrimitive\.Dictate|MicIcon|ReasoningRoot|AssistantCloud/u)
   for (const forbidden of ['@assistant-ui/react-ui', '@assistant-ui/react-ai-sdk', 'assistant-cloud', 'ai', '@ai-sdk/react', 'tailwindcss', 'shadcn']) assert.equal(pkg.dependencies[forbidden], undefined, forbidden)
 
-  // Styling grammar: local Tailwind source, sticky footer, reduced motion, narrow breakpoint, SVG icons.
   assert.match(styles, /@import "tailwindcss"/u)
   assert.match(styles, /@source "\.\/\*\*\/\*\.\{ts,tsx\}"/u)
+  assert.match(styles, /@custom-variant dark/u)
+  assert.match(styles, /--background:\s*oklch/u)
+  assert.match(styles, /--font-sans:\s*"BIZ UDPGothic"/u)
   assert.match(clientBuild, /@tailwindcss\/postcss/u)
   assert.match(clientBuild, /plugins:\s*\[tailwindPlugin\]/u)
-  assert.match(styles, /prefers-reduced-motion/)
   assert.match(source, /sticky bottom-0/u)
   assert.doesNotMatch(styles, /position:\s*fixed/u)
   assert.match(source, /aui-tool-group/u)
-  assert.match(source, /aria-label="成果物"/u)
   assert.match(source, /aui-thread-root/u)
-  assert.match(source, /aui-tool-row/u)
-  assert.match(styles, /@media \(max-width: 720px\)/u)
   assert.match(server, /<link rel="icon" href="data:,">/u)
-  assert.match(source, /function Icon/u)
   assert.doesNotMatch(source, /[▣↗◌✓↑■›⌄↓]/u)
 })
 

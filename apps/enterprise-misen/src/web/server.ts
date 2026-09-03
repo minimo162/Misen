@@ -277,6 +277,19 @@ export function createDemoServer(
         response.setHeader('content-type', 'application/json; charset=utf-8')
         return response.end(JSON.stringify(await projectSession(session)))
       }
+      if (request.method === 'DELETE' && url.pathname.startsWith('/sessions/')) {
+        if (request.headers.origin !== `http://${host}`) throw new Error('origin')
+        if (active) { response.statusCode = 409; return response.end('Request failed') }
+        const id = url.pathname.slice('/sessions/'.length)
+        if (!SESSION_ID_RE.test(id) || !await sessions.delete(id)) { response.statusCode = 404; return response.end('Not found') }
+        if (state.sessionId === id) {
+          artifactResources.clear()
+          state = { status: 'idle', tools: [], axes: [], artifacts: [] }
+          emitState()
+        }
+        response.statusCode = 204
+        return response.end()
+      }
       if (request.method === 'GET' && url.pathname === '/events') {
         response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', connection: 'keep-alive' })
         listeners.add(response)
