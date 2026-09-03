@@ -10,18 +10,21 @@ import { createDemoServer, encodeRfc5987Value, liveAgentRunner, textFromAssistan
 import { WorkspaceBoundary } from '../src/workspace/boundary.js'
 
 async function start(root: string, runner: AgentRunner, artifactObserver?: ArtifactObserver) {
-  const server = createDemoServer(root, runner, artifactObserver)
+  const server = createDemoServer(root, runner, artifactObserver, { sessionDirectory: join(root, '.test-data', 'sessions') })
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   const port = (server.address() as { port: number }).port
   return { server, base: 'http://127.0.0.1:' + port }
 }
 
 async function run(base: string, prompt: string, clientId: string) {
+  const created = await fetch(base + '/sessions', { method: 'POST', headers: { origin: base } })
+  if (created.status !== 201) return created
+  const session = await created.json() as { id: string }
   return fetch(base + '/run', {
     method: 'POST',
     redirect: 'manual',
     headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ prompt, clientId }),
+    body: new URLSearchParams({ prompt, clientId, sessionId: session.id }),
   })
 }
 
@@ -115,7 +118,7 @@ test('SSE preserves actual newlines and literal backslashes without exposing a r
   }
 })
 
-test('two successful runs retain distinct turn-scoped artifacts and failures add none', async () => {
+test('separate conversations retain their own bounded artifacts and failures add none', async () => {
   const root = await mkdtemp(join(tmpdir(), 'misen-artifact-history-'))
   await fixture(root)
   let invocation = 0
@@ -139,7 +142,7 @@ test('two successful runs retain distinct turn-scoped artifacts and failures add
     while (!releaseSecond) await new Promise(resolve => setTimeout(resolve, 5))
     const stateDuringAugust = await (await fetch(base + '/state')).json() as any
     assert.equal(stateDuringAugust.status, 'running')
-    assert.deepEqual(stateDuringAugust.artifacts, stateAfterJuly.artifacts)
+    assert.deepEqual(stateDuringAugust.artifacts, [])
     assert.equal((await run(base, '同時実行は拒否される', 'parallel-run')).status, 400)
     const stateAfterRejection = await (await fetch(base + '/state')).json() as any
     assert.equal(stateAfterRejection.status, 'running')
@@ -148,19 +151,22 @@ test('two successful runs retain distinct turn-scoped artifacts and failures add
     assert.equal((await augustRun).status, 303)
 
     const completed = await (await fetch(base + '/state')).json() as any
-    assert.equal(completed.artifacts.length, 2)
-    assert.equal(completed.artifacts[0].runId, 'run-july')
-    assert.equal(completed.artifacts[1].runId, 'run-august')
-    assert.equal(await (await fetch(base + '/download/' + completed.artifacts[0].id)).text(), 'workbook-A')
-    assert.equal(await (await fetch(base + '/download/' + completed.artifacts[1].id)).text(), 'workbook-B')
+    assert.equal(completed.artifacts.length, 1)
+    assert.equal(completed.artifacts[0].runId, 'run-august')
+    assert.equal(await (await fetch(base + '/download/' + completed.artifacts[0].id)).text(), 'workbook-B')
+    const history = await (await fetch(base + '/sessions')).json() as any[]
+    const july = await (await fetch(base + '/sessions/' + history.find(session => session.title.startsWith('7月'))!.id)).json() as any
+    assert.equal(july.artifacts[0].runId, 'run-july')
+    assert.equal(await (await fetch(base + '/download/' + july.artifacts[0].id)).text(), 'workbook-A')
     assert.equal((await fetch(base + '/download/BBBBBBBBBBBBBBBBBBBBBBBB')).status, 404)
     assert.equal((await fetch(base + '/download/../../master.xlsx')).status, 404)
 
     assert.equal((await run(base, PROMPTS['7月'], 'run-fail')).status, 303)
-    assert.equal((await (await fetch(base + '/state')).json() as any).artifacts.length, 2)
+    assert.equal((await (await fetch(base + '/state')).json() as any).artifacts.length, 0)
     assert.equal((await run(base, PROMPTS['8月'], 'run-cancelled')).status, 303)
-    assert.equal((await (await fetch(base + '/state')).json() as any).artifacts.length, 2)
+    assert.equal((await (await fetch(base + '/state')).json() as any).artifacts.length, 0)
   } finally {
+    releaseSecond?.()
     await new Promise<void>(resolve => server.close(() => resolve()))
     await rm(root, { recursive: true, force: true })
   }
@@ -173,8 +179,9 @@ test('single-active admission is reserved before a slow request body is read', a
   const runner: AgentRunner = async () => { invocations += 1; return { tools: [], status: 'COMPLETED' } }
   const { server, base } = await start(root, runner)
   const target = new URL(base)
-  const body = new URLSearchParams({ prompt: 'slow request', clientId: 'slow-request' }).toString()
   try {
+    const session = await (await fetch(base + '/sessions', { method: 'POST', headers: { origin: base } })).json() as { id: string }
+    const body = new URLSearchParams({ prompt: 'slow request', clientId: 'slow-request', sessionId: session.id }).toString()
     const slowStatus = new Promise<number>((resolve, reject) => {
       const slow = request({
         host: target.hostname,
