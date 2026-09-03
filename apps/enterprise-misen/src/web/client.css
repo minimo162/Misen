@@ -92,6 +92,8 @@ button { cursor: pointer; }
   font-weight: 620;
 }
 
+.history-item { display: contents; }
+
 .history-row {
   display: grid;
   width: 100%;
@@ -163,14 +165,16 @@ button { cursor: pointer; }
 }
 
 .assistant-copy {
+  flex: 1 1 auto;
   max-width: 100%;
+  min-width: 0;
   color: #2f2e2b;
   font-size: 14px;
   line-height: 24px;
   overflow-wrap: anywhere;
 }
 
-.assistant-copy span { white-space: pre-wrap; }
+.user-bubble span { white-space: pre-wrap; }
 .assistant-markdown > :first-child { margin-top: 0; }
 .assistant-markdown > :last-child { margin-bottom: 0; }
 .assistant-markdown p { margin: 0 0 16px; }
@@ -333,7 +337,7 @@ button { cursor: pointer; }
 .back-to-bottom:disabled { visibility: hidden; pointer-events: none; }
 .back-to-bottom .icon { width: 18px; height: 18px; }
 
-.error-note { width: min(100%, 760px); margin: 0 auto; color: #9c4d45; font-size: 13px; }
+.error-note { display: block; margin: 0 0 16px; color: #9c4d45; font-size: 13px; }
 
 :focus-visible { outline: 2px solid #6f6a62; outline-offset: 3px; }
 
