@@ -205,24 +205,19 @@ export function readRange(workbook: SpreadsheetWorkbook, sheetTitle: string, ran
 
 export class OfficeCliSpreadsheet {
   readonly process: OfficeCliProcess
-  private verifiedVersion?: Promise<void>
+  private versionVerified = false
 
   constructor(options: OfficeCliProcessOptions = {}) {
     this.process = new OfficeCliProcess(options)
   }
 
   async ensureVersion(signal?: AbortSignal): Promise<void> {
-    if (!this.verifiedVersion) {
-      const attempt = (async () => {
-        const result = await this.process.run(['--version'], { signal })
-        if (result.exitCode !== 0 || result.stderr.trim() || result.stdout.trim() !== OFFICECLI_VERSION) {
-          throw new OfficeCliProcessError('OfficeCLI version does not match the pinned runtime', 'version_mismatch', result.exitCode, result.stdout, result.stderr)
-        }
-      })()
-      this.verifiedVersion = attempt
-      void attempt.catch(() => { if (this.verifiedVersion === attempt) this.verifiedVersion = undefined })
+    if (this.versionVerified) return
+    const result = await this.process.run(['--version'], { signal })
+    if (result.exitCode !== 0 || result.stderr.trim() || result.stdout.trim() !== OFFICECLI_VERSION) {
+      throw new OfficeCliProcessError('OfficeCLI version does not match the pinned runtime', 'version_mismatch', result.exitCode, result.stdout, result.stderr)
     }
-    return await this.verifiedVersion
+    this.versionVerified = true
   }
 
   async json(args: readonly string[], options: { readonly cwd?: string; readonly stdin?: string; readonly signal?: AbortSignal; readonly timeoutMs?: number } = {}): Promise<OfficeCliEnvelope> {

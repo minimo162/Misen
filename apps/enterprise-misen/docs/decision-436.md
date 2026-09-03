@@ -4,7 +4,7 @@ Decisions 433-436 retain Misen as the authority for Capability (the fixed five-t
 
 The runtime-independent WorkspaceBoundary, typed Office-document seam, synthetic data, formula policy, and atomic output design are carried forward from Decision 427/PR #71. DSH/Cordis composition, providers, session code, and UI are replaced by public Pi Agent/AI plus a restricted Node loopback server. The deterministic route uses Pi's public faux stream seam; the production UI and live runner use only Luna medium and Pi's official OpenAI provider with `maxRetries: 0`.
 
-Normal execution is Node in-process, the selected workspace, and the configured OpenAI endpoint. There is no shell, subprocess, browser/Web/MCP tool, plugin, subagent, runtime download, or network monitor capability. The external observer is intentionally outside Agent tools. Live provider/device/EDR/TCP evidence remains a deployment gate, not a deterministic-pass claim.
+Normal host execution is the bundled Node process, its typed OfficeCLI child-process adapter, the selected workspace, and the configured OpenAI endpoint. OfficeCLI is not model-facing: there is no shell/subprocess Tool, browser/Web/MCP Tool, plugin, subagent, runtime download, or network-monitor capability. The external observer is intentionally outside Agent tools. Live provider/device/EDR/TCP evidence remains a deployment gate, not a deterministic-pass claim.
 
 ## UI composition
 

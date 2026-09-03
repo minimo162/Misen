@@ -95,6 +95,7 @@ export class OfficeCliProcess {
       let outputBytes = 0
       let settled = false
       let terminationCode: string | undefined
+      let stdinError: Error | undefined
       const timeout = setTimeout(() => {
         terminationCode = 'timeout'
         child.kill('SIGKILL')
@@ -127,6 +128,7 @@ export class OfficeCliProcess {
       }
       child.stdout.on('data', chunk => collect('stdout', Buffer.from(chunk)))
       child.stderr.on('data', chunk => collect('stderr', Buffer.from(chunk)))
+      child.stdin.on('error', error => { stdinError = error })
       child.once('error', error => {
         const code = (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing_binary' : 'spawn_error'
         finish(new OfficeCliProcessError(error.message, code, null, Buffer.concat(stdoutChunks).toString('utf8'), Buffer.concat(stderrChunks).toString('utf8')))
@@ -137,6 +139,7 @@ export class OfficeCliProcess {
         if (terminationCode === 'cancelled') return finish(abortError('OfficeCLI invocation was cancelled'))
         if (terminationCode === 'timeout') return finish(new OfficeCliProcessError('OfficeCLI invocation timed out', 'timeout', code, out, err))
         if (terminationCode === 'output_limit') return finish(new OfficeCliProcessError('OfficeCLI output exceeded the configured limit', 'output_limit', code, out, err))
+        if (stdinError && code === 0) return finish(new OfficeCliProcessError(stdinError.message, 'stdin_error', code, out, err))
         finish(undefined, { exitCode: code ?? 1, stdout: out, stderr: err })
       })
 

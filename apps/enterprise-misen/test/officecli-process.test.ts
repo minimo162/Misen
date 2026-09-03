@@ -50,7 +50,7 @@ test('timeout, cancellation, missing binary, and output limit terminate determin
     const timeout = new OfficeCliProcess({ executable: process.execPath, prefixArgs: [fake.script], timeoutMs: 100 })
     await assert.rejects(timeout.run(['slow']), (error: unknown) => error instanceof OfficeCliProcessError && error.code === 'timeout')
     const controller = new AbortController()
-    const pending = new OfficeCliProcess({ executable: process.execPath, prefixArgs: [fake.script], timeoutMs: 5000 }).run(['slow'], { signal: controller.signal })
+    const pending = new OfficeCliProcess({ executable: process.execPath, prefixArgs: [fake.script], timeoutMs: 5000 }).run(['slow'], { signal: controller.signal, stdin: 'x'.repeat(16 * 1024 * 1024) })
     setTimeout(() => controller.abort(), 100)
     await assert.rejects(pending, (error: unknown) => error instanceof Error && error.name === 'AbortError')
     await assert.rejects(new OfficeCliProcess({ executable: join(fake.root, 'missing-officecli.exe') }).run(['--version']), (error: unknown) => error instanceof OfficeCliProcessError && error.code === 'missing_binary')
@@ -67,6 +67,35 @@ test('a cancelled first version check does not poison later OfficeCLI calls', as
     await assert.rejects(client.ensureVersion(controller.signal), (error: unknown) => error instanceof Error && error.name === 'AbortError')
     await client.ensureVersion()
   } finally { await rm(fake.root, { recursive: true, force: true }) }
+})
+
+test('concurrent first-use version checks isolate cancellation between requests', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'misen-officecli-version-race-'))
+  const marker = join(root, 'first-version-call')
+  const script = join(root, 'version-race.mjs')
+  await writeFile(script, `
+import { writeFileSync } from 'node:fs'
+if (process.argv[2] !== '--version') process.exit(2)
+try {
+  writeFileSync(${JSON.stringify(marker)}, '', { flag: 'wx' })
+  setTimeout(() => console.log('1.0.147'), 5000)
+} catch {
+  console.log('1.0.147')
+}
+`, 'utf8')
+  try {
+    const client = new OfficeCliSpreadsheet({ executable: process.execPath, prefixArgs: [script] })
+    const controller = new AbortController()
+    const first = client.ensureVersion(controller.signal)
+    for (let attempt = 0; attempt < 50; attempt++) {
+      try { await access(marker); break } catch { await new Promise(resolve => setTimeout(resolve, 10)) }
+    }
+    await access(marker)
+    const second = client.ensureVersion()
+    controller.abort()
+    await assert.rejects(first, (error: unknown) => error instanceof Error && error.name === 'AbortError')
+    await second
+  } finally { await rm(root, { recursive: true, force: true }) }
 })
 
 test('private workbook temp path is removed after success and failure', async () => {
