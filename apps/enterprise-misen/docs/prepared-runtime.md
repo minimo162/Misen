@@ -8,9 +8,10 @@ fallback.
 
 ## Frozen product and runtime inputs
 
-The current free-form bounded Agent source and production-behavior baseline are:
+The current local-history and free-form bounded Agent source and
+production-behavior baseline are:
 
-`4eef951bb4f37735dcac2800ccf38a6add5d08e1`
+`352920f8262f371946f39369979538ea25c5efb7`
 
 The earlier Thin Misen behavior lineage remains recorded as:
 
@@ -61,7 +62,7 @@ byte-identical to the frozen free-form source:
 
 ```powershell
 npm run prepare-runtime -- --output C:\staging\misen-enterprise-self-contained `
-  --source-sha 4eef951bb4f37735dcac2800ccf38a6add5d08e1 `
+  --source-sha 352920f8262f371946f39369979538ea25c5efb7 `
   --packaging-sha <40-character-packaging-commit> `
   --node-runtime C:\staging\misen-node-v24.20.0
 ```
@@ -90,6 +91,21 @@ The synthetic workspace still requires:
 - `workspace/.agents/skills/monthly-report/SKILL.md`
 
 These are model-visible guidance, not Security Authority.
+
+Conversation history is host/UI infrastructure. It uses only Node standard
+filesystem APIs and stores schema-versioned JSON under:
+
+```text
+%LOCALAPPDATA%\Misen\data\sessions\
+```
+
+This user-writable directory is outside both the prepared runtime and the
+business workspace. Merely starting Misen or listing an empty history does not
+write into the package. Session files contain only the UI-safe user/assistant
+projection, bounded process labels, terminal status, timestamps, and bounded
+artifact metadata; they do not contain provider credentials or raw provider
+payloads. The package adds no executable, native add-on, database, service,
+runtime download, or model-facing Tool for history.
 
 ## Target startup contract
 

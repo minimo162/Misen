@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { nodeRuntimeContract } from './node-runtime-contract.mjs'
 
-const preparedRuntimeSourceSha = '4eef951bb4f37735dcac2800ccf38a6add5d08e1'
+const preparedRuntimeSourceSha = '352920f8262f371946f39369979538ea25c5efb7'
 const thinMisenBehaviorBaselineSha = 'f3b772f7765206f75f7296e436d89c6a771b690a'
 const productBehaviorBaselineSha = preparedRuntimeSourceSha
 const modelVisibleWorkspacePaths = [

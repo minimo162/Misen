@@ -15,7 +15,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { nodeRuntimeContract, nodeRuntimeInputManifest } from './node-runtime-contract.mjs'
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const preparedRuntimeSourceSha = '4eef951bb4f37735dcac2800ccf38a6add5d08e1'
+const preparedRuntimeSourceSha = '352920f8262f371946f39369979538ea25c5efb7'
 const thinMisenBehaviorBaselineSha = 'f3b772f7765206f75f7296e436d89c6a771b690a'
 const productBehaviorBaselineSha = preparedRuntimeSourceSha
 const shaPattern = /^[0-9a-f]{40}$/
@@ -352,6 +352,7 @@ export async function prepareRuntime({ output, sourceSha, packagingSha, nodeRunt
         'app/dependency-lock.json',
         'app/dist/src/web/server.js',
         'app/dist/src/web/artifacts.js',
+        'app/dist/src/web/sessions.js',
         'app/dist/web/assets/client.js',
         'app/dist/web/assets/client.css',
         'app/node_modules',

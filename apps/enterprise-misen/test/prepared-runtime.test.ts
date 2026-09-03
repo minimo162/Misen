@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const distributionSource = '4eef951bb4f37735dcac2800ccf38a6add5d08e1'
+const distributionSource = '352920f8262f371946f39369979538ea25c5efb7'
 const thinMisenBehaviorBaseline = 'f3b772f7765206f75f7296e436d89c6a771b690a'
 const archiveSha256 = '6cac9ffbca8f6a47091e4b5c772e0606049c3871cb67d900c0cedde630e545ba'
 const executableSha256 = '5c976096e04e5c2c1f091938926234cc9fbebfe9787ddd149351b3b0ecc707b5'
