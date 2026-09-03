@@ -103,7 +103,7 @@ jobs:
             '2. PowerShell で次を実行する（共有フォルダーのパスは置き換える）',
             '',
             '```',
-            'powershell -NoProfile -ExecutionPolicy Bypass -File .\Expand-MisenShare.ps1 -Zip .\${{ steps.zip.outputs.name }}.zip -Destination "\fileserver\財務\Misen"',
+            'powershell -NoProfile -ExecutionPolicy Bypass -File .\Expand-MisenShare.ps1 -Zip .\${{ steps.zip.outputs.name }}.zip -Destination "\\fileserver\財務\Misen"',
             '```',
             '',
             '3. 利用者は共有フォルダーの `Misen起動.cmd` をダブルクリックする',
