@@ -5,16 +5,19 @@ Enterprise Misen を共有フォルダーへ公開し、利用者が `Misen起�
 ## 共有フォルダーのレイアウト
 
 ```text
-\fileserver\CompanyApps\Misen\
-  Misen起動.cmd          ← 利用者がダブルクリックする唯一のファイル
-  manifest.json          ← 版数・公開ID・各ファイルの SHA-256（misen-distribution/1）
-  app\                   ← Enterprise Misen（dist, node_modules, package.json, dependency-lock.json）
-  runtime\               ← 同梱 Node.js（runtime\node）と OfficeCLI（runtime\officecli）
-  workspace\             ← 作業フォルダーの雛形（初回起動時に利用者のローカルへコピー）
-  launcher\              ← launch.ps1 と、監査用の prepared-runtime\manifest.json / SHA256SUMS.txt
+\\fileserver\CompanyApps\Misen\
+  Misen起動.cmd          ← 利用者が触るのはこれだけ
+  _misen\                ← 隠し属性。先頭アンダースコアで並び順の末尾
+    manifest.json        ← current（有効な版）・版数・公開ID・各ファイルの SHA-256（misen-distribution/2）
+    publish-log.txt      ← 公開直後の再検証結果（公開のたびに 1 行追記）
+    versions\<version>\  ← 版別。前の版を 1 つ残し、それより古い版は公開時に削除
+      app\               ← Enterprise Misen（dist, node_modules, package.json, dependency-lock.json）
+      runtime\           ← 同梱 Node.js（runtime\node）と OfficeCLI（runtime\officecli）
+      workspace\         ← 作業フォルダーの雛形（初回起動時に利用者のローカルへコピー）
+      launcher\          ← launch.ps1 と、監査用の prepared-runtime\manifest.json / SHA256SUMS.txt
 ```
 
-共有フォルダーには APIキーなどの秘密情報を置きません。利用者には読み取り権限だけを付与してください。
+共有フォルダーには APIキーなどの秘密情報を置きません。共有フォルダーは読める人が全員書き込める前提なので、最上位に見えるのは `Misen起動.cmd` だけにし、それ以外は隠し属性の `_misen` 配下の版別フォルダーに置きます。誤って上書きしても前の版が残ります。
 
 ## 管理者側
 
@@ -31,7 +34,7 @@ cd Misen
 コマンドプロンプトから:
 
 ```cmd
-scripts\prepare-misen.cmd "\fileserver\CompanyApps\Misen" -CleanDestination
+scripts\prepare-misen.cmd "\\fileserver\CompanyApps\Misen" -CleanDestination
 ```
 
 エクスプローラーから `scripts\prepare-misen.cmd` をダブルクリックし、共有フォルダーの UNC パスを入力して Enter を押しても同じです。ダブルクリック時は `-CleanDestination` が自動で付き、古い配布物を削除してから公開します。
@@ -45,14 +48,14 @@ scripts\prepare-misen.cmd "\fileserver\CompanyApps\Misen" -CleanDestination
 | `-SkipNpmInstall` / `-SkipTests` | 依存関係の構築、unit テストを省略 |
 | `-Url http://127.0.0.1:8787/` | 利用者側で開くループバック URL |
 
-公開のたびに新しい公開ID（GUID）が発行され、`manifest.json` に全ファイルの SHA-256 が記録されます。`manifest.json` は最後に書き込まれるため、コピー途中の共有フォルダーを利用者が開いても古い版か新しい版のどちらかに整合します。
+公開のたびに新しい公開ID（GUID）が発行され、`_misen\manifest.json` に全ファイルの SHA-256 が記録されます。公開スクリプトは `_misen\versions\<version>\` を作り、共有側のハッシュを再検証して結果を `_misen\publish-log.txt` に追記してから、最後に `manifest.json` の `current` を差し替えます。コピー途中の共有フォルダーを利用者が開いても前の版か新しい版のどちらかに整合します。前の版は 1 つ残し（`-KeepPreviousVersions`）、それより古い版は削除します。`-CleanDestination` は他の全版と旧レイアウトの残骸を削除します。
 
 ## バージョン更新時（管理者側）
 
 ```cmd
 cd C:\任意の作業フォルダー\Misen
 git pull
-scripts\prepare-misen.cmd "\fileserver\CompanyApps\Misen" -CleanDestination
+scripts\prepare-misen.cmd "\\fileserver\CompanyApps\Misen" -CleanDestination
 ```
 
 版数を変えなくても公開IDが変わるため、利用者は次回のダブルクリックで自動的に更新を取得します。
@@ -62,13 +65,13 @@ scripts\prepare-misen.cmd "\fileserver\CompanyApps\Misen" -CleanDestination
 利用者が使うファイルは、初回も更新後も同じ `Misen起動.cmd` です。
 
 ```text
-\fileserver\CompanyApps\Misen\Misen起動.cmd
+\\fileserver\CompanyApps\Misen\Misen起動.cmd
 ```
 
 ダブルクリックすると毎回次の処理を行います。
 
-1. 共有側 `manifest.json` の版数・公開IDと `%LOCALAPPDATA%\Misen\current.json` を比較
-2. 初回、または版数か公開IDが違う場合だけ `app\` `runtime\` `workspace\` を `%LOCALAPPDATA%\Misen\versions\<version>\` へコピーし、全ファイルの SHA-256 を検証してから `current` を切り替え（失敗時は前回正常版へ戻して停止）
+1. 共有側 `_misen\manifest.json` の `current`（有効な版）・公開IDと `%LOCALAPPDATA%\Misen\current.json` を比較
+2. 初回、または版数か公開IDが違う場合だけ `_misen\versions\<version>\` の `app\` `runtime\` `workspace\` を `%LOCALAPPDATA%\Misen\versions\<version>\` へコピーし、全ファイルの SHA-256 を検証してから `current` を切り替え（失敗時は前回正常版へ戻して停止）
 3. 検証済みローカル版の `runtime\node\node.exe` でサーバーを起動し、ブラウザーで `http://127.0.0.1:8787/` を開く。既に起動中ならブラウザーだけを開く
 
 作業フォルダーの既定は `%LOCALAPPDATA%\Misen\workspace`（初回に共有側 `workspace\` の雛形をコピー）です。別のフォルダーを使う場合は、そのフォルダーを `Misen起動.cmd` へドラッグ＆ドロップします。
@@ -127,7 +130,7 @@ node --test launcher/test/launch.test.mjs
 coding-agent は従来どおり `scripts\prepare-coding-agent.cmd`（`Prepare-CodingAgent.ps1` / `New-CodingAgent.ps1`）で公開します。共有先には `launcher\launch-coding-agent.*`、`apps\coding-agent`、`runtime\node-v...\node.exe`、`start-coding-agent.cmd` が配置され、利用者は `start-coding-agent.cmd` を実行します。ローカル同期先は `%LOCALAPPDATA%\CompanyApps` です。
 
 ```cmd
-scripts\prepare-coding-agent.cmd "\fileserver\CompanyApps\CodingAgent" -CleanDestination
+scripts\prepare-coding-agent.cmd "\\fileserver\CompanyApps\CodingAgent" -CleanDestination
 ```
 
 ### Edge接続の分離

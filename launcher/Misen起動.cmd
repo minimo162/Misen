@@ -6,17 +6,25 @@ rem Drop a folder onto this file to use it as the workspace. ASCII-only comments
 rem multi-byte text in rem lines, so Japanese appears only in echo lines after chcp 65001.
 setlocal EnableExtensions DisableDelayedExpansion
 set "ROOT=%~dp0"
-set "PS1=%ROOT%launcher\launch.ps1"
-if not exist "%PS1%" set "PS1=%ROOT%launch.ps1"
-if not exist "%PS1%" (
-  echo launcher\launch.ps1 が見つかりません。
-  echo   %PS1%
-  echo 共有フォルダーの Misen起動.cmd をそのままダブルクリックしてください。
+set "MANIFEST=%ROOT%_misen\manifest.json"
+if not exist "%MANIFEST%" (
+  echo _misen\manifest.json が見つかりません。
+  echo   %MANIFEST%
+  echo 管理者に配布物の再公開を依頼してください。
   goto fail
 )
-if not exist "%ROOT%manifest.json" (
-  echo manifest.json が見つかりません。
-  echo   %ROOT%manifest.json
+rem Read "current" from the manifest with PowerShell; the launcher of that version is the one to run.
+set "CURRENT="
+for /f "usebackq delims=" %%V in (`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "(Get-Content -LiteralPath '%MANIFEST%' -Raw -Encoding UTF8 | ConvertFrom-Json).current"`) do set "CURRENT=%%V"
+if not defined CURRENT (
+  echo _misen\manifest.json から有効な版を読み取れませんでした。
+  echo 管理者に配布物の再公開を依頼してください。
+  goto fail
+)
+set "PS1=%ROOT%_misen\versions\%CURRENT%\launcher\launch.ps1"
+if not exist "%PS1%" (
+  echo 有効な版 %CURRENT% の launcher\launch.ps1 が見つかりません。
+  echo   %PS1%
   echo 管理者に配布物の再公開を依頼してください。
   goto fail
 )
@@ -39,7 +47,7 @@ shift
 goto collect
 
 :invoke
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS1%" %WORKSPACE_ARG%%FORWARD%
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS1%" -ShareRoot "%ROOT%." %WORKSPACE_ARG%%FORWARD%
 set "RC=%ERRORLEVEL%"
 if "%RC%"=="0" exit /b 0
 if "%RC%"=="2" (

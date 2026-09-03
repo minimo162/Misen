@@ -104,9 +104,11 @@ Corporate-device/EDR/application-control certification remains the separate
 
 The prepared runtime is not handed to users directly. `scripts/prepare-misen.cmd`
 at the repository root runs `prepare-runtime` and `verify:prepared-runtime`, then
-`scripts/New-Misen.ps1` publishes `app/`, `runtime/`, `workspace/`, the launcher and a
-distribution `manifest.json` (version, publish id, SHA-256 of every file) to the
-share. Users double-click `Misen起動.cmd`; `launcher/launch.ps1` copies and verifies
+`scripts/New-Misen.ps1` publishes `app/`, `runtime/`, `workspace/` and the launcher into
+`_misen/versions/<version>/` on the share, re-verifies the copied hashes, appends the result
+to `_misen/publish-log.txt`, and only then switches `current` in the distribution
+`_misen/manifest.json` (publish id, SHA-256 of every file). The share root shows only
+`Misen起動.cmd`; `_misen` is hidden and keeps one previous version. Users double-click `Misen起動.cmd`; `launcher/launch.ps1` copies and verifies
 the files into `%LOCALAPPDATA%\Misen\versions\<version>` before starting the bundled
 Node.js. See `DEPLOY.md` for the operator and user flows and
 `launcher/test/launch.test.mjs` for the automated first-run / second-run / update /

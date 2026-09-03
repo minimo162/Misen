@@ -2,8 +2,10 @@
 <#
   Enterprise Misen 利用者用ランチャー本体（Misen起動.cmd から呼ばれる）。
 
-  共有フォルダー（読み取り専用）:
-    Misen起動.cmd / manifest.json / app\ / runtime\ / workspace\ / launcher\
+  共有フォルダー（読み取り専用、Issue #108 のレイアウト）:
+    Misen起動.cmd
+    _misen\manifest.json                  current（有効な版）・公開ID・SHA-256 一覧
+    _misen\versions\<version>\           app\ runtime\ workspace\ launcher\（このスクリプトはここに置かれる）
   ローカル（書き込みはここだけ）:
     %LOCALAPPDATA%\Misen\versions\<version>\   検証済みの app・runtime・workspace 雛形
     %LOCALAPPDATA%\Misen\current.json          有効な版と公開ID
@@ -25,11 +27,13 @@ param(
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
-if (-not $ShareRoot) { $ShareRoot = Split-Path -Parent $PSScriptRoot }
+# 既定の配置: <share>\_misen\versions\<version>\launcher\launch.ps1 → 4 階層上が共有ルート
+if (-not $ShareRoot) { $ShareRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))) }
 if (-not $LocalRoot) { $LocalRoot = Join-Path $env:LOCALAPPDATA 'Misen' }
 $shareRoot = $ShareRoot.TrimEnd('\', '/')
 $localRoot = $LocalRoot.TrimEnd('\', '/')
-$remoteManifestPath = Join-Path $shareRoot 'manifest.json'
+$remoteMisenDir = Join-Path $shareRoot '_misen'
+$remoteManifestPath = Join-Path $remoteMisenDir 'manifest.json'
 $versionsDir = Join-Path $localRoot 'versions'
 $currentPointerPath = Join-Path $localRoot 'current.json'
 $stateDir = Join-Path $localRoot 'state'
@@ -93,7 +97,8 @@ function Get-PublishId([object]$Manifest) {
 }
 
 function Assert-ManifestShape([object]$Manifest) {
-    if ("$($Manifest.schema)" -ne 'misen-distribution/1') { throw "manifest.json の形式が未対応です: $($Manifest.schema)" }
+    if ("$($Manifest.schema)" -ne 'misen-distribution/2') { throw "manifest.json の形式が未対応です: $($Manifest.schema)（管理者に再公開を依頼してください）" }
+    if ([string]::IsNullOrWhiteSpace([string]$Manifest.current)) { throw 'manifest.json に current（有効な版）がありません' }
     if ([string]::IsNullOrWhiteSpace([string]$Manifest.version)) { throw 'manifest.json に version がありません' }
     if ([string]$Manifest.version -notmatch '^[0-9A-Za-z][0-9A-Za-z._-]*$') { throw "manifest.json の version が不正です: $($Manifest.version)" }
     foreach ($key in @('entry', 'node', 'officeCli', 'url')) {
@@ -134,11 +139,13 @@ function Test-PortListening([int]$Port) {
 }
 
 if (-not (Test-Path -LiteralPath $remoteManifestPath -PathType Leaf)) {
-    throw "共有フォルダーに manifest.json が見つかりません: $remoteManifestPath"
+    throw "共有フォルダーに _misen\manifest.json が見つかりません: $remoteManifestPath"
 }
 $remoteManifest = Get-Content -LiteralPath $remoteManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
 Assert-ManifestShape $remoteManifest
-$remoteVersion = [string]$remoteManifest.version
+$remoteVersion = [string]$remoteManifest.current
+$remoteVersionDir = Join-Path (Join-Path $remoteMisenDir ([string]$remoteManifest.versionsRoot)) $remoteVersion
+if (-not (Test-Path -LiteralPath $remoteVersionDir -PathType Container)) { throw "共有フォルダーに有効な版がありません: $remoteVersionDir" }
 $remotePublishId = Get-PublishId $remoteManifest
 $current = Read-Json $currentPointerPath
 $previousVersion = if ($current) { [string]$current.version } else { '' }
@@ -161,7 +168,7 @@ try {
         New-Item -ItemType Directory -Force -Path $stage | Out-Null
         Write-DistributionState 'syncing' '共有版を版別ステージングへ取得しています' $remoteVersion $localVersion $remotePublishId $localPublishId $previousVersion $previousPublishId
         foreach ($directory in $syncDirectories) {
-            $sourceDir = Join-Path $shareRoot $directory
+            $sourceDir = Join-Path $remoteVersionDir $directory
             if (-not (Test-Path -LiteralPath $sourceDir -PathType Container)) {
                 if ($directory -eq 'workspace') { continue }
                 throw "共有フォルダーに $directory がありません: $sourceDir"
