@@ -21,13 +21,19 @@ Enterprise Misen を共有フォルダーへ公開し、利用者が `Misen起�
 
 ## GitHub 経由の配布（推奨）
 
-開発 PC のファイルを社内へ持ち込めない場合の経路です。配布物は GitHub Actions（`.github/workflows/release-share.yml`）が Windows ランナー上で main から生成し、GitHub Release に zip として添付します。社内 PC には git も Node.js も要りません。
+開発 PC のファイルを社内へ直接持ち込めない場合の経路です。配布物を zip にして GitHub Release に添付し、社内 PC では Release からダウンロードして共有フォルダーへ展開します。社内 PC には git も Node.js も要りません。
 
-### 1. Release を作る（GitHub 上）
+### 1. Release を作る（開発 PC で1コマンド）
 
-- GitHub の **Actions** → **release-share** → **Run workflow** を押します。版数を空にすると `apps\enterprise-misen\package.json` の version を使います。
-- または `share-v0.2.0` のようなタグを push しても同じ Release ができます。
-- 生成物は `npm ci` → unit テスト → Node.js / OfficeCLI の公式配布物取得と SHA-256 検証 → 自己完結ランタイムの生成と検証 → 共有フォルダー形式への公開 → zip 化、の順で作られます。Release の本文に zip の SHA-256 とファイル数が載ります。
+clone 済みのリポジトリで、コミット済みの状態から実行します。`gh`（GitHub CLI）にサインインしておいてください。
+
+```cmd
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Publish-Release.ps1 -NodeRuntime <検証済み Node 入力> -OfficeCliRuntime <検証済み OfficeCLI 入力>
+```
+
+`Prepare-Misen.ps1` と同じ工程（`npm ci` → unit テスト → ランタイムの取得と SHA-256 検証 → 自己完結ランタイムの生成と検証 → 共有フォルダー形式への公開）を一時フォルダーに対して行い、UTF-8 名の zip と `.sha256.txt` を作り、タグ `share-v<version>-<sha7>` の Release（既定はプレリリース、`-Latest` で通常リリース）に zip・`.sha256.txt`・`Expand-MisenShare.ps1` を添付します。Release 本文に zip の SHA-256、公開ID、同梱ランタイムの版、公開直後の再検証結果が載ります。`-NodeRuntime` / `-OfficeCliRuntime` を省くと公式配布物を取得します。
+
+GitHub Actions のワークフロー（`.github/workflows/release-share.yml`、**Actions** → **release-share** → **Run workflow**）でも同じ Release を作れますが、プライベートリポジトリの Actions は月の無料枠があり Windows ランナーは 2 倍換算なので、手動実行専用の予備としています。
 
 ### 2. 社内 PC で共有フォルダーへ展開する
 

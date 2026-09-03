@@ -3,6 +3,9 @@ name: release-share
 # 共有フォルダー配布物（Misen起動.cmd + _misen\versions\<version>\）を GitHub Actions 上で生成し、
 # GitHub Release に zip として添付する。開発 PC のファイルは一切使わない。
 # 社内 PC では Release から zip を落とし、scripts/Expand-MisenShare.ps1 で共有フォルダーへ展開する。
+#
+# 注意: プライベートリポジトリの Actions は月の無料枠があり、Windows ランナーは 2 倍換算。
+# 通常は開発 PC で scripts/Publish-Release.ps1 を使い、このワークフローは手動実行専用の予備とする。
 
 on:
   workflow_dispatch:
@@ -16,9 +19,6 @@ on:
         required: false
         default: true
         type: boolean
-  push:
-    tags:
-      - 'share-v*'
 
 permissions:
   contents: write
