@@ -24,6 +24,7 @@ async function runSession(base: string, prompt: string, clientId: string) {
 test('assistant-ui composition keeps the conversation surface restrained and safe', async () => {
   const source = await readFile(join(process.cwd(), 'src', 'web', 'client.tsx'), 'utf8')
   const styles = await readFile(join(process.cwd(), 'src', 'web', 'client.css'), 'utf8')
+  const server = await readFile(join(process.cwd(), 'src', 'web', 'server.ts'), 'utf8')
   assert.match(source, /useExternalStoreRuntime/)
   assert.match(source, /ThreadPrimitive\.Viewport/)
   assert.match(source, /ThreadPrimitive\.ViewportFooter/)
@@ -47,6 +48,7 @@ test('assistant-ui composition keeps the conversation surface restrained and saf
   assert.match(source, /fetch\('\/sessions'\)/u)
   assert.match(styles, /\.history-panel/u)
   assert.match(styles, /@media \(max-width: 760px\)/u)
+  assert.match(server, /<link rel="icon" href="data:,">/u)
   for (const label of ['ファイル一覧を確認', '業務ガイドを確認', 'Excelを確認', 'Excelを作成', 'Excelを更新']) assert.match(source, new RegExp(label, 'u'))
   assert.match(source, /function Icon/u)
   assert.doesNotMatch(source, /[▣↗◌✓↑■›⌄↓]/u)

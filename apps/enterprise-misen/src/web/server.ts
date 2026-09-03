@@ -240,7 +240,7 @@ export function createDemoServer(
 
       if (request.method === 'GET' && url.pathname === '/') {
         response.setHeader('content-type', 'text/html; charset=utf-8')
-        return response.end(`<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Misen</title><link rel="stylesheet" href="/assets/client.css"></head><body><div id="root"></div><script type="module" src="/assets/client.js"></script></body></html>`)
+        return response.end(`<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>Misen</title><link rel="stylesheet" href="/assets/client.css"></head><body><div id="root"></div><script type="module" src="/assets/client.js"></script></body></html>`)
       }
       if (request.method === 'GET' && (url.pathname === '/assets/client.js' || url.pathname === '/assets/client.css')) {
         const name = url.pathname.endsWith('.css') ? 'client.css' : 'client.js'
