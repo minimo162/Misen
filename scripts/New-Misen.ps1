@@ -121,6 +121,8 @@ try {
         try { $previousManifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json } catch { $previousManifest = $null }
     }
     $previousCurrent = if ($previousManifest -and $previousManifest.current) { [string]$previousManifest.current } else { '' }
+    # 同じ版数の再公開は禁止する。current が指す版フォルダーを書き直すと、公開中の利用者が起動に失敗し、再検証に失敗すると全利用者が起動できなくなるため。
+    if ($previousCurrent -eq $Version) { Fail "版 v$Version は既に共有フォルダーで有効な版です。版数を上げてから公開してください（同じ版数の再公開はできません）。" }
 
     $manifest = [ordered]@{
         schema = 'misen-distribution/2'
@@ -168,7 +170,7 @@ try {
         $previousCurrent = ''
     }
 
-    # 1. 版フォルダーを作る（同じ版数の再公開は同じフォルダーを作り直す。manifest はまだ前の版を指している）。
+    # 1. 版フォルダーを作る（manifest はまだ前の版を指している。current と同じ版数は上で拒否済み）。
     Write-Step "版フォルダーを書き込んでいます: $targetVersionDir"
     if (Test-Path -LiteralPath $targetVersionDir) { Remove-Item -LiteralPath $targetVersionDir -Recurse -Force }
     & robocopy $stageRoot $targetVersionDir /E /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null

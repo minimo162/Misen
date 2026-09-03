@@ -244,18 +244,18 @@ test('Misen起動.cmd: first launch, second launch, version update, and tampered
     assert.ok(!remaining.includes('1.2.0'))
 
     // --- sync-only mode used by administrators to pre-verify ----------------------------------------
-    await writePreparedRuntime(preparedRuntime, '1.2.0')
+    await writePreparedRuntime(preparedRuntime, '1.2.1')
     await publish(preparedRuntime, share, { url })
     const syncOnly = await launch(share, localAppData, { port, marker, syncOnly: true })
     assert.equal(syncOnly.code, 0, `sync-only failed:\n${syncOnly.stdout}\n${syncOnly.stderr}`)
-    assert.match(syncOnly.stdout, /SYNC_RESULT phase=activated version=1\.2\.0/u)
+    assert.match(syncOnly.stdout, /SYNC_RESULT phase=activated version=1\.2\.1/u)
     assert.equal(syncOnly.record, null, 'sync-only never starts the server')
 
     // --- publish log: every publish re-verified the share right after writing it --------------------
     const publishLog = (await readFile(join(share, "_misen", "publish-log.txt"), 'utf8')).trim().split(/\r?\n/u)
-    assert.equal(publishLog.length, 4, 'one line per publish (1.0.0, 1.1.0, 1.2.0, 1.2.0 again)')
-    for (const line of publishLog) assert.match(line, /^\d{4}-\d{2}-\d{2}T\S+\tversion=1\.\d\.0\tpublishId=[0-9a-f]{32}\tfiles=\d+\tverify=OK\tby=/u)
-    assert.deepEqual(publishLog.map((line) => line.match(/version=(\S+)/u)[1]), ['1.0.0', '1.1.0', '1.2.0', '1.2.0'])
+    assert.equal(publishLog.length, 4, 'one line per publish (1.0.0, 1.1.0, 1.2.0, 1.2.1)')
+    for (const line of publishLog) assert.match(line, /^\d{4}-\d{2}-\d{2}T\S+\tversion=1\.\d\.\d\tpublishId=[0-9a-f]{32}\tfiles=\d+\tverify=OK\tby=/u)
+    assert.deepEqual(publishLog.map((line) => line.match(/version=(\S+)/u)[1]), ['1.0.0', '1.1.0', '1.2.0', '1.2.1'])
     assert.ok(!publishLog.join('\n').includes('sk-'), 'the log carries no key material')
 
     // --- -CleanDestination removes every other version --------------------------------------------
@@ -263,6 +263,38 @@ test('Misen起動.cmd: first launch, second launch, version update, and tampered
     await publish(preparedRuntime, share, { url, clean: true })
     assert.deepEqual(await readdirSafe(join(share, '_misen', 'versions')), ['1.3.0'])
     assert.deepEqual((await readdirSafe(share)).sort(), ['Misen起動.cmd', '_misen'])
+
+    // --- review 1: republishing the version current points at is refused and changes nothing --------
+    const misenBefore = await snapshotTree(join(share, '_misen'))
+    await writePreparedRuntime(preparedRuntime, '1.3.0', { serverSource: stubServer('1.3.0-republished') })
+    const sameVersion = await run(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', join(repoRoot, 'scripts', 'New-Misen.ps1'), '-Destination', share, '-PreparedRuntime', preparedRuntime, '-SourceRoot', repoRoot, '-Url', url, '-Version', '1.3.0', '-CleanDestination'], { cwd: repoRoot })
+    assert.notEqual(sameVersion.code, 0, 'same-version republish must stop')
+    assert.match(`${sameVersion.stdout}${sameVersion.stderr}`, /版数を上げてから公開してください/u)
+    assert.deepEqual(await snapshotTree(join(share, '_misen')), misenBefore, 'version folders, manifest and publish log are unchanged')
+
+    // --- review 2: a current value that is not a plain version name stops launch.ps1 clearly -----------
+    const manifestPath = join(share, '_misen', 'manifest.json')
+    const goodManifest = await readFile(manifestPath, 'utf8')
+    await writeFile(manifestPath, goodManifest.replace(/"current":\s+"1\.3\.0"/u, '"current": "../x"'), 'utf8')
+    assert.match(await readFile(manifestPath, 'utf8'), /"current": "\.\.\/x"/u)
+    const badCurrent = await run(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', join(share, '_misen', 'versions', '1.3.0', 'launcher', 'launch.ps1'), '-ShareRoot', share, '-LocalRoot', join(localAppData, 'Misen'), '-SyncOnly', '-NoBrowser'], { cwd: share })
+    assert.notEqual(badCurrent.code, 0)
+    assert.match(`${badCurrent.stdout}${badCurrent.stderr}`, /current が不正です: \.\.\/x/u)
+    const badCurrentCmd = await launch(share, localAppData, { port, marker, syncOnly: true })
+    assert.notEqual(badCurrentCmd.code, 0)
+    assert.match(badCurrentCmd.stdout, /_misen\\manifest\.json から有効な版を読み取れませんでした/u, 'the .cmd rejects the value before building a path')
+    assert.doesNotMatch(badCurrentCmd.stdout, /versions\\\.\./u)
+
+    // --- review 3: a broken manifest.json stops Misen起動.cmd with the same message and no odd path --
+    await writeFile(manifestPath, '{ "schema": "misen-distribution/2", "current": ', 'utf8')
+    const broken = await launch(share, localAppData, { port, marker, syncOnly: true })
+    assert.notEqual(broken.code, 0)
+    assert.match(broken.stdout, /_misen\\manifest\.json から有効な版を読み取れませんでした/u)
+    assert.doesNotMatch(broken.stdout, /launcher\\launch\.ps1 が見つかりません|ConvertFrom-Json|versions\\\S*launcher/u, 'no PowerShell error text or nonsense path is shown')
+    assert.equal(broken.record, null)
+    await writeFile(manifestPath, goodManifest, 'utf8')
+    const restored = await launch(share, localAppData, { port, marker, syncOnly: true })
+    assert.equal(restored.code, 0, `restored manifest failed:\n${restored.stdout}\n${restored.stderr}`)
 
   } finally {
     await rm(scratch, { recursive: true, force: true })

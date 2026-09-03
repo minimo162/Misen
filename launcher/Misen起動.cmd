@@ -14,8 +14,11 @@ if not exist "%MANIFEST%" (
   goto fail
 )
 rem Read "current" from the manifest with PowerShell; the launcher of that version is the one to run.
+rem PowerShell errors go to nul so a broken manifest cannot leak error text into CURRENT, and the value
+rem is accepted only when it consists of [0-9A-Za-z._-] because it becomes part of a path.
 set "CURRENT="
-for /f "usebackq delims=" %%V in (`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "(Get-Content -LiteralPath '%MANIFEST%' -Raw -Encoding UTF8 | ConvertFrom-Json).current"`) do set "CURRENT=%%V"
+for /f "usebackq delims=" %%V in (`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$v = [string](Get-Content -LiteralPath '%MANIFEST%' -Raw -Encoding UTF8 | ConvertFrom-Json).current; if ($v -match '^[0-9A-Za-z][0-9A-Za-z._-]*$') { $v }" 2^>nul`) do set "CURRENT=%%V"
+if defined CURRENT (echo %CURRENT%| findstr /r /x /c:"[0-9A-Za-z][0-9A-Za-z._-]*" >nul) || set "CURRENT="
 if not defined CURRENT (
   echo _misen\manifest.json から有効な版を読み取れませんでした。
   echo 管理者に配布物の再公開を依頼してください。

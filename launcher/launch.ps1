@@ -99,6 +99,7 @@ function Get-PublishId([object]$Manifest) {
 function Assert-ManifestShape([object]$Manifest) {
     if ("$($Manifest.schema)" -ne 'misen-distribution/2') { throw "manifest.json の形式が未対応です: $($Manifest.schema)（管理者に再公開を依頼してください）" }
     if ([string]::IsNullOrWhiteSpace([string]$Manifest.current)) { throw 'manifest.json に current（有効な版）がありません' }
+    if ([string]$Manifest.current -notmatch '^[0-9A-Za-z][0-9A-Za-z._-]*$') { throw "manifest.json の current が不正です: $($Manifest.current)（管理者に再公開を依頼してください）" }
     if ([string]::IsNullOrWhiteSpace([string]$Manifest.version)) { throw 'manifest.json に version がありません' }
     if ([string]$Manifest.version -notmatch '^[0-9A-Za-z][0-9A-Za-z._-]*$') { throw "manifest.json の version が不正です: $($Manifest.version)" }
     foreach ($key in @('entry', 'node', 'officeCli', 'url')) {
