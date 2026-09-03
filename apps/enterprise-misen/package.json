@@ -11,6 +11,7 @@
     "build": "npm run clean && tsc -p tsconfig.json && node scripts/build-client.mjs",
     "test": "npm run build && node --test dist/test/**/*.test.js",
     "acceptance": "npm run build && node dist/acceptance/run.js",
+    "acceptance:office-ui": "npm run build && node dist/acceptance/office-ui.js",
     "benchmark:spreadsheet": "npm run build && node scripts/benchmark-spreadsheet.mjs",
     "live": "npm run build && node dist/acceptance/live.js",
     "study:checkpoint": "npm run build && node dist/study/checkpoint.js",

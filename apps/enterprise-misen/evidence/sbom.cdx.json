@@ -7586,7 +7586,7 @@
       "bom-ref": "officecli@1.0.147-win-x64",
       "name": "OfficeCLI",
       "version": "1.0.147",
-      "description": "Bundled Office document process engine behind Misen typed spreadsheet capabilities",
+      "description": "Bundled Office document process engine behind Misen typed spreadsheet, Word, and PowerPoint capabilities",
       "hashes": [
         {
           "alg": "SHA-256",

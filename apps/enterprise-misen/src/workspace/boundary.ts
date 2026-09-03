@@ -63,7 +63,7 @@ export class WorkspaceBoundary {
     return real
   }
 
-  /** Resolve an existing or new .xlsx path under workspace/output only. */
+  /** Resolve an existing or new supported Office path under workspace/output only. */
   async resolveOutputFile(userPath: string): Promise<string> {
     const candidate = this.resolveLexical(userPath)
     this.assertInside(candidate, 'output path')
@@ -71,8 +71,8 @@ export class WorkspaceBoundary {
     if (!outputRelative || outputRelative.startsWith('..' + sep) || outputRelative === '..') {
       throw new WorkspaceBoundaryError('writes are limited to workspace/output')
     }
-    if (!/\.xlsx$/iu.test(candidate)) {
-      throw new WorkspaceBoundaryError('spreadsheet output must use the .xlsx extension')
+    if (!/\.(?:xlsx|docx|pptx)$/iu.test(candidate)) {
+      throw new WorkspaceBoundaryError('Office output must use the .xlsx, .docx, or .pptx extension')
     }
 
     // Validate every existing ancestor.  This rejects a symlinked output

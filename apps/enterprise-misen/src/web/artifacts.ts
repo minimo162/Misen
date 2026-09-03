@@ -18,12 +18,12 @@ const ordinal = (left: string, right: string): number => left < right ? -1 : lef
 
 async function outputPaths(boundary: WorkspaceBoundary): Promise<string[]> {
   return (await boundary.listOutputFiles())
-    .filter(path => /\.xlsx$/iu.test(path))
+    .filter(path => /\.(?:xlsx|docx|pptx)$/iu.test(path))
     .sort(ordinal)
 }
 
 /**
- * Capture only bounded, regular .xlsx files under the authorized output scope.
+ * Capture only bounded, regular supported Office files under the authorized output scope.
  * WorkspaceBoundary rejects an escaped/symlinked output root; its lister ignores
  * symlink entries, so an arbitrary host path can never become an artifact.
  */
@@ -36,7 +36,7 @@ export async function snapshotOutputArtifacts(boundary: WorkspaceBoundary): Prom
   return snapshot
 }
 
-/** Return newly created or changed authorized workbooks, with bytes frozen for download. */
+/** Return newly created or changed authorized Office files, with bytes frozen for download. */
 export async function discoverOutputArtifacts(
   boundary: WorkspaceBoundary,
   before: OutputScopeSnapshot,

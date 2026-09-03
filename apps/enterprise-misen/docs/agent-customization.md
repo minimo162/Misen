@@ -33,7 +33,7 @@ Nested precedence can be added later only if a real workspace need demonstrates 
   When relevant, the Agent reads the selected body with the existing
   `workspace_read_text` Tool. This follows the standard
   [progressive-disclosure pattern](https://agentskills.io/client-implementation/adding-skills-support)
-  without a selector request or sixth Tool.
+  without a selector request or dedicated Skill-selection Tool.
 - References and scripts are not scanned, loaded, or executed automatically.
   Frontmatter such as `allowed-tools` is descriptive only and cannot grant a
   capability. There is no download, marketplace, dynamic module, eval, process,
@@ -56,7 +56,7 @@ The minimal lifecycle is:
 Hooks run sequentially in registration order with a one-second bound. Exceptions,
 timeouts, and malformed hook results fail closed with a generic policy error.
 The built-in capability authority is always registered first and validates the
-exact five-Tool roster. Existing Tool implementation guards remain in place, so
+exact eleven-Tool roster. Existing Tool implementation guards remain in place, so
 omitting an optional hook cannot remove the underlying Security Authority.
 
 Pi is an in-process Agent loop, not the Security Authority. The implementation

@@ -57,7 +57,7 @@ test('observer stores public usage but no model text, raw targets, reasoning, or
   assert.match(serialized, /sha256:/u)
 })
 
-test('progressive monthly-report Skill read is observed without changing the five-Tool roster', () => {
+test('progressive monthly-report Skill read is observed without changing the fixed Tool roster', () => {
   const observer = new StudyObserver(metadata, () => '2026-09-01T00:00:01.000Z')
   begin(observer)
   observer.observe({ type: 'tool_execution_start', toolCallId: 'skill', toolName: 'workspace_read_text', args: { path: '.agents/skills/monthly-report/SKILL.md' } })
