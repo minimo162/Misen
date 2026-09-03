@@ -83,3 +83,6 @@ coding-agentは通常、空きポートと専用Edgeプロファイルを自動�
 - 利用者PC: Windows、Microsoft Edge とM365 Copilotへのサインイン
 - 利用者PC: 共有フォルダーへの読み取り権限
 - 利用者側の管理者権限は不要（ローカル同期先は `%LOCALAPPDATA%`）
+## テスト（管理者側）
+
+公開前に各アプリで `npm test`（unit 層、30 秒以内）を実行してください。OfficeCLI を使う enterprise-misen の integration 層は `MISEN_OFFICECLI_PATH` を設定してから `npm run test:integration` で実行します。APIキーが必要な live 層は手動実行のみです。層の詳細は `README.md` の「テスト」を参照してください。

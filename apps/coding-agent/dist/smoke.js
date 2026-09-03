@@ -47099,46 +47099,58 @@ async function testDemoRecordingContract() {
   }
   console.log("PASS demo-recording-contract");
 }
+var SMOKE_TESTS = [
+  { name: "testAuditLog", run: testAuditLog, tier: "unit" },
+  { name: "testWeather", run: testWeather, tier: "unit" },
+  { name: "testApprovals", run: testApprovals, tier: "unit" },
+  { name: "testTools", run: testTools, tier: "integration" },
+  { name: "testAgentLoop", run: testAgentLoop, tier: "unit" },
+  { name: "testV2SafeExecutionOrder", run: testV2SafeExecutionOrder, tier: "unit" },
+  { name: "testV2ToolLoopAndEventContract", run: testV2ToolLoopAndEventContract, tier: "unit" },
+  { name: "testV2OptimizationProjectionAndTelemetry", run: testV2OptimizationProjectionAndTelemetry, tier: "unit" },
+  { name: "testV2HookDenialPropagation", run: testV2HookDenialPropagation, tier: "unit" },
+  { name: "testV2PermissionActionsLastWins", run: testV2PermissionActionsLastWins, tier: "unit" },
+  { name: "testV2PermissionNewVsOverwrite", run: testV2PermissionNewVsOverwrite, tier: "unit" },
+  { name: "testV2PermissionOverwriteLastWins", run: testV2PermissionOverwriteLastWins, tier: "unit" },
+  { name: "testV2PermissionOverwritePrecondition", run: testV2PermissionOverwritePrecondition, tier: "unit" },
+  { name: "testV2MinAskProfileZeroApprovals", run: testV2MinAskProfileZeroApprovals, tier: "unit" },
+  { name: "testV2PermissionCommandPrefix", run: testV2PermissionCommandPrefix, tier: "unit" },
+  { name: "testV2PermissionCommandConservative", run: testV2PermissionCommandConservative, tier: "unit" },
+  { name: "testV2PermissionHardGuardComposition", run: testV2PermissionHardGuardComposition, tier: "unit" },
+  { name: "testV2PermissionEmptyCompatibility", run: testV2PermissionEmptyCompatibility, tier: "unit" },
+  { name: "testV2LimitsAndNoProgress", run: testV2LimitsAndNoProgress, tier: "unit" },
+  { name: "testOllamaProvider", run: testOllamaProvider, tier: "unit" },
+  { name: "testModelWaitAndExternalProvider", run: testModelWaitAndExternalProvider, tier: "unit" },
+  { name: "testExternalStateIsolation", run: testExternalStateIsolation, tier: "unit" },
+  { name: "testDenial", run: testDenial, tier: "unit" },
+  { name: "testProtocolParsing", run: testProtocolParsing, tier: "unit" },
+  { name: "testCopilotChoosesFirstAction", run: testCopilotChoosesFirstAction, tier: "unit" },
+  { name: "testModeBoundaries", run: testModeBoundaries, tier: "integration" },
+  { name: "testCopilotEdgeIsolation", run: testCopilotEdgeIsolation, tier: "unit" },
+  { name: "testCopilotVisibleSessionPidLifecycle", run: testCopilotVisibleSessionPidLifecycle, tier: "integration" },
+  { name: "testCopilotResponseCompletion", run: testCopilotResponseCompletion, tier: "unit" },
+  { name: "testCopilotChunkFallback", run: testCopilotChunkFallback, tier: "integration" },
+  { name: "testCopilotLoop", run: testCopilotLoop, tier: "unit" },
+  { name: "testCopilotToolResultBudgets", run: testCopilotToolResultBudgets, tier: "unit" },
+  { name: "testMaxIterationHistory", run: testMaxIterationHistory, tier: "unit" },
+  { name: "testCopilotPlainMode", run: testCopilotPlainMode, tier: "unit" },
+  { name: "testCopilotFenceMode", run: testCopilotFenceMode, tier: "unit" },
+  { name: "testLocalResponseConverter", run: testLocalResponseConverter, tier: "integration" },
+  { name: "testOpenAICompatibleBridge", run: testOpenAICompatibleBridge, tier: "integration" },
+  { name: "testUiContract", run: testUiContract, tier: "unit" },
+  { name: "testDemoRecordingContract", run: testDemoRecordingContract, tier: "unit" }
+];
+function selectedTier() {
+  const index = process.argv.indexOf("--tier");
+  const value = index >= 0 ? process.argv[index + 1] : "all";
+  if (value === "unit" || value === "integration" || value === "all") return value;
+  throw new Error(`unknown smoke tier: ${value}`);
+}
 (async () => {
-  await testAuditLog();
-  await testWeather();
-  await testApprovals();
-  await testTools();
-  await testAgentLoop();
-  await testV2SafeExecutionOrder();
-  await testV2ToolLoopAndEventContract();
-  await testV2OptimizationProjectionAndTelemetry();
-  await testV2HookDenialPropagation();
-  await testV2PermissionActionsLastWins();
-  await testV2PermissionNewVsOverwrite();
-  await testV2PermissionOverwriteLastWins();
-  await testV2PermissionOverwritePrecondition();
-  await testV2MinAskProfileZeroApprovals();
-  await testV2PermissionCommandPrefix();
-  await testV2PermissionCommandConservative();
-  await testV2PermissionHardGuardComposition();
-  await testV2PermissionEmptyCompatibility();
-  await testV2LimitsAndNoProgress();
-  await testOllamaProvider();
-  await testModelWaitAndExternalProvider();
-  await testExternalStateIsolation();
-  await testDenial();
-  await testProtocolParsing();
-  await testCopilotChoosesFirstAction();
-  await testModeBoundaries();
-  await testCopilotEdgeIsolation();
-  await testCopilotVisibleSessionPidLifecycle();
-  await testCopilotResponseCompletion();
-  await testCopilotChunkFallback();
-  await testCopilotLoop();
-  await testCopilotToolResultBudgets();
-  await testMaxIterationHistory();
-  await testCopilotPlainMode();
-  await testCopilotFenceMode();
-  await testLocalResponseConverter();
-  await testOpenAICompatibleBridge();
-  await testUiContract();
-  await testDemoRecordingContract();
+  const tier = selectedTier();
+  const selected = SMOKE_TESTS.filter((entry) => tier === "all" || entry.tier === tier);
+  for (const entry of selected) await entry.run();
+  console.log(`SMOKE_SUMMARY tier=${tier} ran=${selected.length} of=${SMOKE_TESTS.length}`);
   console.log("ALL PASS");
 })().catch((err) => {
   console.error(err);
