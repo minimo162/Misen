@@ -42,6 +42,11 @@ goto collect
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS1%" %WORKSPACE_ARG%%FORWARD%
 set "RC=%ERRORLEVEL%"
 if "%RC%"=="0" exit /b 0
+if "%RC%"=="2" (
+  echo.
+  echo LLM 接続設定を記入して保存してから、もう一度 Misen起動.cmd をダブルクリックしてください。
+  goto fail
+)
 echo.
 echo Misen の起動に失敗しました。終了コード: %RC%
 :fail

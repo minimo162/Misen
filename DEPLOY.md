@@ -82,6 +82,26 @@ scripts\prepare-misen.cmd "\fileserver\CompanyApps\Misen" -CleanDestination
 | `%LOCALAPPDATA%\Misen\state\launch.json` | 直近の配布状態（checking / syncing / integrity_passed / activated / verified / rolled_back / failed） |
 | `%LOCALAPPDATA%\Misen\workspace\` | 既定の作業フォルダー |
 
+## LLM 接続設定（利用者側）
+
+初回のダブルクリックで、次のファイルが無ければテンプレートを作成してメモ帳で開き、起動を止めます。
+
+```text
+%LOCALAPPDATA%Misenconfigsettings.json
+```
+
+| 項目 | 意味 |
+| --- | --- |
+| `brain.provider` | `"openai"`（OpenAI 公式）/ `"anthropic"`（Anthropic 公式）/ `"openai-compatible"`（社内 LLM や llama.cpp などの OpenAI 互換 API） |
+| `brain.model` | モデル名。公式プロバイダーは Pi の公式カタログにある ID だけ |
+| `brain.apiKey` | 文字列で直接書くか、`{ "env": "OPENAI_API_KEY" }` で IT 部門が配布した環境変数を参照する。認証不要な openai-compatible では省略 |
+| `brain.baseUrl` | openai-compatible のときだけ必須（http/https）。公式プロバイダーでは指定不可 |
+| `brain.thinkingLevel` | 省略可（既定 medium） |
+
+記入して保存したあと、もう一度 `Misen起動.cmd` をダブルクリックします。設定に誤りがあると日本語のメッセージで停止します（API キーは表示しません）。管理者が事前に確認する場合は、ローカル版の `appdistsrcuntimesettings-cli.js check --settings <path>` を同梱 Node.js で実行してください。
+
+API キーは共有フォルダー・manifest・ログ・画面・セッション履歴に出ません。共有フォルダーには利用者の設定を置かないでください。
+
 ## 起動入口の自動テスト
 
 一時フォルダーを共有フォルダーに見立て、初回起動・2回目起動・版更新後の起動・改ざんされた共有の拒否・ドラッグ＆ドロップ・`-SyncOnly` を確認します。

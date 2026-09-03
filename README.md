@@ -35,6 +35,16 @@ apps\coding-agent\       coding-agent 本体
 
 失敗時は日本語のメッセージを表示して停止します。直近の配布状態は `%LOCALAPPDATA%\Misen\state\launch.json` に記録されます（秘密情報は含みません）。
 
+## LLM 接続設定（利用者ごと）
+
+Enterprise Misen が接続する LLM（プロバイダー種別・モデル名・API キー・OpenAI 互換の base URL）は、利用者ごとの次のファイルで決まります。共有フォルダーや配布物には含まれません。
+
+```text
+%LOCALAPPDATA%Misenconfigsettings.json
+```
+
+初回の `Misen起動.cmd` で、このファイルが無ければ日本語コメント付きのテンプレートを作成してメモ帳で開き、起動を止めます。記入して保存し、もう一度ダブルクリックしてください。設定項目と検証規則は `apps/enterprise-misen/docs/brain-profile.md` を参照してください。API キーはログ・manifest・共有フォルダー・画面には出ません。
+
 ## coding-agent の起動
 
 `launcher\コーディングエージェント起動.cmd` をダブルクリックすると、既定の workspace として `%USERPROFILE%\Documents\エージェント作業場` を作成・使用します。別の既存フォルダーを workspace にする場合は、そのフォルダーをドラッグ＆ドロップします。起動時は `launcher\launch-coding-agent.cmd` が共有 `apps\coding-agent` の版を確認し、初回または更新時にローカルの版別領域へ取得して SHA-256 を検証してから起動します。
