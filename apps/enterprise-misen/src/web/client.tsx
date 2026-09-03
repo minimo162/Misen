@@ -12,6 +12,7 @@ import {
 import { MarkdownTextPrimitive } from '@assistant-ui/react-markdown'
 import './client.css'
 import { processEventsForRun, runIdFromMessage, shouldShowThinkingPlaceholder, type ToolEvent } from './process.js'
+import { eventAppliesToActiveSession } from './session-events.js'
 
 type UiMessage = {
   id: string
@@ -315,7 +316,7 @@ function MisenApp() {
   }, [refreshHistory])
 
   const handleEvent = useCallback((event: ServerEvent) => {
-    if ('sessionId' in event && event.sessionId && activeSessionIdRef.current && event.sessionId !== activeSessionIdRef.current) return
+    if (!eventAppliesToActiveSession(event, activeSessionIdRef.current)) return
     if (event.type === 'state') {
       if (event.state.runId) runIdRef.current = event.state.runId
       setState({ status: event.state.status, runId: event.state.runId, sessionId: event.state.sessionId, artifacts: event.state.artifacts, error: event.state.error })

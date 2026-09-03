@@ -15,9 +15,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { nodeRuntimeContract, nodeRuntimeInputManifest } from './node-runtime-contract.mjs'
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const preparedRuntimeSourceSha = '352920f8262f371946f39369979538ea25c5efb7'
-const thinMisenBehaviorBaselineSha = 'f3b772f7765206f75f7296e436d89c6a771b690a'
-const productBehaviorBaselineSha = preparedRuntimeSourceSha
 const shaPattern = /^[0-9a-f]{40}$/
 const allowedDistRoots = Object.freeze([
   ['src'],
@@ -101,41 +98,13 @@ async function ensureCleanTarget(target) {
   }
 }
 
-function git(args) {
-  return execFileSync('git', args, { cwd: appRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
-}
-
-function quietGitDiff(args) {
-  try { execFileSync('git', ['diff', '--quiet', ...args], { cwd: appRoot, stdio: 'ignore' }) }
-  catch { throw new Error('packaging repository provenance mismatch') }
-}
-
-function requireGitAncestor(ancestor, descendant) {
-  try { execFileSync('git', ['merge-base', '--is-ancestor', ancestor, descendant], { cwd: appRoot, stdio: 'ignore' }) }
-  catch { throw new Error(`required Git ancestry missing: ${ancestor} -> ${descendant}`) }
-}
-
-function verifyPackagingProvenance(sourceSha, packagingSha) {
-  if (sourceSha !== preparedRuntimeSourceSha) throw new Error(`--source-sha must equal frozen prepared-runtime source ${preparedRuntimeSourceSha}`)
-  if (git(['rev-parse', 'HEAD']) !== packagingSha) throw new Error('--packaging-sha must equal current HEAD')
-  const protectedPaths = ['apps/enterprise-misen/src', 'apps/enterprise-misen/acceptance', 'apps/enterprise-misen/demo', 'apps/enterprise-misen/package-lock.json']
-  const packagingPaths = [
-    'apps/enterprise-misen/package.json',
-    'apps/enterprise-misen/docs/prepared-runtime.md',
-    'apps/enterprise-misen/scripts/acquire-node-runtime.mjs',
-    'apps/enterprise-misen/scripts/generate-sbom.mjs',
-    'apps/enterprise-misen/scripts/node-runtime-contract.mjs',
-    'apps/enterprise-misen/scripts/prepare-runtime.d.mts',
-    'apps/enterprise-misen/scripts/prepare-runtime.mjs',
-    'apps/enterprise-misen/scripts/verify-prepared-runtime.mjs',
-    'apps/enterprise-misen/test/prepared-runtime.test.ts',
-  ]
-  requireGitAncestor(thinMisenBehaviorBaselineSha, sourceSha)
-  requireGitAncestor(sourceSha, packagingSha)
-  quietGitDiff([sourceSha, 'HEAD', '--', ...protectedPaths])
-  quietGitDiff(['HEAD', '--', ...protectedPaths, ...packagingPaths])
-  quietGitDiff(['--cached', 'HEAD', '--', ...protectedPaths, ...packagingPaths])
-  if (git(['ls-files', '--others', '--exclude-standard', '--', ...protectedPaths, ...packagingPaths])) throw new Error('untracked production or packaging files reject provenance')
+function informationalBuildGitSha() {
+  try {
+    const value = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: appRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+    return shaPattern.test(value) ? value : null
+  } catch {
+    return null
+  }
 }
 
 async function verifiedNodeRuntimeInput(nodeRuntime) {
@@ -274,13 +243,10 @@ async function writeHashes(target) {
   await writeFile(join(target, 'SHA256SUMS.txt'), `${lines.join('\n')}\n`, 'utf8')
 }
 
-export async function prepareRuntime({ output, sourceSha, packagingSha, nodeRuntime }) {
+export async function prepareRuntime({ output, nodeRuntime }) {
   const target = resolve(output)
-  if (!shaPattern.test(sourceSha)) throw new Error('--source-sha must be a lowercase 40-character Git SHA')
-  if (!shaPattern.test(packagingSha)) throw new Error('--packaging-sha must be a lowercase 40-character Git SHA')
   if (!nodeRuntime) throw new Error('--node-runtime is required')
   await ensureCleanTarget(target)
-  verifyPackagingProvenance(sourceSha, packagingSha)
   await mkdir(target, { recursive: true })
 
   try {
@@ -311,15 +277,15 @@ export async function prepareRuntime({ output, sourceSha, packagingSha, nodeRunt
     await writeFile(join(target, 'run.cmd'), launcher, 'utf8')
 
     const lockHash = await sha256(join(appDirectory, 'dependency-lock.json'))
+    const applicationVersion = JSON.parse(await readFile(join(appDirectory, 'package.json'), 'utf8')).version
     const productionDependencyPackageCount = await countInstalledPackages(join(appDirectory, 'node_modules'))
     const preliminaryInventory = await buildInventory(target)
     assertRuntimeBoundary(preliminaryInventory)
     const manifest = {
-      schemaVersion: 3,
-      sourceSha,
-      thinMisenBehaviorBaselineSha,
-      productBehaviorBaselineSha,
-      packagingSha,
+      schemaVersion: 4,
+      applicationVersion,
+      buildGitSha: informationalBuildGitSha(),
+      gitMetadataPolicy: 'informational-only',
       node: {
         version: nodeRuntimeContract.version,
         releaseName: nodeRuntimeContract.releaseName,
@@ -392,7 +358,7 @@ export async function prepareRuntime({ output, sourceSha, packagingSha, nodeRunt
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = parseArguments(process.argv.slice(2))
-  if (!args.output || !args['source-sha'] || !args['packaging-sha'] || !args['node-runtime']) throw new Error('usage: prepare-runtime --output <clean-directory> --source-sha <sha> --packaging-sha <sha> --node-runtime <verified-node-input>')
-  const result = await prepareRuntime({ output: args.output, sourceSha: args['source-sha'], packagingSha: args['packaging-sha'], nodeRuntime: args['node-runtime'] })
+  if (!args.output || !args['node-runtime']) throw new Error('usage: prepare-runtime --output <clean-directory> --node-runtime <verified-node-input>')
+  const result = await prepareRuntime({ output: args.output, nodeRuntime: args['node-runtime'] })
   console.log(JSON.stringify(result.manifest, null, 2))
 }

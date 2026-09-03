@@ -6,16 +6,14 @@ runtime used only by Misen. Startup does not modify `PATH`, install system-wide
 software, download or update a runtime, build TypeScript, or invoke a PowerShell
 fallback.
 
-## Frozen product and runtime inputs
+## Product metadata and pinned runtime input
 
-The current local-history and free-form bounded Agent source and
-production-behavior baseline are:
-
-`352920f8262f371946f39369979538ea25c5efb7`
-
-The earlier Thin Misen behavior lineage remains recorded as:
-
-`f3b772f7765206f75f7296e436d89c6a771b690a`
+Prepared-runtime integrity does not depend on Git commit ancestry. The manifest
+records the application version and, when Git is available on the packaging
+host, the build-time Git SHA as informational metadata only. The SHA is not a
+source baseline, is not compared with another commit, and cannot allow or deny
+package generation. Package contents remain identified by the complete
+`SHA256SUMS.txt`, inventory, dependency-lock hash, SBOM, and runtime hashes.
 
 The package bundles exactly the official Node.js v24.20.0 LTS (Krypton) Windows
 x64 runtime input:
@@ -57,20 +55,19 @@ with `--archive` and `--shasums`; the same exact hashes are still required.
 
 ## Package assembly
 
-Build from a clean packaging commit whose protected production paths remain
-byte-identical to the frozen free-form source:
+Build the current application checkout with an explicitly verified Node input:
 
 ```powershell
 npm run prepare-runtime -- --output C:\staging\misen-enterprise-self-contained `
-  --source-sha 352920f8262f371946f39369979538ea25c5efb7 `
-  --packaging-sha <40-character-packaging-commit> `
   --node-runtime C:\staging\misen-node-v24.20.0
 ```
 
 The output directory must be absent or empty. Packaging fails closed and removes
-an incomplete output. Manifest schema v3 records the product source, behavior
-baseline, packaging commit, Node release/archive/executable/license provenance,
-and `resolution: bundled-only` / `externalRuntimeRequired: false`.
+an incomplete output. Manifest schema v4 records the application version,
+informational build Git SHA, Node release/archive/executable/license provenance,
+and `resolution: bundled-only` / `externalRuntimeRequired: false`. Git ancestry,
+hard-pinned product commits, and post-squash repin workflows are not part of the
+Misen packaging authority.
 
 The package contains only `runtime/node/node.exe` and
 `runtime/node/LICENSE` from the official Node ZIP. It does not distribute npm,
