@@ -99,3 +99,15 @@ not become execution authority.
 
 Corporate-device/EDR/application-control certification remains the separate
 #74 human step. Historical packages and transport identities remain immutable.
+
+## Distribution through the read-only share
+
+The prepared runtime is not handed to users directly. `scripts/prepare-misen.cmd`
+at the repository root runs `prepare-runtime` and `verify:prepared-runtime`, then
+`scripts/New-Misen.ps1` publishes `app/`, `runtime/`, `workspace/`, the launcher and a
+distribution `manifest.json` (version, publish id, SHA-256 of every file) to the
+share. Users double-click `Misen起動.cmd`; `launcher/launch.ps1` copies and verifies
+the files into `%LOCALAPPDATA%\Misen\versions\<version>` before starting the bundled
+Node.js. See `DEPLOY.md` for the operator and user flows and
+`launcher/test/launch.test.mjs` for the automated first-run / second-run / update /
+tamper checks.

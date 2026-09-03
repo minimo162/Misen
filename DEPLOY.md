@@ -1,8 +1,24 @@
 # 社内PCへの配布
 
+Enterprise Misen を共有フォルダーへ公開し、利用者が `Misen起動.cmd` だけで使えるようにする手順です。coding-agent の配布は末尾の「coding-agent の配布」を参照してください。
+
+## 共有フォルダーのレイアウト
+
+```text
+\fileserver\CompanyApps\Misen\
+  Misen起動.cmd          ← 利用者がダブルクリックする唯一のファイル
+  manifest.json          ← 版数・公開ID・各ファイルの SHA-256（misen-distribution/1）
+  app\                   ← Enterprise Misen（dist, node_modules, package.json, dependency-lock.json）
+  runtime\               ← 同梱 Node.js（runtime\node）と OfficeCLI（runtime\officecli）
+  workspace\             ← 作業フォルダーの雛形（初回起動時に利用者のローカルへコピー）
+  launcher\              ← launch.ps1 と、監査用の prepared-runtime\manifest.json / SHA256SUMS.txt
+```
+
+共有フォルダーには APIキーなどの秘密情報を置きません。利用者には読み取り権限だけを付与してください。
+
 ## 管理者側
 
-1. 管理者PCの任意の作業フォルダーでリポジトリをcloneします。保存先は固定ではありません。
+1. 管理者PCの任意の作業フォルダーでリポジトリを clone します。
 
 ```cmd
 cd C:\任意の作業フォルダー
@@ -10,79 +26,94 @@ git clone https://github.com/minimo162/Misen.git
 cd Misen
 ```
 
-2. 共有フォルダーへ公開します。clone先の `scripts\prepare-misen.cmd` を実行してください。依存関係の構築、型チェック、ビルド、スモークテスト、Node.jsランタイム準備、公開をまとめて行います。`-Version` を省略すると `apps\coding-agent\manifest.json` の版数を使います。
+2. `scripts\prepare-misen.cmd` を実行します。`npm ci` → unit 層テスト → Node.js / OfficeCLI ランタイムの取得と SHA-256 検証 → 自己完結ランタイムの生成と検証 → 共有フォルダーへの公開、をまとめて行います。作業領域は `%LOCALAPPDATA%\Misen\staging` です。
 
-コマンドプロンプトから実行する場合:
-
-```cmd
-scripts\prepare-misen.cmd "\\fileserver\CompanyApps\Misen" -CleanDestination
-```
-
-エクスプローラーから `scripts\prepare-misen.cmd` をダブルクリックすることもできます。共有フォルダーのUNCパスを入力してEnterを押してください。ダブルクリック時は `-CleanDestination` が自動で付くため、古い配布物を削除してから公開します。
-
-版数を明示する場合は、コマンドプロンプトから次のように指定できます。
+コマンドプロンプトから:
 
 ```cmd
-scripts\prepare-misen.cmd "\\fileserver\CompanyApps\Misen" -Version 0.10.8 -CleanDestination
+scripts\prepare-misen.cmd "\fileserver\CompanyApps\Misen" -CleanDestination
 ```
 
-共有先には、`launcher`、`apps\coding-agent`、`runtime\node-v...\node.exe`、`start-coding-agent.cmd` だけが配置されます。利用者には共有フォルダーの読み取り権限だけを付与してください。
+エクスプローラーから `scripts\prepare-misen.cmd` をダブルクリックし、共有フォルダーの UNC パスを入力して Enter を押しても同じです。ダブルクリック時は `-CleanDestination` が自動で付き、古い配布物を削除してから公開します。
+
+主なオプション（`Prepare-Misen.ps1` に渡されます）:
+
+| オプション | 意味 |
+| --- | --- |
+| `-Version 0.3.0` | 公開版数を明示する。省略時は `apps\enterprise-misen\package.json` の version |
+| `-NodeRuntime <dir>` / `-OfficeCliRuntime <dir>` | 取得済み（検証済み）のランタイム入力フォルダーを使う。省略時は staging へ取得 |
+| `-SkipNpmInstall` / `-SkipTests` | 依存関係の構築、unit テストを省略 |
+| `-Url http://127.0.0.1:8787/` | 利用者側で開くループバック URL |
+
+公開のたびに新しい公開ID（GUID）が発行され、`manifest.json` に全ファイルの SHA-256 が記録されます。`manifest.json` は最後に書き込まれるため、コピー途中の共有フォルダーを利用者が開いても古い版か新しい版のどちらかに整合します。
 
 ## バージョン更新時（管理者側）
-
-clone済みの同じフォルダーで、次の操作を行います。
 
 ```cmd
 cd C:\任意の作業フォルダー\Misen
 git pull
+scripts\prepare-misen.cmd "\fileserver\CompanyApps\Misen" -CleanDestination
 ```
 
-その後、`scripts\prepare-misen.cmd` をダブルクリックし、同じ共有フォルダーのUNCパスを入力します。コマンドプロンプトからなら次の1行です。
-
-```cmd
-scripts\prepare-misen.cmd "\\fileserver\CompanyApps\Misen" -CleanDestination
-```
-
-`manifest.json` の版数が共有先へ反映されるため、利用者は初回と同じ `start-coding-agent.cmd` をダブルクリックするだけで更新を取得します。
+版数を変えなくても公開IDが変わるため、利用者は次回のダブルクリックで自動的に更新を取得します。
 
 ## 利用者側
 
-利用者が使うファイルは、初回も更新後も同じ `start-coding-agent.cmd` です。
+利用者が使うファイルは、初回も更新後も同じ `Misen起動.cmd` です。
 
 ```text
-\\fileserver\CompanyApps\Misen\start-coding-agent.cmd
+\fileserver\CompanyApps\Misen\Misen起動.cmd
 ```
 
-このファイルをダブルクリックすると、毎回次の処理を行います。
+ダブルクリックすると毎回次の処理を行います。
 
-1. 共有側の `manifest.json` とローカル版数を比較
-2. 初回または版数が違う場合、アプリ本体を `%LOCALAPPDATA%\CompanyApps` へ同期
-3. Node.jsランタイムが無ければ同じ場所へ同期
-4. ローカルに同期したWebサーバーを起動し、ブラウザーを開く
+1. 共有側 `manifest.json` の版数・公開IDと `%LOCALAPPDATA%\Misen\current.json` を比較
+2. 初回、または版数か公開IDが違う場合だけ `app\` `runtime\` `workspace\` を `%LOCALAPPDATA%\Misen\versions\<version>\` へコピーし、全ファイルの SHA-256 を検証してから `current` を切り替え（失敗時は前回正常版へ戻して停止）
+3. 検証済みローカル版の `runtime\node\node.exe` でサーバーを起動し、ブラウザーで `http://127.0.0.1:8787/` を開く。既に起動中ならブラウザーだけを開く
 
-作業フォルダーを変える場合は、次のように引数を渡します。省略時は `Documents` を使います。
+作業フォルダーの既定は `%LOCALAPPDATA%\Misen\workspace`（初回に共有側 `workspace\` の雛形をコピー）です。別のフォルダーを使う場合は、そのフォルダーを `Misen起動.cmd` へドラッグ＆ドロップします。
 
-```text
-start-coding-agent.cmd --workspace "C:\Users\me\Documents\my-project"
+利用者側の書き込み先は `%LOCALAPPDATA%\Misen` 配下と作業フォルダーだけです。
+
+| パス | 内容 |
+| --- | --- |
+| `%LOCALAPPDATA%\Misen\versions\<version>\` | 検証済みの app / runtime / workspace 雛形（前回版を 1 つだけ残す） |
+| `%LOCALAPPDATA%\Misen\current.json` | 有効な版と公開ID |
+| `%LOCALAPPDATA%\Misen\state\launch.json` | 直近の配布状態（checking / syncing / integrity_passed / activated / verified / rolled_back / failed） |
+| `%LOCALAPPDATA%\Misen\workspace\` | 既定の作業フォルダー |
+
+## 起動入口の自動テスト
+
+一時フォルダーを共有フォルダーに見立て、初回起動・2回目起動・版更新後の起動・改ざんされた共有の拒否・ドラッグ＆ドロップ・`-SyncOnly` を確認します。
+
+```bash
+node --test launcher/test/launch.test.mjs
 ```
 
-## Edge接続の分離
+実機の共有フォルダーで事前確認する場合は、`Misen起動.cmd -SyncOnly` を実行すると取得と検証だけを行って終了します。
 
-coding-agentは通常、空きポートと専用Edgeプロファイルを自動で割り当てます。既に動作中の別アプリのEdgeや固定CDPポートへは接続しません。`copilot.reuseExistingEdge` を `true` にした場合だけ、指定した `copilot.cdpPort` の既存Edgeへ明示的に接続します。
-
-## 天気取得
-
-天気・気温の質問は、地域を設定した `weather.defaultLocation`（例: `広島市`）を使ってOpen-Meteoから取得します。既定地域を使わない場合は質問に市区町村名を含めてください。
-## 更新
-
-管理者が新しい版を公開するときは、`manifest.json` の版数を上げてから、管理者側の `scripts\prepare-misen.cmd` をもう一度実行してください。同じ版数のままだと利用者は更新を取得しません。利用者は同じ `start-coding-agent.cmd` を使い続けます。
-
-## 前提
-
-- 管理者PC: Git、Node.js/npm、Windows PowerShell 5.1
-- 利用者PC: Windows、Microsoft Edge とM365 Copilotへのサインイン
-- 利用者PC: 共有フォルダーへの読み取り権限
-- 利用者側の管理者権限は不要（ローカル同期先は `%LOCALAPPDATA%`）
 ## テスト（管理者側）
 
 公開前に各アプリで `npm test`（unit 層、30 秒以内）を実行してください。OfficeCLI を使う enterprise-misen の integration 層は `MISEN_OFFICECLI_PATH` を設定してから `npm run test:integration` で実行します。APIキーが必要な live 層は手動実行のみです。層の詳細は `README.md` の「テスト」を参照してください。
+
+## 前提
+
+- 管理者PC: Git、Node.js/npm、Windows PowerShell 5.1、ランタイム取得のためのインターネット接続（取得済み入力フォルダーを渡す場合は不要）
+- 利用者PC: Windows、共有フォルダーへの読み取り権限。Node.js や Office のインストールは不要
+- 利用者側の管理者権限は不要（ローカル同期先は `%LOCALAPPDATA%\Misen`）
+
+## coding-agent の配布
+
+coding-agent は従来どおり `scripts\prepare-coding-agent.cmd`（`Prepare-CodingAgent.ps1` / `New-CodingAgent.ps1`）で公開します。共有先には `launcher\launch-coding-agent.*`、`apps\coding-agent`、`runtime\node-v...\node.exe`、`start-coding-agent.cmd` が配置され、利用者は `start-coding-agent.cmd` を実行します。ローカル同期先は `%LOCALAPPDATA%\CompanyApps` です。
+
+```cmd
+scripts\prepare-coding-agent.cmd "\fileserver\CompanyApps\CodingAgent" -CleanDestination
+```
+
+### Edge接続の分離
+
+coding-agentは通常、空きポートと専用Edgeプロファイルを自動で割り当てます。既に動作中の別アプリのEdgeや固定CDPポートへは接続しません。`copilot.reuseExistingEdge` を `true` にした場合だけ、指定した `copilot.cdpPort` の既存Edgeへ明示的に接続します。
+
+### 天気取得
+
+天気・気温の質問は、地域を設定した `weather.defaultLocation`（例: `広島市`）を使ってOpen-Meteoから取得します。既定地域を使わない場合は質問に市区町村名を含めてください。

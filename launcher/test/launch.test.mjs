@@ -1,0 +1,234 @@
+// Issue #93 A: automated launcher test.
+//
+// A temporary folder plays the role of the read-only share, another one plays %LOCALAPPDATA%.
+// A fake prepared runtime (stub server.js, the current node.exe as the bundled runtime, a dummy OfficeCLI)
+// is published with scripts/New-Misen.ps1, then Misen起動.cmd is double-click-simulated with cmd.exe:
+//   1. first launch        -> copy + SHA-256 verification + activation + server start
+//   2. second launch       -> verification only, no copy, server start
+//   3. share version bump  -> automatic update on the next launch
+//   4. tampered share file -> refused, previous version kept
+// Run: node --test launcher/test   (Windows only; needs powershell.exe and cmd.exe)
+import test from 'node:test'
+import { strict as assert } from 'node:assert'
+import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:net'
+import { tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
+const windows = process.platform === 'win32'
+const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+const cmdExe = process.env.ComSpec ?? 'cmd.exe'
+
+function run(file, args, { cwd, env } = {}) {
+  return new Promise((resolveRun) => {
+    // cmd.exe receives its command line verbatim; Node's default quoting would wrap the already quoted `/c` payload again.
+    const child = spawn(file, args, { cwd, env: { ...process.env, ...env }, windowsHide: true, windowsVerbatimArguments: file === cmdExe, stdio: ['ignore', 'pipe', 'pipe'] })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.setEncoding('utf8').on('data', (chunk) => { stdout += chunk })
+    child.stderr.setEncoding('utf8').on('data', (chunk) => { stderr += chunk })
+    child.on('error', (error) => resolveRun({ code: -1, stdout, stderr: `${stderr}${error.message}` }))
+    child.on('close', (code) => resolveRun({ code, stdout, stderr }))
+  })
+}
+
+async function freePort() {
+  return new Promise((resolvePort, reject) => {
+    const server = createServer()
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address()
+      server.close(() => resolvePort(port))
+    })
+  })
+}
+
+const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
+
+// The stub replaces app/dist/src/web/server.js. It records how it was started, listens on the manifest
+// port, and exits 1.5 s after the launcher's readiness probe first connects so the launcher returns.
+function stubServer(version) {
+  return `
+import { writeFileSync } from 'node:fs'
+import { createServer } from 'node:net'
+import { join } from 'node:path'
+const workspace = process.argv[2]
+const port = Number(process.env.MISEN_TEST_PORT)
+const marker = process.env.MISEN_TEST_MARKER
+const record = { version: ${JSON.stringify(version)}, workspace, cwd: process.cwd(), execPath: process.execPath, officeCli: process.env.MISEN_OFFICECLI_PATH ?? null, noAutoResident: process.env.OFFICECLI_NO_AUTO_RESIDENT ?? null, argv: process.argv.slice(1) }
+let exiting = false
+const server = createServer((socket) => { socket.destroy(); if (!exiting) { exiting = true; setTimeout(() => process.exit(0), 1500) } })
+server.listen(port, '127.0.0.1', () => { writeFileSync(marker, JSON.stringify(record)) })
+setTimeout(() => process.exit(3), 20000)
+`
+}
+
+async function writePreparedRuntime(root, version, { serverSource } = {}) {
+  await rm(root, { recursive: true, force: true })
+  await mkdir(join(root, 'app', 'dist', 'src', 'web'), { recursive: true })
+  await mkdir(join(root, 'app', 'node_modules', 'example-dependency'), { recursive: true })
+  await mkdir(join(root, 'runtime', 'node'), { recursive: true })
+  await mkdir(join(root, 'runtime', 'officecli'), { recursive: true })
+  await mkdir(join(root, 'workspace', 'output'), { recursive: true })
+  await writeFile(join(root, 'app', 'dist', 'src', 'web', 'server.js'), serverSource ?? stubServer(version), 'utf8')
+  await writeFile(join(root, 'app', 'package.json'), JSON.stringify({ name: '@misen/enterprise-prepared-runtime', version, type: 'module' }), 'utf8')
+  await writeFile(join(root, 'app', 'dependency-lock.json'), '{}\n', 'utf8')
+  await writeFile(join(root, 'app', 'node_modules', 'example-dependency', 'package.json'), JSON.stringify({ name: 'example-dependency', version: '1.0.0' }), 'utf8')
+  await copyFile(process.execPath, join(root, 'runtime', 'node', 'node.exe'))
+  await writeFile(join(root, 'runtime', 'node', 'LICENSE'), 'node license\n', 'utf8')
+  await writeFile(join(root, 'runtime', 'officecli', 'officecli.exe'), 'not a real officecli\n', 'utf8')
+  await writeFile(join(root, 'runtime', 'officecli', 'LICENSE'), 'officecli license\n', 'utf8')
+  await writeFile(join(root, 'runtime', 'officecli', 'NOTICE'), 'officecli notice\n', 'utf8')
+  await writeFile(join(root, 'workspace', 'AGENTS.md'), '# 作業フォルダーの雛形\n', 'utf8')
+  await writeFile(join(root, 'run.cmd'), '@echo off\r\n', 'utf8')
+  await writeFile(join(root, 'SHA256SUMS.txt'), '', 'utf8')
+  await writeFile(join(root, 'manifest.json'), JSON.stringify({ schemaVersion: 5, applicationVersion: version, buildGitSha: null, node: { version: '24.20.0' }, officeCli: { version: '1.0.147' } }, null, 2), 'utf8')
+}
+
+async function publish(preparedRuntime, share, { version, url, clean = false } = {}) {
+  const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', join(repoRoot, 'scripts', 'New-Misen.ps1'), '-Destination', share, '-PreparedRuntime', preparedRuntime, '-SourceRoot', repoRoot, '-Url', url]
+  if (version) args.push('-Version', version)
+  if (clean) args.push('-CleanDestination')
+  const result = await run(powershell, args, { cwd: repoRoot })
+  assert.equal(result.code, 0, `publish failed:\n${result.stdout}\n${result.stderr}`)
+  return JSON.parse(await readFile(join(share, 'manifest.json'), 'utf8'))
+}
+
+async function launch(share, localAppData, { port, marker, syncOnly = false, extraArgs = [] } = {}) {
+  await rm(marker, { force: true })
+  const args = ['/d', '/s', '/c', `""${join(share, 'Misen起動.cmd')}" -NoBrowser ${syncOnly ? '-SyncOnly ' : ''}${extraArgs.join(' ')}"`]
+  const result = await run(cmdExe, args, { cwd: share, env: { LOCALAPPDATA: localAppData, MISEN_NO_PAUSE: '1', MISEN_TEST_PORT: String(port), MISEN_TEST_MARKER: marker } })
+  let record = null
+  try { record = JSON.parse(await readFile(marker, 'utf8')) } catch {}
+  const state = JSON.parse(await readFile(join(localAppData, 'Misen', 'state', 'launch.json'), 'utf8').catch(() => 'null'))
+  const current = JSON.parse(await readFile(join(localAppData, 'Misen', 'current.json'), 'utf8').catch(() => 'null'))
+  return { ...result, record, state, current }
+}
+
+test('Misen起動.cmd: first launch, second launch, version update, and tampered share', { skip: !windows && 'Windows launcher test' }, async () => {
+  const scratch = await mkdtemp(join(tmpdir(), 'misen-launcher-test-'))
+  const preparedRuntime = join(scratch, 'prepared')
+  const share = join(scratch, 'share')
+  const localAppData = join(scratch, 'LocalAppData')
+  const marker = join(scratch, 'server-start.json')
+  const port = await freePort()
+  const url = `http://127.0.0.1:${port}/`
+  try {
+    // --- publish v1.0.0 to the "share" -------------------------------------------------------------
+    await writePreparedRuntime(preparedRuntime, '1.0.0')
+    const manifest1 = await publish(preparedRuntime, share, { url })
+    assert.equal(manifest1.schema, 'misen-distribution/1')
+    assert.equal(manifest1.version, '1.0.0')
+    assert.equal(manifest1.entry, 'app/dist/src/web/server.js')
+    assert.equal(manifest1.files['runtime/node/node.exe'], sha256(await readFile(process.execPath)))
+    assert.equal(manifest1.files['app/dist/src/web/server.js'], sha256(await readFile(join(share, 'app', 'dist', 'src', 'web', 'server.js'))))
+    assert.ok(manifest1.files['launcher/launch.ps1'])
+    assert.ok(manifest1.files['workspace/AGENTS.md'])
+    assert.ok(!JSON.stringify(manifest1).includes('OPENAI'), 'manifest never carries credentials')
+    for (const name of ['Misen起動.cmd', 'manifest.json', 'app', 'runtime', 'workspace', 'launcher']) await stat(join(share, name))
+
+    // Make the share read-only from here on: every launch must succeed without writing to it.
+    const shareSnapshot = await snapshotTree(share)
+
+    // --- 1. first launch: download + verify + activate + start ------------------------------------
+    const first = await launch(share, localAppData, { port, marker })
+    assert.equal(first.code, 0, `first launch failed:\n${first.stdout}\n${first.stderr}`)
+    assert.match(first.stdout, /SYNC_RESULT phase=activated version=1\.0\.0/u)
+    assert.equal(first.state.phase, 'activated')
+    assert.equal(first.state.verified, true)
+    assert.equal(first.current.version, '1.0.0')
+    assert.equal(first.current.publishId, manifest1.publishId)
+    const versionDir = join(localAppData, 'Misen', 'versions', '1.0.0')
+    await stat(join(versionDir, 'app', 'dist', 'src', 'web', 'server.js'))
+    await stat(join(versionDir, 'runtime', 'node', 'node.exe'))
+    assert.ok(first.record, 'stub server was started')
+    assert.equal(first.record.version, '1.0.0')
+    assert.equal(first.record.execPath.toLowerCase(), join(versionDir, 'runtime', 'node', 'node.exe').toLowerCase(), 'server runs from the verified local copy, not the share')
+    assert.equal(first.record.officeCli.toLowerCase(), join(versionDir, 'runtime', 'officecli', 'officecli.exe').toLowerCase())
+    assert.equal(first.record.noAutoResident, '1')
+    assert.equal(first.record.workspace.toLowerCase(), join(localAppData, 'Misen', 'workspace').toLowerCase())
+    assert.equal(await readFile(join(localAppData, 'Misen', 'workspace', 'AGENTS.md'), 'utf8'), '# 作業フォルダーの雛形\n', 'default workspace seeded from the share template')
+    assert.deepEqual(await snapshotTree(share), shareSnapshot, 'share is untouched')
+
+    // --- 2. second launch: verification only, no copy -----------------------------------------------
+    const sentinel = join(versionDir, 'app', 'local-sentinel.txt')
+    await writeFile(sentinel, 'survives a verification-only launch', 'utf8')
+    const second = await launch(share, localAppData, { port, marker })
+    assert.equal(second.code, 0, `second launch failed:\n${second.stdout}\n${second.stderr}`)
+    assert.match(second.stdout, /SYNC_RESULT phase=verified version=1\.0\.0/u)
+    assert.equal(second.state.phase, 'verified')
+    assert.equal(second.record.version, '1.0.0')
+    await stat(sentinel)
+    assert.deepEqual(await snapshotTree(share), shareSnapshot, 'share is untouched')
+
+    // --- explicit workspace by drag & drop (first argument is a folder) ----------------------------
+    const dropped = join(scratch, 'dropped workspace 日本語')
+    await mkdir(dropped, { recursive: true })
+    const droppedResult = await run(cmdExe, ['/d', '/s', '/c', `""${join(share, 'Misen起動.cmd')}" "${dropped}" -NoBrowser"`],{ cwd: share, env: { LOCALAPPDATA: localAppData, MISEN_NO_PAUSE: '1', MISEN_TEST_PORT: String(port), MISEN_TEST_MARKER: marker } })
+    assert.equal(droppedResult.code, 0, `dropped-folder launch failed:\n${droppedResult.stdout}\n${droppedResult.stderr}`)
+    const droppedRecord = JSON.parse(await readFile(marker, 'utf8'))
+    assert.equal(droppedRecord.workspace.toLowerCase(), dropped.toLowerCase())
+    await stat(join(dropped, 'output'))
+
+    // --- 3. share version bump: next launch updates automatically -----------------------------------
+    await writePreparedRuntime(preparedRuntime, '1.1.0')
+    const manifest2 = await publish(preparedRuntime, share, { url, clean: true })
+    assert.equal(manifest2.version, '1.1.0')
+    assert.notEqual(manifest2.publishId, manifest1.publishId)
+    const third = await launch(share, localAppData, { port, marker })
+    assert.equal(third.code, 0, `update launch failed:\n${third.stdout}\n${third.stderr}`)
+    assert.match(third.stdout, /SYNC_RESULT phase=activated version=1\.1\.0/u)
+    assert.equal(third.current.version, '1.1.0')
+    assert.equal(third.current.previousVersion, '1.0.0')
+    assert.equal(third.record.version, '1.1.0')
+    await stat(join(localAppData, 'Misen', 'versions', '1.1.0', 'app', 'dist', 'src', 'web', 'server.js'))
+    await stat(versionDir) // previous version is retained for rollback
+
+    // --- 4. tampered share: refused, previous version kept ------------------------------------------
+    await writePreparedRuntime(preparedRuntime, '1.2.0')
+    await publish(preparedRuntime, share, { url, clean: true })
+    await writeFile(join(share, 'app', 'dist', 'src', 'web', 'server.js'), stubServer('1.2.0-tampered'), 'utf8')
+    const tampered = await launch(share, localAppData, { port, marker })
+    assert.notEqual(tampered.code, 0, 'tampered share must not launch')
+    assert.match(`${tampered.stdout}${tampered.stderr}`, /SHA-256/u)
+    assert.equal(tampered.record, null, 'server was not started from the tampered copy')
+    assert.equal(tampered.state.phase, 'rolled_back')
+    assert.equal(tampered.current.version, '1.1.0')
+    const remaining = await readdirSafe(join(localAppData, 'Misen', 'versions'))
+    assert.ok(!remaining.some((name) => name.startsWith('.staging-')), 'no staging directory left behind')
+    assert.ok(!remaining.includes('1.2.0'))
+
+    // --- sync-only mode used by administrators to pre-verify ----------------------------------------
+    await writePreparedRuntime(preparedRuntime, '1.2.0')
+    await publish(preparedRuntime, share, { url, clean: true })
+    const syncOnly = await launch(share, localAppData, { port, marker, syncOnly: true })
+    assert.equal(syncOnly.code, 0, `sync-only failed:\n${syncOnly.stdout}\n${syncOnly.stderr}`)
+    assert.match(syncOnly.stdout, /SYNC_RESULT phase=activated version=1\.2\.0/u)
+    assert.equal(syncOnly.record, null, 'sync-only never starts the server')
+  } finally {
+    await rm(scratch, { recursive: true, force: true })
+  }
+})
+
+async function readdirSafe(path) {
+  const { readdir } = await import('node:fs/promises')
+  try { return await readdir(path) } catch { return [] }
+}
+
+async function snapshotTree(root) {
+  const { readdir } = await import('node:fs/promises')
+  const entries = []
+  async function visit(directory) {
+    for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
+      const path = join(directory, entry.name)
+      if (entry.isDirectory()) await visit(path)
+      else entries.push([path.slice(root.length), sha256(await readFile(path))])
+    }
+  }
+  await visit(root)
+  return entries
+}

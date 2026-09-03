@@ -1,10 +1,19 @@
 ﻿#Requires -Version 5.1
+<#
+  管理者用: clone 済みリポジトリから Enterprise Misen を構築し、共有フォルダーへ公開する。
+
+  流れ: npm ci → npm test（unit 層）→ Node.js / OfficeCLI ランタイム取得（検証付き）→ prepare-runtime → New-Misen.ps1
+  作業領域は既定で %LOCALAPPDATA%\Misen\staging（共有フォルダーには書き込まない）。
+#>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Destination,
     [string]$SourceRoot = '',
-    [string]$AppName = 'coding-agent',
     [string]$Version = '',
+    [string]$NodeRuntime = '',
+    [string]$OfficeCliRuntime = '',
+    [string]$Staging = '',
+    [string]$Url = 'http://127.0.0.1:8787/',
     [switch]$SkipNpmInstall,
     [switch]$SkipTests,
     [switch]$CleanDestination
@@ -35,21 +44,10 @@ function Invoke-Checked {
 
 if (-not $SourceRoot) { $SourceRoot = Split-Path -Parent $PSScriptRoot }
 try { $source = (Resolve-Path -LiteralPath $SourceRoot -ErrorAction Stop).Path.TrimEnd('\', '/') } catch { Fail "ソースルートが見つかりません: $SourceRoot" }
-
-$appDir = Join-Path $source "apps\$AppName"
-$manifestPath = Join-Path $appDir 'manifest.json'
-$packagePath = Join-Path $appDir 'package.json'
-if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { Fail "manifest.json が見つかりません: $manifestPath" }
-if (-not (Test-Path -LiteralPath $packagePath -PathType Leaf)) { Fail "package.json が見つかりません: $packagePath" }
-
-try { $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json } catch { Fail "manifest.json を読み込めません: $manifestPath" }
-if (-not $Version) { $Version = [string]$manifest.version }
-if ([string]::IsNullOrWhiteSpace($Version)) { Fail '公開版の version が空です。-Version を指定してください。' }
-$runtimeName = if ($manifest.runtime) { [string]$manifest.runtime } else { 'node-v22-win-x64' }
-$nodeVersionMatch = [regex]::Match($runtimeName, '^node-v(?<version>\d+\.\d+\.\d+)-win-x64$')
-if (-not $nodeVersionMatch.Success) { Fail "runtime 名からNode.js版数を解決できません: $runtimeName" }
-$nodeVersion = $nodeVersionMatch.Groups['version'].Value
-$runtimeExe = Join-Path $source "runtime\$runtimeName\node.exe"
+$appDir = Join-Path $source 'apps\enterprise-misen'
+if (-not (Test-Path -LiteralPath (Join-Path $appDir 'package.json') -PathType Leaf)) { Fail "apps\enterprise-misen\package.json が見つかりません: $appDir" }
+if (-not $Staging) { $Staging = Join-Path (Join-Path $env:LOCALAPPDATA 'Misen') 'staging' }
+New-Item -ItemType Directory -Force -Path $Staging | Out-Null
 
 try { $gitRoot = (& git -C $source rev-parse --show-toplevel 2>$null | Select-Object -First 1) } catch { $gitRoot = '' }
 if (-not $gitRoot) { Fail 'SourceRoot は git clone 済みのリポジトリで指定してください。' }
@@ -58,32 +56,51 @@ Write-Step "clone済みリポジトリ: $gitRoot"
 $npm = (Get-Command npm.cmd -ErrorAction SilentlyContinue).Source
 if (-not $npm) { $npm = (Get-Command npm -ErrorAction SilentlyContinue).Source }
 if (-not $npm) { Fail 'npm が見つかりません。Node.js開発環境を先にインストールしてください。' }
+$powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 
 if (-not $SkipNpmInstall) {
-    Write-Step '依存関係を構築中: npm ci'
-    Invoke-Checked -FilePath $npm -ArgumentList @('ci') -WorkingDirectory $appDir
+    Write-Step '依存関係を構築中: npm ci --ignore-scripts'
+    Invoke-Checked -FilePath $npm -ArgumentList @('ci', '--ignore-scripts', '--no-audit', '--no-fund') -WorkingDirectory $appDir
 }
-
 if (-not $SkipTests) {
-    Write-Step '型チェック中: npm run typecheck'
-    Invoke-Checked -FilePath $npm -ArgumentList @('run', 'typecheck') -WorkingDirectory $appDir
-    Write-Step 'ビルドとスモークテスト中: npm run smoke'
-    Invoke-Checked -FilePath $npm -ArgumentList @('run', 'smoke') -WorkingDirectory $appDir
+    Write-Step 'unit 層テスト中: npm test'
+    Invoke-Checked -FilePath $npm -ArgumentList @('test') -WorkingDirectory $appDir
 }
 
-if (-not (Test-Path -LiteralPath $runtimeExe -PathType Leaf)) {
-    $getNode = Join-Path $source 'scripts\get-node.ps1'
-    if (-not (Test-Path -LiteralPath $getNode -PathType Leaf)) { Fail "Node.js取得スクリプトが見つかりません: $getNode" }
-    Write-Step "Node.jsランタイムを取得中: v$nodeVersion"
-    Invoke-Checked -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $getNode, '-Version', $nodeVersion) -WorkingDirectory $source
+if ($NodeRuntime) { try { $NodeRuntime = (Resolve-Path -LiteralPath $NodeRuntime -ErrorAction Stop).Path } catch { Fail "Node.js ランタイム入力が見つかりません: $NodeRuntime" } }
+if ($OfficeCliRuntime) { try { $OfficeCliRuntime = (Resolve-Path -LiteralPath $OfficeCliRuntime -ErrorAction Stop).Path } catch { Fail "OfficeCLI ランタイム入力が見つかりません: $OfficeCliRuntime" } }
+if (-not $NodeRuntime) {
+    $NodeRuntime = Join-Path $Staging 'node-runtime'
+    if (-not (Test-Path -LiteralPath (Join-Path $NodeRuntime 'node.exe') -PathType Leaf)) {
+        Write-Step "Node.js ランタイムを取得中（公式配布物の SHA-256 を検証）: $NodeRuntime"
+        if (Test-Path -LiteralPath $NodeRuntime) { Remove-Item -LiteralPath $NodeRuntime -Recurse -Force }
+        Invoke-Checked -FilePath $npm -ArgumentList @('run', 'acquire:node-runtime', '--', '--output', $NodeRuntime) -WorkingDirectory $appDir
+    }
 }
-if (-not (Test-Path -LiteralPath $runtimeExe -PathType Leaf)) { Fail "Node.jsランタイムを用意できません: $runtimeExe" }
+if (-not $OfficeCliRuntime) {
+    $OfficeCliRuntime = Join-Path $Staging 'officecli-runtime'
+    if (-not (Test-Path -LiteralPath (Join-Path $OfficeCliRuntime 'officecli.exe') -PathType Leaf)) {
+        Write-Step "OfficeCLI ランタイムを取得中（公式リリースの SHA-256 を検証）: $OfficeCliRuntime"
+        if (Test-Path -LiteralPath $OfficeCliRuntime) { Remove-Item -LiteralPath $OfficeCliRuntime -Recurse -Force }
+        Invoke-Checked -FilePath $npm -ArgumentList @('run', 'acquire:officecli-runtime', '--', '--output', $OfficeCliRuntime) -WorkingDirectory $appDir
+    }
+}
+foreach ($required in @((Join-Path $NodeRuntime 'node.exe'), (Join-Path $OfficeCliRuntime 'officecli.exe'))) {
+    if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { Fail "ランタイムを用意できません: $required" }
+}
+
+$prepared = Join-Path $Staging ('prepared-' + (Get-Date).ToString('yyyyMMdd-HHmmss'))
+Write-Step "自己完結ランタイムを生成中: $prepared"
+Invoke-Checked -FilePath $npm -ArgumentList @('run', 'prepare-runtime', '--', '--output', $prepared, '--node-runtime', $NodeRuntime, '--officecli-runtime', $OfficeCliRuntime) -WorkingDirectory $appDir
+Write-Step '生成物を検証中: npm run verify:prepared-runtime'
+Invoke-Checked -FilePath $npm -ArgumentList @('run', 'verify:prepared-runtime', '--', '--runtime', $prepared) -WorkingDirectory $appDir
 
 $publish = Join-Path $source 'scripts\New-Misen.ps1'
 if (-not (Test-Path -LiteralPath $publish -PathType Leaf)) { Fail "公開スクリプトが見つかりません: $publish" }
-$publishArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $publish, '-Destination', $Destination, '-SourceRoot', $source, '-AppName', $AppName, '-Version', $Version)
+$publishArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $publish, '-Destination', $Destination, '-PreparedRuntime', $prepared, '-SourceRoot', $source, '-Url', $Url)
+if ($Version) { $publishArgs += @('-Version', $Version) }
 if ($CleanDestination) { $publishArgs += '-CleanDestination' }
 Write-Step "共有フォルダーへ公開中: $Destination"
-Invoke-Checked -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $publishArgs -WorkingDirectory $source
-Write-Ok "準備完了: $AppName v$Version"
-Write-Ok '利用者は共有フォルダーの start-coding-agent.cmd だけを実行します。'
+Invoke-Checked -FilePath $powershell -ArgumentList $publishArgs -WorkingDirectory $source
+Write-Ok '準備完了。利用者は共有フォルダーの Misen起動.cmd だけをダブルクリックします。'
+Write-Ok "prepared runtime は $prepared に残しています（監査用。不要なら削除してください）。"
