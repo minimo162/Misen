@@ -1,11 +1,11 @@
 @echo off
+rem 管理者用: clone済みリポジトリを構築して共有フォルダーへ公開
 chcp 65001 >nul
-rem Administrator: build Enterprise Misen from the cloned repository and publish it to the share.
 setlocal EnableExtensions DisableDelayedExpansion
 set "HERE=%~dp0"
-set "PS1=%HERE%Prepare-Misen.ps1"
+set "PS1=%HERE%Prepare-CodingAgent.ps1"
 if not exist "%PS1%" (
-  echo Prepare-Misen.ps1 が見つかりません。
+  echo Prepare-CodingAgent.ps1 が見つかりません。
   pause
   exit /b 1
 )
@@ -13,16 +13,17 @@ if not exist "%PS1%" (
 set "INTERACTIVE=0"
 if not "%~1"=="" goto set_destination_from_arg
 set "INTERACTIVE=1"
+:prompt_destination
 echo.
-echo Enterprise Misen 共有フォルダー公開
-set /p "DEST=共有フォルダーの UNC パス: "
+echo coding-agent share publish
+set /p "DEST=Share UNC path: "
 set "DEST=%DEST:"=%"
 if not defined DEST (
   echo 共有フォルダーが入力されませんでした。
   pause
   exit /b 1
 )
-rem Double-click mode removes the previous distribution before publishing the latest one.
+rem ダブルクリック時は、古い配布物を削除してから最新版を再公開する。
 set "ARGS=-CleanDestination"
 goto run_prepare
 
