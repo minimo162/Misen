@@ -19,7 +19,43 @@ Enterprise Misen を共有フォルダーへ公開し、利用者が `Misen起�
 
 共有フォルダーには APIキーなどの秘密情報を置きません。共有フォルダーは読める人が全員書き込める前提なので、最上位に見えるのは `Misen起動.cmd` だけにし、それ以外は隠し属性の `_misen` 配下の版別フォルダーに置きます。誤って上書きしても前の版が残ります。
 
-## 管理者側
+## GitHub 経由の配布（推奨）
+
+開発 PC のファイルを社内へ直接持ち込めない場合の経路です。配布物を zip にして GitHub Release に添付し、社内 PC では Release からダウンロードして共有フォルダーへ展開します。社内 PC には git も Node.js も要りません。
+
+### 1. Release を作る（開発 PC で1コマンド）
+
+clone 済みのリポジトリで、コミット済みの状態から実行します。`gh`（GitHub CLI）にサインインしておいてください。
+
+```cmd
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Publish-Release.ps1 -NodeRuntime <検証済み Node 入力> -OfficeCliRuntime <検証済み OfficeCLI 入力>
+```
+
+`Prepare-Misen.ps1` と同じ工程（`npm ci` → unit テスト → ランタイムの取得と SHA-256 検証 → 自己完結ランタイムの生成と検証 → 共有フォルダー形式への公開）を一時フォルダーに対して行い、UTF-8 名の zip と `.sha256.txt` を作り、タグ `share-v<version>-<sha7>` の Release（既定はプレリリース、`-Latest` で通常リリース）に zip・`.sha256.txt`・`Expand-MisenShare.ps1` を添付します。Release 本文に zip の SHA-256、公開ID、同梱ランタイムの版、公開直後の再検証結果が載ります。`-NodeRuntime` / `-OfficeCliRuntime` を省くと公式配布物を取得します。
+
+GitHub Actions のワークフロー（`.github/workflows/release-share.yml`、**Actions** → **release-share** → **Run workflow**）でも同じ Release を作れますが、プライベートリポジトリの Actions は月の無料枠があり Windows ランナーは 2 倍換算なので、手動実行専用の予備としています。
+
+### 2. 社内 PC で共有フォルダーへ展開する
+
+1. Release ページから次の 3 つを同じフォルダーへダウンロードします（このリポジトリは非公開なので GitHub にサインインした状態で行います）。
+   - `misen-share-<version>-<sha>.zip`
+   - `misen-share-<version>-<sha>.zip.sha256.txt`
+   - `Expand-MisenShare.ps1`
+2. PowerShell で展開します。管理者権限は不要です。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Expand-MisenShare.ps1 -Zip .\misen-share-0.2.0-abc1234.zip -Destination "\\fileserver\財務\Misen"
+```
+
+スクリプトは zip の SHA-256 を照合し、`_misen\versions\<version>\` → `Misen起動.cmd` → `_misen\manifest.json` の順に置き、ダウンロード由来の「インターネットから取得」マークを外し、`_misen` に隠し属性を付けます。既存の版フォルダーは残るので、展開中に利用者が開いても前の版か新しい版のどちらかに整合します。
+
+3. 利用者は共有フォルダーの `Misen起動.cmd` をダブルクリックするだけです（「利用者側」を参照）。
+
+### 版を上げるとき
+
+main を更新してから、もう一度 **Run workflow** を押し、新しい zip を同じ手順で展開します。公開IDが変わるので利用者は次回のダブルクリックで自動更新されます。
+
+## 管理者側（開発 PC から直接公開する場合）
 
 1. 管理者PCの任意の作業フォルダーでリポジトリを clone します。
 
