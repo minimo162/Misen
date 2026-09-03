@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | Enterprise Misen（`apps/enterprise-misen`） | Excel / Word / PowerPoint を扱う財務本部向けエージェント。同梱 Node.js と OfficeCLI で動く自己完結ランタイム | 共有フォルダーの **`Misen起動.cmd`** |
 
-`apps/coding-agent` は 2026 年 8 月の実験（Copilot / Ollama を頭脳にしたコーディングエージェント、Computer Use の試作）で、現在は凍結中です。Enterprise Misen とは配布経路も起動入口も別で、設計第7版では「将来 PC 操作が必要になったときの実験場」として残しています。使い方は `apps/coding-agent/README-*.md` と `DEPLOY.md` 末尾を参照してください。
+2026 年 8 月の実験（coding-agent、Computer Use の試作、連結デモ）はリポジトリから外しました。必要になったらタグ `archive/coding-agent-be614a6` から取り出せます。
 
 ## 設計の要点
 
@@ -25,16 +25,15 @@ launcher\                利用者用（共有フォルダーへそのまま公�
   Misen起動.cmd            Enterprise Misen の唯一の起動入口
   launch.ps1               起動スクリプト本体（manifest 比較・SHA-256 検証・ローカル版の起動）
   test\launch.test.mjs     初回起動・2回目起動・版更新後の起動・改ざん検出の自動テスト
-  start-coding-agent.cmd / コーディングエージェント起動.cmd / launch-coding-agent.*   coding-agent 用（凍結中）
+  create-shortcut.ps1      ショートカット作成の補助
 scripts\                 管理者用
   Publish-Release.ps1                                      配布物を生成して GitHub Release に添付（推奨）
   Expand-MisenShare.ps1                                    社内 PC で Release の zip を検証して共有フォルダーへ展開
   prepare-misen.cmd / Prepare-Misen.ps1 / New-Misen.ps1    共有フォルダーへ直接公開（開発 PC が社内ネットワークにある場合）
-  prepare-coding-agent.cmd / Prepare-CodingAgent.ps1 / New-CodingAgent.ps1   coding-agent 用（凍結中）
-  get-node.ps1 / get-llama.ps1 / start-llama.cmd / package-release.ps1       開発用
+  get-llama.ps1 / start-llama.cmd                          開発用のローカル LLM（OpenAI 互換 API）
 .github\workflows\release-share.yml   GitHub Actions で同じ Release を作る予備（手動実行専用）
 apps\enterprise-misen\   Enterprise Misen 本体
-apps\coding-agent\       coding-agent 本体（凍結中の実験）
+docs\                    補足資料
 ```
 
 ## 配布（管理者）
@@ -86,15 +85,15 @@ Enterprise Misen が接続する LLM（プロバイダー種別・モデル名�
 
 ## テスト
 
-回帰テストは 3 層に分かれています（Issue #93）。既定の `npm test` は unit 層だけを実行し、両アプリとも 30 秒以内に終わります。
+回帰テストは 3 層に分かれています（Issue #93）。既定の `npm test` は unit 層だけを実行し、30 秒以内に終わります。`apps/enterprise-misen` で実行します。
 
-| 層 | coding-agent | enterprise-misen | 必要なもの |
-| --- | --- | --- | --- |
-| unit | `npm test`（`node test/gate.mjs --tier unit`） | `npm test`（`node scripts/test.mjs unit`） | なし（ネットワーク・OfficeCLI・ブラウザーを使わない） |
-| integration | `npm run test:integration`（プロセス起動・実ループバックサーバーを伴う smoke） | `npm run test:integration`（`*.integration.test.ts`、OfficeCLI 実行） | enterprise-misen は `MISEN_OFFICECLI_PATH` |
-| live | `npm run test:live -- --live-copilot` など | `npm run test:live` | 実プロバイダーの資格情報。手動実行のみ |
+| 層 | コマンド | 必要なもの |
+| --- | --- | --- |
+| unit | `npm test`（`node scripts/test.mjs unit`） | なし（ネットワーク・OfficeCLI・ブラウザーを使わない） |
+| integration | `npm run test:integration`（`*.integration.test.ts`、OfficeCLI 実行） | `MISEN_OFFICECLI_PATH` |
+| live | `npm run test:live` | 実プロバイダーの資格情報。手動実行のみ |
 
-ビルドは変更検知付きです。ソースが前回ビルドから変わっていなければ typecheck とビルドを飛ばします（coding-agent は `.tmp/build-stamp.json`、enterprise-misen は `dist/.build-stamp.json`）。強制ビルドは `--force-build`（coding-agent）または `npm run build:force`（enterprise-misen）です。
+ビルドは変更検知付きです。ソースが前回ビルドから変わっていなければ typecheck とビルドを飛ばします（`dist/.build-stamp.json`）。強制ビルドは `npm run build:force` です。
 
 起動入口のテストはリポジトリ直下で次を実行します（Windows のみ。一時フォルダーを共有フォルダーに見立て、初回起動・2回目起動・版更新後の起動・改ざん検出を確認します）。
 
