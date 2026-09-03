@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { JsonValidator } from '@cyclonedx/cyclonedx-library/Validation'
 import { Version } from '@cyclonedx/cyclonedx-library/Spec'
 import { nodeRuntimeContract } from './node-runtime-contract.mjs'
+import { officeCliRuntimeContract } from './officecli-runtime-contract.mjs'
 
 const lock = JSON.parse(await readFile(new URL('../package-lock.json', import.meta.url), 'utf8'))
 const packages = Object.entries(lock.packages)
@@ -43,13 +44,41 @@ const nodeRuntime = {
   ],
 }
 
+const officeCliRuntime = {
+  type: 'application',
+  'bom-ref': `officecli@${officeCliRuntimeContract.version}-win-x64`,
+  name: 'OfficeCLI',
+  version: officeCliRuntimeContract.version,
+  description: 'Bundled Office document process engine behind Misen typed spreadsheet capabilities',
+  hashes: [{ alg: 'SHA-256', content: officeCliRuntimeContract.releaseArtifactSha256 }],
+  licenses: [{ license: { id: officeCliRuntimeContract.licenseName } }],
+  externalReferences: [
+    { type: 'vcs', url: `${officeCliRuntimeContract.repository}#${officeCliRuntimeContract.commit}` },
+    { type: 'distribution', url: officeCliRuntimeContract.releaseArtifactUrl },
+  ],
+  properties: [
+    { name: 'misen:component-role', value: 'office-engine' },
+    { name: 'misen:platform', value: 'windows' },
+    { name: 'misen:architecture', value: officeCliRuntimeContract.arch },
+    { name: 'misen:release-tag', value: officeCliRuntimeContract.tag },
+    { name: 'misen:source-commit', value: officeCliRuntimeContract.commit },
+    { name: 'misen:bundled-executable', value: officeCliRuntimeContract.executable },
+    { name: 'misen:bundled-license', value: officeCliRuntimeContract.license },
+    { name: 'misen:bundled-license-sha256', value: officeCliRuntimeContract.licenseSha256 },
+    { name: 'misen:bundled-notice', value: officeCliRuntimeContract.notice },
+    { name: 'misen:bundled-notice-sha256', value: officeCliRuntimeContract.noticeSha256 },
+    { name: 'misen:runtime-network-required', value: String(officeCliRuntimeContract.networkRequiredAtRuntime) },
+    { name: 'misen:resolution', value: officeCliRuntimeContract.resolution },
+  ],
+}
+
 const out = {
   bomFormat: 'CycloneDX',
   specVersion: '1.6',
   serialNumber: 'urn:uuid:4d697365-6e2d-4f53-8342-4f4d2d302e32',
   version: 1,
   metadata: { component: { type: 'application', name: '@misen/enterprise-runtime-poc', version: '0.2.0' } },
-  components: [...packages, nodeRuntime],
+  components: [...packages, nodeRuntime, officeCliRuntime],
 }
 
 const validator = new JsonValidator(Version.v1dot6)
@@ -62,4 +91,4 @@ if (await validator.validate(JSON.stringify(invalidControl)) === null) throw new
 const evidence = new URL('../evidence/', import.meta.url)
 await mkdir(evidence, { recursive: true })
 await writeFile(new URL('sbom.cdx.json', evidence), serialized)
-console.log(`SBOM ${packages.length} npm packages + 1 bundled Node runtime component; official CycloneDX 1.6 schema PASS; negative control PASS`)
+console.log(`SBOM ${packages.length} npm packages + bundled Node.js and OfficeCLI runtime components; official CycloneDX 1.6 schema PASS; negative control PASS`)

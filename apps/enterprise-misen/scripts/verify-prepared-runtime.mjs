@@ -5,12 +5,14 @@ import { basename, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { nodeRuntimeContract } from './node-runtime-contract.mjs'
+import { officeCliRuntimeContract } from './officecli-runtime-contract.mjs'
 const modelVisibleWorkspacePaths = [
   'workspace/AGENTS.md',
   'workspace/.agents/skills/monthly-report/SKILL.md',
 ]
-const allowedExecutableOrScriptPaths = new Set(['run.cmd', nodeRuntimeContract.executable])
+const allowedExecutableOrScriptPaths = new Set(['run.cmd', nodeRuntimeContract.executable, officeCliRuntimeContract.executable])
 const allowedNodeRuntimePaths = new Set([nodeRuntimeContract.executable, nodeRuntimeContract.license])
+const allowedOfficeCliRuntimePaths = new Set([officeCliRuntimeContract.executable, officeCliRuntimeContract.license, officeCliRuntimeContract.notice])
 
 function parseArguments(argv) {
   const result = {}
@@ -49,10 +51,17 @@ export function expectedLauncher() {
     'setlocal',
     'set "MISEN_ROOT=%~dp0"',
     'set "MISEN_NODE=%MISEN_ROOT%runtime\\node\\node.exe"',
+    'set "MISEN_OFFICECLI_PATH=%MISEN_ROOT%runtime\\officecli\\officecli.exe"',
     'if not exist "%MISEN_NODE%" (',
     '  echo Misen bundled Node.js runtime is missing. 1>&2',
     '  exit /b 1',
     ')',
+    'if not exist "%MISEN_OFFICECLI_PATH%" (',
+    '  echo Misen bundled OfficeCLI runtime is missing. 1>&2',
+    '  exit /b 1',
+    ')',
+    'set "OFFICECLI_NO_AUTO_RESIDENT=1"',
+    'set "OFFICECLI_SKIP_UPDATE=1"',
     'if "%~1"=="" (set "MISEN_WORKSPACE=%MISEN_ROOT%workspace") else set "MISEN_WORKSPACE=%~f1"',
     '"%MISEN_NODE%" "%MISEN_ROOT%app\\dist\\src\\web\\server.js" "%MISEN_WORKSPACE%"',
     'exit /b %errorlevel%',
@@ -107,6 +116,7 @@ export async function findForbiddenNames(root) {
       } else {
         const relativePath = relativeName(root, path)
         if (relativePath.startsWith('runtime/node/') && !allowedNodeRuntimePaths.has(relativePath)) forbidden.push(path)
+        if (relativePath.startsWith('runtime/officecli/') && !allowedOfficeCliRuntimePaths.has(relativePath)) forbidden.push(path)
         if (/^(esbuild|tsc|npm|npx|corepack)(\.cmd|\.ps1|\.exe)?$/iu.test(entry.name) || /\.(ts|tsx|mts|cts|map|tsbuildinfo)$/iu.test(entry.name)) forbidden.push(path)
         if (/\.(exe|dll|node|cmd|ps1|bat|com)$/iu.test(entry.name) && !allowedExecutableOrScriptPaths.has(relativePath)) forbidden.push(path)
       }
@@ -137,7 +147,7 @@ async function verifyManifestInventory(root, manifest) {
 }
 
 export async function verifyManifestContract(root, manifest) {
-  if (manifest.schemaVersion !== 4) throw new Error('unsupported prepared-runtime manifest schema')
+  if (manifest.schemaVersion !== 5) throw new Error('unsupported prepared-runtime manifest schema')
   if (typeof manifest.applicationVersion !== 'string' || manifest.applicationVersion.length === 0) throw new Error('application version missing')
   if (manifest.buildGitSha !== null && !/^[0-9a-f]{40}$/u.test(manifest.buildGitSha ?? '')) throw new Error('invalid informational build Git SHA')
   if (manifest.gitMetadataPolicy !== 'informational-only') throw new Error('Git metadata must be informational only')
@@ -160,17 +170,28 @@ export async function verifyManifestContract(root, manifest) {
     externalRuntimeRequired: false,
   }
   for (const [key, value] of Object.entries(expectedNode)) if (manifest.node?.[key] !== value) throw new Error(`bundled Node manifest mismatch: ${key}`)
+  const expectedOfficeCli = { schemaVersion: 1, ...officeCliRuntimeContract, verifiedVersion: officeCliRuntimeContract.version, verifiedReleaseArtifactSha256: true, installsAtRuntime: false, downloadsAtRuntime: false }
+  for (const [key, value] of Object.entries(expectedOfficeCli)) if (manifest.officeCli?.[key] !== value) throw new Error(`bundled OfficeCLI manifest mismatch: ${key}`)
   if (manifest.runtimePolicy?.installsAtRuntime !== false || manifest.runtimePolicy?.buildsAtRuntime !== false || manifest.runtimePolicy?.downloadsAtRuntime !== false
-    || manifest.runtimePolicy?.powershellFallback !== false || manifest.runtimePolicy?.observerOrStudyCodeDistributed !== false) throw new Error('runtime policy is not fail-closed')
+    || manifest.runtimePolicy?.powershellFallback !== false || manifest.runtimePolicy?.observerOrStudyCodeDistributed !== false
+    || manifest.runtimePolicy?.officeCliAutoUpdate !== false || manifest.runtimePolicy?.officeCliAutoResident !== false) throw new Error('runtime policy is not fail-closed')
   if (JSON.stringify(manifest.modelVisibleWorkspacePaths) !== JSON.stringify(modelVisibleWorkspacePaths)) throw new Error('model-visible workspace context mismatch')
   if (!Array.isArray(manifest.requiredPaths) || manifest.requiredPaths.length === 0) throw new Error('manifest requiredPaths missing')
-  for (const path of [...modelVisibleWorkspacePaths, nodeRuntimeContract.executable, nodeRuntimeContract.license]) if (!manifest.requiredPaths.includes(path)) throw new Error(`required package path missing: ${path}`)
+  for (const path of [...modelVisibleWorkspacePaths, nodeRuntimeContract.executable, nodeRuntimeContract.license, officeCliRuntimeContract.executable, officeCliRuntimeContract.license, officeCliRuntimeContract.notice]) if (!manifest.requiredPaths.includes(path)) throw new Error(`required package path missing: ${path}`)
   const executable = join(root, ...nodeRuntimeContract.executable.split('/'))
   const license = join(root, ...nodeRuntimeContract.license.split('/'))
   if (await hash(executable) !== nodeRuntimeContract.executableSha256) throw new Error('bundled Node executable hash mismatch')
   if (await hash(license) !== nodeRuntimeContract.licenseSha256) throw new Error('bundled Node license hash mismatch')
   const version = execFileSync(executable, ['--version'], { encoding: 'utf8' }).trim()
   if (version !== `v${nodeRuntimeContract.version}`) throw new Error(`bundled Node version mismatch: ${version}`)
+  const officeCliExecutable = join(root, ...officeCliRuntimeContract.executable.split('/'))
+  const officeCliLicense = join(root, ...officeCliRuntimeContract.license.split('/'))
+  const officeCliNotice = join(root, ...officeCliRuntimeContract.notice.split('/'))
+  if (await hash(officeCliExecutable) !== officeCliRuntimeContract.releaseArtifactSha256) throw new Error('OfficeCLI executable hash mismatch')
+  if (await hash(officeCliLicense) !== officeCliRuntimeContract.licenseSha256) throw new Error('OfficeCLI LICENSE hash mismatch')
+  if (await hash(officeCliNotice) !== officeCliRuntimeContract.noticeSha256) throw new Error('OfficeCLI NOTICE hash mismatch')
+  const officeCliVersion = execFileSync(officeCliExecutable, ['--version'], { encoding: 'utf8', env: { ...process.env, OFFICECLI_NO_AUTO_RESIDENT: '1', OFFICECLI_SKIP_UPDATE: '1' }, windowsHide: true }).trim()
+  if (officeCliVersion !== officeCliRuntimeContract.version) throw new Error(`bundled OfficeCLI version mismatch: ${officeCliVersion}`)
   if (await readFile(join(root, 'run.cmd'), 'utf8') !== expectedLauncher()) throw new Error('launcher does not match the bundled-only contract')
 }
 
@@ -281,6 +302,25 @@ async function verifyMissingBundledNodeFailsClosed(root) {
   } finally { await rm(scratch, { recursive: true, force: true }) }
 }
 
+async function verifyMissingBundledOfficeCliFailsClosed(root) {
+  const scratch = await mkdtemp(join(tmpdir(), 'misen-missing-bundled-officecli-'))
+  await mkdir(join(scratch, 'runtime', 'node'), { recursive: true })
+  await cp(join(root, 'run.cmd'), join(scratch, 'run.cmd'))
+  await cp(join(root, ...nodeRuntimeContract.executable.split('/')), join(scratch, ...nodeRuntimeContract.executable.split('/')))
+  const command = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'cmd.exe')
+  try {
+    const result = spawnSync(command, ['/d', '/c', join(scratch, 'run.cmd')], {
+      cwd: scratch,
+      env: { SystemRoot: process.env.SystemRoot, ComSpec: command, PATHEXT: '.EXE;.CMD', PATH: '', TEMP: scratch, TMP: scratch },
+      encoding: 'utf8',
+      windowsHide: true,
+    })
+    if (result.status === 0) throw new Error('missing bundled OfficeCLI did not fail closed')
+    if (!result.stderr.includes('Misen bundled OfficeCLI runtime is missing.')) throw new Error(`unexpected missing OfficeCLI error: ${result.stderr}`)
+    return { status: 'PASS', exitCode: result.status, pathFallbackInvoked: false }
+  } finally { await rm(scratch, { recursive: true, force: true }) }
+}
+
 async function main() {
   if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('prepared-runtime verification requires Windows x64')
   const args = parseArguments(process.argv.slice(2))
@@ -296,15 +336,18 @@ async function main() {
   const noPathNode = await observeStartup(root, manifest, 'no-path-node')
   const fakePathNode = await observeStartup(root, manifest, 'fake-path-node')
   const missingNodeNegative = await verifyMissingBundledNodeFailsClosed(root)
+  const missingOfficeCliNegative = await verifyMissingBundledOfficeCliFailsClosed(root)
   console.log(JSON.stringify({
     status: 'PASS',
     applicationVersion: manifest.applicationVersion,
     buildGitSha: manifest.buildGitSha,
     gitMetadataPolicy: manifest.gitMetadataPolicy,
     node: manifest.node,
+    officeCli: manifest.officeCli,
     hashCount,
     startup: [noPathNode, fakePathNode],
     missingNodeNegative,
+    missingOfficeCliNegative,
     networkObservation: 'ten point-in-time stable-startup TCP samples per startup; no non-loopback endpoint observed',
     npmOnTargetPath: false,
     npxOnTargetPath: false,

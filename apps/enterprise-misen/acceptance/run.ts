@@ -10,6 +10,7 @@ import { snapshotOutputScope, validateReport } from '../src/acceptance/validator
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 
 for (const scenario of MONTHS) {
+  const startedAt = performance.now()
   const root = await mkdtemp(join(tmpdir(), 'misen-pi-'))
   try {
     await fixture(root)
@@ -24,7 +25,7 @@ for (const scenario of MONTHS) {
     const validation = await validateReport(root, scenario, inputs, outputBefore)
     assert.equal(validation.passed, true, JSON.stringify(validation.axes))
     assert.equal(replay.events.filter(event => event.type === 'tool_execution_start').length, 9, 'Pi tool loop including progressive Skill read')
-    console.log(`${scenario.month}: PASS ${Object.entries(validation.axes).map(([axis, result]) => `${axis}=${result.status}`).join(' ')} new-output-count input-hashes`)
+    console.log(`${scenario.month}: PASS ${Object.entries(validation.axes).map(([axis, result]) => `${axis}=${result.status}`).join(' ')} new-output-count input-hashes elapsedMs=${Math.round(performance.now() - startedAt)}`)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

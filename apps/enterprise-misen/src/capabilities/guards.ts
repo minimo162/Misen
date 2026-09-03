@@ -1,9 +1,35 @@
-import { getCoordinate, isFormulaValue } from '@office-kit/xlsx/cell'
-import { iterCells, listHyperlinks } from '@office-kit/xlsx/worksheet'
-import { iterWorksheets } from '@office-kit/xlsx/workbook'
+import { externalWorkbookSurfaces, inspectOpenXmlWorkbook } from '../spreadsheet/openxml.js'
 
-const allowed=new Set(['ABS','AND','AVERAGE','COUNT','COUNTA','IF','MAX','MIN','NOT','OR','ROUND','ROUNDDOWN','ROUNDUP','SUM'])
-export function safeFormula(value:string) { const f=value.startsWith('=')?value:`=${value}`; if(f.length>8192||/[\0\r\n\[\]{}!|]/u.test(f)||/\b(?:https?|ftp|file):/iu.test(f)) throw new Error('formula contains unsafe external or control reference'); const code=f.replace(/"(?:[^"]|"")*"/gu,m=>' '.repeat(m.length)); for(const m of code.matchAll(/\b([A-Z_][A-Z0-9_.]*)\s*\(/giu)){const n=m[1]!.toUpperCase();if(!allowed.has(n))throw new Error(`formula function ${n} is not allowed`)} for(const m of code.matchAll(/\b([A-Z_][A-Z0-9_.]*)\b/giu)){const n=m[1]!.toUpperCase();if(allowed.has(n)||n==='TRUE'||n==='FALSE'||/^[A-Z]{1,3}\d+$/u.test(n))continue;throw new Error(`formula name ${n} is not allowed`)} return f }
-function external(type:string,target:string){const n=target.trim(),t=type.toLowerCase();return /^[a-z][a-z0-9+.-]*:/iu.test(n)||/^(?:\\\\|\/\/)/u.test(n)||/^[a-z]:[\\/]/iu.test(n)||/(external|connection|querytable)/u.test(t)||/(?:^|\/)(?:externallinks?|connections|querytables?)(?:\/|$)/iu.test(n)}
-/** Reject carried external relationship surfaces before a deliverable is published. */
-export function validateDeliverable(workbook:any){if(workbook.externalReferences?.length)throw new Error('external workbook references are not allowed');for(const p of workbook.passthrough?.keys?.()??[]){if(/^\/?xl\/(connections\.xml|externallinks\/|querytables\/)/iu.test(p))throw new Error('external workbook passthrough is not allowed')}for(const r of workbook.workbookRelsExtras??[]){if(external(r.type,r.target))throw new Error('external workbook relationship is not allowed')}for(const ws of iterWorksheets(workbook)){for(const c of iterCells(ws)){if(isFormulaValue(c.value))safeFormula(c.value.formula)}for(const h of listHyperlinks(ws)){if(h.target)throw new Error(`external hyperlink is not allowed at ${ws.title}!${h.ref}`)}for(const r of ws.relsExtras??[]){if(external(r.type,r.target))throw new Error(`external worksheet relationship is not allowed at ${ws.title}`)}}}
+const allowed = new Set(['ABS', 'AND', 'AVERAGE', 'COUNT', 'COUNTA', 'IF', 'MAX', 'MIN', 'NOT', 'OR', 'ROUND', 'ROUNDDOWN', 'ROUNDUP', 'SUM'])
+
+export function safeFormula(value: string): string {
+  const formula = value.startsWith('=') ? value : '=' + value
+  if (formula.length > 8192 || /[\0\r\n\[\]{}!|]/u.test(formula) || /\b(?:https?|ftp|file):/iu.test(formula)) throw new Error('formula contains unsafe external or control reference')
+  const code = formula.replace(/"(?:[^"]|"")*"/gu, match => ' '.repeat(match.length))
+  for (const match of code.matchAll(/\b([A-Z_][A-Z0-9_.]*)\s*\(/giu)) {
+    const name = match[1]!.toUpperCase()
+    if (!allowed.has(name)) throw new Error('formula function ' + name + ' is not allowed')
+  }
+  for (const match of code.matchAll(/\b([A-Z_][A-Z0-9_.]*)\b/giu)) {
+    const name = match[1]!.toUpperCase()
+    if (allowed.has(name) || name === 'TRUE' || name === 'FALSE' || /^[A-Z]{1,3}\d+$/u.test(name)) continue
+    throw new Error('formula name ' + name + ' is not allowed')
+  }
+  return formula
+}
+
+/** Independent OOXML inspection rejects carried links and unsafe formulas. */
+export function validateDeliverable(bytes: Uint8Array): void {
+  const snapshot = inspectOpenXmlWorkbook(bytes)
+  const external = externalWorkbookSurfaces(snapshot)
+  if (external.length > 0) throw new Error('external workbook relationship is not allowed: ' + external[0])
+  for (const sheet of snapshot.sheets) {
+    for (const [coordinate, formula] of Object.entries(sheet.formulas)) {
+      try {
+        safeFormula(formula)
+      } catch (error) {
+        throw new Error('unsafe formula at ' + sheet.name + '!' + coordinate + ': ' + (error instanceof Error ? error.message : String(error)))
+      }
+    }
+  }
+}

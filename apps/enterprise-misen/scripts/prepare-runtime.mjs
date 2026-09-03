@@ -13,6 +13,7 @@ import {
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { nodeRuntimeContract, nodeRuntimeInputManifest } from './node-runtime-contract.mjs'
+import { officeCliRuntimeContract, officeCliRuntimeInputManifest } from './officecli-runtime-contract.mjs'
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const shaPattern = /^[0-9a-f]{40}$/
@@ -148,6 +149,32 @@ async function copyNodeRuntime(target, nodeRuntime) {
   return verified.provenance
 }
 
+async function verifiedOfficeCliRuntimeInput(officeCliRuntime) {
+  const root = resolve(officeCliRuntime)
+  const provenance = JSON.parse(await readFile(join(root, officeCliRuntimeInputManifest), 'utf8'))
+  const exact = { schemaVersion: 1, ...officeCliRuntimeContract, verifiedVersion: officeCliRuntimeContract.version, verifiedReleaseArtifactSha256: true, installsAtRuntime: false, downloadsAtRuntime: false }
+  for (const [key, value] of Object.entries(exact)) if (provenance[key] !== value) throw new Error(`OfficeCLI runtime provenance mismatch: ${key}`)
+  const executable = join(root, 'officecli.exe')
+  const license = join(root, 'LICENSE')
+  const notice = join(root, 'NOTICE')
+  if (await sha256(executable) !== officeCliRuntimeContract.releaseArtifactSha256) throw new Error('OfficeCLI executable SHA-256 mismatch')
+  if (await sha256(license) !== officeCliRuntimeContract.licenseSha256) throw new Error('OfficeCLI LICENSE SHA-256 mismatch')
+  if (await sha256(notice) !== officeCliRuntimeContract.noticeSha256) throw new Error('OfficeCLI NOTICE SHA-256 mismatch')
+  const version = execFileSync(executable, ['--version'], { encoding: 'utf8', env: { ...process.env, OFFICECLI_NO_AUTO_RESIDENT: '1', OFFICECLI_SKIP_UPDATE: '1' }, windowsHide: true }).trim()
+  if (version !== officeCliRuntimeContract.version) throw new Error(`OfficeCLI version mismatch: ${version}`)
+  return { root, provenance }
+}
+
+async function copyOfficeCliRuntime(target, officeCliRuntime) {
+  const verified = await verifiedOfficeCliRuntimeInput(officeCliRuntime)
+  const destination = join(target, 'runtime', 'officecli')
+  await mkdir(destination, { recursive: true })
+  await cp(join(verified.root, 'officecli.exe'), join(destination, 'officecli.exe'))
+  await cp(join(verified.root, 'LICENSE'), join(destination, 'LICENSE'))
+  await cp(join(verified.root, 'NOTICE'), join(destination, 'NOTICE'))
+  return verified.provenance
+}
+
 async function installProductionDependencies(appDirectory) {
   const packageJson = JSON.parse(await readFile(join(appRoot, 'package.json'), 'utf8'))
   await cp(join(appRoot, 'package.json'), join(appDirectory, 'package.json'))
@@ -229,11 +256,11 @@ async function countInstalledPackages(nodeModules) {
 }
 
 function assertRuntimeBoundary(inventory) {
-  const allowed = new Set(['run.cmd', nodeRuntimeContract.executable])
+  const allowed = new Set(['run.cmd', nodeRuntimeContract.executable, officeCliRuntimeContract.executable])
   const forbiddenNames = inventory.executableOrScriptFiles.filter((path) => !allowed.has(path))
   if (forbiddenNames.length > 0) throw new Error(`unexpected executable or script files: ${forbiddenNames.join(', ')}`)
   const extensions = inventory.byExtension
-  if ((extensions['.node'] ?? 0) !== 0 || (extensions['.dll'] ?? 0) !== 0 || (extensions['.exe'] ?? 0) !== 1) throw new Error('native runtime inventory must contain exactly the approved Node executable')
+  if ((extensions['.node'] ?? 0) !== 0 || (extensions['.dll'] ?? 0) !== 0 || (extensions['.exe'] ?? 0) !== 2) throw new Error('native runtime inventory must contain exactly the approved Node and OfficeCLI executables')
 }
 
 async function writeHashes(target) {
@@ -243,9 +270,10 @@ async function writeHashes(target) {
   await writeFile(join(target, 'SHA256SUMS.txt'), `${lines.join('\n')}\n`, 'utf8')
 }
 
-export async function prepareRuntime({ output, nodeRuntime }) {
+export async function prepareRuntime({ output, nodeRuntime, officeCliRuntime }) {
   const target = resolve(output)
   if (!nodeRuntime) throw new Error('--node-runtime is required')
+  if (!officeCliRuntime) throw new Error('--officecli-runtime is required')
   await ensureCleanTarget(target)
   await mkdir(target, { recursive: true })
 
@@ -255,6 +283,7 @@ export async function prepareRuntime({ output, nodeRuntime }) {
     await copyRuntimeDist(appDirectory)
     await installProductionDependencies(appDirectory)
     await copyNodeRuntime(target, nodeRuntime)
+    const officeCliProvenance = await copyOfficeCliRuntime(target, officeCliRuntime)
 
     const fixtureModule = await import(pathToFileURL(join(appRoot, 'dist', 'demo', 'enterprise-excel', 'fixtures.js')).href)
     await fixtureModule.createEnterpriseFixtureWorkspace(join(target, 'workspace'))
@@ -265,10 +294,17 @@ export async function prepareRuntime({ output, nodeRuntime }) {
       'setlocal',
       'set "MISEN_ROOT=%~dp0"',
       'set "MISEN_NODE=%MISEN_ROOT%runtime\\node\\node.exe"',
+      'set "MISEN_OFFICECLI_PATH=%MISEN_ROOT%runtime\\officecli\\officecli.exe"',
       'if not exist "%MISEN_NODE%" (',
       '  echo Misen bundled Node.js runtime is missing. 1>&2',
       '  exit /b 1',
       ')',
+      'if not exist "%MISEN_OFFICECLI_PATH%" (',
+      '  echo Misen bundled OfficeCLI runtime is missing. 1>&2',
+      '  exit /b 1',
+      ')',
+      'set "OFFICECLI_NO_AUTO_RESIDENT=1"',
+      'set "OFFICECLI_SKIP_UPDATE=1"',
       'if "%~1"=="" (set "MISEN_WORKSPACE=%MISEN_ROOT%workspace") else set "MISEN_WORKSPACE=%~f1"',
       '"%MISEN_NODE%" "%MISEN_ROOT%app\\dist\\src\\web\\server.js" "%MISEN_WORKSPACE%"',
       'exit /b %errorlevel%',
@@ -282,7 +318,7 @@ export async function prepareRuntime({ output, nodeRuntime }) {
     const preliminaryInventory = await buildInventory(target)
     assertRuntimeBoundary(preliminaryInventory)
     const manifest = {
-      schemaVersion: 4,
+      schemaVersion: 5,
       applicationVersion,
       buildGitSha: informationalBuildGitSha(),
       gitMetadataPolicy: 'informational-only',
@@ -303,6 +339,7 @@ export async function prepareRuntime({ output, nodeRuntime }) {
         resolution: nodeRuntimeContract.resolution,
         externalRuntimeRequired: false,
       },
+      officeCli: officeCliProvenance,
       launcher: 'run.cmd',
       entrypoint: 'app/dist/src/web/server.js',
       defaultWorkspace: 'workspace',
@@ -314,6 +351,9 @@ export async function prepareRuntime({ output, nodeRuntime }) {
         'run.cmd',
         nodeRuntimeContract.executable,
         nodeRuntimeContract.license,
+        officeCliRuntimeContract.executable,
+        officeCliRuntimeContract.license,
+        officeCliRuntimeContract.notice,
         'app/package.json',
         'app/dependency-lock.json',
         'app/dist/src/web/server.js',
@@ -340,6 +380,8 @@ export async function prepareRuntime({ output, nodeRuntime }) {
         downloadsAtRuntime: false,
         powershellFallback: false,
         observerOrStudyCodeDistributed: false,
+        officeCliAutoUpdate: false,
+        officeCliAutoResident: false,
       },
       inventory: { ...preliminaryInventory, scope: 'all distributed files except SHA256SUMS.txt' },
     }
@@ -358,7 +400,7 @@ export async function prepareRuntime({ output, nodeRuntime }) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = parseArguments(process.argv.slice(2))
-  if (!args.output || !args['node-runtime']) throw new Error('usage: prepare-runtime --output <clean-directory> --node-runtime <verified-node-input>')
-  const result = await prepareRuntime({ output: args.output, nodeRuntime: args['node-runtime'] })
+  if (!args.output || !args['node-runtime'] || !args['officecli-runtime']) throw new Error('usage: prepare-runtime --output <clean-directory> --node-runtime <verified-node-input> --officecli-runtime <verified-officecli-input>')
+  const result = await prepareRuntime({ output: args.output, nodeRuntime: args['node-runtime'], officeCliRuntime: args['officecli-runtime'] })
   console.log(JSON.stringify(result.manifest, null, 2))
 }

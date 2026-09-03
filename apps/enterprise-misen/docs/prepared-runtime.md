@@ -1,150 +1,101 @@
 # Self-contained prepared runtime
 
-The prepared runtime is assembled on a development or packaging host. A target
-user does not install Node.js: the package contains a private, pinned Node.js
-runtime used only by Misen. Startup does not modify `PATH`, install system-wide
-software, download or update a runtime, build TypeScript, or invoke a PowerShell
-fallback.
+The package contains private, exact-pinned Windows x64 Node.js and OfficeCLI
+runtimes. A target PC performs no `npm install`, runtime install, download,
+update, TypeScript build, or PowerShell fallback, and `PATH` is not modified.
 
-## Product metadata and pinned runtime input
+## Frozen runtime identities
 
-Prepared-runtime integrity does not depend on Git commit ancestry. The manifest
-records the application version and, when Git is available on the packaging
-host, the build-time Git SHA as informational metadata only. The SHA is not a
-source baseline, is not compared with another commit, and cannot allow or deny
-package generation. Package contents remain identified by the complete
-`SHA256SUMS.txt`, inventory, dependency-lock hash, SBOM, and runtime hashes.
+Node.js is the official v24.20.0 LTS (Krypton) Windows x64 distribution:
 
-The package bundles exactly the official Node.js v24.20.0 LTS (Krypton) Windows
-x64 runtime input:
+- archive `node-v24.20.0-win-x64.zip`, SHA-256 `6cac9ffbca8f6a47091e4b5c772e0606049c3871cb67d900c0cedde630e545ba`
+- `node.exe` SHA-256 `5c976096e04e5c2c1f091938926234cc9fbebfe9787ddd149351b3b0ecc707b5`
+- `LICENSE` SHA-256 `ed34dd8e3f0a78dbaf00d0444ce8e285b015b765379c2e17880455f70370f8e9`
 
-- archive: `node-v24.20.0-win-x64.zip`
-- release: `https://nodejs.org/dist/v24.20.0/`
-- archive SHA-256: `6cac9ffbca8f6a47091e4b5c772e0606049c3871cb67d900c0cedde630e545ba`
-- `node.exe` SHA-256: `5c976096e04e5c2c1f091938926234cc9fbebfe9787ddd149351b3b0ecc707b5`
-- `LICENSE` SHA-256: `ed34dd8e3f0a78dbaf00d0444ce8e285b015b765379c2e17880455f70370f8e9`
+OfficeCLI is the official self-contained iOfficeAI/OfficeCLI v1.0.147 release at
+commit `b94f3906fd52d450c64f8e40370e376b9e15079e`:
 
-The archive hash and the matching standalone `win-x64/node.exe` hash are exact
-pins published in the official release SHASUMS. The `LICENSE` hash is derived
-from the license file inside that hash-verified official archive. Floating
-`lts`, `24`, `current`, or `latest` identities are not accepted.
+- artifact `officecli-win-x64.exe`, SHA-256 `724056e5ff079c3585df79c8afc386f08ef7d5f956cf4e2723534e129aab6e80`
+- Apache-2.0 `LICENSE`, SHA-256 `0ef10002c77f6f3672795877e8a276f5a2840105474c87aa6c0bcd8904b12fc7`
+- `NOTICE`, SHA-256 `762d2098c370da58737a2f235ddf962f041762b803e5bf6f10cd921894836586`
+- no .NET, Python, Node.js, Microsoft Office, or network prerequisite
 
-## Build-time acquisition boundary
+Floating version identities are never accepted.
 
-Acquire and verify the Node input separately from package assembly:
+## Acquisition and assembly
+
+Acquire and verify both inputs on the packaging host:
 
 ```powershell
 npm run acquire:node-runtime -- --output C:\staging\misen-node-v24.20.0
+npm run acquire:officecli-runtime -- --output C:\staging\misen-officecli-v1.0.147
 ```
 
-This step is the only Node-distribution network boundary. It downloads from the
-two exact `nodejs.org` v24.20.0 URLs, requires the pinned archive line in the
-official `SHASUMS256.txt`, verifies the downloaded ZIP, extracts it with the
-existing Windows PowerShell `Expand-Archive`, verifies `node.exe`, and stages
-only:
+The OfficeCLI step downloads only the exact executable, `LICENSE`, and `NOTICE`,
+then verifies all hashes and `--version` before promoting its staging directory.
+For offline packaging, supply already downloaded files with `--executable`,
+`--license`, and `--notice`; the same checks still apply.
 
-```text
-node.exe
-LICENSE
-node-runtime-provenance.json
-```
-
-No execution-policy change, module install, or target-PC download is involved.
-An already downloaded official archive and SHASUMS file can instead be supplied
-with `--archive` and `--shasums`; the same exact hashes are still required.
-
-## Package assembly
-
-Build the current application checkout with an explicitly verified Node input:
+Build the application with both verified inputs:
 
 ```powershell
 npm run prepare-runtime -- --output C:\staging\misen-enterprise-self-contained `
-  --node-runtime C:\staging\misen-node-v24.20.0
+  --node-runtime C:\staging\misen-node-v24.20.0 `
+  --officecli-runtime C:\staging\misen-officecli-v1.0.147
 ```
 
-The output directory must be absent or empty. Packaging fails closed and removes
-an incomplete output. Manifest schema v4 records the application version,
-informational build Git SHA, Node release/archive/executable/license provenance,
-and `resolution: bundled-only` / `externalRuntimeRequired: false`. Git ancestry,
-hard-pinned product commits, and post-squash repin workflows are not part of the
-Misen packaging authority.
+The output must be absent or empty. Any error removes the incomplete output.
+Manifest schema v5 records the application version, informational build Git
+SHA, dependency lock, complete inventory, and both runtime identities. Git
+ancestry does not grant packaging authority.
 
-The package contains only `runtime/node/node.exe` and
-`runtime/node/LICENSE` from the official Node ZIP. It does not distribute npm,
-npx, corepack, TypeScript, esbuild, Node headers, an installer, or package-manager
-command shims. The executable/script allowlist is exact:
+The only distributed executable/script paths are:
 
 ```text
 run.cmd
 runtime/node/node.exe
+runtime/officecli/officecli.exe
 ```
 
-All other `.exe`, `.dll`, `.node`, `.cmd`, `.bat`, `.com`, and `.ps1` files are
-rejected. The reliability observer under `dist/study` is also rejected.
+Unexpected `.exe`, `.dll`, `.node`, `.cmd`, `.bat`, `.com`, or `.ps1` files are
+rejected. npm/npx/corepack, TypeScript, esbuild, Node headers, installers, tests,
+and observer/study code are absent. `runtime/node/LICENSE` and
+`runtime/officecli/{LICENSE,NOTICE}` are the only other runtime files.
 
-The synthetic workspace still requires:
-
-- `workspace/AGENTS.md`
-- `workspace/.agents/skills/monthly-report/SKILL.md`
-
-These are model-visible guidance, not Security Authority.
-
-Conversation history is host/UI infrastructure. It uses only Node standard
-filesystem APIs and stores schema-versioned JSON under:
-
-```text
-%LOCALAPPDATA%\Misen\data\sessions\
-```
-
-This user-writable directory is outside both the prepared runtime and the
-business workspace. Merely starting Misen or listing an empty history does not
-write into the package. Session files contain only the UI-safe user/assistant
-projection, bounded process labels, terminal status, timestamps, and bounded
-artifact metadata; they do not contain provider credentials or raw provider
-payloads. The package adds no executable, native add-on, database, service,
-runtime download, or model-facing Tool for history.
-
-## Target startup contract
-
-The only supported target startup is:
+## Target startup
 
 ```text
 run.cmd
   -> runtime/node/node.exe
      -> app/dist/src/web/server.js
+        -> runtime/officecli/officecli.exe
 ```
 
-Run `run.cmd` directly. An absolute workspace may be supplied as the first
-argument. If the bundled executable is absent, startup fails; there is no global
-or `PATH` Node fallback. The target needs no Node installation, `PATH` change,
-registry change, administrator privilege, npm command, build, or runtime download.
+The launcher requires both bundled executables and fails closed if either is
+missing. It sets `MISEN_OFFICECLI_PATH`, `OFFICECLI_SKIP_UPDATE=1`, and
+`OFFICECLI_NO_AUTO_RESIDENT=1`; there is no global or `PATH` fallback. An
+absolute workspace may be passed as the first argument.
 
-Before transfer, verify the package on Windows x64:
+Conversation history remains host/UI infrastructure under
+`%LOCALAPPDATA%\Misen\data\sessions\`. It contains only the bounded UI-safe
+projection and is outside both package and business workspace.
+
+## Verification
 
 ```powershell
 npm run verify:prepared-runtime -- --runtime C:\staging\misen-enterprise-self-contained
 ```
 
-The verifier checks the complete `SHA256SUMS.txt`, manifest/inventory, exact
-Node version and hashes, exact launcher text, and forbidden executable surface.
-It starts the package once with no Node on `PATH` and once with a fake `node.cmd`
-first on `PATH`; both must reach HTTP 200 and `/state=idle` using the bundled
-executable. A missing-bundled-Node negative control must fail without invoking
-the fake PATH Node.
+The verifier checks `SHA256SUMS.txt`, manifest/inventory, dependency count,
+runtime versions and hashes, exact launcher text, and executable allowlist. It
+starts the package with no Node on `PATH` and with a fake `node.cmd`, observes
+the expected bundled Node and loopback-only listener, and runs separate
+missing-Node and missing-OfficeCLI negative controls. Point-in-time TCP sampling
+is evidence, not packet capture.
 
-PowerShell is used only by the development-host verifier for external process
-and TCP observation. It is not distributed, is not a launcher fallback, and is
-not an Agent capability. Network evidence is point-in-time sampling, not packet
-capture or proof against every arbitrarily short transient connection.
+The model-visible synthetic workspace still contains `workspace/AGENTS.md` and
+`workspace/.agents/skills/monthly-report/SKILL.md`. These guide the Agent but do
+not become execution authority.
 
-For a later Windows PowerShell 5.1 human verification of `SHA256SUMS.txt`, always
-read the UTF-8 file explicitly:
-
-```powershell
-Get-Content -LiteralPath $sumPath -Encoding UTF8
-```
-
-Corporate-device / EDR / application-control validation remains a separate #74
-human-run step after this implementation is reviewed, merged, and assigned a new
-transport identity. The historical `eb99e428...` package and prerelease remain
-immutable.
+Corporate-device/EDR/application-control certification remains the separate
+#74 human step. Historical packages and transport identities remain immutable.

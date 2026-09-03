@@ -1,12 +1,20 @@
 import { createHash } from 'node:crypto'
 import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import { getFormulaText, isFormulaValue } from '@office-kit/xlsx/cell'
-import { getCellByCoord, getColumnDimension, getRowDimension, iterCells, type Worksheet } from '@office-kit/xlsx/worksheet'
-import type { Workbook } from '@office-kit/xlsx/workbook'
 import type { MonthFixture } from '../../demo/enterprise-excel/fixtures.js'
 import { validateDeliverable } from '../capabilities/guards.js'
-import { listWorksheetTitles, openSpreadsheetBytes, readCell, readCellStyle, requireWorksheet } from '../spreadsheet/engine.js'
+import {
+  getCellByCoord,
+  isFormulaValue,
+  iterCells,
+  listWorksheetTitles,
+  openSpreadsheetBytes,
+  readCell,
+  requireWorksheet,
+  type SpreadsheetWorkbook,
+  type SpreadsheetWorksheet,
+} from '../spreadsheet/engine.js'
+import { inspectOpenXmlWorkbook, preservationSnapshot } from '../spreadsheet/openxml.js'
 import { verifyProfitFormula, verifyStatusFormula, verifyTotalFormula } from './formula.js'
 
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
@@ -48,7 +56,7 @@ const coordinate = (column: number, row: number) => `${columnName(column)}${row}
 const equal = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right)
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : String(error)
 
-function findTemplateLayout(workbook: Workbook): Layout {
+function findTemplateLayout(workbook: SpreadsheetWorkbook): Layout {
   for (const sheet of listWorksheetTitles(workbook)) {
     const worksheet = requireWorksheet(workbook, sheet)
     const rows = new Map<number, Map<string, number>>()
@@ -68,8 +76,8 @@ function findTemplateLayout(workbook: Workbook): Layout {
 }
 
 function grade(fn: () => unknown, observed?: unknown): AxisResult { try { return { status: 'PASS', evidence: fn() } } catch (error) { return { status: 'FAIL', evidence: { error: errorMessage(error), ...(observed === undefined ? {} : { observed }) } } } }
-function formulaText(worksheet: Worksheet, cellCoordinate: string): string { const cell = getCellByCoord(worksheet, cellCoordinate); if (!cell || !isFormulaValue(cell.value)) throw new Error(`${cellCoordinate} must be a formula`); return getFormulaText(cell) }
-function cellRepresentation(worksheet: Worksheet | undefined, cellCoordinate: string): unknown { const cell = worksheet ? getCellByCoord(worksheet, cellCoordinate) : undefined; return isFormulaValue(cell?.value) ? { formula: getFormulaText(cell!) } : cell?.value ?? null }
+function formulaText(worksheet: SpreadsheetWorksheet, cellCoordinate: string): string { const cell = getCellByCoord(worksheet, cellCoordinate); if (!cell || !isFormulaValue(cell.value)) throw new Error(`${cellCoordinate} must be a formula`); return cell.value.formula }
+function cellRepresentation(worksheet: SpreadsheetWorksheet | undefined, cellCoordinate: string): unknown { const cell = worksheet ? getCellByCoord(worksheet, cellCoordinate) : undefined; return isFormulaValue(cell?.value) ? { formula: cell.value.formula } : cell?.value ?? null }
 
 async function sourceFacts(root: string, scenario: MonthFixture): Promise<{ facts: SourceFact[]; period: ReportingPeriod }> {
   const facts: Omit<SourceFact, 'target'>[] = []
@@ -96,9 +104,15 @@ export async function validateReport(root: string, scenario: MonthFixture, befor
   const name = created[0]!
   if (!/\.xlsx$/iu.test(name)) throw new Error('new output is not xlsx')
   const output = `output/${name}`
-  const workbook = await openSpreadsheetBytes(await readFile(join(root, output)))
-  validateDeliverable(workbook)
-  const template = await openSpreadsheetBytes(await readFile(join(root, '月次管理レポート_template.xlsx')))
+  const outputBytes = new Uint8Array(await readFile(join(root, output)))
+  validateDeliverable(outputBytes)
+  const workbook = await openSpreadsheetBytes(outputBytes)
+  const templateBytes = new Uint8Array(await readFile(join(root, '月次管理レポート_template.xlsx')))
+  validateDeliverable(templateBytes)
+  const template = await openSpreadsheetBytes(templateBytes)
+  const outputOpenXml = inspectOpenXmlWorkbook(outputBytes)
+  const templateOpenXml = inspectOpenXmlWorkbook(templateBytes)
+  const independentFormula = (coordinate: string) => outputOpenXml.sheets.find(sheet => sheet.name === layout.sheet)?.formulas[coordinate]
   const layout = findTemplateLayout(template)
   const diagnostics: string[] = []
   const titles = listWorksheetTitles(workbook)
@@ -128,11 +142,11 @@ export async function validateReport(root: string, scenario: MonthFixture, befor
     for (const row of actualRows) { const expected = expectedByCompany.get(row.company as string)!; if (row.revenue !== expected.revenue || row.cost !== expected.cost) throw new Error(`company/value association mismatch: ${row.company}`) }
     return { companies: actualRows.map(row => ({ company: row.company, revenue: row.revenue, cost: row.cost, row: row.row })) }
   }, { actual: actualRows, expected: expectedRows })
-  axes.PROFIT_FORMULAS = grade(() => { if (!outputSheet) throw new Error('report sheet unavailable'); const checked: unknown[] = []; for (const fact of facts) { const rows = rowsByCompany.get(fact.company) ?? []; if (rows.length !== 1) throw new Error(`company row unavailable: ${fact.company}`); const row = rows[0]!.row; const formula = formulaText(outputSheet, coordinate(layout.columns.Profit, row)); verifyProfitFormula(formula, row, columnName(layout.columns.Revenue), columnName(layout.columns.Cost), fact.revenue, fact.cost); checked.push({ company: fact.company, row, formula }) } return checked }, profitObserved)
-  axes.STATUS = grade(() => { if (!outputSheet) throw new Error('report sheet unavailable'); const checked: unknown[] = []; for (const fact of facts) { const rows = rowsByCompany.get(fact.company) ?? []; if (rows.length !== 1) throw new Error(`company row unavailable: ${fact.company}`); const row = rows[0]!.row; const cell = getCellByCoord(outputSheet, coordinate(layout.columns.Status, row)); const sourceProfit = fact.revenue - fact.cost, expected = sourceProfit >= fact.target ? 'On target' : 'Review'; if (isFormulaValue(cell?.value)) { const formula = getFormulaText(cell!); verifyStatusFormula(formula, row, columnName(layout.columns.Profit), columnName(layout.columns.Revenue), columnName(layout.columns.Cost), fact.target, sourceProfit); checked.push({ company: fact.company, representation: 'formula', formula }) } else { if (cell?.value !== expected) throw new Error(`status mismatch: ${fact.company}`); checked.push({ company: fact.company, representation: 'literal', value: cell.value }) } } return checked }, statusObserved)
-  axes.TOTAL = grade(() => { if (!outputSheet) throw new Error('report sheet unavailable'); const companyRows = actualRows.filter(row => typeof row.company === 'string' && expectedByCompany.has(row.company)).map(row => row.row); if (companyRows.length !== facts.length) throw new Error('company rows unavailable for total'); const checked: unknown[] = []; for (const key of ['Revenue', 'Cost', 'Profit'] as const) { const column = columnName(layout.columns[key]); const formula = formulaText(outputSheet, coordinate(layout.columns[key], layout.totalRow)); const sourceValues = actualRows.map(row => { const fact = expectedByCompany.get(row.company as string)!; return key === 'Revenue' ? fact.revenue : key === 'Cost' ? fact.cost : fact.revenue - fact.cost }); verifyTotalFormula(formula, column, companyRows, sourceValues); checked.push({ column: key, formula, rows: companyRows }) } return checked }, totalObserved)
+  axes.PROFIT_FORMULAS = grade(() => { if (!outputSheet) throw new Error('report sheet unavailable'); const checked: unknown[] = []; for (const fact of facts) { const rows = rowsByCompany.get(fact.company) ?? []; if (rows.length !== 1) throw new Error(`company row unavailable: ${fact.company}`); const row = rows[0]!.row; const cell = coordinate(layout.columns.Profit, row); const formula = formulaText(outputSheet, cell); if (independentFormula(cell) !== formula) throw new Error(`OfficeCLI/OpenXML formula disagreement: ${cell}`); verifyProfitFormula(formula, row, columnName(layout.columns.Revenue), columnName(layout.columns.Cost), fact.revenue, fact.cost); checked.push({ company: fact.company, row, formula, independentOpenXml: true }) } return checked }, profitObserved)
+  axes.STATUS = grade(() => { if (!outputSheet) throw new Error('report sheet unavailable'); const checked: unknown[] = []; for (const fact of facts) { const rows = rowsByCompany.get(fact.company) ?? []; if (rows.length !== 1) throw new Error(`company row unavailable: ${fact.company}`); const row = rows[0]!.row; const coordinateValue = coordinate(layout.columns.Status, row); const cell = getCellByCoord(outputSheet, coordinateValue); const sourceProfit = fact.revenue - fact.cost, expected = sourceProfit >= fact.target ? 'On target' : 'Review'; if (isFormulaValue(cell?.value)) { const formula = cell.value.formula; if (independentFormula(coordinateValue) !== formula) throw new Error(`OfficeCLI/OpenXML formula disagreement: ${coordinateValue}`); verifyStatusFormula(formula, row, columnName(layout.columns.Profit), columnName(layout.columns.Revenue), columnName(layout.columns.Cost), fact.target, sourceProfit); checked.push({ company: fact.company, representation: 'formula', formula, independentOpenXml: true }) } else { if (cell?.value !== expected) throw new Error(`status mismatch: ${fact.company}`); checked.push({ company: fact.company, representation: 'literal', value: cell?.value }) } } return checked }, statusObserved)
+  axes.TOTAL = grade(() => { if (!outputSheet) throw new Error('report sheet unavailable'); const companyRows = actualRows.filter(row => typeof row.company === 'string' && expectedByCompany.has(row.company)).map(row => row.row); if (companyRows.length !== facts.length) throw new Error('company rows unavailable for total'); const checked: unknown[] = []; for (const key of ['Revenue', 'Cost', 'Profit'] as const) { const column = columnName(layout.columns[key]); const cell = coordinate(layout.columns[key], layout.totalRow); const formula = formulaText(outputSheet, cell); if (independentFormula(cell) !== formula) throw new Error(`OfficeCLI/OpenXML formula disagreement: ${cell}`); const sourceValues = actualRows.map(row => { const fact = expectedByCompany.get(row.company as string)!; return key === 'Revenue' ? fact.revenue : key === 'Cost' ? fact.cost : fact.revenue - fact.cost }); verifyTotalFormula(formula, column, companyRows, sourceValues); checked.push({ column: key, formula, rows: companyRows, independentOpenXml: true }) } return checked }, totalObserved)
   axes.FOOTER = grade(() => { if (!outputSheet) throw new Error('report sheet unavailable'); const checked: unknown[] = []; for (const row of layout.footerRows) for (let column = 1; column <= Math.max(...Object.values(layout.columns)); column++) { const expected = getCellByCoord(templateSheet, coordinate(column, row))?.value ?? null; if (expected === null) continue; const actual = getCellByCoord(outputSheet, coordinate(column, row))?.value ?? null; if (!equal(actual, expected)) throw new Error(`footer mismatch: ${coordinate(column, row)}`); checked.push({ cell: coordinate(column, row), value: actual }) } return checked })
-  axes.FORMAT = grade(() => { if (!outputSheet) throw new Error('report sheet unavailable'); const maxColumn = Math.max(...Object.values(layout.columns)), maxRow = Math.max(layout.totalRow, ...layout.footerRows); for (let row = 1; row <= maxRow; row++) for (let column = 1; column <= maxColumn; column++) { const cell = coordinate(column, row); if (!equal(readCellStyle(workbook, layout.sheet, cell), readCellStyle(template, layout.sheet, cell))) throw new Error(`template style mismatch: ${cell}`) } for (let row = 1; row <= maxRow; row++) if (!equal(getRowDimension(outputSheet, row), getRowDimension(templateSheet, row))) throw new Error(`template row dimension mismatch: ${row}`); for (let column = 1; column <= maxColumn; column++) if (!equal(getColumnDimension(outputSheet, column), getColumnDimension(templateSheet, column))) throw new Error(`template column dimension mismatch: ${column}`); return { comparedCells: maxRow * maxColumn, rows: maxRow, columns: maxColumn } })
+  axes.FORMAT = grade(() => { if (!outputSheet) throw new Error('report sheet unavailable'); const maxColumn = Math.max(...Object.values(layout.columns)), maxRow = Math.max(layout.totalRow, ...layout.footerRows); const range = `A1:${coordinate(maxColumn, maxRow)}`; const expected = preservationSnapshot(templateOpenXml, layout.sheet, range); const actual = preservationSnapshot(outputOpenXml, layout.sheet, range); if (!equal(actual, expected)) throw new Error('template style, row height, column width, merge, or sheet identity mismatch'); return { comparedCells: maxRow * maxColumn, rows: maxRow, columns: maxColumn, independentOpenXml: true } })
   const passed = AXIS_NAMES.every(axis => axes[axis].status === 'PASS')
   return { period, output, passed, axes, diagnostics }
 }
