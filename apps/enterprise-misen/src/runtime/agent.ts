@@ -29,3 +29,35 @@ export async function runReplay(root: string, month: '7月'|'8月', prompt: stri
   agent.subscribe(e=>{ if(e.type==='tool_execution_start') events.push({type:e.type,name:e.toolName}); else if(e.type==='tool_execution_end') events.push({type:e.type,name:e.toolName}); else events.push({type:e.type}) })
   await agent.prompt(prompt); return { agent, events, output:file }
 }
+
+export async function runOfficeReplay(root: string, kind: 'word' | 'powerpoint', prompt: string, observe?: (event: AgentEvent) => void) {
+  const faux = fauxProvider({ provider: 'misen-office-replay', models: [{ id: 'gpt-5.6-luna', reasoning: true }] })
+  const models = createModels()
+  models.setProvider(faux.provider)
+  const output = kind === 'word' ? 'output/日本語 業務メモ.docx' : 'output/日本語 説明資料.pptx'
+  faux.setResponses(kind === 'word' ? [
+    call('workspace_list_files', { path: '.', extension: '.docx' }),
+    call('document_create_output', { output, paragraphs: [{ text: '{{表題}}', style: 'Heading1' }, { text: '担当: {{担当者}}' }] }),
+    call('document_update', { document: output, replacements: [{ find: '{{表題}}', replace: '業務メモ' }, { find: '{{担当者}}', replace: 'ミセン担当' }], appendParagraphs: [{ text: '確認済みです。' }] }),
+    call('document_read', { document: output, start: 1, end: 20 }),
+    fauxAssistantMessage('Word業務メモを作成しました。'),
+  ] : [
+    call('workspace_list_files', { path: '.', extension: '.pptx' }),
+    call('presentation_create_output', { output, slides: [{ title: '{{表題}}', text: '概要', layout: 'titleContent' }] }),
+    call('presentation_update', { presentation: output, replacements: [{ find: '{{表題}}', replace: '月次説明資料' }], appendSlides: [{ title: '結論', text: '確認済みです。', layout: 'titleContent' }] }),
+    call('presentation_read', { presentation: output, start: 1, end: 20 }),
+    fauxAssistantMessage('PowerPoint説明資料を作成しました。'),
+  ])
+  const model = models.getModel('misen-office-replay', 'gpt-5.6-luna')
+  if (!model) throw new Error('Office replay model missing')
+  const events: Array<Pick<AgentEvent, 'type'> & { name?: string }> = []
+  const customization = await prepareAgentCustomization(root)
+  const agent = new Agent({ initialState: { systemPrompt: customization.systemPrompt, model, thinkingLevel: 'medium', tools: [...customization.tools] }, streamFn: models.streamSimple.bind(models), toolExecution: 'sequential', beforeToolCall: customization.hooks.beforeToolCall, afterToolCall: customization.hooks.afterToolCall })
+  agent.subscribe(event => {
+    observe?.(event)
+    if (event.type === 'tool_execution_start' || event.type === 'tool_execution_end') events.push({ type: event.type, name: event.toolName })
+    else events.push({ type: event.type })
+  })
+  await agent.prompt(prompt)
+  return { agent, events, output }
+}

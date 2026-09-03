@@ -58,8 +58,9 @@ literal. External workbook relationships, URLs, and formulas outside Misen's
 allowlist remain rejected.
 
 OfficeCLI also supports Word and PowerPoint operations, validation, HTML/PNG
-rendering, MCP, and skills. Those are adoption evidence only; this change adds
-no Word or PowerPoint model-facing Tool.
+rendering, MCP, and skills. The follow-up Word/PowerPoint vertical slice uses
+the same pinned executable through six typed Tools; MCP, raw shell, and generic
+DOM mutation remain unexposed.
 
 Actual files confirmed Japanese sheet/file names, paths containing spaces,
 formula read/write and cached values, style preservation, row height, column
@@ -76,8 +77,9 @@ missing executable are distinct Misen errors.
 Finance Skill -> Pi Agent -> typed spreadsheet Tool -> OfficeCLI process -> Excel
 ```
 
-The five Agent-facing Tool names and schemas remain stable. No raw shell Tool is
-added. The adapter uses direct argument arrays, UTF-8, separate bounded
+The five Excel-era Agent-facing Tool names and schemas remain stable. Six typed
+Word/PowerPoint Tools are added, for eleven total. No raw shell Tool is added.
+The adapter uses direct argument arrays, UTF-8, separate bounded
 stdout/stderr, timeout, cancellation, forced termination, strict JSON envelopes,
 one batch per multi-cell update, private temporary paths, and cleanup. Create
 and update operate on a private copy, validate it, recheck the OpenXML boundary,

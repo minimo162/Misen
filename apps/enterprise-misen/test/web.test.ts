@@ -83,6 +83,34 @@ test('loopback HTTP server validates requests and serves only an opaque validate
   }
 })
 
+test('opaque artifact publishing serves Word and PowerPoint with correct filenames and MIME types', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'misen-web-office-'))
+  await mkdir(join(root, 'output'))
+  const runner: AgentRunner = async () => {
+    await writeFile(join(root, 'output', '日本語 文書.docx'), 'docx-bytes')
+    await writeFile(join(root, 'output', '日本語 資料.pptx'), 'pptx-bytes')
+    return { tools: ['document_create_output', 'presentation_create_output'], status: 'COMPLETED' }
+  }
+  const { server, base } = await start(root, runner)
+  try {
+    assert.equal((await run(base, 'WordとPowerPointを作成して', 'office-artifacts-1')).status, 303)
+    const state = await (await fetch(base + '/state')).json() as any
+    assert.deepEqual(state.artifacts.map((artifact: any) => artifact.filename), ['日本語 文書.docx', '日本語 資料.pptx'])
+    const word = await fetch(base + '/download/' + state.artifacts[0].id)
+    assert.equal(word.headers.get('content-type'), 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    assert.match(word.headers.get('content-disposition') ?? '', /filename="document\.docx"/u)
+    assert.match(word.headers.get('content-disposition') ?? '', /filename\*=UTF-8''%E6%97%A5%E6%9C%AC%E8%AA%9E%20%E6%96%87%E6%9B%B8\.docx/u)
+    assert.equal(await word.text(), 'docx-bytes')
+    const presentation = await fetch(base + '/download/' + state.artifacts[1].id)
+    assert.equal(presentation.headers.get('content-type'), 'application/vnd.openxmlformats-officedocument.presentationml.presentation')
+    assert.match(presentation.headers.get('content-disposition') ?? '', /filename="presentation\.pptx"/u)
+    assert.equal(await presentation.text(), 'pptx-bytes')
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()))
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('SSE preserves actual newlines and literal backslashes without exposing a raw output path', async () => {
   const root = await mkdtemp(join(tmpdir(), 'misen-web-events-'))
   await fixture(root)

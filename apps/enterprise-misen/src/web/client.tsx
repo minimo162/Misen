@@ -48,6 +48,12 @@ const TOOL_PRESENTATION: Record<string, string> = {
   spreadsheet_read: 'Excelを確認',
   spreadsheet_create_output: 'Excelを作成',
   spreadsheet_update: 'Excelを更新',
+  document_read: 'Wordを確認',
+  document_create_output: 'Wordを作成',
+  document_update: 'Wordを更新',
+  presentation_read: 'PowerPointを確認',
+  presentation_create_output: 'PowerPointを作成',
+  presentation_update: 'PowerPointを更新',
 }
 
 function Icon({ name, className }: { name: 'send' | 'stop' | 'running' | 'success' | 'error' | 'chevron-right' | 'chevron-down' | 'file' | 'open' | 'back' | 'plus'; className?: string }) {

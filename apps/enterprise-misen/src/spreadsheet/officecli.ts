@@ -52,7 +52,7 @@ interface OfficeCliEnvelope {
   readonly diagnostics?: readonly string[]
 }
 
-interface OfficeCliBatchResult {
+export interface OfficeCliBatchResult {
   readonly success?: unknown
   readonly output?: unknown
 }
@@ -268,9 +268,9 @@ export class OfficeCliSpreadsheet {
     if (data.count !== 0 || !Array.isArray(data.errors)) throw new OfficeCliProcessError('OfficeCLI validation reported errors', 'validation_failed')
   }
 
-  async batchFile(file: string, items: readonly OfficeCliBatchItem[], signal?: AbortSignal): Promise<void> {
+  async batchFile(file: string, items: readonly OfficeCliBatchItem[], signal?: AbortSignal): Promise<OfficeCliBatchResult[]> {
     const envelope = await this.json(['batch', file], { cwd: dirname(file), stdin: JSON.stringify(items), signal })
-    this.batchResults(envelope, items.length)
+    return this.batchResults(envelope, items.length)
   }
 
   async withPrivateWorkbook<T>(bytes: Uint8Array, action: (file: string) => Promise<T>): Promise<T> {

@@ -70,6 +70,12 @@ const TOOL_LABELS: Record<string, string> = {
   spreadsheet_read: 'Read spreadsheet',
   spreadsheet_create_output: 'Create workbook',
   spreadsheet_update: 'Update spreadsheet',
+  document_read: 'Read Word document',
+  document_create_output: 'Create Word document',
+  document_update: 'Update Word document',
+  presentation_read: 'Read PowerPoint',
+  presentation_create_output: 'Create PowerPoint',
+  presentation_update: 'Update PowerPoint',
 }
 
 export function textFromAssistantMessage(message: unknown): string {
@@ -87,10 +93,14 @@ export function textFromAssistantMessage(message: unknown): string {
 function safeToolDetail(name: string, args: unknown): string | undefined {
   if (!args || typeof args !== 'object') return undefined
   const record = args as Record<string, unknown>
-  const candidate = name === 'spreadsheet_create_output'
+  const candidate = name === 'spreadsheet_create_output' || name === 'document_create_output' || name === 'presentation_create_output'
     ? record.output
     : name === 'spreadsheet_update' || name === 'spreadsheet_read'
       ? record.workbook
+      : name === 'document_update' || name === 'document_read'
+        ? record.document
+        : name === 'presentation_update' || name === 'presentation_read'
+          ? record.presentation
       : record.path
   if (typeof candidate !== 'string' || candidate.length === 0 || candidate.length > 260) return undefined
   const normalized = candidate.replace(/\\/gu, '/').split('/').filter(Boolean).at(-1)
@@ -409,8 +419,17 @@ export function createDemoServer(
         if (!ARTIFACT_ID_RE.test(id)) { response.statusCode = 404; return response.end('Not found') }
         const artifact = artifactResources.get(id)
         if (!artifact) { response.statusCode = 404; return response.end('Not found') }
-        response.setHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        response.setHeader('content-disposition', `attachment; filename="monthly-report.xlsx"; filename*=UTF-8''${encodeRfc5987Value(artifact.filename)}`)
+        const extension = /\.(xlsx|docx|pptx)$/iu.exec(artifact.filename)?.[1]?.toLowerCase() ?? 'bin'
+        const fallback = extension === 'xlsx' ? 'spreadsheet.xlsx' : extension === 'docx' ? 'document.docx' : extension === 'pptx' ? 'presentation.pptx' : 'office-output.bin'
+        const contentType = extension === 'xlsx'
+          ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          : extension === 'docx'
+            ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            : extension === 'pptx'
+              ? 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+              : 'application/octet-stream'
+        response.setHeader('content-type', contentType)
+        response.setHeader('content-disposition', `attachment; filename="${fallback}"; filename*=UTF-8''${encodeRfc5987Value(artifact.filename)}`)
         return response.end(artifact.bytes)
       }
       response.statusCode = 404
