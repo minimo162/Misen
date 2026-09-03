@@ -1,6 +1,6 @@
 # Enterprise Misen Pi demo
 
-Run `npm ci --ignore-scripts`, then `npm test`. The deterministic replay uses Pi's public `Agent` and faux stream provider to exercise user, tool call, tool result, follow-up, and final response. `npm run live` requires `OPENAI_API_KEY`; it uses only `openaiProvider`, `gpt-5.6-luna`, and `thinkingLevel: 'medium'`.
+Run `npm ci --ignore-scripts`, then `npm test`. The deterministic replay uses Pi's public `Agent` and faux stream provider to exercise user, tool call, tool result, follow-up, and final response. `npm run live` uses the deployment-managed Brain profile in `%LOCALAPPDATA%\Misen\config\settings.json` (or `MISEN_SETTINGS_PATH`); see `docs/brain-profile.md`. The template's default profile is `openai` / `gpt-5.6-luna` / `thinkingLevel: 'medium'` with `maxRetries: 0` and no fallback.
 
 ## Tests
 

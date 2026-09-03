@@ -3,7 +3,7 @@
 // A temporary folder plays the role of the read-only share, another one plays %LOCALAPPDATA%.
 // A fake prepared runtime (stub server.js, the current node.exe as the bundled runtime, a dummy OfficeCLI)
 // is published with scripts/New-Misen.ps1, then Misen起動.cmd is double-click-simulated with cmd.exe:
-//   1. first launch        -> copy + SHA-256 verification + activation + server start
+//   1. first launch        -> copy + SHA-256 verification + activation; settings template created, then server start
 //   2. second launch       -> verification only, no copy, server start
 //   3. share version bump  -> automatic update on the next launch
 //   4. tampered share file -> refused, previous version kept
@@ -59,7 +59,7 @@ import { join } from 'node:path'
 const workspace = process.argv[2]
 const port = Number(process.env.MISEN_TEST_PORT)
 const marker = process.env.MISEN_TEST_MARKER
-const record = { version: ${JSON.stringify(version)}, workspace, cwd: process.cwd(), execPath: process.execPath, officeCli: process.env.MISEN_OFFICECLI_PATH ?? null, noAutoResident: process.env.OFFICECLI_NO_AUTO_RESIDENT ?? null, argv: process.argv.slice(1) }
+const record = { version: ${JSON.stringify(version)}, workspace, cwd: process.cwd(), execPath: process.execPath, officeCli: process.env.MISEN_OFFICECLI_PATH ?? null, noAutoResident: process.env.OFFICECLI_NO_AUTO_RESIDENT ?? null, settingsPath: process.env.MISEN_SETTINGS_PATH ?? null, argv: process.argv.slice(1) }
 let exiting = false
 const server = createServer((socket) => { socket.destroy(); if (!exiting) { exiting = true; setTimeout(() => process.exit(0), 1500) } })
 server.listen(port, '127.0.0.1', () => { writeFileSync(marker, JSON.stringify(record)) })
@@ -67,9 +67,21 @@ setTimeout(() => process.exit(3), 20000)
 `
 }
 
+// Stand-in for app/dist/src/runtime/settings-cli.js: writes a template when the settings file is missing (exit 3).
+const stubSettingsCli = `
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
+const index = process.argv.indexOf('--settings')
+const path = process.argv[index + 1]
+if (process.argv[2] === 'ensure' && !existsSync(path)) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, '// template\\n{}\\n'); console.log('template created ' + path); process.exit(3) }
+process.exit(0)
+`
+
 async function writePreparedRuntime(root, version, { serverSource } = {}) {
   await rm(root, { recursive: true, force: true })
   await mkdir(join(root, 'app', 'dist', 'src', 'web'), { recursive: true })
+  await mkdir(join(root, 'app', 'dist', 'src', 'runtime'), { recursive: true })
+  await writeFile(join(root, 'app', 'dist', 'src', 'runtime', 'settings-cli.js'), stubSettingsCli, 'utf8')
   await mkdir(join(root, 'app', 'node_modules', 'example-dependency'), { recursive: true })
   await mkdir(join(root, 'runtime', 'node'), { recursive: true })
   await mkdir(join(root, 'runtime', 'officecli'), { recursive: true })
@@ -134,15 +146,28 @@ test('Misen起動.cmd: first launch, second launch, version update, and tampered
     // Make the share read-only from here on: every launch must succeed without writing to it.
     const shareSnapshot = await snapshotTree(share)
 
-    // --- 1. first launch: download + verify + activate + start ------------------------------------
+    // --- 1. first launch: download + verify + activate, then stop to let the user fill in settings ---
+    const settingsPath = join(localAppData, 'Misen', 'config', 'settings.json')
+    const initial = await launch(share, localAppData, { port, marker })
+    assert.notEqual(initial.code, 0, 'first launch stops after creating the settings template')
+    assert.match(initial.stdout, /SYNC_RESULT phase=activated version=1\.0\.0/u)
+    assert.match(initial.stdout, /LLM 接続設定のテンプレートを作成しました/u)
+    assert.match(initial.stdout, /LLM 接続設定を記入して保存してから/u)
+    await stat(settingsPath)
+    assert.equal(initial.record, null, 'server is not started before the settings exist')
+    assert.equal(initial.state.phase, 'activated')
+    assert.equal(initial.state.verified, true)
+    assert.equal(initial.current.version, '1.0.0')
+    assert.equal(initial.current.publishId, manifest1.publishId)
+    const versionDir = join(localAppData, 'Misen', 'versions', '1.0.0')
+    assert.deepEqual(await snapshotTree(share), shareSnapshot, 'share is untouched')
+    assert.ok(!(await readdirSafe(share)).includes('config'), 'settings never land in the share')
+
+    // --- 1b. first start with settings present: verified local copy starts the server -------------
     const first = await launch(share, localAppData, { port, marker })
     assert.equal(first.code, 0, `first launch failed:\n${first.stdout}\n${first.stderr}`)
-    assert.match(first.stdout, /SYNC_RESULT phase=activated version=1\.0\.0/u)
-    assert.equal(first.state.phase, 'activated')
-    assert.equal(first.state.verified, true)
-    assert.equal(first.current.version, '1.0.0')
-    assert.equal(first.current.publishId, manifest1.publishId)
-    const versionDir = join(localAppData, 'Misen', 'versions', '1.0.0')
+    assert.match(first.stdout, /SYNC_RESULT phase=verified version=1\.0\.0/u)
+    assert.equal(first.record.settingsPath.toLowerCase(), settingsPath.toLowerCase(), 'server receives the per-user settings path')
     await stat(join(versionDir, 'app', 'dist', 'src', 'web', 'server.js'))
     await stat(join(versionDir, 'runtime', 'node', 'node.exe'))
     assert.ok(first.record, 'stub server was started')

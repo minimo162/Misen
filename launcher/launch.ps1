@@ -228,6 +228,23 @@ try {
     $workspaceFull = (Resolve-Path -LiteralPath $Workspace).Path
     New-Item -ItemType Directory -Force -Path (Join-Path $workspaceFull 'output') | Out-Null
 
+    # 利用者ごとの LLM 接続設定（Issue #93 B）。共有フォルダーには置かず、%LOCALAPPDATA%\Misen\config だけに存在する。
+    $settingsPath = Join-Path $localRoot 'config\settings.json'
+    $env:MISEN_SETTINGS_PATH = $settingsPath
+    $settingsCli = Join-Path $localVersionDir 'app\dist\src\runtime\settings-cli.js'
+    if (Test-Path -LiteralPath $settingsCli -PathType Leaf) {
+        & $nodeExe $settingsCli ensure --settings $settingsPath
+        $settingsExit = $LASTEXITCODE
+        if ($settingsExit -eq 3) {
+            Write-Host ''
+            Write-Host "LLM 接続設定のテンプレートを作成しました: $settingsPath" -ForegroundColor Yellow
+            Write-Host 'プロバイダー種別・モデル名・API キーを記入して保存し、もう一度 Misen起動.cmd をダブルクリックしてください。' -ForegroundColor Yellow
+            if (-not $NoBrowser) { Start-Process notepad.exe "`"$settingsPath`"" }
+            exit 2
+        }
+        if ($settingsExit -ne 0) { throw "LLM 接続設定に問題があります: $settingsPath（上のメッセージを確認してください）" }
+    }
+
     $url = [string]$remoteManifest.url
     $port = ([uri]$url).Port
     if (Test-PortListening $port) {
