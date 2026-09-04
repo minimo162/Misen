@@ -9,6 +9,8 @@ export const READ_TOOL_NAMES = Object.freeze([
   'spreadsheet_read',
   'document_read',
   'presentation_read',
+  'pdf_read',
+  'pdf_render',
 ] as const)
 
 const readTools = new Set<string>(READ_TOOL_NAMES)

@@ -98,6 +98,9 @@ const TOOL_LABELS: Record<string, string> = {
   office_swap: 'Swap Office content',
   office_batch: 'Update Office file',
   office_import: 'Import tabular data',
+  pdf_read: 'Read PDF',
+  pdf_render: 'Render PDF page',
+  pdf_create_output: 'Create PDF output',
 }
 
 export function textFromAssistantMessage(message: unknown): string {
@@ -115,9 +118,9 @@ export function textFromAssistantMessage(message: unknown): string {
 export function safeToolTarget(name: string, args: unknown): string | undefined {
   if (!args || typeof args !== 'object') return undefined
   const record = args as Record<string, unknown>
-  const candidate = name === 'office_create_output'
+  const candidate = name === 'office_create_output' || name === 'pdf_create_output'
     ? record.output
-    : name.startsWith('office_')
+    : name.startsWith('office_') || name.startsWith('pdf_')
       ? record.file ?? record.source
     : name === 'spreadsheet_read'
       ? record.workbook
@@ -471,7 +474,7 @@ export function createDemoServer(
           let importedPaths: string[] = []
           try {
             const candidate = JSON.parse(params.get('imports') ?? '[]') as unknown
-            if (!Array.isArray(candidate) || candidate.length > 20 || candidate.some(path => typeof path !== 'string' || !/^input\/[\p{L}\p{N} ._()/-]+\.(?:xlsx|docx|pptx|csv|md|txt)$/iu.test(path))) throw new Error('imports')
+            if (!Array.isArray(candidate) || candidate.length > 20 || candidate.some(path => typeof path !== 'string' || !/^input\/[\p{L}\p{N} ._()/-]+\.(?:xlsx|docx|pptx|pdf|csv|md|txt)$/iu.test(path))) throw new Error('imports')
             importedPaths = candidate
             for (const path of importedPaths) await boundary.resolveFile(path)
           } catch {
@@ -674,15 +677,17 @@ export function createDemoServer(
         if (!ARTIFACT_ID_RE.test(id)) { response.statusCode = 404; return response.end('Not found') }
         const artifact = artifactResources.get(id)
         if (!artifact) { response.statusCode = 404; return response.end('Not found') }
-        const extension = /\.(xlsx|docx|pptx)$/iu.exec(artifact.filename)?.[1]?.toLowerCase() ?? 'bin'
-        const fallback = extension === 'xlsx' ? 'spreadsheet.xlsx' : extension === 'docx' ? 'document.docx' : extension === 'pptx' ? 'presentation.pptx' : 'office-output.bin'
+        const extension = /\.(xlsx|docx|pptx|pdf)$/iu.exec(artifact.filename)?.[1]?.toLowerCase() ?? 'bin'
+        const fallback = extension === 'xlsx' ? 'spreadsheet.xlsx' : extension === 'docx' ? 'document.docx' : extension === 'pptx' ? 'presentation.pptx' : extension === 'pdf' ? 'document.pdf' : 'office-output.bin'
         const contentType = extension === 'xlsx'
           ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
           : extension === 'docx'
             ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
             : extension === 'pptx'
               ? 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
-              : 'application/octet-stream'
+              : extension === 'pdf'
+                ? 'application/pdf'
+                : 'application/octet-stream'
         response.setHeader('content-type', contentType)
         response.setHeader('content-disposition', `attachment; filename="${fallback}"; filename*=UTF-8''${encodeRfc5987Value(artifact.filename)}`)
         return response.end(artifact.bytes)

@@ -30,6 +30,9 @@ const TOOL_LABELS: Record<string, string> = {
   office_swap: "Officeの要素を入れ替え",
   office_batch: "Officeファイルを一括更新",
   office_import: "表データを取り込み",
+  pdf_read: "PDFを確認",
+  pdf_render: "PDFのページを表示",
+  pdf_create_output: "PDFファイルを作成",
 };
 
 export const toolLabel = (name: string): string => TOOL_LABELS[name] ?? "操作";

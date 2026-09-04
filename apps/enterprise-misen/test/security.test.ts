@@ -13,6 +13,7 @@ test('authority roster exposes OfficeCLI verbs and only compatibility read alias
   assert.deepEqual(ENTERPRISE_TOOL_NAMES, [
     'workspace_list_files', 'workspace_read_text', 'office_get', 'office_query', 'office_inspect', 'office_create_output',
     'office_set', 'office_add', 'office_remove', 'office_move', 'office_swap', 'office_batch', 'office_import',
+    'pdf_read', 'pdf_render', 'pdf_create_output',
     'spreadsheet_read', 'document_read', 'presentation_read',
   ])
   for (const retired of ['spreadsheet_create_output', 'spreadsheet_update', 'document_create_output', 'document_update', 'presentation_create_output', 'presentation_update']) assert.ok(!ENTERPRISE_TOOL_NAMES.includes(retired as any))

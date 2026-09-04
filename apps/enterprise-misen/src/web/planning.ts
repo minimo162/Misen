@@ -4,9 +4,10 @@ export const PLAN_TOOLS = [
   'workspace_list_files', 'workspace_read_text', 'spreadsheet_read', 'document_read', 'presentation_read',
   'office_get', 'office_query', 'office_inspect', 'office_create_output', 'office_set', 'office_add',
   'office_remove', 'office_move', 'office_swap', 'office_batch', 'office_import',
+  'pdf_read', 'pdf_render', 'pdf_create_output',
 ] as const
 
-const WRITING_TOOLS = new Set(['office_create_output', 'office_set', 'office_add', 'office_remove', 'office_move', 'office_swap', 'office_batch', 'office_import'])
+const WRITING_TOOLS = new Set(['office_create_output', 'pdf_create_output', 'office_set', 'office_add', 'office_remove', 'office_move', 'office_swap', 'office_batch', 'office_import'])
 const PLAN_TOOL_SET = new Set<string>(PLAN_TOOLS)
 const SAFE_TARGET = /^(?!\/|[A-Za-z]:)(?!.*(?:^|\/)\.\.(?:\/|$))[^\r\n]{1,512}$/u
 

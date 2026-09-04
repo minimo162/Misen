@@ -4,7 +4,7 @@ import { extname } from 'node:path'
 import { WorkspaceBoundary } from '../workspace/boundary.js'
 
 export const MAX_ATTACHMENT_BYTES = 64 * 1024 * 1024
-export const ATTACHMENT_EXTENSIONS = ['.xlsx', '.docx', '.pptx', '.csv', '.md', '.txt'] as const
+export const ATTACHMENT_EXTENSIONS = ['.xlsx', '.docx', '.pptx', '.pdf', '.csv', '.md', '.txt'] as const
 const allowed = new Set<string>(ATTACHMENT_EXTENSIONS)
 
 export class AttachmentImportError extends Error {

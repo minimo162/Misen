@@ -65,7 +65,7 @@ export class WorkspaceBoundary {
     return real
   }
 
-  /** Resolve an existing or new supported Office path under workspace/output only. */
+  /** Resolve an existing or new supported deliverable path (Office or PDF) under workspace/output only. */
   async resolveOutputFile(userPath: string): Promise<string> {
     const candidate = this.resolveLexical(userPath)
     this.assertInside(candidate, 'output path')
@@ -73,8 +73,8 @@ export class WorkspaceBoundary {
     if (!outputRelative || outputRelative.startsWith('..' + sep) || outputRelative === '..') {
       throw new WorkspaceBoundaryError('writes are limited to workspace/output')
     }
-    if (!/\.(?:xlsx|docx|pptx)$/iu.test(candidate)) {
-      throw new WorkspaceBoundaryError('Office output must use the .xlsx, .docx, or .pptx extension')
+    if (!/\.(?:xlsx|docx|pptx|pdf)$/iu.test(candidate)) {
+      throw new WorkspaceBoundaryError('output must use the .xlsx, .docx, .pptx, or .pdf extension')
     }
 
     // Validate every existing ancestor.  This rejects a symlinked output
@@ -114,7 +114,7 @@ export class WorkspaceBoundary {
 
   /** Host-only file-import path. Agent Tools do not receive this write method. */
   async writeImportedInputFile(filename: string, bytes: Uint8Array): Promise<string> {
-    if (!/^[\p{L}\p{N}][\p{L}\p{N} ._-]*\.(?:xlsx|docx|pptx|csv|md|txt)$/iu.test(filename) || filename.includes('..')) {
+    if (!/^[\p{L}\p{N}][\p{L}\p{N} ._-]*\.(?:xlsx|docx|pptx|pdf|csv|md|txt)$/iu.test(filename) || filename.includes('..')) {
       throw new WorkspaceBoundaryError('unsafe input filename')
     }
     await mkdir(this.inputRoot, { recursive: true })

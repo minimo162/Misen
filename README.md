@@ -4,7 +4,7 @@
 
 | アプリ | 役割 | 利用者の入口 |
 | --- | --- | --- |
-| Enterprise Misen（`apps/enterprise-misen`） | Excel / Word / PowerPoint を扱う財務本部向けエージェント。同梱 Node.js と OfficeCLI で動く自己完結ランタイム | 共有フォルダーの **`Misen起動.cmd`** |
+| Enterprise Misen（`apps/enterprise-misen`） | Excel / Word / PowerPoint / PDF を扱う財務本部向けエージェント。同梱 Node.js と OfficeCLI で動く自己完結ランタイム | 共有フォルダーの **`Misen起動.cmd`** |
 
 2026 年 8 月の実験（coding-agent、Computer Use の試作、連結デモ）はリポジトリから外しました。必要になったらタグ `archive/coding-agent-be614a6` から取り出せます。
 
@@ -15,6 +15,7 @@
 - **実行場所は利用者の PC。** サーバーは建てません。共有フォルダーの `Misen起動.cmd` がハッシュ検証つきでローカルに同期し、ローカルで起動します。
 - **ファイルは PC から出ません。** 作業フォルダーの Office ファイルを OfficeCLI で編集し、成果物も同じ場所の `output\` に出ます。外へ出る通信は LLM への推論要求だけです。
 - **コード実行は持ちません。** Python やシェル、ブラウザー操作は提供しません。一方で Office ファイルへの操作は OfficeCLI の動詞（get / query / set / add / remove / move / swap / batch / validate / import）と要素モデルをそのまま Tool にし、危険な動詞・要素・プロパティだけを拒否リストで塞ぎます。境界は操作の種類ではなく、書き込み先が `output\` 内であること、数式の拒否リスト、外部参照の禁止、送信系の不在で守ります（第9版）。
+- **PDF は読む・見る・組む の 3 Tool だけです（Issue #138）。** `pdf_read`（PDF.js）が 1 回でページ数・metadata・全ページのテキストを返し、`pdf_render`（PDFium の WebAssembly）が指定 1 ページだけを画像にし、`pdf_create_output`（pdf-lib）が `output\` に複製・結合・ページ抽出を作ります。PDF 内の JavaScript・Launch・添付・リンクは実行せず、有無だけを報告します。ネイティブアドオン・OCR・Java は同梱しません。詳細は `apps/enterprise-misen/docs/pdf.md`。
 - **利用者体験は Microsoft Copilot Cowork に合わせます。** 計画の提示、チェックポイントでの承認、Skills の形式、モデルの自動選択、監査の語彙を同じ形で作ります（Issue #98 〜 #107）。
 - **監査は各 PC に追記専用で置き、善意を前提にします。** 共有フォルダーは財務本部が管理し、読める人は全員書き込めるため、ハッシュ検証は改ざん防止ではなく事故防止です。
 
