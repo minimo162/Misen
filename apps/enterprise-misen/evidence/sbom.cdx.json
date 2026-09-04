@@ -1623,6 +1623,29 @@
     },
     {
       "type": "library",
+      "bom-ref": "@hyzyla/pdfium@2.1.13",
+      "name": "@hyzyla/pdfium",
+      "version": "2.1.13",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/@hyzyla/pdfium"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "@jridgewell/gen-mapping@0.3.13",
       "name": "@jridgewell/gen-mapping",
       "version": "0.3.13",
@@ -1752,6 +1775,52 @@
         {
           "name": "misen:package-lock-path",
           "value": "node_modules/@nodable/entities"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "@pdf-lib/standard-fonts@1.0.0",
+      "name": "@pdf-lib/standard-fonts",
+      "version": "1.0.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/@pdf-lib/standard-fonts"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "@pdf-lib/upng@1.0.1",
+      "name": "@pdf-lib/upng",
+      "version": "1.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/@pdf-lib/upng"
         },
         {
           "name": "misen:has-install-script",
@@ -7419,6 +7488,29 @@
     },
     {
       "type": "library",
+      "bom-ref": "pako@1.0.11",
+      "name": "pako",
+      "version": "1.0.11",
+      "licenses": [
+        {
+          "license": {
+            "name": "(MIT AND Zlib)"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/pako"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "parse-entities@4.0.2",
       "name": "parse-entities",
       "version": "4.0.2",
@@ -7502,6 +7594,75 @@
         {
           "name": "misen:package-lock-path",
           "value": "node_modules/path-expression-matcher"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pdf-lib@1.17.1",
+      "name": "pdf-lib",
+      "version": "1.17.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/pdf-lib"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pdf-lib/node_modules/tslib@1.14.1",
+      "name": "pdf-lib/node_modules/tslib",
+      "version": "1.14.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "0BSD"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/pdf-lib/node_modules/tslib"
+        },
+        {
+          "name": "misen:has-install-script",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pdfjs-dist@6.3.289",
+      "name": "pdfjs-dist",
+      "version": "6.3.289",
+      "licenses": [
+        {
+          "license": {
+            "name": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "misen:package-lock-path",
+          "value": "node_modules/pdfjs-dist"
         },
         {
           "name": "misen:has-install-script",

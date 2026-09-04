@@ -18,7 +18,7 @@ const ordinal = (left: string, right: string): number => left < right ? -1 : lef
 
 async function outputPaths(boundary: WorkspaceBoundary): Promise<string[]> {
   return (await boundary.listOutputFiles())
-    .filter(path => /\.(?:xlsx|docx|pptx)$/iu.test(path))
+    .filter(path => /\.(?:xlsx|docx|pptx|pdf)$/iu.test(path))
     .sort(ordinal)
 }
 

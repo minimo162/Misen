@@ -34,8 +34,11 @@
     "@assistant-ui/react-markdown": "0.14.13",
     "@earendil-works/pi-agent-core": "0.84.4",
     "@earendil-works/pi-ai": "0.84.4",
+    "@hyzyla/pdfium": "2.1.13",
     "fast-xml-parser": "5.9.3",
     "fflate": "0.8.3",
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "6.3.289",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "yaml": "2.9.0"

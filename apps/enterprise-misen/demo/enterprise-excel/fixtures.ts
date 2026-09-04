@@ -92,6 +92,7 @@ const WORKSPACE_INSTRUCTIONS = `# Enterprise Finance Workspace
 - Create deliverables with office_create_output, then modify only files under output with office_set, office_add, office_remove, office_move, office_swap, office_batch, or office_import.
 - Use OfficeCLI element paths, selectors, element types, and string properties. A batch may contain at most 200 items.
 - Run office_inspect with validate before reporting completion. Never overwrite a source file.
+- For PDF files, pdf_read once is enough for reading and summarizing; use pdf_render only for a page whose layout must be checked. Combine or extract PDF pages with pdf_create_output under output.
 - Do not reveal credentials or claim that a failed check passed.
 `
 

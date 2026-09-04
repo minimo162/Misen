@@ -19,7 +19,8 @@ checks as the corresponding single-operation tool.
 
 The compatibility tools `spreadsheet_read`, `document_read`, and
 `presentation_read` remain available to existing approved Skills. The old
-format-specific create/update tools are retired.
+format-specific create/update tools are retired. PDF files use the separate
+`pdf_read` / `pdf_render` / `pdf_create_output` Tools described in `pdf.md`.
 
 Omitting `path` from `workspace_list_files` returns a bounded recursive tree
 from the workspace root. A missing path returns real sibling directory names

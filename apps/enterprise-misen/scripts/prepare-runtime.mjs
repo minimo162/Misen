@@ -14,6 +14,7 @@ import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { nodeRuntimeContract, nodeRuntimeInputManifest } from './node-runtime-contract.mjs'
 import { officeCliRuntimeContract, officeCliRuntimeInputManifest } from './officecli-runtime-contract.mjs'
+import { allowedWasmDirectories } from './wasm-runtime-contract.mjs'
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const shaPattern = /^[0-9a-f]{40}$/
@@ -181,7 +182,8 @@ async function installProductionDependencies(appDirectory) {
   await cp(join(appRoot, 'package-lock.json'), join(appDirectory, 'package-lock.json'))
   const npmCli = process.env.npm_execpath
   if (!npmCli) throw new Error('prepare-runtime must be invoked through npm so the packaging npm CLI is explicit')
-  execFileSync(process.execPath, [npmCli, 'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], {
+  // --omit=optional keeps pdfjs-dist's optional native canvas (@napi-rs/canvas) out of the runtime; Misen never renders with pdf.js.
+  execFileSync(process.execPath, [npmCli, 'ci', '--omit=dev', '--omit=optional', '--ignore-scripts', '--no-audit', '--no-fund'], {
     cwd: appDirectory,
     stdio: 'inherit',
   })
@@ -255,12 +257,18 @@ async function countInstalledPackages(nodeModules) {
   return (await walk(nodeModules)).filter(path => basename(path) === 'package.json').length
 }
 
-function assertRuntimeBoundary(inventory) {
+function assertRuntimeBoundary(inventory, wasmFiles) {
   const allowed = new Set(['run.cmd', nodeRuntimeContract.executable, officeCliRuntimeContract.executable])
   const forbiddenNames = inventory.executableOrScriptFiles.filter((path) => !allowed.has(path))
   if (forbiddenNames.length > 0) throw new Error(`unexpected executable or script files: ${forbiddenNames.join(', ')}`)
   const extensions = inventory.byExtension
   if ((extensions['.node'] ?? 0) !== 0 || (extensions['.dll'] ?? 0) !== 0 || (extensions['.exe'] ?? 0) !== 2) throw new Error('native runtime inventory must contain exactly the approved Node and OfficeCLI executables')
+  const strayWasm = wasmFiles.filter((path) => !allowedWasmDirectories.some((directory) => path.startsWith(directory)))
+  if (strayWasm.length > 0) throw new Error(`unexpected WebAssembly files: ${strayWasm.join(', ')}`)
+}
+
+async function wasmInventory(target) {
+  return (await walk(target)).map((path) => inventoryEntry(path, target)).filter((path) => path.toLowerCase().endsWith('.wasm'))
 }
 
 async function writeHashes(target) {
@@ -316,7 +324,8 @@ export async function prepareRuntime({ output, nodeRuntime, officeCliRuntime }) 
     const applicationVersion = JSON.parse(await readFile(join(appDirectory, 'package.json'), 'utf8')).version
     const productionDependencyPackageCount = await countInstalledPackages(join(appDirectory, 'node_modules'))
     const preliminaryInventory = await buildInventory(target)
-    assertRuntimeBoundary(preliminaryInventory)
+    const wasmFiles = await wasmInventory(target)
+    assertRuntimeBoundary(preliminaryInventory, wasmFiles)
     const manifest = {
       schemaVersion: 5,
       applicationVersion,
@@ -371,7 +380,7 @@ export async function prepareRuntime({ output, nodeRuntime, officeCliRuntime }) 
       dependencyProvenance: {
         source: 'app/dependency-lock.json',
         sha256: lockHash,
-        install: 'npm ci --omit=dev --ignore-scripts --no-audit --no-fund (packaging host only)',
+        install: 'npm ci --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund (packaging host only)',
         productionDependencyPackageCount,
       },
       runtimePolicy: {
@@ -382,12 +391,14 @@ export async function prepareRuntime({ output, nodeRuntime, officeCliRuntime }) 
         observerOrStudyCodeDistributed: false,
         officeCliAutoUpdate: false,
         officeCliAutoResident: false,
+        nativeAddons: false,
+        webAssemblyModules: wasmFiles,
       },
       inventory: { ...preliminaryInventory, scope: 'all distributed files except SHA256SUMS.txt' },
     }
     await writeFile(join(target, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
     const finalInventory = await buildInventory(target)
-    assertRuntimeBoundary(finalInventory)
+    assertRuntimeBoundary(finalInventory, await wasmInventory(target))
     manifest.inventory = { ...finalInventory, scope: 'all distributed files except SHA256SUMS.txt' }
     await writeFile(join(target, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
     await writeHashes(target)

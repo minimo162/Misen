@@ -27,7 +27,7 @@ export interface LiveAgentOptions {
  */
 export function checkpointFor(name: string, args: unknown, outputExists?: (relativePath: string) => boolean): BlockedCheckpoint | undefined {
   const values = args && typeof args === 'object' ? args as Record<string, unknown> : {}
-  if (name === 'office_create_output' && values.overwrite === true) {
+  if ((name === 'office_create_output' || name === 'pdf_create_output') && values.overwrite === true) {
     const target = typeof values.output === 'string' ? values.output : '成果物'
     if (outputExists && typeof values.output === 'string' && !outputExists(values.output)) return undefined
     return { verb: '上書き', target, risk: '中', reason: '同名のファイルが output に既にあり、その内容が置き換わります。前回の成果物を残す場合は拒否して、別の名前を指示してください。' }

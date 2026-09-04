@@ -6,7 +6,8 @@ import { officeCliRuntimeContract } from './officecli-runtime-contract.mjs'
 
 const lock = JSON.parse(await readFile(new URL('../package-lock.json', import.meta.url), 'utf8'))
 const packages = Object.entries(lock.packages)
-  .filter(([path]) => path.startsWith('node_modules/'))
+  // Production-optional packages (pdfjs-dist's native canvas) are excluded from every prepared runtime by `--omit=optional`.
+  .filter(([path, value]) => path.startsWith('node_modules/') && !(value.optional === true && value.dev !== true))
   .map(([path, value]) => ({
     type: 'library',
     'bom-ref': `${path.slice('node_modules/'.length)}@${value.version}`,

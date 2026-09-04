@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { nodeRuntimeContract } from './node-runtime-contract.mjs'
 import { officeCliRuntimeContract } from './officecli-runtime-contract.mjs'
+import { allowedWasmDirectories } from './wasm-runtime-contract.mjs'
 const modelVisibleWorkspacePaths = [
   'workspace/AGENTS.md',
   'workspace/.agents/skills/monthly-report/SKILL.md',
@@ -119,6 +120,7 @@ export async function findForbiddenNames(root) {
         if (relativePath.startsWith('runtime/officecli/') && !allowedOfficeCliRuntimePaths.has(relativePath)) forbidden.push(path)
         if (/^(esbuild|tsc|npm|npx|corepack)(\.cmd|\.ps1|\.exe)?$/iu.test(entry.name) || /\.(ts|tsx|mts|cts|map|tsbuildinfo)$/iu.test(entry.name)) forbidden.push(path)
         if (/\.(exe|dll|node|cmd|ps1|bat|com)$/iu.test(entry.name) && !allowedExecutableOrScriptPaths.has(relativePath)) forbidden.push(path)
+        if (/\.wasm$/iu.test(entry.name) && !allowedWasmDirectories.some((directory) => relativePath.startsWith(directory))) forbidden.push(path)
       }
     }
   }
