@@ -61,12 +61,12 @@ function ToolFallbackDuration({ className, ...props }: React.ComponentProps<"spa
   return <span className={cn("text-muted-foreground text-xs tabular-nums", className)} {...props}>{label}</span>;
 }
 
-function ToolFallbackTrigger({ toolName, status, className, ...props }: React.ComponentProps<typeof CollapsibleTrigger> & { toolName: string; status?: ToolCallMessagePartStatus }) {
+function ToolFallbackTrigger({ toolName, status, cached = false, className, ...props }: React.ComponentProps<typeof CollapsibleTrigger> & { toolName: string; status?: ToolCallMessagePartStatus; cached?: boolean }) {
   const statusType = status?.type ?? "complete";
   const isRunning = statusType === "running";
   const isCancelled = status?.type === "incomplete" && status.reason === "cancelled";
   const Icon = statusIconMap[statusType];
-  const label = isCancelled ? "中止した操作" : isRunning ? "操作中" : "実行した操作";
+  const label = isCancelled ? "中止した操作" : isRunning ? "操作中" : cached ? "同じ結果を再利用" : "実行した操作";
   return (
     <CollapsibleTrigger className={cn("group/trigger text-muted-foreground hover:text-foreground flex w-fit origin-left items-center gap-2 py-1.5 text-sm transition-[color,scale] active:scale-[0.98]", className)} {...props}>
       <Icon className={cn("size-4 shrink-0", isRunning && "animate-spin [animation-duration:0.6s]")} />
@@ -104,9 +104,10 @@ function ToolFallbackError({ status, className, ...props }: React.ComponentProps
 
 const ToolFallbackImpl: ToolCallMessagePartComponent = ({ toolName, argsText, result, status }: ToolCallMessagePartProps) => {
   const [open, setOpen] = useState(status?.type === "running");
+  const cached = Boolean(result && typeof result === "object" && (result as { cached?: unknown }).cached === true);
   return (
     <ToolFallbackRoot open={open} onOpenChange={setOpen}>
-      <ToolFallbackTrigger toolName={toolName} status={status} />
+      <ToolFallbackTrigger toolName={toolName} status={status} cached={cached} />
       <ToolFallbackContent>
         <ToolFallbackError status={status} />
         <ToolFallbackArgs argsText={argsText} />

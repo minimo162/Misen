@@ -1,5 +1,6 @@
 import type { AgentTool } from '@earendil-works/pi-agent-core'
 import { enterpriseTools } from '../capabilities/tools.js'
+import { withSessionReadCache } from '../capabilities/tool-cache.js'
 import { StaticLifecycleHooks, type LifecycleHook } from '../customization/hooks.js'
 import { discoverSkills, renderSkillCatalog, type SkillMetadata } from '../customization/skills.js'
 import { loadReferencedDocuments, loadWorkspaceTree } from '../customization/preload.js'
@@ -22,7 +23,7 @@ export interface PreparedAgentCustomization {
 
 export async function prepareAgentCustomization(root: string, additionalHooks: readonly LifecycleHook[] = []): Promise<PreparedAgentCustomization> {
   const boundary = new WorkspaceBoundary(root)
-  const tools = enterpriseTools(boundary)
+  const tools = withSessionReadCache(enterpriseTools(boundary))
   const hooks = new StaticLifecycleHooks(additionalHooks)
   const [instructions, skills, tree] = await Promise.all([loadWorkspaceInstructions(boundary), discoverSkills(boundary), loadWorkspaceTree(boundary)])
   const referencedDocuments = await loadReferencedDocuments(boundary, instructions)

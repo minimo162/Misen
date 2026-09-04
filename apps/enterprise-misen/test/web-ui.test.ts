@@ -81,6 +81,7 @@ test('assistant-ui composition keeps the conversation surface restrained and saf
   assert.match(source, /sourceType:\s*'url'/u)
   assert.match(source, /<File \{\.\.\.part\}/u)
   for (const label of ['ファイル一覧を確認', '業務ガイドを確認', 'Excelを確認', 'Wordを確認', 'PowerPointを確認', 'Officeの内容を確認', 'Officeの要素を検索', 'Officeファイルを検証', 'Officeファイルを作成', 'Officeの書式・値を更新', 'Officeの要素を追加', 'Officeの要素を削除', 'Officeの要素を移動', 'Officeの要素を入れ替え', 'Officeファイルを一括更新', '表データを取り込み']) assert.match(source, new RegExp(label, 'u'))
+  assert.match(source, /同じ結果を再利用/u)
 
   assert.match(source, /ThreadListPrimitive\.Root/)
   assert.match(source, /ThreadListPrimitive\.New/)

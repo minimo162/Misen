@@ -61,6 +61,13 @@ test('persisted session projects Tool calls and artifacts onto its own assistant
   assert.deepEqual(statusOf(store, 'assistant-run-1'), { type: 'complete', reason: 'stop' })
 })
 
+test('cached Tool results survive persistence and project a Japanese reuse marker', () => {
+  const store = threadStoreFromSession(session({ tools: [{ id: 'cached-1', runId: 'run-1', name: 'spreadsheet_read', detail: 'Alpha.xlsx', status: 'success', cached: true }] }))
+  assert.deepEqual(parts(store, 'assistant-run-1')[0]?.result, { status: 'success', cached: true })
+  const live = applyServerEvent(startRun(emptyThreadStore(), 'cached-run', '依頼'), { type: 'tool', phase: 'end', id: 'cached-2', name: 'workspace_list_files', status: 'success', cached: true })
+  assert.deepEqual(parts(live, 'assistant-cached-run')[0]?.result, { status: 'success', cached: true })
+})
+
 test('interrupted and failed sessions surface an error status on the last assistant message', () => {
   const interrupted = threadStoreFromSession(session({ status: 'RUNNING', messages: [{ id: 'run-1', role: 'user', text: '依頼' }] }))
   assert.equal(interrupted.status, 'FAIL')

@@ -17,6 +17,31 @@ async function start(root: string, runner: AgentRunner, artifactObserver?: Artif
   return { server, base: 'http://127.0.0.1:' + port }
 }
 
+test('cached Tool completion is persisted in the session and metadata-only audit', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'misen-cached-audit-'))
+  await mkdir(join(root, 'output'))
+  const auditPath = join(root, '.test-data', 'audit.jsonl')
+  const runner: AgentRunner = async (_root, _prompt, context) => {
+    context!.emit({ type: 'tool', phase: 'start', id: 'cached-call', name: 'spreadsheet_read', detail: 'Alpha.xlsx' })
+    context!.emit({ type: 'tool', phase: 'end', id: 'cached-call', name: 'spreadsheet_read', status: 'success', cached: true })
+    return { tools: ['spreadsheet_read'], status: 'COMPLETED' }
+  }
+  const { server, base } = await start(root, runner, undefined, { auditPath })
+  try {
+    const created = await fetch(base + '/sessions', { method: 'POST', headers: { origin: base } })
+    const session = await created.json() as { id: string }
+    const response = await fetch(base + '/run', { method: 'POST', redirect: 'manual', headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ prompt: '確認', clientId: 'cached-run', sessionId: session.id }) })
+    assert.equal(response.status, 303)
+    const stored = await (await fetch(base + '/sessions/' + session.id)).json() as any
+    assert.equal(stored.tools[0].cached, true)
+    const audit = (await readFile(auditPath, 'utf8')).trim().split(/\r?\n/u).map(line => JSON.parse(line))
+    assert.deepEqual(audit.map(item => ({ event: item.event, tool: item.tool, cached: item.cached })), [{ event: 'tool.completed', tool: 'spreadsheet_read', cached: true }])
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()))
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('file import accepts only supported bounded files, numbers duplicates, and writes metadata audit', async () => {
   const root = await mkdtemp(join(tmpdir(), 'misen-import-'))
   await mkdir(join(root, 'output'))

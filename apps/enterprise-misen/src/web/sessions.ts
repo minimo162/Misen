@@ -24,6 +24,7 @@ export type StoredToolEvent = {
   name: string
   detail?: string
   status: 'success' | 'error'
+  cached?: boolean
 }
 
 export type StoredArtifact = {
@@ -81,7 +82,8 @@ function parseMessage(value: unknown): StoredMessage | undefined {
 function parseTool(value: unknown): StoredToolEvent | undefined {
   if (!isRecord(value) || !isSafeText(value.id, 160) || !isSafeText(value.runId, 80) || !isSafeText(value.name, 80) || (value.status !== 'success' && value.status !== 'error')) return undefined
   if (value.detail !== undefined && !isSafeText(value.detail, 260)) return undefined
-  return { id: value.id, runId: value.runId, name: value.name, status: value.status, ...(value.detail === undefined ? {} : { detail: value.detail }) }
+  if (value.cached !== undefined && typeof value.cached !== 'boolean') return undefined
+  return { id: value.id, runId: value.runId, name: value.name, status: value.status, ...(value.detail === undefined ? {} : { detail: value.detail }), ...(value.cached === true ? { cached: true } : {}) }
 }
 
 function parseArtifact(value: unknown): StoredArtifact | undefined {
