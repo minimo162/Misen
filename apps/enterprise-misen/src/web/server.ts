@@ -45,7 +45,7 @@ export interface AgentRunResult {
 export type DemoEvent =
   | { type: 'user'; sessionId?: string; id: string; text: string }
   | { type: 'assistant'; sessionId?: string; text: string; done?: boolean }
-  | { type: 'tool'; sessionId?: string; phase: 'start' | 'end'; id: string; name: string; detail?: string; status?: 'success' | 'error' }
+  | { type: 'tool'; sessionId?: string; phase: 'start' | 'end'; id: string; name: string; detail?: string; status?: 'success' | 'error'; cached?: boolean }
   | { type: 'plan'; sessionId?: string; plan: StoredPlan }
   | { type: 'step'; sessionId?: string; planId: string; stepId: string; status: 'pending' | 'running' | 'completed' }
   | { type: 'checkpoint_request'; sessionId?: string; checkpoint: { id: string; verb: string; target: string; risk: '低' | '中' | '高'; reason: string } }
@@ -137,7 +137,9 @@ function forwardAgentEvent(event: AgentEvent, context: DemoRunContext, tools: st
     return
   }
   if (event.type === 'tool_execution_end') {
-    context.emit({ type: 'tool', phase: 'end', id: event.toolCallId, name: event.toolName, detail: safeToolDetail(event.toolName, undefined), status: event.isError ? 'error' : 'success' })
+    const details = event.result?.details
+    const cached = Boolean(details && typeof details === 'object' && !Array.isArray(details) && (details as Record<string, unknown>).cached === true)
+    context.emit({ type: 'tool', phase: 'end', id: event.toolCallId, name: event.toolName, detail: safeToolDetail(event.toolName, undefined), status: event.isError ? 'error' : 'success', ...(cached ? { cached: true } : {}) })
     return
   }
   if (event.type === 'message_update' || event.type === 'message_end') {
@@ -499,6 +501,7 @@ export function createDemoServer(
               let hasVisibleAssistantText = false
               let visibleAssistantText = ''
               const storedTools = new Map<string, StoredToolEvent>()
+              let toolAudit = Promise.resolve()
               const runEmit = (event: DemoEvent) => {
                 if (event.type === 'assistant' && event.text.trim().length > 0) {
                   hasVisibleAssistantText = true
@@ -506,7 +509,10 @@ export function createDemoServer(
                 }
                 if (event.type === 'tool') {
                   if (event.phase === 'start') storedTools.set(event.id, { id: event.id, runId: clientId, name: event.name, detail: event.detail, status: 'success' })
-                  else storedTools.set(event.id, { id: event.id, runId: clientId, name: event.name, detail: storedTools.get(event.id)?.detail, status: event.status === 'error' ? 'error' : 'success' })
+                  else {
+                    storedTools.set(event.id, { id: event.id, runId: clientId, name: event.name, detail: storedTools.get(event.id)?.detail, status: event.status === 'error' ? 'error' : 'success', ...(event.cached ? { cached: true } : {}) })
+                    toolAudit = toolAudit.then(() => appendAudit(auditPath, { event: 'tool.completed', tool: event.name, cached: event.cached === true }, options.now))
+                  }
                 }
                 emit({ ...event, sessionId })
               }
@@ -561,6 +567,7 @@ export function createDemoServer(
                   })
                 },
               })
+              await toolAudit
               setStep('work', 'completed')
               setStep('verify', 'running')
               const runnerStatus = cancelRequested ? 'CANCELLED' : result.status
