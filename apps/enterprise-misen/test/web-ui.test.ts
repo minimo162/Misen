@@ -32,8 +32,12 @@ test('assistant-ui composition keeps the conversation surface restrained and saf
     'tooltip-icon-button.tsx',
   ]
   const client = await readFile(join(process.cwd(), 'src', 'web', 'client.tsx'), 'utf8')
+  const attachment = await readFile(join(process.cwd(), 'src', 'web', 'components', 'attachment.aui.tsx'), 'utf8')
+  const projectControls = await readFile(join(process.cwd(), 'src', 'web', 'project-controls.tsx'), 'utf8')
   const source = [
     client,
+    attachment,
+    projectControls,
     ...await Promise.all(componentNames.map(name => readFile(join(process.cwd(), 'src', 'web', 'components', 'assistant-ui', 'elements', name), 'utf8'))),
   ].join('\n')
   const styles = await readFile(join(process.cwd(), 'src', 'web', 'client.css'), 'utf8')
@@ -44,7 +48,7 @@ test('assistant-ui composition keeps the conversation surface restrained and saf
 
   assert.equal(registry.registries['@assistant-ui'], 'https://r.assistant-ui.com/styles/{style}/{name}.json')
   assert.match(source, /useExternalStoreRuntime</)
-  assert.match(source, /adapters:\s*\{\s*threadList\s*\}/u)
+  assert.match(source, /adapters:\s*\{\s*threadList,\s*attachments:\s*misenAttachmentAdapter\s*\}/u)
   assert.match(source, /ExternalStoreThreadListAdapter/)
   assert.match(source, /onSwitchToNewThread/)
   assert.match(source, /onSwitchToThread/)
@@ -62,6 +66,9 @@ test('assistant-ui composition keeps the conversation surface restrained and saf
   assert.match(source, /ComposerPrimitive\.Input/)
   assert.match(source, /ComposerPrimitive\.Send/)
   assert.match(source, /ComposerPrimitive\.Cancel/)
+  assert.match(source, /ComposerPrimitive\.AddAttachment/)
+  assert.match(source, /ComposerPrimitive\.AttachmentDropzone/)
+  assert.match(source, /持ち込んだファイルはこの PC の作業フォルダーに置かれ、外へは出ません/u)
   assert.doesNotMatch(source, /onClick=\{(?:onCancel|cancel)\}/u)
 
   assert.match(source, /MessagePrimitive\.GroupedParts/)
@@ -91,8 +98,8 @@ test('assistant-ui composition keeps the conversation surface restrained and saf
   assert.match(client, /ThreadListItems/u)
   assert.doesNotMatch(client, /ThreadListSearch|<ThreadList\s*\/>/u)
   assert.doesNotMatch(source, /onRename|ThreadListItemPrimitive\.(?:Archive|Unarchive)/u)
-  assert.doesNotMatch(source, /adapters:\s*\{[^}]*(?:attachments|speech|dictation|voice|feedback)/u)
-  assert.equal((source.match(/fetch\(/gu) ?? []).length, 7, 'sessions list, session get, session create, session delete, state resync, run, cancel')
+  assert.doesNotMatch(source, /adapters:\s*\{[^}]*(?:speech|dictation|voice|feedback)/u)
+  for (const label of ['プロジェクト', 'フォルダーを選ぶ…', 'エクスプローラーで開く', '承認', '毎回確認', 'このセッションは自動', 'このプロジェクトのファイルは PC から出ません']) assert.match(source, new RegExp(label, 'u'))
 
   assert.doesNotMatch(source, /viewportRef|scrollHeight|scrollTop|clientHeight/)
   assert.doesNotMatch(source, /assistant-cloud|AssistantCloud|pi-web|Vercel AI SDK|react-ai-sdk|useChatRuntime/iu)

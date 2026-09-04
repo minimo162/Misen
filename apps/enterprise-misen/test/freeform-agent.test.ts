@@ -51,5 +51,5 @@ test('production web routing contains no prompt gallery or Decision 441 validato
   const source = await readFile(join(process.cwd(), 'src', 'web', 'server.ts'), 'utf8')
   assert.doesNotMatch(source, /\bPROMPTS\b|\bSYNTHETIC_MONTHS\b|validateReport/u)
   assert.match(source, /prompt\.trim\(\)\.length === 0/u)
-  assert.match(source, /runner\(root, prompt,/u)
+  assert.match(source, /runner\(projects\.currentRoot, agentPrompt,/u)
 })
