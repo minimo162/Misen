@@ -36,7 +36,9 @@ export function createStoredPlan(clientId: string, proposal?: PlanProposal): Sto
     return {
       id: `plan-${clientId}`,
       title: '実行計画',
-      visible: true,
+      // The fixed three steps carry no request-specific information; keep them for internal
+      // progress tracking but never show them to the user in place of a real plan.
+      visible: false,
       completed: false,
       fallback: true,
       steps: [
