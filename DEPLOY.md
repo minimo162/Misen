@@ -135,7 +135,7 @@ scripts\prepare-misen.cmd "\\fileserver\CompanyApps\Misen" -CleanDestination
 | `brain.baseUrl` | openai-compatible のときだけ必須（http/https）。公式プロバイダーでは指定不可 |
 | `brain.thinkingLevel` | 省略可（既定 medium） |
 
-記入して保存したあと、もう一度 `Misen起動.cmd` をダブルクリックします。設定に誤りがあると日本語のメッセージで停止します（API キーは表示しません）。管理者が事前に確認する場合は、ローカル版の `app\dist\srcuntime\settings-cli.js check --settings <path>` を同梱 Node.js で実行してください。
+記入して保存したあと、もう一度 `Misen起動.cmd` をダブルクリックします。設定に誤りがあると日本語のメッセージで停止します（API キーは表示しません）。管理者が事前に確認する場合は、ローカル版の `app\dist\src\runtime\settings-cli.js check --settings <path>` を同梱 Node.js で実行してください。
 
 API キーは共有フォルダー・manifest・ログ・画面・セッション履歴に出ません。共有フォルダーには利用者の設定を置かないでください。
 
