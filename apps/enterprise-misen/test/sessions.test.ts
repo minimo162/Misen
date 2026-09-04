@@ -42,10 +42,14 @@ test('local title is deterministic, single-line, bounded, and needs no Brain req
   assert.equal(localSessionDirectory({ LOCALAPPDATA: 'C:\\Users\\standard\\AppData\\Local' }), 'C:\\Users\\standard\\AppData\\Local\\Misen\\data\\sessions')
 })
 
-test('version 1 sessions migrate to the plan-capable schema without losing conversation data', () => {
+test('older sessions migrate to the current plan-capable schema without losing conversation data', () => {
   const migrated = parseStoredSession({ schemaVersion: 1, id: 'abcdefghijklmnopqrstuvwx', title: '旧会話', createdAt: '2026-09-03T01:00:00.000Z', updatedAt: '2026-09-03T01:01:00.000Z', status: 'COMPLETED', messages: [], tools: [], artifacts: [] })
   assert.equal(migrated?.schemaVersion, SESSION_SCHEMA_VERSION)
   assert.deepEqual(migrated?.runUi, [])
+  const version2 = parseStoredSession({ schemaVersion: 2, id: 'abcdefghijklmnopqrstuvwy', title: '旧計画', createdAt: '2026-09-03T01:00:00.000Z', updatedAt: '2026-09-03T01:01:00.000Z', status: 'COMPLETED', messages: [], tools: [], artifacts: [], runUi: [{ runId: 'old-run', checkpoints: [], plan: { id: 'old-plan', title: '実行計画', steps: [{ id: 'old-step', title: '必要な作業を実行', status: 'completed' }] } }] })
+  assert.equal(version2?.runUi[0]?.plan?.visible, true)
+  assert.equal(version2?.runUi[0]?.plan?.completed, true)
+  assert.equal(version2?.runUi[0]?.plan?.steps[0]?.tool, '')
 })
 
 test('empty history, persistence, ordering, safe reopen, and distinct new chat survive server restart', async () => {

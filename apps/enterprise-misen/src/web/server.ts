@@ -4,7 +4,7 @@ import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import { basename, dirname, join } from 'node:path'
 import { createHash, randomBytes } from 'node:crypto'
-import { liveAgent, liveBrainIdentity, type ApprovalMode, type BlockedCheckpoint, type LiveAgentOptions } from '../runtime/live.js'
+import { liveAgent, liveBrainIdentity, livePlanProvider, type ApprovalMode, type BlockedCheckpoint, type LiveAgentOptions } from '../runtime/live.js'
 import { WorkspaceBoundary } from '../workspace/boundary.js'
 import type { AgentEvent } from '@earendil-works/pi-agent-core'
 import {
@@ -31,6 +31,7 @@ import {
 import { appendAudit, defaultAuditPath } from './audit.js'
 import { AttachmentImportError, importAttachment, readAttachmentRequest } from './attachments.js'
 import { defaultProjectStatePath, ProjectSelectionError, ProjectStore } from './projects.js'
+import { additionalOperationStep, createStoredPlan, matchingPendingStep, planShouldBeVisible, type PlanProvider } from './planning.js'
 
 export interface AgentRunResult {
   tools: string[]
@@ -200,6 +201,7 @@ export interface DemoServerOptions {
   pickFolder?: (initialPath: string) => Promise<string | undefined>
   openFolder?: (path: string) => void | Promise<void>
   brainIdentity?: () => Promise<{ provider: string; model: string }>
+  planProvider?: PlanProvider
 }
 
 const execFileAsync = promisify(execFile)
@@ -252,6 +254,7 @@ export function createDemoServer(
   const stateBase = options.sessionDirectory ? dirname(options.sessionDirectory) : undefined
   const projects = new ProjectStore(options.projectStatePath ?? (stateBase ? join(stateBase, 'projects.json') : defaultProjectStatePath()), root)
   const auditPath = options.auditPath ?? (stateBase ? join(stateBase, 'audit.jsonl') : defaultAuditPath())
+  const planProvider = options.planProvider ?? (runner === liveAgentRunner ? livePlanProvider : async () => undefined)
   let approvalMode: ApprovalMode = 'confirm'
   const artifactResources = new Map<string, { filename: string; bytes: Uint8Array }>()
   const usedRunIds = new Set<string>()
@@ -470,15 +473,9 @@ export function createDemoServer(
             return response.end('Request failed')
           }
           usedRunIds.add(clientId)
-          const plan: StoredPlan = {
-            id: `plan-${clientId}`,
-            title: '実行計画',
-            steps: [
-              { id: 'review', title: '依頼内容と入力を確認', status: 'running' },
-              { id: 'work', title: '必要な作業を実行', status: 'pending' },
-              { id: 'verify', title: '成果物を確認して完了', status: 'pending' },
-            ],
-          }
+          let proposedPlan
+          try { proposedPlan = await planProvider(projects.currentRoot, prompt, importedPaths) } catch { proposedPlan = undefined }
+          const plan: StoredPlan = createStoredPlan(clientId, proposedPlan)
           const runUi: StoredRunUi = { runId: clientId, plan, checkpoints: [] }
           const startedAt = sessions.timestamp()
           const userMessage: StoredMessage = { id: clientId, role: 'user', text: prompt, timestamp: startedAt }
@@ -490,10 +487,19 @@ export function createDemoServer(
           })
           state = { status: 'running', runId: clientId, sessionId, tools: [], axes: [], artifacts: [], runUi }
           emit({ type: 'status', sessionId, status: 'running' }); emit({ type: 'user', sessionId, id: clientId, text: prompt }); emit({ type: 'plan', sessionId, plan }); emitState()
+          let planDifferencesRecorded = false
+          const recordUnexecutedPlan = async () => {
+            if (planDifferencesRecorded || plan.fallback) return
+            planDifferencesRecorded = true
+            for (const step of plan.steps.filter(item => !item.unplanned && item.status !== 'completed')) {
+              await appendAudit(auditPath, { event: 'plan.unexecuted_step', planId: plan.id, stepId: step.id, tool: step.tool, target: step.target }, options.now)
+            }
+          }
           try {
             const outputBefore = await artifactObserver.snapshot(boundary)
             if (cancelRequested) {
               const text = '処理を停止しました。'
+              await recordUnexecutedPlan()
               session = await persist(session, { status: 'CANCELLED', messages: [...session.messages, { id: `assistant-${clientId}`, role: 'assistant', text, timestamp: sessions.timestamp() }] })
               state = { ...state, status: 'CANCELLED' }
               emit({ type: 'assistant', sessionId, text, done: true })
@@ -502,6 +508,7 @@ export function createDemoServer(
               let hasVisibleAssistantText = false
               let visibleAssistantText = ''
               const storedTools = new Map<string, StoredToolEvent>()
+              const stepByToolCall = new Map<string, string>()
               let toolAudit = Promise.resolve()
               const runEmit = (event: DemoEvent) => {
                 if (event.type === 'assistant' && event.text.trim().length > 0) {
@@ -509,10 +516,26 @@ export function createDemoServer(
                   visibleAssistantText = event.text
                 }
                 if (event.type === 'tool') {
-                  if (event.phase === 'start') storedTools.set(event.id, { id: event.id, runId: clientId, name: event.name, target: event.target, status: 'success' })
+                  if (event.phase === 'start') {
+                    storedTools.set(event.id, { id: event.id, runId: clientId, name: event.name, target: event.target, status: 'success' })
+                    if (!plan.fallback) {
+                      const matched = matchingPendingStep(plan, event.name, event.target)
+                      const step = matched ?? additionalOperationStep(plan, event.name, event.target)
+                      if (!matched) {
+                        plan.steps.push(step)
+                        plan.visible = planShouldBeVisible(plan.steps)
+                        runEmit({ type: 'plan', plan })
+                        toolAudit = toolAudit.then(() => appendAudit(auditPath, { event: 'plan.unplanned_tool', planId: plan.id, tool: event.name, target: event.target ?? '' }, options.now))
+                      }
+                      stepByToolCall.set(event.id, step.id)
+                      setStep(step.id, 'running')
+                    }
+                  }
                   else {
                     storedTools.set(event.id, { id: event.id, runId: clientId, name: event.name, target: storedTools.get(event.id)?.target, status: event.status === 'error' ? 'error' : 'success', ...(event.cached ? { cached: true } : {}) })
                     toolAudit = toolAudit.then(() => appendAudit(auditPath, { event: 'tool.completed', tool: event.name, cached: event.cached === true }, options.now))
+                    const stepId = stepByToolCall.get(event.id)
+                    if (stepId) setStep(stepId, 'completed')
                   }
                 }
                 emit({ ...event, sessionId })
@@ -522,8 +545,7 @@ export function createDemoServer(
                 if (step) step.status = status
                 runEmit({ type: 'step', planId: plan.id, stepId, status })
               }
-              setStep('review', 'completed')
-              setStep('work', 'running')
+              if (plan.fallback) { setStep('review', 'completed'); setStep('work', 'running') }
               const agentPrompt = importedPaths.length === 0 ? prompt : `${prompt}\n\n持ち込んだファイル（作業フォルダーからの相対パス）:\n${importedPaths.map(path => `- ${path}`).join('\n')}`
               const result = await runner(projects.currentRoot, agentPrompt, {
                 emit: runEmit,
@@ -569,8 +591,7 @@ export function createDemoServer(
                 },
               })
               await toolAudit
-              setStep('work', 'completed')
-              setStep('verify', 'running')
+              if (plan.fallback) { setStep('work', 'completed'); setStep('verify', 'running') }
               const runnerStatus = cancelRequested ? 'CANCELLED' : result.status
               const discovered = runnerStatus === 'COMPLETED'
                 ? await artifactObserver.discover(boundary, outputBefore, MAX_SESSION_ARTIFACTS - artifactResources.size)
@@ -580,7 +601,10 @@ export function createDemoServer(
               const status = cancelRequested ? 'CANCELLED' : runnerStatus
               const terminalStatus: Exclude<UiState['status'], 'idle' | 'running'> = status
               const artifacts = status === 'COMPLETED' ? registerArtifacts(discovered, clientId) : []
-              setStep('verify', 'completed')
+              if (plan.fallback) setStep('verify', 'completed')
+              await recordUnexecutedPlan()
+              plan.completed = status === 'COMPLETED'
+              runEmit({ type: 'plan', plan })
               const fallbackText = status === 'COMPLETED' ? '処理が完了しました。' : status === 'CANCELLED' ? '処理を停止しました。' : '処理を完了できませんでした。'
               const assistantText = hasVisibleAssistantText ? visibleAssistantText : fallbackText
               const storedArtifacts: StoredArtifact[] = status === 'COMPLETED' ? discovered.map(artifact => ({
@@ -606,6 +630,7 @@ export function createDemoServer(
             // Keep provider/transport details out of the browser-facing state;
             // diagnostic evidence belongs to the server-side acceptance layer.
             const text = '処理に失敗しました。'
+            await recordUnexecutedPlan()
             session = await persist(session, { status: 'FAIL', messages: [...session.messages, { id: `assistant-${clientId}`, role: 'assistant', text, timestamp: sessions.timestamp() }] })
             state = { ...state, status: 'FAIL', error: text }
             emit({ type: 'status', sessionId, status: 'FAIL', error: text }); emitState()

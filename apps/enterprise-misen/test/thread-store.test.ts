@@ -123,7 +123,7 @@ test('failure and cancellation become assistant-ui incomplete statuses without r
 
 test('plan, step progress, and checkpoint request-response events reduce into the active assistant card', () => {
   let store = startRun(emptyThreadStore('session-a'), 'client-plan', 'レポートを更新して')
-  store = applyServerEvent(store, { type: 'plan', plan: { id: 'plan-1', title: '実行計画', steps: [{ id: 'review', title: '依頼内容と入力を確認', status: 'running' }, { id: 'work', title: '必要な作業を実行', status: 'pending' }] } })
+  store = applyServerEvent(store, { type: 'plan', plan: { id: 'plan-1', title: 'この依頼で行うこと', visible: true, completed: false, steps: [{ id: 'review', title: 'Alpha.xlsxを確認', tool: 'spreadsheet_read', target: 'input/Alpha.xlsx', status: 'running' }, { id: 'work', title: '月次レポートを作成', tool: 'office_create_output', target: 'output/report.xlsx', status: 'pending' }] } })
   store = applyServerEvent(store, { type: 'step', planId: 'plan-1', stepId: 'review', status: 'completed' })
   store = applyServerEvent(store, { type: 'step', planId: 'plan-1', stepId: 'work', status: 'running' })
   store = applyServerEvent(store, { type: 'checkpoint_request', checkpoint: { id: 'checkpoint-1', verb: '上書き', target: 'output/report.xlsx', risk: '中', reason: '既存ファイルの内容が置き換わります。' } })
@@ -139,6 +139,29 @@ test('plan, step progress, and checkpoint request-response events reduce into th
   const restored = reconnected.messages[0]?.metadata?.custom as any
   assert.equal(restored.plan.id, 'plan-1')
   assert.equal(restored.checkpoints[0].status, 'approved')
+})
+
+test('plan reducer preserves visibility and replaces the active plan with added operations and completion summary state', () => {
+  let store = startRun(emptyThreadStore('session-a'), 'client-dynamic', '月次レポートを作って')
+  const initial = { id: 'plan-dynamic', title: 'この依頼で行うこと', visible: true, completed: false, steps: [
+    { id: 'step-1', title: 'テンプレートを確認', tool: 'spreadsheet_read', target: 'input/template.xlsx', status: 'pending' as const },
+    { id: 'step-2', title: '月次レポートを作成', tool: 'office_create_output', target: 'output/report.xlsx', status: 'pending' as const },
+  ] }
+  store = applyServerEvent(store, { type: 'plan', plan: initial })
+  store = applyServerEvent(store, { type: 'step', planId: initial.id, stepId: 'step-1', status: 'running' })
+  const withAdditional = { ...initial, steps: [
+    { ...initial.steps[0]!, status: 'completed' as const },
+    initial.steps[1]!,
+    { id: 'additional-1', title: '追加の操作', tool: 'office_get', target: 'output/report.xlsx', status: 'completed' as const, unplanned: true },
+  ], completed: true }
+  store = applyServerEvent(store, { type: 'plan', plan: withAdditional })
+  const custom = store.messages[1]?.metadata?.custom as any
+  assert.equal(custom.plan.visible, true)
+  assert.equal(custom.plan.completed, true)
+  assert.equal(custom.plan.steps.at(-1).unplanned, true)
+
+  const hidden = applyServerEvent(startRun(emptyThreadStore(), 'client-read', '売上を教えて'), { type: 'plan', plan: { ...initial, visible: false, steps: [initial.steps[0]!] } })
+  assert.equal((hidden.messages[1]?.metadata?.custom as any).plan.visible, false)
 })
 
 test('a reconnect during an active run restores the running placeholder from the state event', () => {

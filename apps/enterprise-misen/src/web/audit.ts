@@ -9,6 +9,8 @@ export type AuditEvent =
   | { event: 'checkpoint.requested'; id: string; verb: string; target: string; risk: '低' | '中' | '高'; reason: string }
   | { event: 'checkpoint.responded'; id: string; verb: string; decision: 'approved' | 'rejected'; approveSimilar: boolean; automatic?: boolean }
   | { event: 'tool.completed'; tool: string; cached: boolean }
+  | { event: 'plan.unplanned_tool'; planId: string; tool: string; target: string }
+  | { event: 'plan.unexecuted_step'; planId: string; stepId: string; tool: string; target: string }
 
 export function defaultAuditPath(env: NodeJS.ProcessEnv = process.env): string {
   const localAppData = env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local')

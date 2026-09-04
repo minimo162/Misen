@@ -3,7 +3,7 @@ import { mkdir, open, readdir, rename, unlink, writeFile } from 'node:fs/promise
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-export const SESSION_SCHEMA_VERSION = 2
+export const SESSION_SCHEMA_VERSION = 3
 export const DEFAULT_SESSION_TITLE = '新しいチャット'
 export const MAX_SESSION_TITLE_LENGTH = 36
 export const MAX_SESSION_FILE_BYTES = 1024 * 1024
@@ -34,8 +34,15 @@ export type StoredArtifact = {
   sha256: string
 }
 
-export type StoredPlanStep = { id: string; title: string; status: 'pending' | 'running' | 'completed' }
-export type StoredPlan = { id: string; title: string; steps: StoredPlanStep[] }
+export type StoredPlanStep = {
+  id: string
+  title: string
+  tool: string
+  target: string
+  status: 'pending' | 'running' | 'completed'
+  unplanned?: boolean
+}
+export type StoredPlan = { id: string; title: string; steps: StoredPlanStep[]; visible: boolean; completed: boolean; fallback?: boolean }
 export type StoredCheckpoint = { id: string; verb: string; target: string; risk: '低' | '中' | '高'; reason: string; status: 'pending' | 'approved' | 'rejected'; approveSimilar?: boolean }
 export type StoredRunUi = { runId: string; plan?: StoredPlan; checkpoints: StoredCheckpoint[] }
 
@@ -97,9 +104,26 @@ function parseRunUi(value: unknown): StoredRunUi | undefined {
   let plan: StoredPlan | undefined
   if (value.plan !== undefined) {
     if (!isRecord(value.plan) || !isSafeText(value.plan.id, 80) || !isSafeText(value.plan.title, 200) || !Array.isArray(value.plan.steps)) return undefined
-    const steps = value.plan.steps.map(step => isRecord(step) && isSafeText(step.id, 80) && isSafeText(step.title, 200) && ['pending', 'running', 'completed'].includes(String(step.status)) ? { id: step.id, title: step.title, status: step.status as StoredPlanStep['status'] } : undefined)
+    const steps = value.plan.steps.map(step => {
+      if (!isRecord(step) || !isSafeText(step.id, 80) || !isSafeText(step.title, 200) || !['pending', 'running', 'completed'].includes(String(step.status))) return undefined
+      const tool = step.tool === undefined ? '' : step.tool
+      const target = step.target === undefined ? '' : step.target
+      if (!isSafeText(tool, 80) || !isSafeText(target, 512) || (step.unplanned !== undefined && typeof step.unplanned !== 'boolean')) return undefined
+      return { id: step.id, title: step.title, tool, target, status: step.status as StoredPlanStep['status'], ...(step.unplanned === true ? { unplanned: true } : {}) }
+    })
     if (steps.some(step => !step)) return undefined
-    plan = { id: value.plan.id, title: value.plan.title, steps: steps as StoredPlanStep[] }
+    const parsedSteps = steps as StoredPlanStep[]
+    if (value.plan.visible !== undefined && typeof value.plan.visible !== 'boolean') return undefined
+    if (value.plan.completed !== undefined && typeof value.plan.completed !== 'boolean') return undefined
+    if (value.plan.fallback !== undefined && typeof value.plan.fallback !== 'boolean') return undefined
+    plan = {
+      id: value.plan.id,
+      title: value.plan.title,
+      steps: parsedSteps,
+      visible: value.plan.visible === undefined ? true : value.plan.visible,
+      completed: value.plan.completed === undefined ? parsedSteps.every(step => step.status === 'completed') : value.plan.completed,
+      ...(value.plan.fallback === true ? { fallback: true } : {}),
+    }
   }
   const checkpoints = value.checkpoints.map(item => {
     if (!isRecord(item) || !isSafeText(item.id, 80) || !isSafeText(item.verb, 80) || !isSafeText(item.target, 260) || !['低', '中', '高'].includes(String(item.risk)) || !isSafeText(item.reason, 400) || !['pending', 'approved', 'rejected'].includes(String(item.status))) return undefined
@@ -110,7 +134,7 @@ function parseRunUi(value: unknown): StoredRunUi | undefined {
 }
 
 export function parseStoredSession(value: unknown): StoredSession | undefined {
-  if (!isRecord(value) || (value.schemaVersion !== 1 && value.schemaVersion !== SESSION_SCHEMA_VERSION) || typeof value.id !== 'string' || !SESSION_ID_RE.test(value.id) || !isSafeText(value.title, 80) || !isIsoDate(value.createdAt) || !isIsoDate(value.updatedAt) || !isStatus(value.status)) return undefined
+  if (!isRecord(value) || ![1, 2, SESSION_SCHEMA_VERSION].includes(Number(value.schemaVersion)) || typeof value.id !== 'string' || !SESSION_ID_RE.test(value.id) || !isSafeText(value.title, 80) || !isIsoDate(value.createdAt) || !isIsoDate(value.updatedAt) || !isStatus(value.status)) return undefined
   if (!Array.isArray(value.messages) || !Array.isArray(value.tools) || !Array.isArray(value.artifacts)) return undefined
   const messages = value.messages.map(parseMessage)
   const tools = value.tools.map(parseTool)

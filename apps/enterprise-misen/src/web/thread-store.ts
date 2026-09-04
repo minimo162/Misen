@@ -15,8 +15,8 @@ export type ThreadStatus = 'idle' | RunStatus
 export type SessionStatus = 'NEW' | 'RUNNING' | 'COMPLETED' | 'FAIL' | 'CANCELLED'
 
 export type ThreadArtifact = { id: string; runId: string; filename: string; available: boolean }
-export type PlanStep = { id: string; title: string; status: 'pending' | 'running' | 'completed' }
-export type RunPlan = { id: string; title: string; steps: PlanStep[] }
+export type PlanStep = { id: string; title: string; tool: string; target: string; status: 'pending' | 'running' | 'completed'; unplanned?: boolean }
+export type RunPlan = { id: string; title: string; steps: PlanStep[]; visible: boolean; completed: boolean; fallback?: boolean }
 export type CheckpointCard = { id: string; verb: string; target: string; risk: '低' | '中' | '高'; reason: string; status: 'pending' | 'approved' | 'rejected'; approveSimilar?: boolean }
 export type RunUiState = { runId: string; plan?: RunPlan; checkpoints: CheckpointCard[] }
 export type SessionToolEvent = { id: string; runId: string; name: string; target?: string; status: 'success' | 'error'; cached?: boolean }

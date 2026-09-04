@@ -50,6 +50,7 @@ test('assistant-ui composition keeps the conversation surface restrained and saf
   const styles = await readFile(join(process.cwd(), 'src', 'web', 'client.css'), 'utf8')
   const clientBuild = await readFile(join(process.cwd(), 'scripts', 'build-client.mjs'), 'utf8')
   const server = await readFile(join(process.cwd(), 'src', 'web', 'server.ts'), 'utf8')
+  const planning = await readFile(join(process.cwd(), 'src', 'web', 'planning.ts'), 'utf8')
   const registry = JSON.parse(await readFile(join(process.cwd(), 'components.json'), 'utf8')) as { registries: Record<string, string> }
   const pkg = JSON.parse(await readFile(join(process.cwd(), 'package.json'), 'utf8')) as { dependencies: Record<string, string> }
 
@@ -109,6 +110,10 @@ test('assistant-ui composition keeps the conversation surface restrained and saf
   assert.doesNotMatch(source, /adapters:\s*\{[^}]*(?:speech|dictation|voice|feedback)/u)
   for (const label of ['プロジェクト', 'フォルダーを選ぶ…', 'エクスプローラーで開く', '承認', '毎回確認', 'このセッションは自動', 'このプロジェクトのファイルは PC から出ません']) assert.match(source, new RegExp(label, 'u'))
   for (const label of ['実行計画', '確認が必要です', 'リスク水準', '操作内容', '対象', '理由', '拒否', 'このセッションでは同種を承認済みにする']) assert.match(source, new RegExp(label, 'u'))
+  assert.match(source, /手順で完了/u)
+  for (const label of ['この依頼で行うこと', '追加の操作']) assert.match(planning, new RegExp(label, 'u'))
+  assert.match(source, /custom\?\.plan\?\.visible/u)
+  assert.match(source, /plan\.completed/u)
   assert.match(source, /\/checkpoints\/respond/u)
 
   assert.doesNotMatch(source, /viewportRef|scrollHeight|scrollTop|clientHeight/)
