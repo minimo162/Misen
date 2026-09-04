@@ -207,7 +207,12 @@ type UiState = {
 
 const MAX_BODY = 8192
 const RUN_ID_RE = /^[A-Za-z0-9_-]{1,80}$/u
-const ARTIFACT_ID_RE = /^[A-Za-z0-9_-]{24}$/u
+/**
+ * Artifact ids are stable: `<sessionId>.<sha256 of the file>`. They survive server restarts,
+ * thread switches and project switches, because the download route can re-resolve them from
+ * the session store and the workspace `output/` instead of an in-memory registry.
+ */
+const ARTIFACT_ID_RE = /^[A-Za-z0-9_-]{1,64}\.[a-f0-9]{64}$/u
 
 export interface DemoServerOptions {
   sessionDirectory?: string
@@ -283,14 +288,28 @@ export function createDemoServer(
   const listeners = new Set<ServerResponse>()
   const emit = (event: DemoEvent) => { for (const response of listeners) writeEvent(response, event) }
   const emitState = () => { for (const response of listeners) writeEvent(response, { type: 'state', state }) }
-  const registerArtifacts = (artifacts: readonly DiscoveredArtifact[], runId: string): UiArtifact[] => {
+  const registerArtifacts = (artifacts: readonly DiscoveredArtifact[], runId: string, sessionId: string): UiArtifact[] => {
     if (artifactResources.size + artifacts.length > MAX_SESSION_ARTIFACTS) throw new Error('artifact capacity')
     return artifacts.map(artifact => {
-      let id = randomBytes(18).toString('base64url')
-      while (artifactResources.has(id)) id = randomBytes(18).toString('base64url')
+      const id = `${sessionId}.${createHash('sha256').update(artifact.bytes).digest('hex')}`
       artifactResources.set(id, { filename: artifact.filename, bytes: artifact.bytes })
       return { id, runId, filename: artifact.filename, available: true }
     })
+  }
+  /** Re-resolve an artifact id from the session store and the current workspace output. */
+  const resolveArtifact = async (id: string): Promise<{ filename: string; bytes: Uint8Array } | undefined> => {
+    const cached = artifactResources.get(id)
+    if (cached) return cached
+    const separator = id.lastIndexOf('.')
+    const sessionId = id.slice(0, separator)
+    const sha256 = id.slice(separator + 1)
+    const session = await sessions.get(sessionId)
+    const stored = session?.artifacts.find(artifact => artifact.sha256 === sha256)
+    if (!stored) return undefined
+    try {
+      const resource = await boundary.readOutputFileBytes(stored.path, MAX_ARTIFACT_BYTES)
+      return { filename: stored.filename, bytes: resource.bytes }
+    } catch { return undefined }
   }
   const projectSession = async (session: StoredSession): Promise<UiSession> => {
     artifactResources.clear()
@@ -300,7 +319,7 @@ export function createDemoServer(
         const resource = await boundary.readOutputFileBytes(artifact.path, MAX_ARTIFACT_BYTES)
         const sha256 = createHash('sha256').update(resource.bytes).digest('hex')
         if (sha256 !== artifact.sha256) throw new Error('artifact changed')
-        artifacts.push(registerArtifacts([{ path: artifact.path, filename: artifact.filename, bytes: resource.bytes }], artifact.runId)[0])
+        artifacts.push(registerArtifacts([{ path: artifact.path, filename: artifact.filename, bytes: resource.bytes }], artifact.runId, session.id)[0])
       } catch {
         artifacts.push({ id: '', runId: artifact.runId, filename: artifact.filename, available: false })
       }
@@ -620,7 +639,7 @@ export function createDemoServer(
               // Honor a Stop accepted during that await and publish nothing.
               const status = cancelRequested ? 'CANCELLED' : runnerStatus
               const terminalStatus: Exclude<UiState['status'], 'idle' | 'running'> = status
-              const artifacts = status === 'COMPLETED' ? registerArtifacts(discovered, clientId) : []
+              const artifacts = status === 'COMPLETED' ? registerArtifacts(discovered, clientId, sessionId) : []
               if (plan.fallback) setStep('verify', 'completed')
               await recordUnexecutedPlan()
               plan.completed = status === 'COMPLETED'
@@ -675,8 +694,12 @@ export function createDemoServer(
       if (request.method === 'GET' && url.pathname.startsWith('/download/')) {
         const id = url.pathname.slice('/download/'.length)
         if (!ARTIFACT_ID_RE.test(id)) { response.statusCode = 404; return response.end('Not found') }
-        const artifact = artifactResources.get(id)
-        if (!artifact) { response.statusCode = 404; return response.end('Not found') }
+        const artifact = await resolveArtifact(id)
+        if (!artifact) {
+          response.statusCode = 404
+          response.setHeader('content-type', 'text/plain; charset=utf-8')
+          return response.end('成果物が見つかりません。作業フォルダーの output に無いか、別のプロジェクトが選ばれています。')
+        }
         const extension = /\.(xlsx|docx|pptx|pdf)$/iu.exec(artifact.filename)?.[1]?.toLowerCase() ?? 'bin'
         const fallback = extension === 'xlsx' ? 'spreadsheet.xlsx' : extension === 'docx' ? 'document.docx' : extension === 'pptx' ? 'presentation.pptx' : extension === 'pdf' ? 'document.pdf' : 'office-output.bin'
         const contentType = extension === 'xlsx'
