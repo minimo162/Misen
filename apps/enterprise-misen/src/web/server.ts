@@ -46,7 +46,7 @@ export interface AgentRunResult {
 export type DemoEvent =
   | { type: 'user'; sessionId?: string; id: string; text: string }
   | { type: 'assistant'; sessionId?: string; text: string; done?: boolean }
-  | { type: 'tool'; sessionId?: string; phase: 'start' | 'end'; id: string; name: string; target?: string; status?: 'success' | 'error'; cached?: boolean }
+  | { type: 'tool'; sessionId?: string; phase: 'start' | 'end'; id: string; name: string; target?: string; status?: 'success' | 'error'; cached?: boolean; detail?: string }
   | { type: 'plan'; sessionId?: string; plan: StoredPlan }
   | { type: 'step'; sessionId?: string; planId: string; stepId: string; status: 'pending' | 'running' | 'completed' }
   | { type: 'checkpoint_request'; sessionId?: string; checkpoint: { id: string; verb: string; target: string; risk: '低' | '中' | '高'; reason: string } }
@@ -132,6 +132,18 @@ export function safeToolTarget(name: string, args: unknown): string | undefined 
   return normalized
 }
 
+/**
+ * Short, user-facing reason for a failed tool call. Tool errors are Misen's own messages
+ * (boundary, denylist, OfficeCLI exit) and never carry credentials; still cap and flatten them.
+ */
+function toolErrorDetail(result: unknown): string | undefined {
+  const content = result && typeof result === 'object' ? (result as { content?: unknown }).content : undefined
+  const texts = Array.isArray(content) ? content.map(part => (part && typeof part === 'object' && (part as { type?: unknown }).type === 'text' ? String((part as { text?: unknown }).text ?? '') : '')).filter(Boolean) : []
+  const flat = texts.join(' ').replace(/\s+/gu, ' ').trim()
+  if (!flat) return undefined
+  return flat.length > 240 ? flat.slice(0, 240) + '…' : flat
+}
+
 function forwardAgentEvent(event: AgentEvent, context: DemoRunContext, tools: string[]): void {
   if (event.type === 'tool_execution_start') {
     tools.push(event.toolName)
@@ -141,7 +153,8 @@ function forwardAgentEvent(event: AgentEvent, context: DemoRunContext, tools: st
   if (event.type === 'tool_execution_end') {
     const details = event.result?.details
     const cached = Boolean(details && typeof details === 'object' && !Array.isArray(details) && (details as Record<string, unknown>).cached === true)
-    context.emit({ type: 'tool', phase: 'end', id: event.toolCallId, name: event.toolName, status: event.isError ? 'error' : 'success', ...(cached ? { cached: true } : {}) })
+    const detail = event.isError ? toolErrorDetail(event.result) : undefined
+    context.emit({ type: 'tool', phase: 'end', id: event.toolCallId, name: event.toolName, status: event.isError ? 'error' : 'success', ...(cached ? { cached: true } : {}), ...(detail ? { detail } : {}) })
     return
   }
   if (event.type === 'message_update' || event.type === 'message_end') {
@@ -536,7 +549,7 @@ export function createDemoServer(
                     }
                   }
                   else {
-                    storedTools.set(event.id, { id: event.id, runId: clientId, name: event.name, target: storedTools.get(event.id)?.target, status: event.status === 'error' ? 'error' : 'success', ...(event.cached ? { cached: true } : {}) })
+                    storedTools.set(event.id, { id: event.id, runId: clientId, name: event.name, target: storedTools.get(event.id)?.target, status: event.status === 'error' ? 'error' : 'success', ...(event.cached ? { cached: true } : {}), ...(event.detail ? { detail: event.detail } : {}) })
                     toolAudit = toolAudit.then(() => appendAudit(auditPath, { event: 'tool.completed', tool: event.name, cached: event.cached === true }, options.now))
                     const stepId = stepByToolCall.get(event.id)
                     if (stepId) setStep(stepId, 'completed')

@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { Agent } from '@earendil-works/pi-agent-core'
 import { createBrain } from './brain.js'
 import { defaultSettingsPath, describeBrainProfile, loadBrainProfile, type BrainProfileIdentity } from './brain-profile.js'
@@ -18,10 +20,17 @@ export interface LiveAgentOptions {
   readonly requestCheckpoint?: (checkpoint: BlockedCheckpoint) => Promise<{ approved: boolean; approveSimilar?: boolean }>
 }
 
-export function checkpointFor(name: string, args: unknown): BlockedCheckpoint | undefined {
+/**
+ * `outputExists` lets the hook confirm that an "overwrite" really replaces a file: the model
+ * sometimes passes overwrite: true for a brand-new deliverable, and asking the user to approve
+ * an overwrite of nothing is confusing. Without the callback the check is skipped (pure use).
+ */
+export function checkpointFor(name: string, args: unknown, outputExists?: (relativePath: string) => boolean): BlockedCheckpoint | undefined {
   const values = args && typeof args === 'object' ? args as Record<string, unknown> : {}
   if (name === 'office_create_output' && values.overwrite === true) {
-    return { verb: '上書き', target: typeof values.output === 'string' ? values.output : '成果物', risk: '中', reason: '同名のファイルが output に既にあり、その内容が置き換わります。前回の成果物を残す場合は拒否して、別の名前を指示してください。' }
+    const target = typeof values.output === 'string' ? values.output : '成果物'
+    if (outputExists && typeof values.output === 'string' && !outputExists(values.output)) return undefined
+    return { verb: '上書き', target, risk: '中', reason: '同名のファイルが output に既にあり、その内容が置き換わります。前回の成果物を残す場合は拒否して、別の名前を指示してください。' }
   }
   const batchRemoves = name === 'office_batch' && Array.isArray(values.items) && values.items.some(item => item && typeof item === 'object' && (item as Record<string, unknown>).command === 'remove')
   if (name === 'office_remove' || batchRemoves) {
@@ -30,11 +39,17 @@ export function checkpointFor(name: string, args: unknown): BlockedCheckpoint | 
   return undefined
 }
 
-export function approvalHook(options: LiveAgentOptions): LifecycleHook {
+export function approvalHook(options: LiveAgentOptions, workspaceRoot?: string): LifecycleHook {
+  // Without a root (pure tests) the existence check is skipped and overwrite: true always asks.
+  const outputExists = workspaceRoot === undefined ? undefined : (relativePath: string): boolean => {
+    const normalized = relativePath.replace(/\\/gu, '/')
+    if (normalized.startsWith('/') || /^[A-Za-z]:/u.test(normalized) || normalized.split('/').some(part => part === '..')) return true
+    try { return existsSync(join(workspaceRoot, ...normalized.split('/'))) } catch { return true }
+  }
   return {
     name: 'misen-session-approval',
     async beforeTool(context) {
-      const checkpoint = checkpointFor(context.toolCall.name, context.args)
+      const checkpoint = checkpointFor(context.toolCall.name, context.args, outputExists)
       if (!checkpoint || options.approvalMode === 'session-auto') return
       const decision = await options.requestCheckpoint?.(checkpoint)
       if (decision?.approved) return
@@ -53,7 +68,7 @@ export async function liveAgent(root: string, options: LiveAgentOptions = {}) {
   const profile = await loadBrainProfile(options.settingsPath ?? defaultSettingsPath())
   const brain = createBrain(profile)
   const streamFn = (activeModel: any, context: any, streamOptions: any) => brain.models.streamSimple(activeModel, context, { ...streamOptions, maxRetries: 0 } as any)
-  const customization = await prepareAgentCustomization(root, [approvalHook(options)])
+  const customization = await prepareAgentCustomization(root, [approvalHook(options, root)])
   return new Agent({
     initialState: { systemPrompt: customization.systemPrompt, model: brain.model, thinkingLevel: profile.thinkingLevel, tools: [...customization.tools] },
     streamFn,
