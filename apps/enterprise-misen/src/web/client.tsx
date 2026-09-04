@@ -165,7 +165,7 @@ function MisenApp() {
   useEffect(() => {
     const source = new EventSource('/events')
     const receive = (event: MessageEvent<string>) => { try { handleEvent(JSON.parse(event.data) as ServerEvent) } catch { /* ignore malformed event */ } }
-    for (const type of ['state', 'status', 'user', 'assistant', 'tool']) source.addEventListener(type, receive)
+    for (const type of ['state', 'status', 'user', 'assistant', 'tool', 'plan', 'step', 'checkpoint_request', 'checkpoint_response']) source.addEventListener(type, receive)
     source.onerror = () => { /* browser reconnects without exposing provider data */ }
     return () => { source.close() }
   }, [handleEvent])

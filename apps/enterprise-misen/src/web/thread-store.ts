@@ -15,23 +15,31 @@ export type ThreadStatus = 'idle' | RunStatus
 export type SessionStatus = 'NEW' | 'RUNNING' | 'COMPLETED' | 'FAIL' | 'CANCELLED'
 
 export type ThreadArtifact = { id: string; runId: string; filename: string; available: boolean }
+export type PlanStep = { id: string; title: string; status: 'pending' | 'running' | 'completed' }
+export type RunPlan = { id: string; title: string; steps: PlanStep[] }
+export type CheckpointCard = { id: string; verb: string; target: string; risk: '低' | '中' | '高'; reason: string; status: 'pending' | 'approved' | 'rejected'; approveSimilar?: boolean }
+export type RunUiState = { runId: string; plan?: RunPlan; checkpoints: CheckpointCard[] }
 export type SessionToolEvent = { id: string; runId: string; name: string; detail?: string; status: 'success' | 'error' }
 export type SessionMessage = { id: string; role: 'user' | 'assistant'; text: string; timestamp?: string }
 export type SessionSummary = { id: string; title: string; createdAt: string; updatedAt: string; status: SessionStatus }
-export type SessionSnapshot = SessionSummary & { messages: SessionMessage[]; tools: SessionToolEvent[]; artifacts: ThreadArtifact[] }
+export type SessionSnapshot = SessionSummary & { messages: SessionMessage[]; tools: SessionToolEvent[]; artifacts: ThreadArtifact[]; runUi?: RunUiState[] }
 
 export type ServerEvent =
-  | { type: 'state'; state: { status: ThreadStatus; runId?: string; sessionId?: string; artifacts: ThreadArtifact[]; error?: string } }
+  | { type: 'state'; state: { status: ThreadStatus; runId?: string; sessionId?: string; artifacts: ThreadArtifact[]; runUi?: RunUiState; error?: string } }
   | { type: 'user'; sessionId?: string; id: string; text: string }
   | { type: 'assistant'; sessionId?: string; text: string; done?: boolean }
   | { type: 'tool'; sessionId?: string; phase: 'start' | 'end'; id: string; name: string; detail?: string; status?: 'success' | 'error' }
+  | { type: 'plan'; sessionId?: string; plan: RunPlan }
+  | { type: 'step'; sessionId?: string; planId: string; stepId: string; status: PlanStep['status'] }
+  | { type: 'checkpoint_request'; sessionId?: string; checkpoint: Omit<CheckpointCard, 'status'> }
+  | { type: 'checkpoint_response'; sessionId?: string; id: string; decision: 'approved' | 'rejected'; approveSimilar?: boolean }
   | { type: 'status'; sessionId?: string; status: RunStatus; error?: string }
 
 export type ToolCallResult = 'success' | 'error'
 export type ToolCallArgs = { readonly detail?: string }
 
 /** `metadata.custom` shape carried by every Misen assistant message. */
-export type AssistantCustomMetadata = { readonly runId: string; readonly artifacts: readonly ThreadArtifact[] }
+export type AssistantCustomMetadata = { readonly runId: string; readonly artifacts: readonly ThreadArtifact[]; readonly plan?: RunPlan; readonly checkpoints: readonly CheckpointCard[] }
 
 export type ThreadStore = {
   readonly sessionId?: string
@@ -88,12 +96,14 @@ function assistantMessage(runId: string, options: {
   text?: string
   tools?: readonly ToolCallPart[]
   artifacts?: readonly ThreadArtifact[]
+  plan?: RunPlan
+  checkpoints?: readonly CheckpointCard[]
   status: MessageStatus
   createdAt?: string
 }): ThreadMessageLike {
   const content: Part[] = [...(options.tools ?? [])]
   if (options.text !== undefined && options.text.length > 0) content.push({ type: 'text', text: options.text })
-  const custom: AssistantCustomMetadata = { runId, artifacts: options.artifacts ?? [] }
+  const custom: AssistantCustomMetadata = { runId, artifacts: options.artifacts ?? [], plan: options.plan, checkpoints: options.checkpoints ?? [] }
   return {
     id: assistantMessageId(runId),
     role: 'assistant',
@@ -113,6 +123,10 @@ const withArtifacts = (message: ThreadMessageLike, artifacts: readonly ThreadArt
   const custom = customOf(message)
   if (!custom) return message
   return { ...message, metadata: { ...message.metadata, custom: { ...custom, artifacts } } }
+}
+const withRunUi = (message: ThreadMessageLike, update: (custom: AssistantCustomMetadata) => AssistantCustomMetadata): ThreadMessageLike => {
+  const custom = customOf(message)
+  return custom ? { ...message, metadata: { ...message.metadata, custom: update(custom) } } : message
 }
 
 const statusForRun = (status: ThreadStatus, error?: string): MessageStatus | undefined =>
@@ -135,10 +149,13 @@ export function threadStoreFromSession(session: SessionSnapshot): ThreadStore {
       continue
     }
     const runId = runIdFromAssistantMessageId(message.id)
+    const runUi = session.runUi?.find(item => item.runId === runId)
     messages.push(assistantMessage(runId, {
       text: message.text,
       tools: session.tools.filter(tool => tool.runId === runId).map(tool => toolCallPart({ id: tool.id, name: tool.name, detail: tool.detail, result: tool.status })),
       artifacts: session.artifacts.filter(artifact => artifact.runId === runId),
+      plan: runUi?.plan,
+      checkpoints: runUi?.checkpoints,
       status: COMPLETE,
       createdAt: message.timestamp,
     }))
@@ -211,6 +228,11 @@ export function applyServerEvent(store: ThreadStore, event: ServerEvent): Thread
         return custom && byRun.has(custom.runId) ? withArtifacts(message, byRun.get(custom.runId) ?? []) : message
       })
     }
+    if (event.state.runUi && runId === event.state.runUi.runId) {
+      const runUi = event.state.runUi
+      const restoredStatus = statusForRun(event.state.status, event.state.error) ?? COMPLETE
+      messages = upsertAssistant(messages, runId, message => withRunUi(message, custom => ({ ...custom, plan: runUi.plan, checkpoints: runUi.checkpoints })), restoredStatus)
+    }
     return applyRunStatus({ ...store, runId, sessionId: event.state.sessionId ?? store.sessionId, messages }, event.state.status, event.state.error)
   }
   if (event.type === 'status') return applyRunStatus(store, event.status, event.error)
@@ -236,6 +258,18 @@ export function applyServerEvent(store: ThreadStore, event: ServerEvent): Thread
         return withContent(message, textIndex >= 0 ? parts.map((part, index) => index === textIndex ? text : part) : [...parts, text])
       }, createStatus),
     }
+  }
+  if (event.type === 'plan') {
+    return { ...store, messages: upsertAssistant(store.messages, runId, message => withRunUi(message, custom => ({ ...custom, plan: event.plan })), createStatus) }
+  }
+  if (event.type === 'step') {
+    return { ...store, messages: upsertAssistant(store.messages, runId, message => withRunUi(message, custom => custom.plan?.id === event.planId ? ({ ...custom, plan: { ...custom.plan, steps: custom.plan.steps.map(step => step.id === event.stepId ? { ...step, status: event.status } : step) } }) : custom), createStatus) }
+  }
+  if (event.type === 'checkpoint_request') {
+    return { ...store, messages: upsertAssistant(store.messages, runId, message => withRunUi(message, custom => ({ ...custom, checkpoints: [...custom.checkpoints.filter(item => item.id !== event.checkpoint.id), { ...event.checkpoint, status: 'pending' }] })), createStatus) }
+  }
+  if (event.type === 'checkpoint_response') {
+    return { ...store, messages: upsertAssistant(store.messages, runId, message => withRunUi(message, custom => ({ ...custom, checkpoints: custom.checkpoints.map(item => item.id === event.id ? { ...item, status: event.decision, ...(event.approveSimilar ? { approveSimilar: true } : {}) } : item) })), createStatus) }
   }
   return {
     ...store,

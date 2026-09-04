@@ -10,13 +10,15 @@ test('checkpoint classification covers overwrite and element removal only', () =
   assert.equal(checkpointFor('office_batch', { file: 'output/report.xlsx', items: [{ command: 'remove', path: '/slides/0' }] })?.verb, '削除')
 })
 
-test('every-time mode blocks classified verbs and session-auto mode is session-local allow', async () => {
-  const blocked: string[] = []
-  const confirm = approvalHook({ approvalMode: 'confirm', onCheckpointBlocked: checkpoint => { blocked.push(checkpoint.verb) } })
-  const result = await confirm.beforeTool!({ toolCall: { name: 'office_remove' }, args: { file: 'output/report.xlsx' } } as any)
+test('every-time mode waits for a decision and session-auto mode is session-local allow', async () => {
+  const requested: string[] = []
+  const rejected = approvalHook({ approvalMode: 'confirm', requestCheckpoint: async checkpoint => { requested.push(checkpoint.verb); return { approved: false } } })
+  const result = await rejected.beforeTool!({ toolCall: { name: 'office_remove' }, args: { file: 'output/report.xlsx' } } as any)
   assert.equal(result?.block, true)
   assert.equal(result?.terminate, false)
-  assert.deepEqual(blocked, ['削除'])
+  assert.deepEqual(requested, ['削除'])
+  const approved = approvalHook({ approvalMode: 'confirm', requestCheckpoint: async () => ({ approved: true }) })
+  assert.equal(await approved.beforeTool!({ toolCall: { name: 'office_remove' }, args: { file: 'output/report.xlsx' } } as any), undefined)
   const automatic = approvalHook({ approvalMode: 'session-auto' })
   assert.equal(await automatic.beforeTool!({ toolCall: { name: 'office_remove' }, args: { file: 'output/report.xlsx' } } as any), undefined)
 })

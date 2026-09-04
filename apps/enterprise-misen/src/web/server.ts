@@ -23,6 +23,10 @@ import {
   type StoredMessage,
   type StoredSession,
   type StoredToolEvent,
+  type StoredRunUi,
+  type StoredPlan,
+  type StoredPlanStep,
+  type StoredCheckpoint,
 } from './sessions.js'
 import { appendAudit, defaultAuditPath } from './audit.js'
 import { AttachmentImportError, importAttachment, readAttachmentRequest } from './attachments.js'
@@ -42,13 +46,17 @@ export type DemoEvent =
   | { type: 'user'; sessionId?: string; id: string; text: string }
   | { type: 'assistant'; sessionId?: string; text: string; done?: boolean }
   | { type: 'tool'; sessionId?: string; phase: 'start' | 'end'; id: string; name: string; detail?: string; status?: 'success' | 'error' }
+  | { type: 'plan'; sessionId?: string; plan: StoredPlan }
+  | { type: 'step'; sessionId?: string; planId: string; stepId: string; status: 'pending' | 'running' | 'completed' }
+  | { type: 'checkpoint_request'; sessionId?: string; checkpoint: { id: string; verb: string; target: string; risk: '低' | '中' | '高'; reason: string } }
+  | { type: 'checkpoint_response'; sessionId?: string; id: string; decision: 'approved' | 'rejected'; approveSimilar?: boolean }
   | { type: 'status'; sessionId?: string; status: 'running' | 'COMPLETED' | 'FAIL' | 'CANCELLED'; error?: string }
 
 export interface DemoRunContext {
   emit: (event: DemoEvent) => void
   setCancel: (cancel: () => void) => void
   approvalMode?: ApprovalMode
-  onCheckpointBlocked?: (checkpoint: BlockedCheckpoint) => void | Promise<void>
+  requestCheckpoint?: (checkpoint: BlockedCheckpoint) => Promise<{ approved: boolean; approveSimilar?: boolean }>
 }
 
 export type UiArtifact = {
@@ -146,7 +154,7 @@ export type AgentFactory = (root: string, options?: LiveAgentOptions) => Promise
 /** Generic Pi route: the host does not classify the prompt or prescribe a workflow. */
 export function createAgentRunner(agentFactory: AgentFactory): AgentRunner {
   return async (root, prompt, context) => {
-    const agent = await agentFactory(root, { approvalMode: context?.approvalMode, onCheckpointBlocked: context?.onCheckpointBlocked })
+    const agent = await agentFactory(root, { approvalMode: context?.approvalMode, requestCheckpoint: context?.requestCheckpoint })
     const tools: string[] = []
     context?.setCancel(() => agent.abort())
     const unsubscribe = agent.subscribe(event => { if (context) forwardAgentEvent(event, context, tools) })
@@ -173,6 +181,7 @@ type UiState = {
   tools: string[]
   axes: string[]
   artifacts: UiArtifact[]
+  runUi?: StoredRunUi
   error?: string
 }
 
@@ -246,6 +255,8 @@ export function createDemoServer(
   let state: UiState = { status: 'idle', tools: [], axes: [], artifacts: [] }
   let active = false
   let activeCancel: (() => void) | undefined
+  let pendingCheckpoint: { id: string; sessionId: string; verb: string; respond: (decision: 'approved' | 'rejected', approveSimilar: boolean) => Promise<void> } | undefined
+  const approvedCheckpointVerbs = new Set<string>()
   let nextRunId = 0
   const listeners = new Set<ServerResponse>()
   const emit = (event: DemoEvent) => { for (const response of listeners) writeEvent(response, event) }
@@ -305,6 +316,7 @@ export function createDemoServer(
         if (request.headers.origin !== `http://${host}` || active) throw new Error('origin')
         // A new chat is a new approval session; automatic approval never carries over.
         approvalMode = 'confirm'
+        approvedCheckpointVerbs.clear()
         const session = await sessions.create()
         response.statusCode = 201
         response.setHeader('content-type', 'application/json; charset=utf-8')
@@ -386,6 +398,19 @@ export function createDemoServer(
         response.setHeader('content-type', 'application/json; charset=utf-8')
         return response.end(JSON.stringify({ mode: approvalMode }))
       }
+      if (request.method === 'POST' && url.pathname === '/checkpoints/respond') {
+        if (request.headers.origin !== `http://${host}`) throw new Error('origin')
+        const body = JSON.parse(await readBody(request)) as { id?: unknown; decision?: unknown; approveSimilar?: unknown }
+        if (typeof body.id !== 'string' || (body.decision !== 'approved' && body.decision !== 'rejected') || (body.approveSimilar !== undefined && typeof body.approveSimilar !== 'boolean')) throw new Error('checkpoint')
+        if (!pendingCheckpoint || pendingCheckpoint.id !== body.id) {
+          response.statusCode = 409
+          response.setHeader('content-type', 'application/json; charset=utf-8')
+          return response.end(JSON.stringify({ error: 'この確認はすでに終了しています。' }))
+        }
+        await pendingCheckpoint.respond(body.decision, body.approveSimilar === true)
+        response.statusCode = 204
+        return response.end()
+      }
       if (request.method === 'POST' && url.pathname === '/attachments') {
         if (request.headers.origin !== `http://${host}` || active) throw new Error('origin')
         const header = request.headers['x-misen-filename']
@@ -412,6 +437,7 @@ export function createDemoServer(
         let runnerCancel: (() => void) | undefined
         activeCancel = () => {
           cancelRequested = true
+          if (pendingCheckpoint) void pendingCheckpoint.respond('rejected', false)
           runnerCancel?.()
         }
         try {
@@ -441,15 +467,26 @@ export function createDemoServer(
             return response.end('Request failed')
           }
           usedRunIds.add(clientId)
+          const plan: StoredPlan = {
+            id: `plan-${clientId}`,
+            title: '実行計画',
+            steps: [
+              { id: 'review', title: '依頼内容と入力を確認', status: 'running' },
+              { id: 'work', title: '必要な作業を実行', status: 'pending' },
+              { id: 'verify', title: '成果物を確認して完了', status: 'pending' },
+            ],
+          }
+          const runUi: StoredRunUi = { runId: clientId, plan, checkpoints: [] }
           const startedAt = sessions.timestamp()
           const userMessage: StoredMessage = { id: clientId, role: 'user', text: prompt, timestamp: startedAt }
           let session = await persist(existingSession, {
             title: titleFromFirstUserMessage(prompt),
             status: 'RUNNING',
             messages: [userMessage],
+            runUi: [...existingSession.runUi, runUi],
           })
-          state = { status: 'running', runId: clientId, sessionId, tools: [], axes: [], artifacts: [] }
-          emit({ type: 'status', sessionId, status: 'running' }); emit({ type: 'user', sessionId, id: clientId, text: prompt }); emitState()
+          state = { status: 'running', runId: clientId, sessionId, tools: [], axes: [], artifacts: [], runUi }
+          emit({ type: 'status', sessionId, status: 'running' }); emit({ type: 'user', sessionId, id: clientId, text: prompt }); emit({ type: 'plan', sessionId, plan }); emitState()
           try {
             const outputBefore = await artifactObserver.snapshot(boundary)
             if (cancelRequested) {
@@ -473,6 +510,13 @@ export function createDemoServer(
                 }
                 emit({ ...event, sessionId })
               }
+              const setStep = (stepId: string, status: StoredPlanStep['status']) => {
+                const step = plan.steps.find(item => item.id === stepId)
+                if (step) step.status = status
+                runEmit({ type: 'step', planId: plan.id, stepId, status })
+              }
+              setStep('review', 'completed')
+              setStep('work', 'running')
               const agentPrompt = importedPaths.length === 0 ? prompt : `${prompt}\n\n持ち込んだファイル（作業フォルダーからの相対パス）:\n${importedPaths.map(path => `- ${path}`).join('\n')}`
               const result = await runner(projects.currentRoot, agentPrompt, {
                 emit: runEmit,
@@ -481,10 +525,44 @@ export function createDemoServer(
                   if (cancelRequested) cancel()
                 },
                 approvalMode,
-                onCheckpointBlocked: async checkpoint => {
-                  await appendAudit(auditPath, { event: 'checkpoint.blocked', ...checkpoint }, options.now)
+                requestCheckpoint: async checkpoint => {
+                  const id = `checkpoint-${randomBytes(12).toString('base64url')}`
+                  const card: StoredCheckpoint = { id, ...checkpoint, status: 'pending' }
+                  runUi.checkpoints.push(card)
+                  runEmit({ type: 'checkpoint_request', checkpoint: { id, ...checkpoint } })
+                  await appendAudit(auditPath, { event: 'checkpoint.requested', id, ...checkpoint }, options.now)
+                  session = await persist(session, { runUi: session.runUi })
+                  if (approvedCheckpointVerbs.has(checkpoint.verb)) {
+                    card.status = 'approved'
+                    card.approveSimilar = true
+                    runEmit({ type: 'checkpoint_response', id, decision: 'approved', approveSimilar: true })
+                    await appendAudit(auditPath, { event: 'checkpoint.responded', id, verb: checkpoint.verb, decision: 'approved', approveSimilar: true, automatic: true }, options.now)
+                    session = await persist(session, { runUi: session.runUi })
+                    return { approved: true, approveSimilar: true }
+                  }
+                  return await new Promise(resolve => {
+                    let answered = false
+                    pendingCheckpoint = {
+                      id,
+                      sessionId,
+                      verb: checkpoint.verb,
+                      respond: async (decision, approveSimilar) => {
+                        if (answered) return
+                        answered = true
+                        card.status = decision
+                        if (decision === 'approved' && approveSimilar) { card.approveSimilar = true; approvedCheckpointVerbs.add(checkpoint.verb) }
+                        runEmit({ type: 'checkpoint_response', id, decision, ...(approveSimilar ? { approveSimilar: true } : {}) })
+                        await appendAudit(auditPath, { event: 'checkpoint.responded', id, verb: checkpoint.verb, decision, approveSimilar }, options.now)
+                        session = await persist(session, { runUi: session.runUi })
+                        pendingCheckpoint = undefined
+                        resolve({ approved: decision === 'approved', ...(approveSimilar ? { approveSimilar: true } : {}) })
+                      },
+                    }
+                  })
                 },
               })
+              setStep('work', 'completed')
+              setStep('verify', 'running')
               const runnerStatus = cancelRequested ? 'CANCELLED' : result.status
               const discovered = runnerStatus === 'COMPLETED'
                 ? await artifactObserver.discover(boundary, outputBefore, MAX_SESSION_ARTIFACTS - artifactResources.size)
@@ -494,6 +572,7 @@ export function createDemoServer(
               const status = cancelRequested ? 'CANCELLED' : runnerStatus
               const terminalStatus: Exclude<UiState['status'], 'idle' | 'running'> = status
               const artifacts = status === 'COMPLETED' ? registerArtifacts(discovered, clientId) : []
+              setStep('verify', 'completed')
               const fallbackText = status === 'COMPLETED' ? '処理が完了しました。' : status === 'CANCELLED' ? '処理を停止しました。' : '処理を完了できませんでした。'
               const assistantText = hasVisibleAssistantText ? visibleAssistantText : fallbackText
               const storedArtifacts: StoredArtifact[] = status === 'COMPLETED' ? discovered.map(artifact => ({
@@ -507,8 +586,9 @@ export function createDemoServer(
                 messages: [...session.messages, { id: `assistant-${clientId}`, role: 'assistant', text: assistantText, timestamp: sessions.timestamp() }],
                 tools: [...storedTools.values()],
                 artifacts: storedArtifacts,
+                runUi: session.runUi,
               })
-              state = { status: terminalStatus, runId: clientId, sessionId, tools: result.tools.slice(0, 20), axes: [], artifacts }
+              state = { status: terminalStatus, runId: clientId, sessionId, tools: result.tools.slice(0, 20), axes: [], artifacts, runUi }
               if (status !== 'COMPLETED' || !hasVisibleAssistantText) {
                 emit({ type: 'assistant', sessionId, text: fallbackText, done: true })
               }

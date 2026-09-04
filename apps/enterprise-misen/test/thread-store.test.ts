@@ -114,6 +114,26 @@ test('failure and cancellation become assistant-ui incomplete statuses without r
   assert.deepEqual(statusOf(hostFailure, 'assistant-client-3'), { type: 'incomplete', reason: 'error', error: '依頼を開始できませんでした。' })
 })
 
+test('plan, step progress, and checkpoint request-response events reduce into the active assistant card', () => {
+  let store = startRun(emptyThreadStore('session-a'), 'client-plan', 'レポートを更新して')
+  store = applyServerEvent(store, { type: 'plan', plan: { id: 'plan-1', title: '実行計画', steps: [{ id: 'review', title: '依頼内容と入力を確認', status: 'running' }, { id: 'work', title: '必要な作業を実行', status: 'pending' }] } })
+  store = applyServerEvent(store, { type: 'step', planId: 'plan-1', stepId: 'review', status: 'completed' })
+  store = applyServerEvent(store, { type: 'step', planId: 'plan-1', stepId: 'work', status: 'running' })
+  store = applyServerEvent(store, { type: 'checkpoint_request', checkpoint: { id: 'checkpoint-1', verb: '上書き', target: 'output/report.xlsx', risk: '中', reason: '既存ファイルの内容が置き換わります。' } })
+  let custom = store.messages[1]?.metadata?.custom as any
+  assert.deepEqual(custom.plan.steps.map((step: any) => step.status), ['completed', 'running'])
+  assert.deepEqual(custom.checkpoints[0], { id: 'checkpoint-1', verb: '上書き', target: 'output/report.xlsx', risk: '中', reason: '既存ファイルの内容が置き換わります。', status: 'pending' })
+  store = applyServerEvent(store, { type: 'checkpoint_response', id: 'checkpoint-1', decision: 'approved', approveSimilar: true })
+  custom = store.messages[1]?.metadata?.custom as any
+  assert.equal(custom.checkpoints[0].status, 'approved')
+  assert.equal(custom.checkpoints[0].approveSimilar, true)
+
+  const reconnected = applyServerEvent(emptyThreadStore('session-a'), { type: 'state', state: { status: 'running', runId: 'client-plan', sessionId: 'session-a', artifacts: [], runUi: { runId: 'client-plan', plan: custom.plan, checkpoints: custom.checkpoints } } })
+  const restored = reconnected.messages[0]?.metadata?.custom as any
+  assert.equal(restored.plan.id, 'plan-1')
+  assert.equal(restored.checkpoints[0].status, 'approved')
+})
+
 test('a reconnect during an active run restores the running placeholder from the state event', () => {
   let store = threadStoreFromSession(session({ status: 'RUNNING', messages: [{ id: 'run-1', role: 'user', text: '依頼' }], tools: [], artifacts: [] }))
   store = applyServerEvent(store, { type: 'state', state: { status: 'running', runId: 'run-1', sessionId: 'session-a', artifacts: [] } })

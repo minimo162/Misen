@@ -12,7 +12,7 @@ export interface LiveAgentOptions {
   readonly settingsPath?: string
   /** Session-only approval state supplied by the local UI host; never persisted in the Agent. */
   readonly approvalMode?: ApprovalMode
-  readonly onCheckpointBlocked?: (checkpoint: BlockedCheckpoint) => void | Promise<void>
+  readonly requestCheckpoint?: (checkpoint: BlockedCheckpoint) => Promise<{ approved: boolean; approveSimilar?: boolean }>
 }
 
 export function checkpointFor(name: string, args: unknown): BlockedCheckpoint | undefined {
@@ -33,8 +33,9 @@ export function approvalHook(options: LiveAgentOptions): LifecycleHook {
     async beforeTool(context) {
       const checkpoint = checkpointFor(context.toolCall.name, context.args)
       if (!checkpoint || options.approvalMode === 'session-auto') return
-      await options.onCheckpointBlocked?.(checkpoint)
-      return { block: true, reason: `確認が必要な操作を止めました: ${checkpoint.verb}（${checkpoint.reason}）`, terminate: false }
+      const decision = await options.requestCheckpoint?.(checkpoint)
+      if (decision?.approved) return
+      return { block: true, reason: `操作は承認されませんでした: ${checkpoint.verb}（${checkpoint.reason}）`, terminate: false }
     },
   }
 }

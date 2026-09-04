@@ -100,6 +100,8 @@ test('assistant-ui composition keeps the conversation surface restrained and saf
   assert.doesNotMatch(source, /onRename|ThreadListItemPrimitive\.(?:Archive|Unarchive)/u)
   assert.doesNotMatch(source, /adapters:\s*\{[^}]*(?:speech|dictation|voice|feedback)/u)
   for (const label of ['プロジェクト', 'フォルダーを選ぶ…', 'エクスプローラーで開く', '承認', '毎回確認', 'このセッションは自動', 'このプロジェクトのファイルは PC から出ません']) assert.match(source, new RegExp(label, 'u'))
+  for (const label of ['実行計画', '確認が必要です', 'リスク水準', '操作内容', '対象', '理由', '拒否', 'このセッションでは同種を承認済みにする']) assert.match(source, new RegExp(label, 'u'))
+  assert.match(source, /\/checkpoints\/respond/u)
 
   assert.doesNotMatch(source, /viewportRef|scrollHeight|scrollTop|clientHeight/)
   assert.doesNotMatch(source, /assistant-cloud|AssistantCloud|pi-web|Vercel AI SDK|react-ai-sdk|useChatRuntime/iu)

@@ -101,6 +101,44 @@ test('project endpoints reject arbitrary and UNC paths, use injected picker, blo
   }
 })
 
+test('checkpoint cards wait for approval, remember the same verb for one session, and persist plan progress', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'misen-checkpoint-'))
+  await mkdir(join(root, 'output'))
+  const auditPath = join(root, '.test-data', 'audit.jsonl')
+  const decisions: boolean[] = []
+  const runner: AgentRunner = async (_root, _prompt, context) => {
+    decisions.push((await context!.requestCheckpoint!({ verb: '上書き', target: 'output/report.xlsx', risk: '中', reason: '既存ファイルの内容が置き換わります。' })).approved)
+    decisions.push((await context!.requestCheckpoint!({ verb: '上書き', target: 'output/summary.xlsx', risk: '中', reason: '既存ファイルの内容が置き換わります。' })).approved)
+    return { tools: [], status: 'COMPLETED' }
+  }
+  const { server, base } = await start(root, runner, undefined, { auditPath })
+  try {
+    const created = await fetch(base + '/sessions', { method: 'POST', headers: { origin: base } })
+    const session = await created.json() as { id: string }
+    const runPromise = fetch(base + '/run', { method: 'POST', redirect: 'manual', headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ prompt: '既存レポートを更新', clientId: 'checkpoint-run', sessionId: session.id }) })
+    let checkpointId = ''
+    for (let attempt = 0; attempt < 100 && !checkpointId; attempt += 1) {
+      const snapshot = await (await fetch(base + '/sessions/' + session.id)).json() as any
+      checkpointId = snapshot.runUi?.[0]?.checkpoints?.[0]?.id ?? ''
+      if (!checkpointId) await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    assert.match(checkpointId, /^checkpoint-/u)
+    assert.equal((await fetch(base + '/checkpoints/respond', { method: 'POST', headers: { origin: base, 'content-type': 'application/json' }, body: JSON.stringify({ id: 'stale', decision: 'approved' }) })).status, 409)
+    assert.equal((await fetch(base + '/checkpoints/respond', { method: 'POST', headers: { origin: base, 'content-type': 'application/json' }, body: JSON.stringify({ id: checkpointId, decision: 'approved', approveSimilar: true }) })).status, 204)
+    assert.equal((await runPromise).status, 303)
+    assert.deepEqual(decisions, [true, true])
+    const stored = await (await fetch(base + '/sessions/' + session.id)).json() as any
+    assert.deepEqual(stored.runUi[0].plan.steps.map((step: any) => step.status), ['completed', 'completed', 'completed'])
+    assert.deepEqual(stored.runUi[0].checkpoints.map((checkpoint: any) => [checkpoint.status, checkpoint.approveSimilar]), [['approved', true], ['approved', true]])
+    const records = (await readFile(auditPath, 'utf8')).trim().split(/\r?\n/u).map(line => JSON.parse(line))
+    assert.deepEqual(records.map(item => item.event), ['checkpoint.requested', 'checkpoint.responded', 'checkpoint.requested', 'checkpoint.responded'])
+    assert.equal(records.at(-1).automatic, true)
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()))
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 async function run(base: string, prompt: string, clientId: string) {
   const created = await fetch(base + '/sessions', { method: 'POST', headers: { origin: base } })
   if (created.status !== 201) return created
