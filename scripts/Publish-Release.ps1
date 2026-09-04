@@ -18,7 +18,8 @@ param(
     [string]$OfficeCliRuntime = '',
     [switch]$SkipTests,
     [switch]$SkipNpmInstall,
-    [switch]$Latest,
+    [switch]$Prerelease,
+    [int]$KeepReleases = 2,
     [string]$OutputDirectory = ''
 )
 $ErrorActionPreference = 'Stop'
@@ -96,9 +97,21 @@ $notesPath = Join-Path $OutputDirectory 'notes.md'
 
 Step "GitHub Release を作成しています: $tag"
 $ghArgs = @('release', 'create', $tag, $zip, "$zip.sha256.txt", (Join-Path $root 'scripts\Expand-MisenShare.ps1'), '--title', "共有フォルダー配布物 v$Version ($sha)", '--notes-file', $notesPath, '--target', (& git -C $root rev-parse HEAD).Trim())
-if (-not $Latest) { $ghArgs += '--prerelease' }
+if ($Prerelease) { $ghArgs += '--prerelease' } else { $ghArgs += '--latest' }
 & gh @ghArgs
 if ($LASTEXITCODE -ne 0) { Fail "gh release create が失敗しました (exit=$LASTEXITCODE)" }
 $global:LASTEXITCODE = 0
 Ok "Release を作成しました: $tag"
+
+# 古い share-v* の Release を KeepReleases 個だけ残して削除する（タグも消す）。共有フォルダーには最新だけ展開するので、Release 一覧が増え続けないようにする。
+if ($KeepReleases -ge 1) {
+    $existing = (& gh release list --limit 100 --json tagName,createdAt | ConvertFrom-Json) | Where-Object { $_.tagName -like 'share-v*' } | Sort-Object createdAt -Descending
+    $global:LASTEXITCODE = 0
+    $stale = @($existing | Select-Object -Skip $KeepReleases)
+    foreach ($old in $stale) {
+        & gh release delete $old.tagName --cleanup-tag --yes 2>$null
+        if ($LASTEXITCODE -eq 0) { Step "古い Release を削除しました: $($old.tagName)" } else { Write-Host "[release] 古い Release の削除に失敗しました（次回再試行）: $($old.tagName)" -ForegroundColor Yellow }
+        $global:LASTEXITCODE = 0
+    }
+}
 Ok "生成物は $OutputDirectory に残しています（不要なら削除してください）。"
