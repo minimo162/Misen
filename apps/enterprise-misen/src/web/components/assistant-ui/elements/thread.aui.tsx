@@ -3,7 +3,7 @@
 import { MarkdownText } from "@/components/assistant-ui/elements/markdown-text.js";
 import { File } from "@/components/assistant-ui/elements/file.js";
 import { ComposerAddAttachment, ComposerAttachments, UserMessageAttachments } from "@/components/attachment.aui.js";
-import { ToolFallback } from "@/components/assistant-ui/elements/tool-fallback.aui.js";
+import { ToolFallback, toolLabel } from "@/components/assistant-ui/elements/tool-fallback.aui.js";
 import {
   ToolGroupContent,
   ToolGroupRoot,
@@ -33,6 +33,7 @@ import {
   CopyIcon,
   SquareIcon,
 } from "lucide-react";
+import type { AssistantCustomMetadata, CheckpointCard } from "@/thread-store.js";
 import {
   createContext,
   useContext,
@@ -44,8 +45,6 @@ import {
 } from "react";
 
 export type ThreadGroupPart = MessagePrimitive.GroupedParts.GroupPart;
-type CheckpointCard = { id: string; verb: string; target: string; risk: "低" | "中" | "高"; reason: string; status: "pending" | "approved" | "rejected"; approveSimilar?: boolean };
-type AssistantCustomMetadata = { plan?: { id: string; title: string; steps: { id: string; title: string; status: "pending" | "running" | "completed" }[] }; checkpoints: CheckpointCard[] };
 
 /** Official assistant-ui Thread, trimmed only for Misen's deliberately absent features. */
 export type ThreadComponents = {
@@ -247,24 +246,27 @@ const AssistantMessage: FC = () => {
 
 const RunCards: FC = () => {
   const custom = useAuiState((s) => s.message.metadata?.custom as AssistantCustomMetadata | undefined);
-  if (!custom?.plan && !custom?.checkpoints.length) return null;
+  const plan = custom?.plan?.visible ? custom.plan : undefined;
+  if (!plan && !custom?.checkpoints.length) return null;
   return (
     <div className="mb-4 flex flex-col gap-3">
-      {custom.plan && (
+      {plan && (
         <section className="border-border bg-muted/30 rounded-xl border p-4" aria-label="実行計画">
-          <h2 className="text-sm font-medium">{custom.plan.title}</h2>
-          <ol className="mt-3 space-y-2 text-sm">
-            {custom.plan.steps.map(step => (
+          {plan.completed ? (
+            <p className="flex items-center gap-2 text-sm font-medium"><CheckIcon className="size-4" />{plan.steps.filter(step => step.status === "completed").length} 手順で完了</p>
+          ) : <><h2 className="text-sm font-medium">{plan.title}</h2>
+          <ol className="mt-3 space-y-3 text-sm">
+            {plan.steps.map(step => (
               <li key={step.id} className="flex items-center gap-2">
                 <span className={cn("flex size-5 shrink-0 items-center justify-center rounded-full border text-[11px]", step.status === "completed" && "border-primary bg-primary text-primary-foreground", step.status === "running" && "border-primary text-primary animate-pulse motion-reduce:animate-none")} aria-hidden>{step.status === "completed" ? <CheckIcon className="size-3" /> : step.status === "running" ? "●" : ""}</span>
-                <span className={step.status === "pending" ? "text-muted-foreground" : ""}>{step.title}</span>
+                <span className={cn("min-w-0", step.status === "pending" && "text-muted-foreground")}><span className="block">{step.title}</span>{step.tool && <span className="text-muted-foreground block truncate text-xs">{toolLabel(step.tool)} ・ {step.target}</span>}</span>
                 {step.status === "running" && <span className="text-muted-foreground ml-auto text-xs">進行中</span>}
               </li>
             ))}
-          </ol>
+          </ol></>}
         </section>
       )}
-      {custom.checkpoints.map(checkpoint => <Checkpoint key={checkpoint.id} checkpoint={checkpoint} />)}
+      {(custom?.checkpoints ?? []).map(checkpoint => <Checkpoint key={checkpoint.id} checkpoint={checkpoint} />)}
     </div>
   );
 };

@@ -3,6 +3,7 @@ import { createBrain } from './brain.js'
 import { defaultSettingsPath, describeBrainProfile, loadBrainProfile, type BrainProfileIdentity } from './brain-profile.js'
 import { prepareAgentCustomization } from './customized.js'
 import type { LifecycleHook } from '../customization/hooks.js'
+import { parsePlanProposal, PLAN_TOOLS, type PlanProvider } from '../web/planning.js'
 
 export type ApprovalMode = 'confirm' | 'session-auto'
 export type BlockedCheckpoint = { verb: string; target: string; risk: '中' | '高'; reason: string }
@@ -61,6 +62,51 @@ export async function liveAgent(root: string, options: LiveAgentOptions = {}) {
     afterToolCall: customization.hooks.afterToolCall,
   })
 }
+
+const PLAN_SYSTEM_PROMPT = `あなたは Misen の実行計画作成器です。依頼を実行せず、submit_plan Tool を1回だけ呼び出してください。
+読み取り Tool 1回で答えられる依頼は1手順にします。書き込みを伴う依頼または複数操作が必要な依頼は2〜8手順にします。
+各 title は具体的な日本語で30文字以内、tool は利用可能な Tool 名、target は作業フォルダーからの相対パスまたは具体的な対象名にしてください。
+利用可能な Tool: ${PLAN_TOOLS.join(', ')}`
+
+/** First-turn, tool-shaped structured plan response using the configured Brain. */
+export function createLivePlanProvider(options: LiveAgentOptions = {}): PlanProvider {
+  return async (_root, prompt, importedPaths) => {
+    const profile = await loadBrainProfile(options.settingsPath ?? defaultSettingsPath())
+    const brain = createBrain(profile)
+    const response = await brain.models.completeSimple(brain.model, {
+    systemPrompt: PLAN_SYSTEM_PROMPT,
+    messages: [{
+      role: 'user',
+      content: importedPaths.length === 0 ? prompt : `${prompt}\n\n持ち込まれたファイル:\n${importedPaths.map(path => `- ${path}`).join('\n')}`,
+      timestamp: Date.now(),
+    }],
+    tools: [{
+      name: 'submit_plan',
+      description: 'この依頼で行う具体的な手順を確定する',
+      parameters: {
+        type: 'object', additionalProperties: false, required: ['steps'],
+        properties: {
+          steps: {
+            type: 'array', minItems: 1, maxItems: 8,
+            items: {
+              type: 'object', additionalProperties: false, required: ['title', 'tool', 'target'],
+              properties: {
+                title: { type: 'string', minLength: 1, maxLength: 30 },
+                tool: { type: 'string', enum: [...PLAN_TOOLS] },
+                target: { type: 'string', minLength: 1, maxLength: 512 },
+              },
+            },
+          },
+        },
+      } as any,
+    }],
+    }, { maxRetries: 0, maxTokens: 1_200, temperature: 0, toolChoice: 'auto', reasoning: profile.thinkingLevel })
+    const submission = response.content.find(part => part.type === 'toolCall' && part.name === 'submit_plan')
+    return submission?.type === 'toolCall' ? parsePlanProposal(submission.arguments) : undefined
+  }
+}
+
+export const livePlanProvider = createLivePlanProvider()
 
 /** Audit-safe identity of the Brain the live route would use (no secret). */
 export async function liveBrainIdentity(options: LiveAgentOptions = {}): Promise<BrainProfileIdentity> {

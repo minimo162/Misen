@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { fixture } from '../demo/enterprise-excel/fixtures.js'
 import { ENTERPRISE_TOOL_NAMES } from '../src/capabilities/tools.js'
 import { BrainProfileError } from '../src/runtime/brain-profile.js'
-import { liveAgent, liveBrainIdentity } from '../src/runtime/live.js'
+import { createLivePlanProvider, liveAgent, liveBrainIdentity } from '../src/runtime/live.js'
 import { createAgentRunner, type DemoEvent } from '../src/web/server.js'
 
 // Unit tier: the tool roster is constructed but OfficeCLI is never invoked.
@@ -81,6 +81,38 @@ test('the live route talks only to the configured Brain, carries the key only in
     }
   } finally {
     await fake.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('the first-turn planner requests submit_plan structured output from the configured Brain', async () => {
+  let seenBody: any
+  const server = createServer((request, response) => {
+    let body = ''
+    request.setEncoding('utf8')
+    request.on('data', chunk => { body += chunk })
+    request.on('end', () => {
+      seenBody = JSON.parse(body)
+      response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' })
+      const write = (choices: unknown[], extra: Record<string, unknown> = {}) => response.write(`data: ${JSON.stringify({ id: 'chatcmpl-plan', object: 'chat.completion.chunk', created: 1, model: 'local-model', choices, ...extra })}\n\n`)
+      write([{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call-plan', type: 'function', function: { name: 'submit_plan', arguments: JSON.stringify({ steps: [{ title: 'Alpha.xlsxの売上を確認', tool: 'spreadsheet_read', target: 'input/Alpha.xlsx' }] }) } }] }, finish_reason: null }])
+      write([{ index: 0, delta: {}, finish_reason: 'tool_calls' }])
+      write([], { usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 } })
+      response.end('data: [DONE]\n\n')
+    })
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert.ok(address && typeof address !== 'string')
+  const { root, settingsPath } = await workspaceWithSettings({ provider: 'openai-compatible', model: 'local-model', baseUrl: `http://127.0.0.1:${address.port}/v1`, apiKey: SECRET })
+  try {
+    const plan = await createLivePlanProvider({ settingsPath })(root, '7月の Alpha.xlsx の売上を教えて', ['input/Alpha.xlsx'])
+    assert.equal(seenBody.tools[0].function.name, 'submit_plan')
+    assert.match(JSON.stringify(seenBody.messages), /2〜8手順/u)
+    assert.match(JSON.stringify(seenBody.messages), /input\/Alpha\.xlsx/u)
+    assert.deepEqual(plan?.steps, [{ title: 'Alpha.xlsxの売上を確認', tool: 'spreadsheet_read', target: 'input/Alpha.xlsx' }])
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()))
     await rm(root, { recursive: true, force: true })
   }
 })

@@ -42,6 +42,65 @@ test('cached Tool completion is persisted in the session and metadata-only audit
   }
 })
 
+test('request-derived plans hide a single read, progress matched Tools, and audit plan-execution differences', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'misen-dynamic-plan-'))
+  await mkdir(join(root, 'output'))
+  const auditPath = join(root, '.test-data', 'audit.jsonl')
+  let runNumber = 0
+  const runner: AgentRunner = async (_root, _prompt, context) => {
+    runNumber += 1
+    if (runNumber === 1) {
+      context!.emit({ type: 'tool', phase: 'start', id: 'read-alpha', name: 'spreadsheet_read', target: 'input/Alpha.xlsx' })
+      context!.emit({ type: 'tool', phase: 'end', id: 'read-alpha', name: 'spreadsheet_read', status: 'success' })
+      context!.emit({ type: 'assistant', text: '7月の売上は100万円です。', done: true })
+      return { tools: ['spreadsheet_read'], status: 'COMPLETED' }
+    }
+    context!.emit({ type: 'tool', phase: 'start', id: 'read-template', name: 'spreadsheet_read', target: 'input/template.xlsx' })
+    context!.emit({ type: 'tool', phase: 'end', id: 'read-template', name: 'spreadsheet_read', status: 'success' })
+    context!.emit({ type: 'tool', phase: 'start', id: 'extra-inspect', name: 'office_get', target: 'input/template.xlsx' })
+    context!.emit({ type: 'tool', phase: 'end', id: 'extra-inspect', name: 'office_get', status: 'success' })
+    context!.emit({ type: 'tool', phase: 'start', id: 'create-report', name: 'office_create_output', target: 'output/8月月次管理レポート.xlsx' })
+    context!.emit({ type: 'tool', phase: 'end', id: 'create-report', name: 'office_create_output', status: 'success' })
+    return { tools: ['spreadsheet_read', 'office_get', 'office_create_output'], status: 'COMPLETED' }
+  }
+  const plans = [
+    { steps: [{ title: 'Alpha.xlsxの売上を確認', tool: 'spreadsheet_read', target: 'input/Alpha.xlsx' }] },
+    { steps: [
+      { title: 'テンプレートを確認', tool: 'spreadsheet_read', target: 'input/template.xlsx' },
+      { title: '8月レポートを複製', tool: 'office_create_output', target: 'output/8月月次管理レポート.xlsx' },
+      { title: '8月の値を書き込む', tool: 'office_set', target: 'output/8月月次管理レポート.xlsx' },
+      { title: 'レポートを検算', tool: 'office_inspect', target: 'output/8月月次管理レポート.xlsx' },
+    ] },
+  ]
+  const { server, base } = await start(root, runner, undefined, { auditPath, planProvider: async () => plans.shift() })
+  try {
+    const first = await fetch(base + '/sessions', { method: 'POST', headers: { origin: base } }); const firstSession = await first.json() as { id: string }
+    assert.equal((await fetch(base + '/run', { method: 'POST', redirect: 'manual', headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ prompt: '7月の Alpha.xlsx の売上を教えて', clientId: 'simple-read', sessionId: firstSession.id }) })).status, 303)
+    const readStored = await (await fetch(base + '/sessions/' + firstSession.id)).json() as any
+    assert.equal(readStored.runUi[0].plan.visible, false)
+    assert.equal(readStored.runUi[0].plan.steps[0].status, 'completed')
+    assert.equal(readStored.tools.length, 1)
+
+    const second = await fetch(base + '/sessions', { method: 'POST', headers: { origin: base } }); const secondSession = await second.json() as { id: string }
+    assert.equal((await fetch(base + '/run', { method: 'POST', redirect: 'manual', headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ prompt: 'テンプレートで 8月の月次管理レポートを output に作って', clientId: 'report-write', sessionId: secondSession.id }) })).status, 303)
+    const reportStored = await (await fetch(base + '/sessions/' + secondSession.id)).json() as any
+    assert.equal(reportStored.runUi[0].plan.visible, true)
+    assert.equal(reportStored.runUi[0].plan.completed, true)
+    assert.deepEqual(reportStored.runUi[0].plan.steps.map((step: any) => [step.id, step.status]), [
+      ['step-1', 'completed'], ['step-2', 'completed'], ['step-3', 'pending'], ['step-4', 'pending'], ['additional-1', 'completed'],
+    ])
+    const audit = (await readFile(auditPath, 'utf8')).trim().split(/\r?\n/u).map(line => JSON.parse(line))
+    assert.deepEqual(audit.filter(item => item.event.startsWith('plan.')).map(item => [item.event, item.tool, item.target]), [
+      ['plan.unplanned_tool', 'office_get', 'input/template.xlsx'],
+      ['plan.unexecuted_step', 'office_set', 'output/8月月次管理レポート.xlsx'],
+      ['plan.unexecuted_step', 'office_inspect', 'output/8月月次管理レポート.xlsx'],
+    ])
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()))
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('file import accepts only supported bounded files, numbers duplicates, and writes metadata audit', async () => {
   const root = await mkdtemp(join(tmpdir(), 'misen-import-'))
   await mkdir(join(root, 'output'))

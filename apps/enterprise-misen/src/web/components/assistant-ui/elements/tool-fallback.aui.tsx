@@ -32,6 +32,8 @@ const TOOL_LABELS: Record<string, string> = {
   office_import: "表データを取り込み",
 };
 
+export const toolLabel = (name: string): string => TOOL_LABELS[name] ?? "操作";
+
 function ToolFallbackRoot({ className, open: controlledOpen, onOpenChange: controlledOnOpenChange, defaultOpen = false, children, ...props }: Omit<React.ComponentProps<typeof Collapsible>, "open" | "onOpenChange"> & { open?: boolean; onOpenChange?: (open: boolean) => void; defaultOpen?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
@@ -70,7 +72,7 @@ function ToolFallbackTrigger({ toolName, status, cached = false, className, ...p
   return (
     <CollapsibleTrigger className={cn("group/trigger text-muted-foreground hover:text-foreground flex w-fit origin-left items-center gap-2 py-1.5 text-sm transition-[color,scale] active:scale-[0.98]", className)} {...props}>
       <Icon className={cn("size-4 shrink-0", isRunning && "animate-spin [animation-duration:0.6s]")} />
-      <span className={cn("inline-block text-start leading-none", isCancelled && "line-through", isRunning && "shimmer motion-reduce:animate-none")}>{label}: <b>{TOOL_LABELS[toolName] ?? "操作"}</b></span>
+      <span className={cn("inline-block text-start leading-none", isCancelled && "line-through", isRunning && "shimmer motion-reduce:animate-none")}>{label}: <b>{toolLabel(toolName)}</b></span>
       <ToolFallbackDuration />
       <ChevronDownIcon className="size-4 shrink-0 -rotate-90 transition-transform duration-(--animation-duration) group-data-open/trigger:rotate-0 motion-reduce:transition-none" />
     </CollapsibleTrigger>
