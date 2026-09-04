@@ -115,7 +115,7 @@ export function enterpriseTools(boundary: WorkspaceBoundary, spreadsheets: Offic
       const mode = p.mode ?? 'validate'
       return { file: boundary.displayPath(read.absolute), mode, data: await verbs.inspect(read.bytes, read.kind, mode, signal) }
     }),
-    tool<Static<typeof OfficeCreate>>('office_create_output', 'Create a blank Office output or copy a workspace template. The destination must be below output.', OfficeCreate, async (p, signal) => {
+    tool<Static<typeof OfficeCreate>>('office_create_output', 'Create a blank Office output or copy a workspace template. The destination must be below output. Check the workspace tree first: if the destination already exists, either choose a new name or pass overwrite: true, which asks the user for approval before replacing it.', OfficeCreate, async (p, signal) => {
       const kind = officeKind(p.output)
       let source: { readonly absolute: string; readonly bytes: Uint8Array } | undefined
       if (p.source !== undefined) {

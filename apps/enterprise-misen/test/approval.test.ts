@@ -3,7 +3,7 @@ import { strict as assert } from 'node:assert'
 import { approvalHook, checkpointFor } from '../src/runtime/live.js'
 
 test('checkpoint classification covers overwrite and element removal only', () => {
-  assert.deepEqual(checkpointFor('office_create_output', { output: 'output/report.xlsx', overwrite: true }), { verb: '上書き', target: 'output/report.xlsx', risk: '中', reason: '既存ファイルの内容が置き換わります。' })
+  assert.deepEqual(checkpointFor('office_create_output', { output: 'output/report.xlsx', overwrite: true }), { verb: '上書き', target: 'output/report.xlsx', risk: '中', reason: '同名のファイルが output に既にあり、その内容が置き換わります。前回の成果物を残す場合は拒否して、別の名前を指示してください。' })
   assert.equal(checkpointFor('office_create_output', { output: 'output/new.xlsx' }), undefined)
   assert.equal(checkpointFor('office_set', { file: 'output/report.xlsx' }), undefined)
   assert.equal(checkpointFor('office_remove', { file: 'output/report.xlsx', path: '/slides/0' })?.verb, '削除')
