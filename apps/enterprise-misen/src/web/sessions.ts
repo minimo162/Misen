@@ -3,7 +3,7 @@ import { mkdir, open, readdir, rename, unlink, writeFile } from 'node:fs/promise
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-export const SESSION_SCHEMA_VERSION = 1
+export const SESSION_SCHEMA_VERSION = 2
 export const DEFAULT_SESSION_TITLE = '新しいチャット'
 export const MAX_SESSION_TITLE_LENGTH = 36
 export const MAX_SESSION_FILE_BYTES = 1024 * 1024
@@ -33,6 +33,11 @@ export type StoredArtifact = {
   sha256: string
 }
 
+export type StoredPlanStep = { id: string; title: string; status: 'pending' | 'running' | 'completed' }
+export type StoredPlan = { id: string; title: string; steps: StoredPlanStep[] }
+export type StoredCheckpoint = { id: string; verb: string; target: string; risk: '低' | '中' | '高'; reason: string; status: 'pending' | 'approved' | 'rejected'; approveSimilar?: boolean }
+export type StoredRunUi = { runId: string; plan?: StoredPlan; checkpoints: StoredCheckpoint[] }
+
 export type StoredSession = {
   schemaVersion: typeof SESSION_SCHEMA_VERSION
   id: string
@@ -43,6 +48,7 @@ export type StoredSession = {
   messages: StoredMessage[]
   tools: StoredToolEvent[]
   artifacts: StoredArtifact[]
+  runUi: StoredRunUi[]
 }
 
 export type SessionSummary = Pick<StoredSession, 'id' | 'title' | 'createdAt' | 'updatedAt' | 'status'>
@@ -83,13 +89,31 @@ function parseArtifact(value: unknown): StoredArtifact | undefined {
   return { runId: value.runId, path: value.path, filename: value.filename, sha256: value.sha256 }
 }
 
+function parseRunUi(value: unknown): StoredRunUi | undefined {
+  if (!isRecord(value) || !isSafeText(value.runId, 80) || !Array.isArray(value.checkpoints)) return undefined
+  let plan: StoredPlan | undefined
+  if (value.plan !== undefined) {
+    if (!isRecord(value.plan) || !isSafeText(value.plan.id, 80) || !isSafeText(value.plan.title, 200) || !Array.isArray(value.plan.steps)) return undefined
+    const steps = value.plan.steps.map(step => isRecord(step) && isSafeText(step.id, 80) && isSafeText(step.title, 200) && ['pending', 'running', 'completed'].includes(String(step.status)) ? { id: step.id, title: step.title, status: step.status as StoredPlanStep['status'] } : undefined)
+    if (steps.some(step => !step)) return undefined
+    plan = { id: value.plan.id, title: value.plan.title, steps: steps as StoredPlanStep[] }
+  }
+  const checkpoints = value.checkpoints.map(item => {
+    if (!isRecord(item) || !isSafeText(item.id, 80) || !isSafeText(item.verb, 80) || !isSafeText(item.target, 260) || !['低', '中', '高'].includes(String(item.risk)) || !isSafeText(item.reason, 400) || !['pending', 'approved', 'rejected'].includes(String(item.status))) return undefined
+    return { id: item.id, verb: item.verb, target: item.target, risk: item.risk as StoredCheckpoint['risk'], reason: item.reason, status: item.status as StoredCheckpoint['status'], ...(item.approveSimilar === true ? { approveSimilar: true } : {}) }
+  })
+  if (checkpoints.some(item => !item)) return undefined
+  return { runId: value.runId, ...(plan ? { plan } : {}), checkpoints: checkpoints as StoredCheckpoint[] }
+}
+
 export function parseStoredSession(value: unknown): StoredSession | undefined {
-  if (!isRecord(value) || value.schemaVersion !== SESSION_SCHEMA_VERSION || typeof value.id !== 'string' || !SESSION_ID_RE.test(value.id) || !isSafeText(value.title, 80) || !isIsoDate(value.createdAt) || !isIsoDate(value.updatedAt) || !isStatus(value.status)) return undefined
+  if (!isRecord(value) || (value.schemaVersion !== 1 && value.schemaVersion !== SESSION_SCHEMA_VERSION) || typeof value.id !== 'string' || !SESSION_ID_RE.test(value.id) || !isSafeText(value.title, 80) || !isIsoDate(value.createdAt) || !isIsoDate(value.updatedAt) || !isStatus(value.status)) return undefined
   if (!Array.isArray(value.messages) || !Array.isArray(value.tools) || !Array.isArray(value.artifacts)) return undefined
   const messages = value.messages.map(parseMessage)
   const tools = value.tools.map(parseTool)
   const artifacts = value.artifacts.map(parseArtifact)
-  if (messages.some(item => !item) || tools.some(item => !item) || artifacts.some(item => !item)) return undefined
+  const runUi = value.runUi === undefined && value.schemaVersion === 1 ? [] : Array.isArray(value.runUi) ? value.runUi.map(parseRunUi) : [undefined]
+  if (messages.some(item => !item) || tools.some(item => !item) || artifacts.some(item => !item) || runUi.some(item => !item)) return undefined
   return {
     schemaVersion: SESSION_SCHEMA_VERSION,
     id: value.id,
@@ -100,6 +124,7 @@ export function parseStoredSession(value: unknown): StoredSession | undefined {
     messages: messages as StoredMessage[],
     tools: tools as StoredToolEvent[],
     artifacts: artifacts as StoredArtifact[],
+    runUi: runUi as StoredRunUi[],
   }
 }
 
@@ -128,6 +153,7 @@ export class LocalSessionStore {
       messages: [],
       tools: [],
       artifacts: [],
+      runUi: [],
     }
     await this.save(session)
     return session

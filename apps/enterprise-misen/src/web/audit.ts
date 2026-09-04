@@ -6,7 +6,8 @@ export type AuditEvent =
   | { event: 'file.imported'; filename: string; size: number; sha256: string }
   | { event: 'project.switched'; folder: string }
   | { event: 'approval.changed'; mode: 'confirm' | 'session-auto' }
-  | { event: 'checkpoint.blocked'; verb: string; target: string; risk: '中' | '高'; reason: string }
+  | { event: 'checkpoint.requested'; id: string; verb: string; target: string; risk: '低' | '中' | '高'; reason: string }
+  | { event: 'checkpoint.responded'; id: string; verb: string; decision: 'approved' | 'rejected'; approveSimilar: boolean; automatic?: boolean }
 
 export function defaultAuditPath(env: NodeJS.ProcessEnv = process.env): string {
   const localAppData = env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local')

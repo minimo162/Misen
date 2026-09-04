@@ -36,6 +36,7 @@ import {
 import {
   createContext,
   useContext,
+  useState,
   type ComponentType,
   type FC,
   type PropsWithChildren,
@@ -43,6 +44,8 @@ import {
 } from "react";
 
 export type ThreadGroupPart = MessagePrimitive.GroupedParts.GroupPart;
+type CheckpointCard = { id: string; verb: string; target: string; risk: "低" | "中" | "高"; reason: string; status: "pending" | "approved" | "rejected"; approveSimilar?: boolean };
+type AssistantCustomMetadata = { plan?: { id: string; title: string; steps: { id: string; title: string; status: "pending" | "running" | "completed" }[] }; checkpoints: CheckpointCard[] };
 
 /** Official assistant-ui Thread, trimmed only for Misen's deliberately absent features. */
 export type ThreadComponents = {
@@ -217,6 +220,8 @@ const AssistantMessage: FC = () => {
   return (
     <MessagePrimitive.Root className="fade-in slide-in-from-bottom-1 animate-in relative -mb-7.5 pb-7.5 duration-150 [contain-intrinsic-size:auto_200px] [content-visibility:auto]">
       <div className="text-foreground px-2 leading-relaxed wrap-break-word">
+        {/* Misen modification: local plan and approval checkpoint events are rendered as first-class cards. */}
+        <RunCards />
         <MessagePrimitive.GroupedParts groupBy={groupPartByType({ "tool-call": ["group-tool"], "standalone-tool-call": [] })}>
           {({ part, children }) => {
             switch (part.type) {
@@ -237,6 +242,53 @@ const AssistantMessage: FC = () => {
       </div>
       <div className="ms-2 flex min-h-7.5 items-center pt-1.5"><AssistantActionBar /></div>
     </MessagePrimitive.Root>
+  );
+};
+
+const RunCards: FC = () => {
+  const custom = useAuiState((s) => s.message.metadata?.custom as AssistantCustomMetadata | undefined);
+  if (!custom?.plan && !custom?.checkpoints.length) return null;
+  return (
+    <div className="mb-4 flex flex-col gap-3">
+      {custom.plan && (
+        <section className="border-border bg-muted/30 rounded-xl border p-4" aria-label="実行計画">
+          <h2 className="text-sm font-medium">{custom.plan.title}</h2>
+          <ol className="mt-3 space-y-2 text-sm">
+            {custom.plan.steps.map(step => (
+              <li key={step.id} className="flex items-center gap-2">
+                <span className={cn("flex size-5 shrink-0 items-center justify-center rounded-full border text-[11px]", step.status === "completed" && "border-primary bg-primary text-primary-foreground", step.status === "running" && "border-primary text-primary animate-pulse motion-reduce:animate-none")} aria-hidden>{step.status === "completed" ? <CheckIcon className="size-3" /> : step.status === "running" ? "●" : ""}</span>
+                <span className={step.status === "pending" ? "text-muted-foreground" : ""}>{step.title}</span>
+                {step.status === "running" && <span className="text-muted-foreground ml-auto text-xs">進行中</span>}
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+      {custom.checkpoints.map(checkpoint => <Checkpoint key={checkpoint.id} checkpoint={checkpoint} />)}
+    </div>
+  );
+};
+
+const Checkpoint: FC<{ checkpoint: CheckpointCard }> = ({ checkpoint }) => {
+  const [approveSimilar, setApproveSimilar] = useState(false);
+  const [sending, setSending] = useState(false);
+  const respond = async (decision: "approved" | "rejected") => {
+    setSending(true);
+    try {
+      await fetch("/checkpoints/respond", { method: "POST", headers: { origin: globalThis.location.origin, "content-type": "application/json" }, body: JSON.stringify({ id: checkpoint.id, decision, approveSimilar: decision === "approved" && approveSimilar }) });
+    } finally { setSending(false); }
+  };
+  return (
+    <section className="border-border bg-card rounded-xl border p-4 shadow-sm" aria-label="承認チェックポイント">
+      <div className="flex items-center justify-between gap-3"><h2 className="text-sm font-medium">確認が必要です</h2><span className="bg-muted rounded-full px-2 py-0.5 text-xs">リスク水準: {checkpoint.risk}</span></div>
+      <dl className="mt-3 grid grid-cols-[5rem_1fr] gap-x-3 gap-y-1 text-sm"><dt className="text-muted-foreground">操作内容</dt><dd>{checkpoint.verb}</dd><dt className="text-muted-foreground">対象</dt><dd className="break-all">{checkpoint.target}</dd><dt className="text-muted-foreground">理由</dt><dd>{checkpoint.reason}</dd></dl>
+      {checkpoint.status === "pending" ? (
+        <div className="mt-4">
+          <label className="flex items-start gap-2 text-xs"><input type="checkbox" className="mt-0.5" checked={approveSimilar} onChange={event => setApproveSimilar(event.target.checked)} />このセッションでは同種を承認済みにする</label>
+          <div className="mt-3 flex justify-end gap-2"><Button type="button" variant="outline" size="sm" disabled={sending} onClick={() => void respond("rejected")}>拒否</Button><Button type="button" size="sm" disabled={sending} onClick={() => void respond("approved")}>承認</Button></div>
+        </div>
+      ) : <p className="text-muted-foreground mt-3 text-xs">{checkpoint.status === "approved" ? "承認しました" : "拒否しました"}{checkpoint.approveSimilar ? "（このセッションの同種操作を含む）" : ""}</p>}
+    </section>
   );
 };
 

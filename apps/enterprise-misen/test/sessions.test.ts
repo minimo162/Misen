@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fixture } from '../demo/enterprise-excel/fixtures.js'
 import { createDemoServer, type AgentRunner } from '../src/web/server.js'
-import { DEFAULT_SESSION_TITLE, LocalSessionStore, MAX_SESSION_FILE_BYTES, MAX_SESSION_TITLE_LENGTH, localSessionDirectory, titleFromFirstUserMessage } from '../src/web/sessions.js'
+import { DEFAULT_SESSION_TITLE, LocalSessionStore, MAX_SESSION_FILE_BYTES, MAX_SESSION_TITLE_LENGTH, localSessionDirectory, parseStoredSession, SESSION_SCHEMA_VERSION, titleFromFirstUserMessage } from '../src/web/sessions.js'
 
 async function listen(root: string, sessionDirectory: string, runner: AgentRunner, now?: () => Date) {
   const server = createDemoServer(root, runner, undefined, { sessionDirectory, now })
@@ -40,6 +40,12 @@ test('local title is deterministic, single-line, bounded, and needs no Brain req
   assert.equal(title.endsWith('…'), true)
   assert.equal(titleFromFirstUserMessage('  '), DEFAULT_SESSION_TITLE)
   assert.equal(localSessionDirectory({ LOCALAPPDATA: 'C:\\Users\\standard\\AppData\\Local' }), 'C:\\Users\\standard\\AppData\\Local\\Misen\\data\\sessions')
+})
+
+test('version 1 sessions migrate to the plan-capable schema without losing conversation data', () => {
+  const migrated = parseStoredSession({ schemaVersion: 1, id: 'abcdefghijklmnopqrstuvwx', title: '旧会話', createdAt: '2026-09-03T01:00:00.000Z', updatedAt: '2026-09-03T01:01:00.000Z', status: 'COMPLETED', messages: [], tools: [], artifacts: [] })
+  assert.equal(migrated?.schemaVersion, SESSION_SCHEMA_VERSION)
+  assert.deepEqual(migrated?.runUi, [])
 })
 
 test('empty history, persistence, ordering, safe reopen, and distinct new chat survive server restart', async () => {
