@@ -29,7 +29,7 @@ clone 済みのリポジトリで、コミット済みの状態から実行し�
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Publish-Release.ps1 -NodeRuntime <検証済み Node 入力> -OfficeCliRuntime <検証済み OfficeCLI 入力>
 ```
 
-`Prepare-Misen.ps1` と同じ工程（`npm ci` → unit テスト → ランタイムの取得と SHA-256 検証 → 自己完結ランタイムの生成と検証 → 共有フォルダー形式への公開）を一時フォルダーに対して行い、UTF-8 名の zip と `.sha256.txt` を作り、タグ `share-v<version>-<sha7>` の Release（既定はプレリリース、`-Latest` で通常リリース）に zip・`.sha256.txt`・`Expand-MisenShare.ps1` を添付します。Release 本文に zip の SHA-256、公開ID、同梱ランタイムの版、公開直後の再検証結果が載ります。`-NodeRuntime` / `-OfficeCliRuntime` を省くと公式配布物を取得します。
+`Prepare-Misen.ps1` と同じ工程（`npm ci` → unit テスト → ランタイムの取得と SHA-256 検証 → 自己完結ランタイムの生成と検証 → 共有フォルダー形式への公開）を一時フォルダーに対して行い、UTF-8 名の zip と `.sha256.txt` を作り、タグ `share-v<version>-<sha7>` の Release（既定は通常リリースで latest になります。`-Prerelease` でプレリリース）に zip・`.sha256.txt`・`Expand-MisenShare.ps1` を添付します。古い `share-v*` の Release は `-KeepReleases`（既定 2）個だけ残して自動で削除されるので、一覧が増え続けません。Release 本文に zip の SHA-256、公開ID、同梱ランタイムの版、公開直後の再検証結果が載ります。`-NodeRuntime` / `-OfficeCliRuntime` を省くと公式配布物を取得します。
 
 GitHub Actions のワークフロー（`.github/workflows/release-share.yml`、**Actions** → **release-share** → **Run workflow**）でも同じ Release を作れますが、プライベートリポジトリの Actions は月の無料枠があり Windows ランナーは 2 倍換算なので、手動実行専用の予備としています。
 
@@ -51,7 +51,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Expand-MisenShare.ps1 -Zip
 
 ### 版を上げるとき
 
-main を更新してから、もう一度 **Run workflow** を押し、新しい zip を同じ手順で展開します。公開IDが変わるので利用者は次回のダブルクリックで自動更新されます。
+main を更新してから、開発 PC でもう一度 `scripts\Publish-Release.ps1` を実行し、新しい zip を同じ手順で展開します。公開IDが変わるので利用者は次回のダブルクリックで自動更新されます。古い Release は自動で整理されます。
 
 ## 管理者側（開発 PC から直接公開する場合）
 
@@ -124,7 +124,7 @@ scripts\prepare-misen.cmd "\\fileserver\CompanyApps\Misen" -CleanDestination
 初回のダブルクリックで、次のファイルが無ければテンプレートを作成してメモ帳で開き、起動を止めます。
 
 ```text
-%LOCALAPPDATA%Misenconfigsettings.json
+%LOCALAPPDATA%\Misen\config\settings.json
 ```
 
 | 項目 | 意味 |
@@ -135,8 +135,7 @@ scripts\prepare-misen.cmd "\\fileserver\CompanyApps\Misen" -CleanDestination
 | `brain.baseUrl` | openai-compatible のときだけ必須（http/https）。公式プロバイダーでは指定不可 |
 | `brain.thinkingLevel` | 省略可（既定 medium） |
 
-記入して保存したあと、もう一度 `Misen起動.cmd` をダブルクリックします。設定に誤りがあると日本語のメッセージで停止します（API キーは表示しません）。管理者が事前に確認する場合は、ローカル版の `appdistsrc
-untimesettings-cli.js check --settings <path>` を同梱 Node.js で実行してください。
+記入して保存したあと、もう一度 `Misen起動.cmd` をダブルクリックします。設定に誤りがあると日本語のメッセージで停止します（API キーは表示しません）。管理者が事前に確認する場合は、ローカル版の `app\dist\srcuntime\settings-cli.js check --settings <path>` を同梱 Node.js で実行してください。
 
 API キーは共有フォルダー・manifest・ログ・画面・セッション履歴に出ません。共有フォルダーには利用者の設定を置かないでください。
 
