@@ -38,6 +38,7 @@ $versionsDir = Join-Path $localRoot 'versions'
 $currentPointerPath = Join-Path $localRoot 'current.json'
 $stateDir = Join-Path $localRoot 'state'
 $statePath = Join-Path $stateDir 'launch.json'
+$projectsStatePath = Join-Path $stateDir 'projects.json'
 $syncDirectories = @('app', 'runtime', 'workspace')
 
 function Write-Info([string]$Message) { Write-Host ('[Misen] ' + $Message) }
@@ -220,8 +221,14 @@ try {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "ローカル版に必須ファイルがありません: $required" }
     }
 
+    $rememberedProjects = Read-Json $projectsStatePath
     if (-not $Workspace) {
-        $Workspace = Join-Path $localRoot 'workspace'
+        $remembered = if ($rememberedProjects -and $rememberedProjects.schema -eq 'misen-projects/1') { [string]$rememberedProjects.last } else { '' }
+        if ($remembered -and $remembered -notmatch '^[\\/]{2}' -and (Test-Path -LiteralPath $remembered -PathType Container)) {
+            $Workspace = $remembered
+        } else {
+            $Workspace = Join-Path $localRoot 'workspace'
+        }
         if (-not (Test-Path -LiteralPath $Workspace -PathType Container)) {
             $seed = Join-Path $localVersionDir 'workspace'
             New-Item -ItemType Directory -Force -Path $Workspace | Out-Null
@@ -232,9 +239,21 @@ try {
             }
         }
     }
+    if ($Workspace -match '^[\\/]{2}') { throw '共有フォルダーは直接使えません。手元にコピーしてください' }
     if (-not (Test-Path -LiteralPath $Workspace -PathType Container)) { throw "作業フォルダーが見つかりません: $Workspace" }
     $workspaceFull = (Resolve-Path -LiteralPath $Workspace).Path
     New-Item -ItemType Directory -Force -Path (Join-Path $workspaceFull 'output') | Out-Null
+    $recentProjects = New-Object System.Collections.Generic.List[string]
+    $recentProjects.Add($workspaceFull)
+    if ($rememberedProjects -and $rememberedProjects.recent) {
+        foreach ($candidate in @($rememberedProjects.recent)) {
+            $value = [string]$candidate
+            if (-not $value -or $value -match '^[\\/]{2}') { continue }
+            if (-not ($recentProjects | Where-Object { $_ -ieq $value })) { $recentProjects.Add($value) }
+            if ($recentProjects.Count -ge 5) { break }
+        }
+    }
+    Write-JsonAtomic $projectsStatePath ([ordered]@{ schema = 'misen-projects/1'; recent = @($recentProjects); last = $workspaceFull })
 
     # 利用者ごとの LLM 接続設定（Issue #93 B）。共有フォルダーには置かず、%LOCALAPPDATA%\Misen\config だけに存在する。
     $settingsPath = Join-Path $localRoot 'config\settings.json'

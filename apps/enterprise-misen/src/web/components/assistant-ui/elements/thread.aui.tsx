@@ -2,6 +2,7 @@
 
 import { MarkdownText } from "@/components/assistant-ui/elements/markdown-text.js";
 import { File } from "@/components/assistant-ui/elements/file.js";
+import { ComposerAddAttachment, ComposerAttachments, UserMessageAttachments } from "@/components/attachment.aui.js";
 import { ToolFallback } from "@/components/assistant-ui/elements/tool-fallback.aui.js";
 import {
   ToolGroupContent,
@@ -38,6 +39,7 @@ import {
   type ComponentType,
   type FC,
   type PropsWithChildren,
+  type ReactNode,
 } from "react";
 
 export type ThreadGroupPart = MessagePrimitive.GroupedParts.GroupPart;
@@ -53,6 +55,7 @@ export type ThreadComponents = {
 export type ThreadProps = {
   components?: ThreadComponents;
   autoFocus?: boolean;
+  composerFooter?: ReactNode;
 };
 
 const EMPTY_COMPONENTS: ThreadComponents = {};
@@ -79,16 +82,16 @@ const ThreadHistorySkeleton: FC = () => (
   </div>
 );
 
-export const Thread: FC<ThreadProps> = ({ components = EMPTY_COMPONENTS, autoFocus = true }) => {
+export const Thread: FC<ThreadProps> = ({ components = EMPTY_COMPONENTS, autoFocus = true, composerFooter }) => {
   const isEmpty = useAuiState(isNewChatView);
   return (
     <ThreadComponentsContext.Provider value={components}>
-      <ThreadRoot isEmpty={isEmpty} autoFocus={autoFocus} />
+      <ThreadRoot isEmpty={isEmpty} autoFocus={autoFocus} composerFooter={composerFooter} />
     </ThreadComponentsContext.Provider>
   );
 };
 
-const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({ isEmpty, autoFocus }) => {
+const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean; composerFooter?: ReactNode }> = ({ isEmpty, autoFocus, composerFooter }) => {
   const { Welcome = ThreadWelcome } = useContext(ThreadComponentsContext);
   return (
     <ThreadPrimitive.Root
@@ -114,6 +117,8 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({ isEmpty, aut
           <ThreadPrimitive.ViewportFooter className={cn("bg-background flex flex-col gap-4 overflow-visible pb-4 md:pb-6", !isEmpty && "sticky bottom-0 mt-auto rounded-t-(--composer-radius)")}>
             <ThreadScrollToBottom />
             <Composer autoFocus={autoFocus} />
+            {/* Misen modification: Cowork-aligned local project and approval controls. */}
+            {composerFooter}
             <AuiIf condition={(s) => isNewChatView(s) && s.composer.isEmpty}><ThreadSuggestions /></AuiIf>
           </ThreadPrimitive.ViewportFooter>
         </div>
@@ -162,8 +167,9 @@ const ThreadSuggestionItem: FC = () => (
 
 const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => (
   <ComposerPrimitive.Root className="relative flex w-full flex-col">
-    {/* Misen modification: attachment and microphone controls are intentionally absent. */}
-    <div className="border-border/60 focus-within:border-border dark:border-muted-foreground/15 dark:focus-within:border-muted-foreground/30 flex w-full cursor-text flex-col gap-2 rounded-(--composer-radius) border bg-(--composer-bg) p-(--composer-padding) transition-[border-color]">
+    {/* Misen modification: official Attachments are the local-PC file import route; microphone remains absent. */}
+    <ComposerPrimitive.AttachmentDropzone className="border-border/60 focus-within:border-border data-[dragging=true]:border-ring dark:border-muted-foreground/15 dark:focus-within:border-muted-foreground/30 flex w-full cursor-text flex-col gap-2 rounded-(--composer-radius) border bg-(--composer-bg) p-(--composer-padding) transition-[border-color]">
+      <ComposerAttachments />
       <ComposerPrimitive.Input
         placeholder="メッセージを入力…"
         className="caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base leading-6 outline-none"
@@ -173,12 +179,14 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => (
         aria-label="メッセージ入力"
       />
       <ComposerAction />
-    </div>
+      <p className="text-muted-foreground px-2 pb-1 text-[11px]">持ち込んだファイルはこの PC の作業フォルダーに置かれ、外へは出ません</p>
+    </ComposerPrimitive.AttachmentDropzone>
   </ComposerPrimitive.Root>
 );
 
 const ComposerAction: FC = () => (
-  <div className="relative flex items-center justify-end">
+  <div className="relative flex items-center justify-between">
+    <ComposerAddAttachment />
     <AuiIf condition={(s) => !s.thread.isRunning}>
       <ComposerPrimitive.Send asChild>
         <TooltipIconButton tooltip="送信" side="bottom" type="button" variant="default" size="icon" className="size-7 rounded-full" aria-label="送信">
@@ -245,6 +253,7 @@ const AssistantActionBar: FC = () => (
 
 const UserMessage: FC = () => (
   <MessagePrimitive.Root className="grid auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] gap-y-1 [&:where(>*)]:col-start-2">
+    <UserMessageAttachments />
     <div className="bg-muted text-foreground max-w-[calc(var(--thread-max-width)*0.8)] rounded-xl px-4 py-2 wrap-break-word">
       <MessagePrimitive.Parts />
     </div>

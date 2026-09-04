@@ -26,8 +26,12 @@ const cmdExe = process.env.ComSpec ?? 'cmd.exe'
 
 function run(file, args, { cwd, env } = {}) {
   return new Promise((resolveRun) => {
+    const childEnv = { ...process.env, ...env }
+    // Codex's PowerShell 7 runtime contributes an incompatible PSModulePath to Node.
+    // Let Windows PowerShell 5.1 rebuild its native module path, as it does on a user double-click.
+    delete childEnv.PSModulePath
     // cmd.exe receives its command line verbatim; Node's default quoting would wrap the already quoted `/c` payload again.
-    const child = spawn(file, args, { cwd, env: { ...process.env, ...env }, windowsHide: true, windowsVerbatimArguments: file === cmdExe, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(file, args, { cwd, env: childEnv, windowsHide: true, windowsVerbatimArguments: file === cmdExe, stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
     child.stdout.setEncoding('utf8').on('data', (chunk) => { stdout += chunk })
@@ -185,6 +189,16 @@ test('Misen起動.cmd: first launch, second launch, version update, and tampered
     assert.equal(await readFile(join(localAppData, 'Misen', 'workspace', 'AGENTS.md'), 'utf8'), '# 作業フォルダーの雛形\n', 'default workspace seeded from the share template')
     assert.deepEqual(await snapshotTree(share), shareSnapshot, 'share is untouched')
 
+    // --- remembered project: no-argument launch uses projects.json --------------------------------
+    const remembered = join(scratch, 'remembered workspace 日本語')
+    await mkdir(remembered, { recursive: true })
+    const projectsPath = join(localAppData, 'Misen', 'state', 'projects.json')
+    await writeFile(projectsPath, JSON.stringify({ schema: 'misen-projects/1', recent: [remembered], last: remembered }), 'utf8')
+    const rememberedResult = await launch(share, localAppData, { port, marker })
+    assert.equal(rememberedResult.code, 0, `remembered-project launch failed:\n${rememberedResult.stdout}\n${rememberedResult.stderr}`)
+    assert.equal(rememberedResult.record.workspace.toLowerCase(), remembered.toLowerCase())
+    await stat(join(remembered, 'output'))
+
     // --- 2. second launch: verification only, no copy -----------------------------------------------
     const sentinel = join(versionDir, 'app', 'local-sentinel.txt')
     await writeFile(sentinel, 'survives a verification-only launch', 'utf8')
@@ -204,6 +218,9 @@ test('Misen起動.cmd: first launch, second launch, version update, and tampered
     const droppedRecord = JSON.parse(await readFile(marker, 'utf8'))
     assert.equal(droppedRecord.workspace.toLowerCase(), dropped.toLowerCase())
     await stat(join(dropped, 'output'))
+    const afterDropProjects = JSON.parse(await readFile(projectsPath, 'utf8'))
+    assert.equal(afterDropProjects.last.toLowerCase(), dropped.toLowerCase(), 'drag and drop wins over remembered project')
+    assert.equal(afterDropProjects.recent[0].toLowerCase(), dropped.toLowerCase())
 
     // --- 3. share version bump: next launch updates automatically -----------------------------------
     await writePreparedRuntime(preparedRuntime, '1.1.0')

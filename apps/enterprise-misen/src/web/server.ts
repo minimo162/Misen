@@ -1,7 +1,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { readFile } from 'node:fs/promises'
+import { execFile, spawn } from 'node:child_process'
+import { promisify } from 'node:util'
+import { basename, dirname, join } from 'node:path'
 import { createHash, randomBytes } from 'node:crypto'
-import { liveAgent } from '../runtime/live.js'
+import { liveAgent, liveBrainIdentity, type ApprovalMode, type BlockedCheckpoint, type LiveAgentOptions } from '../runtime/live.js'
 import { WorkspaceBoundary } from '../workspace/boundary.js'
 import type { AgentEvent } from '@earendil-works/pi-agent-core'
 import {
@@ -21,6 +24,9 @@ import {
   type StoredSession,
   type StoredToolEvent,
 } from './sessions.js'
+import { appendAudit, defaultAuditPath } from './audit.js'
+import { AttachmentImportError, importAttachment, readAttachmentRequest } from './attachments.js'
+import { defaultProjectStatePath, ProjectSelectionError, ProjectStore } from './projects.js'
 
 export interface AgentRunResult {
   tools: string[]
@@ -41,6 +47,8 @@ export type DemoEvent =
 export interface DemoRunContext {
   emit: (event: DemoEvent) => void
   setCancel: (cancel: () => void) => void
+  approvalMode?: ApprovalMode
+  onCheckpointBlocked?: (checkpoint: BlockedCheckpoint) => void | Promise<void>
 }
 
 export type UiArtifact = {
@@ -133,12 +141,12 @@ function forwardAgentEvent(event: AgentEvent, context: DemoRunContext, tools: st
 }
 
 type BoundedAgent = Pick<Awaited<ReturnType<typeof liveAgent>>, 'abort' | 'prompt' | 'state' | 'subscribe'>
-export type AgentFactory = (root: string) => Promise<BoundedAgent>
+export type AgentFactory = (root: string, options?: LiveAgentOptions) => Promise<BoundedAgent>
 
 /** Generic Pi route: the host does not classify the prompt or prescribe a workflow. */
 export function createAgentRunner(agentFactory: AgentFactory): AgentRunner {
   return async (root, prompt, context) => {
-    const agent = await agentFactory(root)
+    const agent = await agentFactory(root, { approvalMode: context?.approvalMode, onCheckpointBlocked: context?.onCheckpointBlocked })
     const tools: string[] = []
     context?.setCancel(() => agent.abort())
     const unsubscribe = agent.subscribe(event => { if (context) forwardAgentEvent(event, context, tools) })
@@ -175,6 +183,25 @@ const ARTIFACT_ID_RE = /^[A-Za-z0-9_-]{24}$/u
 export interface DemoServerOptions {
   sessionDirectory?: string
   now?: () => Date
+  projectStatePath?: string
+  auditPath?: string
+  pickFolder?: (initialPath: string) => Promise<string | undefined>
+  openFolder?: (path: string) => void | Promise<void>
+  brainIdentity?: () => Promise<{ provider: string; model: string }>
+}
+
+const execFileAsync = promisify(execFile)
+
+async function defaultPickFolder(initialPath: string): Promise<string | undefined> {
+  const quoted = initialPath.replace(/'/gu, "''")
+  const script = `Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = '作業フォルダーを選んでください'; $d.SelectedPath = '${quoted}'; if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::OutputEncoding = [Text.Encoding]::UTF8; $d.SelectedPath }`
+  const encoded = Buffer.from(script, 'utf16le').toString('base64')
+  const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-STA', '-EncodedCommand', encoded], { windowsHide: true, encoding: 'utf8' })
+  return stdout.trim() || undefined
+}
+
+function defaultOpenFolder(path: string): void {
+  spawn('explorer.exe', [path], { detached: true, stdio: 'ignore', windowsHide: true }).unref()
 }
 
 function writeEvent(response: ServerResponse, event: DemoEvent | { type: 'state'; state: UiState }): void {
@@ -208,8 +235,12 @@ export function createDemoServer(
   artifactObserver: ArtifactObserver = defaultArtifactObserver,
   options: DemoServerOptions = {},
 ) {
-  const boundary = new WorkspaceBoundary(root)
+  let boundary = new WorkspaceBoundary(root)
   const sessions = new LocalSessionStore(options.sessionDirectory, options.now)
+  const stateBase = options.sessionDirectory ? dirname(options.sessionDirectory) : undefined
+  const projects = new ProjectStore(options.projectStatePath ?? (stateBase ? join(stateBase, 'projects.json') : defaultProjectStatePath()), root)
+  const auditPath = options.auditPath ?? (stateBase ? join(stateBase, 'audit.jsonl') : defaultAuditPath())
+  let approvalMode: ApprovalMode = 'confirm'
   const artifactResources = new Map<string, { filename: string; bytes: Uint8Array }>()
   const usedRunIds = new Set<string>()
   let state: UiState = { status: 'idle', tools: [], axes: [], artifacts: [] }
@@ -254,6 +285,7 @@ export function createDemoServer(
       const host = request.headers.host ?? ''
       if (!hostIsLoopback(host)) throw new Error('host')
       const url = new URL(request.url ?? '/', `http://${host}`)
+      await projects.initialize()
 
       if (request.method === 'GET' && url.pathname === '/') {
         response.setHeader('content-type', 'text/html; charset=utf-8')
@@ -271,6 +303,8 @@ export function createDemoServer(
       }
       if (request.method === 'POST' && url.pathname === '/sessions') {
         if (request.headers.origin !== `http://${host}` || active) throw new Error('origin')
+        // A new chat is a new approval session; automatic approval never carries over.
+        approvalMode = 'confirm'
         const session = await sessions.create()
         response.statusCode = 201
         response.setHeader('content-type', 'application/json; charset=utf-8')
@@ -308,6 +342,62 @@ export function createDemoServer(
         response.setHeader('content-type', 'application/json; charset=utf-8')
         return response.end(JSON.stringify(state))
       }
+      if (request.method === 'GET' && url.pathname === '/project') {
+        const identity = await (options.brainIdentity ?? (async () => { const value = await liveBrainIdentity(); return { provider: value.provider, model: value.model } }))().catch(() => ({ provider: '未設定', model: '未設定' }))
+        response.setHeader('content-type', 'application/json; charset=utf-8')
+        return response.end(JSON.stringify({ ...projects.snapshot(), running: active, approvalMode, provider: identity.provider, model: identity.model }))
+      }
+      if (request.method === 'POST' && url.pathname === '/project/select') {
+        if (request.headers.origin !== `http://${host}`) throw new Error('origin')
+        if (active) { response.statusCode = 409; return response.end(JSON.stringify({ error: '処理が終わってから切り替えてください。' })) }
+        const body = JSON.parse(await readBody(request)) as { path?: unknown }
+        if (typeof body.path !== 'string') throw new ProjectSelectionError('作業フォルダーを選べませんでした。')
+        const selected = await projects.selectRemembered(body.path)
+        boundary = new WorkspaceBoundary(selected)
+        artifactResources.clear(); state = { status: 'idle', tools: [], axes: [], artifacts: [] }; emitState()
+        await appendAudit(auditPath, { event: 'project.switched', folder: basename(selected) }, options.now)
+        response.setHeader('content-type', 'application/json; charset=utf-8')
+        return response.end(JSON.stringify(projects.snapshot()))
+      }
+      if (request.method === 'POST' && url.pathname === '/project/pick') {
+        if (request.headers.origin !== `http://${host}`) throw new Error('origin')
+        if (active) { response.statusCode = 409; return response.end(JSON.stringify({ error: '処理が終わってから切り替えてください。' })) }
+        const picked = await (options.pickFolder ?? defaultPickFolder)(projects.currentRoot)
+        if (!picked) { response.statusCode = 204; return response.end() }
+        const selected = await projects.selectPicked(picked)
+        boundary = new WorkspaceBoundary(selected)
+        artifactResources.clear(); state = { status: 'idle', tools: [], axes: [], artifacts: [] }; emitState()
+        await appendAudit(auditPath, { event: 'project.switched', folder: basename(selected) }, options.now)
+        response.setHeader('content-type', 'application/json; charset=utf-8')
+        return response.end(JSON.stringify(projects.snapshot()))
+      }
+      if (request.method === 'POST' && url.pathname === '/project/open') {
+        if (request.headers.origin !== `http://${host}`) throw new Error('origin')
+        await (options.openFolder ?? defaultOpenFolder)(projects.currentRoot)
+        response.statusCode = 204
+        return response.end()
+      }
+      if (request.method === 'POST' && url.pathname === '/approval') {
+        if (request.headers.origin !== `http://${host}`) throw new Error('origin')
+        const body = JSON.parse(await readBody(request)) as { mode?: unknown }
+        if (body.mode !== 'confirm' && body.mode !== 'session-auto') throw new Error('approval')
+        approvalMode = body.mode
+        await appendAudit(auditPath, { event: 'approval.changed', mode: approvalMode }, options.now)
+        response.setHeader('content-type', 'application/json; charset=utf-8')
+        return response.end(JSON.stringify({ mode: approvalMode }))
+      }
+      if (request.method === 'POST' && url.pathname === '/attachments') {
+        if (request.headers.origin !== `http://${host}` || active) throw new Error('origin')
+        const header = request.headers['x-misen-filename']
+        if (typeof header !== 'string') throw new AttachmentImportError(400, 'ファイル名を読み取れませんでした。')
+        let requestedName: string
+        try { requestedName = decodeURIComponent(header) } catch { throw new AttachmentImportError(400, 'ファイル名を読み取れませんでした。') }
+        const imported = await importAttachment(boundary, requestedName, await readAttachmentRequest(request))
+        await appendAudit(auditPath, { event: 'file.imported', filename: imported.name, size: imported.size, sha256: imported.sha256 }, options.now)
+        response.statusCode = 201
+        response.setHeader('content-type', 'application/json; charset=utf-8')
+        return response.end(JSON.stringify(imported))
+      }
       if (request.method === 'POST' && url.pathname === '/run') {
         if (request.headers.origin !== `http://${host}` || active) {
           response.statusCode = 400
@@ -333,6 +423,16 @@ export function createDemoServer(
             return response.end('Request failed')
           }
           const prompt = params.get('prompt') ?? ''
+          let importedPaths: string[] = []
+          try {
+            const candidate = JSON.parse(params.get('imports') ?? '[]') as unknown
+            if (!Array.isArray(candidate) || candidate.length > 20 || candidate.some(path => typeof path !== 'string' || !/^input\/[\p{L}\p{N} ._()/-]+\.(?:xlsx|docx|pptx|csv|md|txt)$/iu.test(path))) throw new Error('imports')
+            importedPaths = candidate
+            for (const path of importedPaths) await boundary.resolveFile(path)
+          } catch {
+            response.statusCode = 400
+            return response.end('Request failed')
+          }
           const clientId = params.get('clientId') ?? `server-${++nextRunId}`
           const sessionId = params.get('sessionId') ?? ''
           const existingSession = await sessions.get(sessionId)
@@ -373,11 +473,16 @@ export function createDemoServer(
                 }
                 emit({ ...event, sessionId })
               }
-              const result = await runner(root, prompt, {
+              const agentPrompt = importedPaths.length === 0 ? prompt : `${prompt}\n\n持ち込んだファイル（作業フォルダーからの相対パス）:\n${importedPaths.map(path => `- ${path}`).join('\n')}`
+              const result = await runner(projects.currentRoot, agentPrompt, {
                 emit: runEmit,
                 setCancel: cancel => {
                   runnerCancel = cancel
                   if (cancelRequested) cancel()
+                },
+                approvalMode,
+                onCheckpointBlocked: async checkpoint => {
+                  await appendAudit(auditPath, { event: 'checkpoint.blocked', ...checkpoint }, options.now)
                 },
               })
               const runnerStatus = cancelRequested ? 'CANCELLED' : result.status
@@ -454,9 +559,12 @@ export function createDemoServer(
       }
       response.statusCode = 404
       return response.end()
-    } catch {
+    } catch (error) {
+      response.setHeader('content-type', 'application/json; charset=utf-8')
+      if (error instanceof AttachmentImportError) { response.statusCode = error.status; return response.end(JSON.stringify({ error: error.message })) }
+      if (error instanceof ProjectSelectionError) { response.statusCode = 400; return response.end(JSON.stringify({ error: error.message })) }
       response.statusCode = 400
-      return response.end('Request failed')
+      return response.end(JSON.stringify({ error: '要求を処理できませんでした。' }))
     }
   })
 }

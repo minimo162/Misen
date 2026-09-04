@@ -13,12 +13,14 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
  */
 export class WorkspaceBoundary {
   readonly root: string
+  readonly inputRoot: string
   readonly outputRoot: string
 
   constructor(root: string) {
     if (!isAbsolute(root)) throw new WorkspaceBoundaryError('workspace root must be absolute')
     const resolvedRoot = realpathSync(root)
     this.root = resolvedRoot
+    this.inputRoot = join(resolvedRoot, 'input')
     this.outputRoot = join(resolvedRoot, 'output')
   }
 
@@ -108,6 +110,31 @@ export class WorkspaceBoundary {
     await mkdir(this.outputRoot, { recursive: true })
     const real = await realpath(this.outputRoot)
     this.assertInsideOutput(real, 'output directory')
+  }
+
+  /** Host-only file-import path. Agent Tools do not receive this write method. */
+  async writeImportedInputFile(filename: string, bytes: Uint8Array): Promise<string> {
+    if (!/^[\p{L}\p{N}][\p{L}\p{N} ._-]*\.(?:xlsx|docx|pptx|csv|md|txt)$/iu.test(filename) || filename.includes('..')) {
+      throw new WorkspaceBoundaryError('unsafe input filename')
+    }
+    await mkdir(this.inputRoot, { recursive: true })
+    const inputReal = await realpath(this.inputRoot)
+    this.assertInsideInput(inputReal, 'input directory')
+    const extension = filename.slice(filename.lastIndexOf('.'))
+    const stem = filename.slice(0, -extension.length)
+    for (let index = 1; index <= 9999; index += 1) {
+      const candidateName = index === 1 ? filename : `${stem} (${index})${extension}`
+      const destination = join(inputReal, candidateName)
+      this.assertInsideInput(destination, 'input path')
+      try {
+        const handle = await open(destination, 'wx', 0o600)
+        try { await handle.writeFile(bytes); await handle.sync() } finally { await handle.close() }
+        return this.displayPath(destination)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      }
+    }
+    throw new WorkspaceBoundaryError('too many input filename collisions')
   }
 
   /**
@@ -286,6 +313,15 @@ export class WorkspaceBoundary {
     const rel = relative(this.outputRoot, candidate)
     if (rel === '..' || rel.startsWith('..' + sep) || isAbsolute(rel)) {
       throw new WorkspaceBoundaryError(`${label} escapes the output scope`)
+    }
+  }
+
+
+  private assertInsideInput(candidate: string, label: string): void {
+    this.assertInside(candidate, label)
+    const rel = relative(this.inputRoot, candidate)
+    if (rel === '..' || rel.startsWith('..' + sep) || isAbsolute(rel)) {
+      throw new WorkspaceBoundaryError(`${label} escapes the input scope`)
     }
   }
 }

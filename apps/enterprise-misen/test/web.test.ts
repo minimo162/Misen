@@ -1,20 +1,105 @@
 import test from 'node:test'
 import { strict as assert } from 'node:assert'
-import { mkdir, mkdtemp, rm, symlink, truncate, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { request } from 'node:http'
 import { fixture, PROMPTS } from '../demo/enterprise-excel/fixtures.js'
 import { MAX_ARTIFACT_BYTES, MAX_SESSION_ARTIFACTS, snapshotOutputArtifacts } from '../src/web/artifacts.js'
-import { createDemoServer, encodeRfc5987Value, liveAgentRunner, textFromAssistantMessage, type AgentRunner, type ArtifactObserver } from '../src/web/server.js'
+import { createDemoServer, encodeRfc5987Value, liveAgentRunner, textFromAssistantMessage, type AgentRunner, type ArtifactObserver, type DemoServerOptions } from '../src/web/server.js'
+import { MAX_ATTACHMENT_BYTES } from '../src/web/attachments.js'
 import { WorkspaceBoundary } from '../src/workspace/boundary.js'
 
-async function start(root: string, runner: AgentRunner, artifactObserver?: ArtifactObserver) {
-  const server = createDemoServer(root, runner, artifactObserver, { sessionDirectory: join(root, '.test-data', 'sessions') })
+async function start(root: string, runner: AgentRunner, artifactObserver?: ArtifactObserver, options: DemoServerOptions = {}) {
+  const server = createDemoServer(root, runner, artifactObserver, { sessionDirectory: join(root, '.test-data', 'sessions'), ...options })
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   const port = (server.address() as { port: number }).port
   return { server, base: 'http://127.0.0.1:' + port }
 }
+
+test('file import accepts only supported bounded files, numbers duplicates, and writes metadata audit', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'misen-import-'))
+  await mkdir(join(root, 'output'))
+  const auditPath = join(root, '.test-data', 'audit.jsonl')
+  let receivedPrompt = ''
+  const { server, base } = await start(root, async (_root, prompt) => { receivedPrompt = prompt; return { tools: [], status: 'COMPLETED' } }, undefined, { auditPath, brainIdentity: async () => ({ provider: 'test', model: 'test-model' }) })
+  const upload = (name: string, body: BodyInit) => fetch(base + '/attachments', { method: 'POST', headers: { origin: base, 'content-type': 'application/octet-stream', 'x-misen-filename': encodeURIComponent(name) }, body })
+  try {
+    const invalid = await upload('malware.exe', 'x')
+    assert.equal(invalid.status, 415)
+    assert.match(await invalid.text(), /このファイル形式は持ち込めません/u)
+    const tooLarge = await new Promise<number>((resolve, reject) => {
+      const target = new URL(base)
+      const req = request({ host: target.hostname, port: target.port, path: '/attachments', method: 'POST', headers: { origin: base, 'x-misen-filename': 'large.xlsx', 'content-length': String(MAX_ATTACHMENT_BYTES + 1) } }, response => { response.resume(); response.on('end', () => resolve(response.statusCode ?? 0)) })
+      req.on('error', reject); req.end()
+    })
+    assert.equal(tooLarge, 413)
+    const first = await upload('危険<>名.xlsx', 'first')
+    const second = await upload('危険<>名.xlsx', 'second')
+    assert.equal(first.status, 201); assert.equal(second.status, 201)
+    const firstValue = await first.json() as { name: string; path: string; size: number; sha256: string }
+    const secondValue = await second.json() as { name: string; path: string }
+    assert.equal(firstValue.path, 'input/危険_名.xlsx')
+    assert.equal(secondValue.path, 'input/危険_名 (2).xlsx')
+    assert.equal(await readFile(join(root, firstValue.path), 'utf8'), 'first')
+    assert.match(firstValue.sha256, /^[0-9a-f]{64}$/u)
+    const created = await fetch(base + '/sessions', { method: 'POST', headers: { origin: base } }); const session = await created.json() as { id: string }
+    const runWithImport = await fetch(base + '/run', { method: 'POST', redirect: 'manual', headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ prompt: '確認してください。', imports: JSON.stringify([firstValue.path]), clientId: 'attachment-run', sessionId: session.id }) })
+    assert.equal(runWithImport.status, 303)
+    assert.match(receivedPrompt, /確認してください。\n\n持ち込んだファイル.*input\/危険_名\.xlsx/su)
+    const stored = await (await fetch(base + '/sessions/' + session.id)).json() as { messages: { text: string }[] }
+    assert.equal(stored.messages[0]?.text, '確認してください。', 'internal input path is not rendered as user prose')
+    const audit = (await readFile(auditPath, 'utf8')).trim().split(/\r?\n/u).map(line => JSON.parse(line))
+    assert.deepEqual(audit.map(item => item.event), ['file.imported', 'file.imported'])
+    assert.equal(audit[0].filename, '危険_名.xlsx'); assert.equal(audit[0].size, 5)
+    assert.equal(JSON.stringify(audit).includes('first'), false, 'audit never stores file contents')
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()))
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('project endpoints reject arbitrary and UNC paths, use injected picker, block active switching, and audit folder names only', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'misen-project-a-'))
+  const picked = await mkdtemp(join(tmpdir(), 'misen-project-b-'))
+  await mkdir(join(root, 'output')); await mkdir(join(picked, 'output'))
+  const projectStatePath = join(root, '.test-data', 'projects.json')
+  const auditPath = join(root, '.test-data', 'audit.jsonl')
+  let release!: () => void
+  let began!: () => void
+  const started = new Promise<void>(resolve => { began = resolve })
+  const runner: AgentRunner = async runRoot => { assert.equal(runRoot.toLowerCase(), picked.toLowerCase()); began(); await new Promise<void>(resolve => { release = resolve }); await writeFile(join(runRoot, 'output', 'project-result.xlsx'), 'result'); return { tools: [], status: 'COMPLETED' } }
+  const { server, base } = await start(root, runner, undefined, { projectStatePath, auditPath, pickFolder: async () => picked, openFolder: async () => undefined, brainIdentity: async () => ({ provider: 'local', model: 'model-a' }) })
+  const postJson = (path: string, value?: object) => fetch(base + path, { method: 'POST', headers: { origin: base, ...(value ? { 'content-type': 'application/json' } : {}) }, ...(value ? { body: JSON.stringify(value) } : {}) })
+  try {
+    const initial = await (await fetch(base + '/project')).json() as any
+    assert.equal(initial.name, root.split(/[\\/]/u).at(-1)); assert.equal(initial.provider, 'local'); assert.equal(initial.model, 'model-a')
+    assert.equal((await postJson('/project/select', { path: join(root, 'not-remembered') })).status, 400)
+    const unc = await postJson('/project/select', { path: '\\\\server\\share' })
+    assert.equal(unc.status, 400); assert.match(await unc.text(), /共有フォルダーは直接使えません/u)
+    assert.equal((await postJson('/project/pick')).status, 200)
+    const selected = await (await fetch(base + '/project')).json() as any
+    assert.equal(selected.current.toLowerCase(), picked.toLowerCase()); assert.equal(selected.recent.length, 2)
+    const created = await fetch(base + '/sessions', { method: 'POST', headers: { origin: base } }); const session = await created.json() as { id: string }
+    const runPromise = fetch(base + '/run', { method: 'POST', redirect: 'manual', headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ prompt: '実行', clientId: 'project-run', sessionId: session.id }) })
+    await started
+    const blocked = await postJson('/project/select', { path: root })
+    assert.equal(blocked.status, 409); assert.match(await blocked.text(), /処理が終わってから/u)
+    release(); assert.equal((await runPromise).status, 303)
+    assert.equal(await readFile(join(picked, 'output', 'project-result.xlsx'), 'utf8'), 'result')
+    assert.equal((await postJson('/project/select', { path: root })).status, 200)
+    assert.equal((await postJson('/approval', { mode: 'session-auto' })).status, 200)
+    assert.equal((await (await fetch(base + '/project')).json() as any).approvalMode, 'session-auto')
+    assert.equal((await fetch(base + '/sessions', { method: 'POST', headers: { origin: base } })).status, 201)
+    assert.equal((await (await fetch(base + '/project')).json() as any).approvalMode, 'confirm', 'new session does not inherit automatic approval')
+    const records = (await readFile(auditPath, 'utf8')).trim().split(/\r?\n/u).map(line => JSON.parse(line))
+    assert.deepEqual(records.map(item => item.event), ['project.switched', 'project.switched', 'approval.changed'])
+    assert.equal(JSON.stringify(records).includes(picked), false, 'project audit stores only folder names')
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()))
+    await Promise.all([rm(root, { recursive: true, force: true }), rm(picked, { recursive: true, force: true })])
+  }
+})
 
 async function run(base: string, prompt: string, clientId: string) {
   const created = await fetch(base + '/sessions', { method: 'POST', headers: { origin: base } })
