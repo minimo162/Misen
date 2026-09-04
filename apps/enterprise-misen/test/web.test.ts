@@ -274,7 +274,8 @@ test('loopback HTTP server validates requests and serves only an opaque validate
     assert.deepEqual(state.axes, [])
     assert.deepEqual(state.tools, ['spreadsheet_read'])
     assert.equal(state.artifacts.length, 1)
-    assert.match(state.artifacts[0].id, /^[A-Za-z0-9_-]{24}$/u)
+    // Stable id: <sessionId>.<sha256>. It must keep working after a restart (the UI keeps history).
+    assert.match(state.artifacts[0].id, /^[A-Za-z0-9_-]{1,64}\.[a-f0-9]{64}$/u)
     assert.equal(state.artifacts[0].runId, 'opaque-1')
     assert.equal(JSON.stringify(state).includes('output/'), false)
     const download = await fetch(base + '/download/' + state.artifacts[0].id)
@@ -282,8 +283,19 @@ test('loopback HTTP server validates requests and serves only an opaque validate
     assert.match(download.headers.get('content-disposition') ?? '', /filename\*=UTF-8''%E8%87%AA%E7%94%B1%E5%BD%A2%E5%BC%8F\.xlsx/u)
     assert.equal(await download.text(), 'xlsx')
     assert.equal((await fetch(base + '/download/AAAAAAAAAAAAAAAAAAAAAAAA')).status, 404)
+    assert.equal((await fetch(base + '/download/' + state.sessionId + '.' + 'f'.repeat(64))).status, 404)
     assert.equal((await fetch(base + '/download?path=../master.xlsx')).status, 404)
     assert.equal((await run(base, PROMPTS['7月'], 'opaque-1')).status, 400)
+    // Restart the server: the in-memory registry is gone, the id must re-resolve from the session store.
+    await new Promise<void>(resolve => server.close(() => resolve()))
+    const restarted = await start(root, runner)
+    try {
+      const again = await fetch(restarted.base + '/download/' + state.artifacts[0].id)
+      assert.equal(again.status, 200, 'artifact download survives a server restart')
+      assert.equal(await again.text(), 'xlsx')
+    } finally {
+      await new Promise<void>(resolve => restarted.server.close(() => resolve()))
+    }
   } finally {
     await new Promise<void>(resolve => server.close(() => resolve()))
     await rm(root, { recursive: true, force: true })
