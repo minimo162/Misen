@@ -21,7 +21,7 @@ export interface LiveAgentOptions {
 export function checkpointFor(name: string, args: unknown): BlockedCheckpoint | undefined {
   const values = args && typeof args === 'object' ? args as Record<string, unknown> : {}
   if (name === 'office_create_output' && values.overwrite === true) {
-    return { verb: '上書き', target: typeof values.output === 'string' ? values.output : '成果物', risk: '中', reason: '既存ファイルの内容が置き換わります。' }
+    return { verb: '上書き', target: typeof values.output === 'string' ? values.output : '成果物', risk: '中', reason: '同名のファイルが output に既にあり、その内容が置き換わります。前回の成果物を残す場合は拒否して、別の名前を指示してください。' }
   }
   const batchRemoves = name === 'office_batch' && Array.isArray(values.items) && values.items.some(item => item && typeof item === 'object' && (item as Record<string, unknown>).command === 'remove')
   if (name === 'office_remove' || batchRemoves) {

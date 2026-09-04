@@ -160,7 +160,7 @@ export class WorkspaceBoundary {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
-    if (exists && !overwrite) throw new WorkspaceBoundaryError('output already exists')
+    if (exists && !overwrite) throw new WorkspaceBoundaryError(`output already exists: ${userPath}。同名のファイルが output に既にあります。置き換えるなら overwrite: true を指定してください（利用者の承認が求められます）。前回の成果物を残すなら別の名前にしてください。`)
 
     const temporary = join(parent, `.misen-${randomUUID()}.tmp`)
     let committed = false
