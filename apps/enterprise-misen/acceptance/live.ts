@@ -21,7 +21,7 @@ const root = await mkdtemp(join(tmpdir(), 'misen-pi-live-'))
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const toolStarts: string[] = []
 const toolEnds: string[] = []
-const spreadsheetUpdates: Array<{ id: string; workbook?: unknown; sheet?: unknown; range?: unknown; values?: unknown; status: string }> = []
+const spreadsheetUpdates: Array<{ id: string; verb: string; file?: unknown; path?: unknown; items?: unknown; status: string }> = []
 let failureClass: 'PROVIDER_OR_TRANSPORT' | 'TOOL' | 'ACCEPTANCE_FATAL' = 'ACCEPTANCE_FATAL'
 const started = performance.now()
 
@@ -35,14 +35,14 @@ try {
   agent.subscribe(event => {
     if (event.type === 'tool_execution_start') {
       toolStarts.push(event.toolName)
-      if (event.toolName === 'spreadsheet_update') {
+      if (event.toolName === 'office_set' || event.toolName === 'office_batch') {
         const args = event.args as Record<string, unknown>
         spreadsheetUpdates.push({
           id: event.toolCallId,
-          workbook: args.workbook,
-          sheet: args.sheet,
-          range: args.range,
-          values: args.values,
+          verb: event.toolName,
+          file: args.file,
+          path: args.path,
+          items: args.items,
           status: 'started'
         })
       }

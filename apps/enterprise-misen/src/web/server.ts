@@ -68,14 +68,19 @@ const TOOL_LABELS: Record<string, string> = {
   workspace_list_files: 'List workspace files',
   workspace_read_text: 'Read workspace guidance',
   spreadsheet_read: 'Read spreadsheet',
-  spreadsheet_create_output: 'Create workbook',
-  spreadsheet_update: 'Update spreadsheet',
   document_read: 'Read Word document',
-  document_create_output: 'Create Word document',
-  document_update: 'Update Word document',
   presentation_read: 'Read PowerPoint',
-  presentation_create_output: 'Create PowerPoint',
-  presentation_update: 'Update PowerPoint',
+  office_get: 'Inspect Office content',
+  office_query: 'Query Office content',
+  office_inspect: 'Validate Office file',
+  office_create_output: 'Create Office output',
+  office_set: 'Set Office properties',
+  office_add: 'Add Office content',
+  office_remove: 'Remove Office content',
+  office_move: 'Move Office content',
+  office_swap: 'Swap Office content',
+  office_batch: 'Update Office file',
+  office_import: 'Import tabular data',
 }
 
 export function textFromAssistantMessage(message: unknown): string {
@@ -93,13 +98,15 @@ export function textFromAssistantMessage(message: unknown): string {
 function safeToolDetail(name: string, args: unknown): string | undefined {
   if (!args || typeof args !== 'object') return undefined
   const record = args as Record<string, unknown>
-  const candidate = name === 'spreadsheet_create_output' || name === 'document_create_output' || name === 'presentation_create_output'
+  const candidate = name === 'office_create_output'
     ? record.output
-    : name === 'spreadsheet_update' || name === 'spreadsheet_read'
+    : name.startsWith('office_')
+      ? record.file ?? record.source
+    : name === 'spreadsheet_read'
       ? record.workbook
-      : name === 'document_update' || name === 'document_read'
+      : name === 'document_read'
         ? record.document
-        : name === 'presentation_update' || name === 'presentation_read'
+        : name === 'presentation_read'
           ? record.presentation
       : record.path
   if (typeof candidate !== 'string' || candidate.length === 0 || candidate.length > 260) return undefined

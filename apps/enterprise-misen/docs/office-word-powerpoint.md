@@ -6,27 +6,21 @@ a shell, OfficeCLI syntax, a generic Office DOM, MCP, or arbitrary file paths.
 
 ## Typed Tool surface
 
-Word:
+The compatibility readers `document_read` and `presentation_read` remain
+available. Creation and mutation use the common typed Office verbs:
+`office_create_output`, `office_get`, `office_query`, `office_inspect`,
+`office_set`, `office_add`, `office_remove`, `office_move`, `office_swap`,
+`office_batch`, and `office_import`.
 
-- `document_read`: read at most 100 ordered text elements and their stable paths.
-- `document_create_output`: create a blank `.docx` or copy a workspace template,
-  then optionally add bounded paragraphs.
-- `document_update`: apply bounded literal find/replace operations and/or append
-  paragraphs to an existing output document.
+Word headings and tables are added with `office_add`; PowerPoint slides use the
+same verb with an allowlisted layout. Literal whole-package find/replace is
+expressed through `office_set` at `/`.
 
-PowerPoint:
-
-- `presentation_read`: read text from at most 100 ordered slides.
-- `presentation_create_output`: create a blank `.pptx` or copy a workspace
-  template, then optionally add bounded slides using an allowlisted layout.
-- `presentation_update`: apply bounded literal find/replace operations and/or
-  append slides to an existing output presentation.
-
-Find/replace is deliberately literal: regex and raw path-scoped mutation are not
+Find/replace is deliberately literal: regex and raw commands are not
 model-facing. Every requested replacement must match at least once; a silent
-zero-match receipt fails before publication. Rich shapes, charts, media, comments, tracked changes, speaker
-notes, animation, and render output remain possible in OfficeCLI but are not in
-this first Misen capability slice.
+zero-match receipt fails before publication. Media, embedded objects, fields,
+external data sources, and external references are rejected by the shared
+Office deny-list.
 
 ## Lifecycle and independent checks
 
@@ -50,5 +44,5 @@ Portable Skill -> Pi Agent -> typed document/presentation Tool
                -> OfficeCLI adapter -> pinned OfficeCLI -> Word/PowerPoint
 ```
 
-The existing five Excel Tool contracts, Finance Skill boundary, July/August
-fixtures, and Decision 441 Acceptance remain unchanged.
+The Finance Skill boundary, July/August fixtures, and Decision 441 Acceptance
+remain unchanged.

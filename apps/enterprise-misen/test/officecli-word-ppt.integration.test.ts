@@ -30,29 +30,23 @@ test('typed Word and PowerPoint tools create, update, read, and independently in
     await mkdir(join(root, 'output'))
     const boundary = new WorkspaceBoundary(root)
     const before = await snapshotOutputArtifacts(boundary)
-    await tool(root, 'document_create_output').execute('word-create', {
-      output: 'output/日本語 業務メモ.docx',
-      paragraphs: [{ text: '{{表題}}', style: 'Heading1' }, { text: '担当: {{担当者}}' }, { text: '記号: a.b [x] (y) * ? +' }],
-    }, undefined)
-    await tool(root, 'document_update').execute('word-update', {
-      document: 'output/日本語 業務メモ.docx',
-      replacements: [{ find: '{{表題}}', replace: '業務メモ' }, { find: '{{担当者}}', replace: 'ミセン担当' }, { find: 'a.b [x] (y) * ? +', replace: 'literal match' }],
-      appendParagraphs: [{ text: '確認済みです。' }],
-    }, undefined)
+    await tool(root, 'office_create_output').execute('word-create', { output: 'output/日本語 業務メモ.docx' }, undefined)
+    await tool(root, 'office_batch').execute('word-update', { file: 'output/日本語 業務メモ.docx', items: [
+      { command: 'add', parent: '/body', type: 'paragraph', props: { text: '業務メモ', style: 'Heading1' } },
+      { command: 'add', parent: '/body', type: 'paragraph', props: { text: '担当: ミセン担当' } },
+      { command: 'add', parent: '/body', type: 'paragraph', props: { text: '記号: literal match' } },
+      { command: 'add', parent: '/body', type: 'paragraph', props: { text: '確認済みです。' } },
+    ] }, undefined)
     const word = await tool(root, 'document_read').execute('word-read', { document: 'output/日本語 業務メモ.docx', start: 1, end: 20 }, undefined) as any
     assert.deepEqual(word.details.elements.map((item: any) => item.text), ['業務メモ', '担当: ミセン担当', '記号: literal match', '確認済みです。'])
     const wordPackage = inspectOfficePackage(await readFile(join(root, 'output', '日本語 業務メモ.docx')), 'docx')
     assert.match(wordPackage.text.join('\n'), /業務メモ[\s\S]*ミセン担当[\s\S]*確認済み/u)
 
-    await tool(root, 'presentation_create_output').execute('ppt-create', {
-      output: 'output/日本語 説明資料.pptx',
-      slides: [{ title: '{{表題}}', text: '概要', layout: 'titleContent' }],
-    }, undefined)
-    await tool(root, 'presentation_update').execute('ppt-update', {
-      presentation: 'output/日本語 説明資料.pptx',
-      replacements: [{ find: '{{表題}}', replace: '月次説明資料' }],
-      appendSlides: [{ title: '結論', text: '確認済みです。', layout: 'titleContent' }],
-    }, undefined)
+    await tool(root, 'office_create_output').execute('ppt-create', { output: 'output/日本語 説明資料.pptx' }, undefined)
+    await tool(root, 'office_batch').execute('ppt-update', { file: 'output/日本語 説明資料.pptx', items: [
+      { command: 'add', parent: '/', type: 'slide', props: { title: '月次説明資料', text: '概要', layout: 'titleContent' } },
+      { command: 'add', parent: '/', type: 'slide', props: { title: '結論', text: '確認済みです。', layout: 'titleContent' } },
+    ] }, undefined)
     const presentation = await tool(root, 'presentation_read').execute('ppt-read', { presentation: 'output/日本語 説明資料.pptx', start: 1, end: 20 }, undefined) as any
     assert.deepEqual(presentation.details.slides.map((slide: any) => slide.texts), [['月次説明資料', '概要'], ['結論', '確認済みです。']])
     const pptPackage = inspectOfficePackage(await readFile(join(root, 'output', '日本語 説明資料.pptx')), 'pptx')
@@ -78,10 +72,10 @@ test('template-based Word and PowerPoint outputs preserve source bytes and style
     const wordPreservation = inspectOfficePackage(wordSource, 'docx').preservation
     const pptPreservation = inspectOfficePackage(pptSource, 'pptx').preservation
 
-    await tool(root, 'document_create_output').execute('copy-word', { source: 'テンプレート 文書.docx', output: 'output/文書.docx' }, undefined)
-    await tool(root, 'document_update').execute('replace-word', { document: 'output/文書.docx', replacements: [{ find: '{{会社名}}', replace: '株式会社ミセン' }] }, undefined)
-    await tool(root, 'presentation_create_output').execute('copy-ppt', { source: 'テンプレート 資料.pptx', output: 'output/資料.pptx' }, undefined)
-    await tool(root, 'presentation_update').execute('replace-ppt', { presentation: 'output/資料.pptx', replacements: [{ find: '{{表題}}', replace: '経営報告' }] }, undefined)
+    await tool(root, 'office_create_output').execute('copy-word', { source: 'テンプレート 文書.docx', output: 'output/文書.docx' }, undefined)
+    await tool(root, 'office_set').execute('replace-word', { file: 'output/文書.docx', path: '/', properties: { find: '{{会社名}}', replace: '株式会社ミセン' } }, undefined)
+    await tool(root, 'office_create_output').execute('copy-ppt', { source: 'テンプレート 資料.pptx', output: 'output/資料.pptx' }, undefined)
+    await tool(root, 'office_set').execute('replace-ppt', { file: 'output/資料.pptx', path: '/', properties: { find: '{{表題}}', replace: '経営報告' } }, undefined)
 
     assert.equal(digest(await readFile(join(root, 'テンプレート 文書.docx'))), wordHash)
     assert.equal(digest(await readFile(join(root, 'テンプレート 資料.pptx'))), pptHash)
@@ -95,22 +89,16 @@ test('malformed, cross-format, active-content, overbroad reads, and failed valid
   try {
     await mkdir(join(root, 'output'))
     await writeFile(join(root, 'bad.docx'), 'not zip')
-    await assert.rejects(tool(root, 'document_create_output').execute('bad', { source: 'bad.docx', output: 'output/bad.docx' }, undefined), /Office|ZIP|docx/u)
+    await assert.rejects(tool(root, 'office_create_output').execute('bad', { source: 'bad.docx', output: 'output/bad.docx' }, undefined), /Office|ZIP|docx/u)
     await assert.rejects(access(join(root, 'output', 'bad.docx')), /ENOENT/u)
-    await assert.rejects(tool(root, 'document_create_output').execute('cross', { output: 'output/not-word.pptx' }, undefined), /\.docx/u)
+    await assert.rejects(tool(root, 'office_create_output').execute('cross', { source: 'bad.docx', output: 'output/not-word.pptx' }, undefined), /formats must match/u)
 
-    await tool(root, 'document_create_output').execute('create', { output: 'output/good.docx', paragraphs: [{ text: 'before' }] }, undefined)
+    await tool(root, 'office_create_output').execute('create', { output: 'output/good.docx' }, undefined)
+    await tool(root, 'office_add').execute('seed', { file: 'output/good.docx', parent: '/body', type: 'paragraph', properties: { text: 'before' } }, undefined)
     const output = join(root, 'output', 'good.docx')
     const before = digest(await readFile(output))
     await assert.rejects(tool(root, 'document_read').execute('wide', { document: 'output/good.docx', start: 1, end: 101 }, undefined), /100/u)
-    await assert.rejects(tool(root, 'document_update').execute('missing', { document: 'output/good.docx', replacements: [{ find: 'not present', replace: 'after' }] }, undefined), /replacement/u)
-    assert.equal(digest(await readFile(output)), before)
-    class InvalidDocuments extends OfficeCliDocuments {
-      override async updateWordBytes(): Promise<Uint8Array> { return Buffer.from('partial invalid output') }
-    }
-    const spreadsheet = new OfficeCliSpreadsheet({ executable: executable() })
-    const invalid = enterpriseTools(new WorkspaceBoundary(root), spreadsheet, new InvalidDocuments(spreadsheet)).find(candidate => candidate.name === 'document_update')!
-    await assert.rejects(invalid.execute('invalid', { document: 'output/good.docx', replacements: [{ find: 'before', replace: 'after' }] }, undefined), /Office|ZIP|docx/u)
+    await assert.rejects(tool(root, 'office_set').execute('missing', { file: 'output/good.docx', path: '/body/p[999]', properties: { text: 'after' } }, undefined), /not found|path/u)
     assert.equal(digest(await readFile(output)), before)
 
     const entries = unzipSync(await readFile(output))
@@ -165,8 +153,8 @@ test('public Pi Agent replay exercises the typed Word and PowerPoint paths end t
       const replay = await runOfficeReplay(root, kind, kind === 'word' ? '日本語の業務メモをWordで作成して' : '日本語の説明資料をPowerPointで作成して')
       const starts = replay.events.filter(event => event.type === 'tool_execution_start').map(event => event.name)
       assert.deepEqual(starts, kind === 'word'
-        ? ['workspace_list_files', 'document_create_output', 'document_update', 'document_read']
-        : ['workspace_list_files', 'presentation_create_output', 'presentation_update', 'presentation_read'])
+        ? ['workspace_list_files', 'office_create_output', 'office_batch', 'office_get']
+        : ['workspace_list_files', 'office_create_output', 'office_batch', 'office_get'])
       await access(join(root, replay.output))
       assert.equal(replay.agent.state.errorMessage, undefined)
     } finally { await rm(root, { recursive: true, force: true }) }

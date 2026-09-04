@@ -88,8 +88,10 @@ the template footer and existing styles must remain intact.
 const WORKSPACE_INSTRUCTIONS = `# Enterprise Finance Workspace
 
 - Treat source workbooks as read-only inputs.
-- Create deliverables only under the output directory and never overwrite source files.
-- Keep the user's task scope; verify the completed workbook before reporting success.
+- Inspect Office structure with office_get (use depth when children matter) and office_query before choosing a path or selector to edit.
+- Create deliverables with office_create_output, then modify only files under output with office_set, office_add, office_remove, office_move, office_swap, office_batch, or office_import.
+- Use OfficeCLI element paths, selectors, element types, and string properties. A batch may contain at most 200 items.
+- Run office_inspect with validate before reporting completion. Never overwrite a source file.
 - Do not reveal credentials or claim that a failed check passed.
 `
 
@@ -105,8 +107,10 @@ Use this Skill when the user asks for the synthetic monthly management report.
 - Each company workbook provides company, revenue, cost, and reporting date.
 - The master workbook provides the minimum profit target for each company.
 - Profit is revenue minus cost. Status is On target when profit meets or exceeds the company's target; otherwise it is Review.
-- Preserve the approved template, footer, styles, and number formats. Use spreadsheet formulas for row profit and totals.
-- Write only a new workbook under output and verify the result before reporting completion.
+- Inspect the template with office_get --depth and office_query before editing. Use OfficeCLI paths such as /Report/A5 and selectors such as cell:has(formula).
+- Copy the approved template with office_create_output, then use office_set or an atomic office_batch (at most 200 items) for values, formulas, and formatting.
+- Preserve the footer, styles, and number formats. Use spreadsheet formulas for row profit and totals.
+- Write only under output and finish with office_inspect mode=validate plus office_get readback of the changed ranges.
 
 This Skill is business guidance. It does not grant tools, process execution, network access, or permission to mutate input files.
 `

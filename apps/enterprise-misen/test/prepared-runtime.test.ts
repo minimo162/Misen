@@ -10,8 +10,8 @@ const archiveSha256 = '6cac9ffbca8f6a47091e4b5c772e0606049c3871cb67d900c0cedde63
 const executableSha256 = '5c976096e04e5c2c1f091938926234cc9fbebfe9787ddd149351b3b0ecc707b5'
 const licenseSha256 = 'ed34dd8e3f0a78dbaf00d0444ce8e285b015b765379c2e17880455f70370f8e9'
 const officeCliExecutableSha256 = '724056e5ff079c3585df79c8afc386f08ef7d5f956cf4e2723534e129aab6e80'
-const officeCliLicenseSha256 = '0ef10002c77f6f3672795877e8a276f5a2840105474c87aa6c0bcd8904b12fc7'
-const officeCliNoticeSha256 = '762d2098c370da58737a2f235ddf962f041762b803e5bf6f10cd921894836586'
+const officeCliLicenseSha256 = '7e282402a5a6db33995fe638bb3fe79013f9884d8f7d15a42e481c1e86aadda1'
+const officeCliNoticeSha256 = '3a4715b268e148a8e9566f5e835f766f5c95c3da4d6e5ddd908806a258a2f07b'
 
 test('distribution entrypoint and packaging scripts are explicit', async () => {
   const packageJson = JSON.parse(await readFile('package.json', 'utf8')) as { scripts: Record<string, string> }

@@ -16,8 +16,8 @@ OfficeCLI is the official self-contained iOfficeAI/OfficeCLI v1.0.147 release at
 commit `b94f3906fd52d450c64f8e40370e376b9e15079e`:
 
 - artifact `officecli-win-x64.exe`, SHA-256 `724056e5ff079c3585df79c8afc386f08ef7d5f956cf4e2723534e129aab6e80`
-- Apache-2.0 `LICENSE`, SHA-256 `0ef10002c77f6f3672795877e8a276f5a2840105474c87aa6c0bcd8904b12fc7`
-- `NOTICE`, SHA-256 `762d2098c370da58737a2f235ddf962f041762b803e5bf6f10cd921894836586`
+- Apache-2.0 `LICENSE`, SHA-256 `7e282402a5a6db33995fe638bb3fe79013f9884d8f7d15a42e481c1e86aadda1`
+- `NOTICE`, SHA-256 `3a4715b268e148a8e9566f5e835f766f5c95c3da4d6e5ddd908806a258a2f07b`
 - no .NET, Python, Node.js, Microsoft Office, or network prerequisite
 
 Floating version identities are never accepted.
