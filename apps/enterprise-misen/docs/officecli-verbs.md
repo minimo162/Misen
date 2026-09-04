@@ -21,6 +21,14 @@ The compatibility tools `spreadsheet_read`, `document_read`, and
 `presentation_read` remain available to existing approved Skills. The old
 format-specific create/update tools are retired.
 
+Omitting `path` from `workspace_list_files` returns a bounded recursive tree
+from the workspace root. A missing path returns real sibling directory names
+as candidates instead of requiring the model to guess. For xlsx files,
+`spreadsheet_read` without `sheet` and `office_get` without `path` return the
+sheet list together with values from the first sheet. An omitted range is
+bounded to 200 rows by 30 columns and trailing empty rows and columns are
+removed from the result.
+
 ## Boundary
 
 Read tools accept only files inside the selected workspace. Mutation tools

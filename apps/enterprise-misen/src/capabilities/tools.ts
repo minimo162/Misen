@@ -4,7 +4,7 @@ import { WorkspaceBoundary } from '../workspace/boundary.js'
 import { OfficeCliDocuments } from '../office/officecli.js'
 import { OfficeCliVerbs, officeKind, type OfficeMutation } from '../office/officecli-verbs.js'
 import { validateOfficePackage } from '../office/openxml.js'
-import { OfficeCliSpreadsheet, officeCli, type OfficeCliBatchItem } from '../spreadsheet/officecli.js'
+import { DEFAULT_INSPECTION_RANGE, OfficeCliSpreadsheet, officeCli, type OfficeCliBatchItem } from '../spreadsheet/officecli.js'
 import { validateDeliverable } from './guards.js'
 
 const MAX_OFFICE_BYTES = 64 * 1024 * 1024
@@ -13,7 +13,7 @@ const result = (details: object) => ({ content: [{ type: 'text' as const, text: 
 const Path = Type.Object({ path: Type.Optional(Type.String()), extension: Type.Optional(Type.String()) })
 const Text = Type.Object({ path: Type.String(), offset: Type.Optional(Type.Integer({ minimum: 0 })), limit: Type.Optional(Type.Integer({ minimum: 0, maximum: 200000 })) })
 const Properties = Type.Record(Type.String({ minLength: 1, maxLength: 128 }), Type.String({ maxLength: 50000 }))
-const OfficeGet = Type.Object({ file: Type.String({ minLength: 1 }), path: Type.String({ minLength: 1 }), depth: Type.Optional(Type.Integer({ minimum: 0, maximum: 8 })) })
+const OfficeGet = Type.Object({ file: Type.String({ minLength: 1 }), path: Type.Optional(Type.String({ minLength: 1 })), depth: Type.Optional(Type.Integer({ minimum: 0, maximum: 8 })) })
 const OfficeQuery = Type.Object({ file: Type.String({ minLength: 1 }), selector: Type.String({ minLength: 1, maxLength: 2000 }) })
 const OfficeInspect = Type.Object({ file: Type.String({ minLength: 1 }), mode: Type.Optional(Type.Union([Type.Literal('validate'), Type.Literal('issues')])) })
 const OfficeCreate = Type.Object({ source: Type.Optional(Type.String({ minLength: 1 })), output: Type.String({ minLength: 1 }), overwrite: Type.Optional(Type.Boolean()) })
@@ -70,10 +70,24 @@ export function enterpriseTools(boundary: WorkspaceBoundary, spreadsheets: Offic
   }
 
   return [
-    tool<Static<typeof Path>>('workspace_list_files', 'List regular files below the selected workspace.', Path, async p => {
-      const files = await boundary.listFiles(p.path)
-      if (files.length > 20000) throw new RangeError('file listing exceeds 20000 entries')
-      return { files: p.extension ? files.filter(path => path.toLowerCase().endsWith(p.extension!.toLowerCase())) : files }
+    tool<Static<typeof Path>>('workspace_list_files', 'List workspace files. Omit path for a bounded recursive tree from the workspace root.', Path, async p => {
+      const requestedPath = p.path ?? '.'
+      try {
+        if (p.path === undefined) {
+          const listing = await boundary.listFilesRecursive(requestedPath, p.extension)
+          return { path: requestedPath, files: listing.files, truncated: listing.truncated }
+        }
+        const files = await boundary.listFiles(requestedPath)
+        if (files.length > 20000) throw new RangeError('file listing exceeds 20000 entries')
+        return { path: requestedPath, files: p.extension ? files.filter(path => path.toLowerCase().endsWith(p.extension!.toLowerCase())) : files, truncated: false }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        const candidates = await boundary.siblingDirectories(requestedPath).catch(() => [])
+        const message = candidates.length > 0
+          ? `フォルダー「${requestedPath}」は見つかりません。候補: ${candidates.join(', ')}`
+          : `フォルダー「${requestedPath}」は見つかりません。`
+        return { path: requestedPath, files: [], candidates, truncated: false, message }
+      }
     }),
     tool<Static<typeof Text>>('workspace_read_text', 'Read a UTF-8 workspace text file.', Text, async p => {
       const read = await boundary.readFileBytes(p.path)
@@ -83,9 +97,14 @@ export function enterpriseTools(boundary: WorkspaceBoundary, spreadsheets: Offic
       const text = all.slice(offset, offset + Math.min(p.limit ?? 200000, 200000))
       return { path: boundary.displayPath(read.absolute), text, truncated: offset + text.length < all.length }
     }),
-    tool<Static<typeof OfficeGet>>('office_get', 'Inspect an Office file by DOM path. Use depth to expand children before editing.', OfficeGet, async (p, signal) => {
+    tool<Static<typeof OfficeGet>>('office_get', 'Inspect an Office file. For xlsx, omit path to return sheet names and the first sheet values.', OfficeGet, async (p, signal) => {
       const read = await readOffice(p.file)
-      return { file: boundary.displayPath(read.absolute), path: p.path, data: await verbs.get(read.bytes, read.kind, p.path, p.depth ?? 1, signal) }
+      if (read.kind === 'xlsx' && p.path === undefined) {
+        validateDeliverable(read.bytes)
+        return { file: boundary.displayPath(read.absolute), path: '/', data: await spreadsheets.readBytes(read.bytes, undefined, undefined, signal) }
+      }
+      const path = p.path ?? '/'
+      return { file: boundary.displayPath(read.absolute), path, data: await verbs.get(read.bytes, read.kind, path, p.depth ?? 1, signal) }
     }),
     tool<Static<typeof OfficeQuery>>('office_query', 'Query Office elements with an OfficeCLI selector before choosing paths to edit.', OfficeQuery, async (p, signal) => {
       const read = await readOffice(p.file)
@@ -132,11 +151,11 @@ export function enterpriseTools(boundary: WorkspaceBoundary, spreadsheets: Offic
       await boundary.writeOutputFileBytes(p.file, changed.bytes, true)
       return { file: boundary.displayPath(output.absolute), source: boundary.displayPath(source.absolute), bytes: changed.bytes.byteLength, output: changed.output }
     }),
-    tool<Static<typeof SpreadsheetRead>>('spreadsheet_read', 'Compatibility alias for reading workbook sheets or a rectangular range.', SpreadsheetRead, async (p, signal) => {
+    tool<Static<typeof SpreadsheetRead>>('spreadsheet_read', 'Read sheet names and values. Omit sheet to read the first sheet; omitted ranges are bounded to 200 rows by 30 columns.', SpreadsheetRead, async (p, signal) => {
       const read = await boundary.readFileBytes(p.workbook, MAX_OFFICE_BYTES)
       validateDeliverable(read.bytes)
-      const workbook = await spreadsheets.readBytes(read.bytes, p.sheet, p.range ?? 'A1:E20', signal)
-      return p.sheet ? { workbook: boundary.displayPath(read.absolute), sheets: workbook.sheets, sheet: p.sheet, range: p.range ?? 'A1:E20', values: workbook.values } : { workbook: boundary.displayPath(read.absolute), sheets: workbook.sheets }
+      const workbook = await spreadsheets.readBytes(read.bytes, p.sheet, p.range, signal)
+      return { workbook: boundary.displayPath(read.absolute), sheets: workbook.sheets, sheet: workbook.sheet, range: p.range ?? DEFAULT_INSPECTION_RANGE, values: workbook.values }
     }),
     tool<Static<typeof DocumentRead>>('document_read', 'Compatibility alias for reading bounded Word text elements.', DocumentRead, async (p, signal) => {
       const bounds = readBounds(p.start, p.end)
