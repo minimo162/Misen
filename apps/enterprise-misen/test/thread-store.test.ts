@@ -26,7 +26,7 @@ const session = (overrides: Partial<SessionSnapshot> = {}): SessionSnapshot => (
     { id: 'assistant-run-1', role: 'assistant', text: '利益は改善しました。', timestamp: '2026-09-04T00:01:00.000Z' },
   ],
   tools: [
-    { id: 'call-1', runId: 'run-1', name: 'spreadsheet_read', detail: 'Alpha.xlsx', status: 'success' },
+    { id: 'call-1', runId: 'run-1', name: 'spreadsheet_read', target: '7月/Alpha.xlsx', status: 'success' },
     { id: 'call-other', runId: 'run-0', name: 'workspace_list_files', status: 'success' },
   ],
   artifacts: [
@@ -39,7 +39,7 @@ const session = (overrides: Partial<SessionSnapshot> = {}): SessionSnapshot => (
 const parts = (store: ThreadStore, id: string) => {
   const message = store.messages.find(item => item.id === id)
   assert.ok(message, `message ${id}`)
-  return message.content as readonly { type: string; toolCallId?: string; toolName?: string; result?: unknown; isError?: boolean; text?: string; args?: { detail?: string } }[]
+  return message.content as readonly { type: string; toolCallId?: string; toolName?: string; result?: unknown; isError?: boolean; text?: string; args?: { target?: string } }[]
 }
 
 const statusOf = (store: ThreadStore, id: string) => store.messages.find(item => item.id === id)?.status
@@ -53,7 +53,7 @@ test('persisted session projects Tool calls and artifacts onto its own assistant
   assert.deepEqual(assistant.map(part => part.type), ['tool-call', 'text'])
   assert.equal(assistant[0]?.toolCallId, 'call-1')
   assert.equal(assistant[0]?.result, 'success')
-  assert.deepEqual(assistant[0]?.args, { detail: 'Alpha.xlsx' })
+  assert.deepEqual(assistant[0]?.args, { target: '7月/Alpha.xlsx' })
   assert.equal(assistant[1]?.text, '利益は改善しました。')
   const custom = store.messages[1]?.metadata?.custom as { runId: string; artifacts: { id: string }[] }
   assert.equal(custom.runId, 'run-1')
@@ -62,7 +62,7 @@ test('persisted session projects Tool calls and artifacts onto its own assistant
 })
 
 test('cached Tool results survive persistence and project a Japanese reuse marker', () => {
-  const store = threadStoreFromSession(session({ tools: [{ id: 'cached-1', runId: 'run-1', name: 'spreadsheet_read', detail: 'Alpha.xlsx', status: 'success', cached: true }] }))
+  const store = threadStoreFromSession(session({ tools: [{ id: 'cached-1', runId: 'run-1', name: 'spreadsheet_read', target: '7月/Alpha.xlsx', status: 'success', cached: true }] }))
   assert.deepEqual(parts(store, 'assistant-run-1')[0]?.result, { status: 'success', cached: true })
   const live = applyServerEvent(startRun(emptyThreadStore(), 'cached-run', '依頼'), { type: 'tool', phase: 'end', id: 'cached-2', name: 'workspace_list_files', status: 'success', cached: true })
   assert.deepEqual(parts(live, 'assistant-cached-run')[0]?.result, { status: 'success', cached: true })
@@ -90,9 +90,9 @@ test('a run starts optimistically and SSE events fold into the assistant placeho
   assert.equal(store.messages.length, 2, 'server confirmation reconciles the optimistic user turn')
   assert.equal(store.messages[0]?.metadata, undefined)
 
-  store = applyServerEvent(store, { type: 'tool', phase: 'start', id: 'call-1', name: 'spreadsheet_read', detail: 'Alpha.xlsx' })
+  store = applyServerEvent(store, { type: 'tool', phase: 'start', id: 'call-1', name: 'spreadsheet_read', target: '8月/Alpha.xlsx' })
   store = applyServerEvent(store, { type: 'assistant', text: '確認中' })
-  store = applyServerEvent(store, { type: 'tool', phase: 'start', id: 'call-2', name: 'spreadsheet_create_output', detail: 'report.xlsx' })
+  store = applyServerEvent(store, { type: 'tool', phase: 'start', id: 'call-2', name: 'spreadsheet_create_output', target: 'output/report.xlsx' })
   store = applyServerEvent(store, { type: 'tool', phase: 'end', id: 'call-1', name: 'spreadsheet_read', status: 'success' })
   store = applyServerEvent(store, { type: 'tool', phase: 'end', id: 'call-2', name: 'spreadsheet_create_output', status: 'error' })
   store = applyServerEvent(store, { type: 'assistant', text: '最終回答', done: true })

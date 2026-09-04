@@ -22,7 +22,7 @@ test('cached Tool completion is persisted in the session and metadata-only audit
   await mkdir(join(root, 'output'))
   const auditPath = join(root, '.test-data', 'audit.jsonl')
   const runner: AgentRunner = async (_root, _prompt, context) => {
-    context!.emit({ type: 'tool', phase: 'start', id: 'cached-call', name: 'spreadsheet_read', detail: 'Alpha.xlsx' })
+    context!.emit({ type: 'tool', phase: 'start', id: 'cached-call', name: 'spreadsheet_read', target: '7月/Alpha.xlsx' })
     context!.emit({ type: 'tool', phase: 'end', id: 'cached-call', name: 'spreadsheet_read', status: 'success', cached: true })
     return { tools: ['spreadsheet_read'], status: 'COMPLETED' }
   }
