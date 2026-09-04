@@ -2,10 +2,11 @@
 <#
   Enterprise Misen 利用者用ランチャー本体（Misen起動.cmd から呼ばれる）。
 
-  共有フォルダー（読み取り専用、Issue #108 のレイアウト）:
+  共有フォルダー（読み取り専用、Issue #126 のレイアウト）:
     Misen起動.cmd
     _misen\manifest.json                  current（有効な版）・公開ID・SHA-256 一覧
-    _misen\versions\<version>\           app\ runtime\ workspace\ launcher\（このスクリプトはここに置かれる）
+    _misen\versions\<version>\launcher\ このスクリプトなど、起動前に必要な数ファイル
+    _misen\versions\<version>\misen-<version>.zip  app\ runtime\ workspace\ をまとめた配布 zip
   ローカル（書き込みはここだけ）:
     %LOCALAPPDATA%\Misen\versions\<version>\   検証済みの app・runtime・workspace 雛形
     %LOCALAPPDATA%\Misen\current.json          有効な版と公開ID
@@ -98,7 +99,8 @@ function Get-PublishId([object]$Manifest) {
 }
 
 function Assert-ManifestShape([object]$Manifest) {
-    if ("$($Manifest.schema)" -ne 'misen-distribution/2') { throw "manifest.json の形式が未対応です: $($Manifest.schema)（管理者に再公開を依頼してください）" }
+    $schema = [string]$Manifest.schema
+    if ($schema -notin @('misen-distribution/2', 'misen-distribution/3')) { throw "manifest.json の形式が未対応です: $schema（管理者に再公開を依頼してください）" }
     if ([string]::IsNullOrWhiteSpace([string]$Manifest.current)) { throw 'manifest.json に current（有効な版）がありません' }
     if ([string]$Manifest.current -notmatch '^[0-9A-Za-z][0-9A-Za-z._-]*$') { throw "manifest.json の current が不正です: $($Manifest.current)（管理者に再公開を依頼してください）" }
     if ([string]::IsNullOrWhiteSpace([string]$Manifest.version)) { throw 'manifest.json に version がありません' }
@@ -107,6 +109,9 @@ function Assert-ManifestShape([object]$Manifest) {
         if ([string]::IsNullOrWhiteSpace([string]$Manifest.$key)) { throw "manifest.json に $key がありません" }
     }
     if (-not $Manifest.files) { throw 'manifest.json に files（SHA-256 一覧）がありません' }
+    if ($schema -eq 'misen-distribution/3' -and ([string]$Manifest.zipSha256 -notmatch '^[0-9a-fA-F]{64}$')) {
+        throw 'manifest.json に有効な zipSha256 がありません'
+    }
 }
 
 function Assert-StagedVersion([string]$Stage, [object]$RemoteManifest) {
@@ -169,22 +174,42 @@ try {
         $stage = Join-Path $versionsDir ".staging-$([guid]::NewGuid().ToString('N'))"
         New-Item -ItemType Directory -Force -Path $stage | Out-Null
         Write-DistributionState 'syncing' '共有版を版別ステージングへ取得しています' $remoteVersion $localVersion $remotePublishId $localPublishId $previousVersion $previousPublishId
-        foreach ($directory in $syncDirectories) {
-            $sourceDir = Join-Path $remoteVersionDir $directory
-            if (-not (Test-Path -LiteralPath $sourceDir -PathType Container)) {
-                if ($directory -eq 'workspace') { continue }
-                throw "共有フォルダーに $directory がありません: $sourceDir"
+        $stagePayload = $stage
+        if ([string]$remoteManifest.schema -eq 'misen-distribution/3') {
+            $archiveName = "misen-$remoteVersion.zip"
+            $remoteArchive = Join-Path $remoteVersionDir $archiveName
+            if (-not (Test-Path -LiteralPath $remoteArchive -PathType Leaf)) { throw "共有フォルダーに配布 zip がありません: $remoteArchive" }
+            $stageArchive = Join-Path $stage $archiveName
+            # SMB から取得する大きなファイルはこの 1 ファイルだけ。展開と個別ハッシュ検証はローカルで行う。
+            Copy-Item -LiteralPath $remoteArchive -Destination $stageArchive -Force
+            $actualZipSha256 = (Get-FileHash -LiteralPath $stageArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualZipSha256 -ne ([string]$remoteManifest.zipSha256).ToLowerInvariant()) {
+                throw "配布 zip の SHA-256 が一致しません: $archiveName"
             }
-            # robocopy の既定の再試行は事実上無限。共有側でロックされたファイルは失敗としてロールバックする。
-            & robocopy $sourceDir (Join-Path $stage $directory) /E /NFL /NDL /NJH /NJS /NP /R:2 /W:1 | Out-Null
-            if ($LASTEXITCODE -ge 8) { throw "共有フォルダーからのコピーに失敗しました ($directory, robocopy exit=$LASTEXITCODE)" }
+            $stagePayload = Join-Path $stage 'payload'
+            New-Item -ItemType Directory -Force -Path $stagePayload | Out-Null
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            [System.IO.Compression.ZipFile]::ExtractToDirectory($stageArchive, $stagePayload, [System.Text.Encoding]::UTF8)
+        } else {
+            # /2 は移行期間用。従来どおり展開済みの 3 ディレクトリを共有側から取得する。
+            foreach ($directory in $syncDirectories) {
+                $sourceDir = Join-Path $remoteVersionDir $directory
+                if (-not (Test-Path -LiteralPath $sourceDir -PathType Container)) {
+                    if ($directory -eq 'workspace') { continue }
+                    throw "共有フォルダーに $directory がありません: $sourceDir"
+                }
+                # robocopy の既定の再試行は事実上無限。共有側でロックされたファイルは失敗としてロールバックする。
+                & robocopy $sourceDir (Join-Path $stagePayload $directory) /E /NFL /NDL /NJH /NJS /NP /R:2 /W:1 | Out-Null
+                if ($LASTEXITCODE -ge 8) { throw "共有フォルダーからのコピーに失敗しました ($directory, robocopy exit=$LASTEXITCODE)" }
+            }
         }
-        $verifiedCount = Assert-StagedVersion $stage $remoteManifest
+        $verifiedCount = Assert-StagedVersion $stagePayload $remoteManifest
         Write-DistributionState 'integrity_passed' "全 $verifiedCount ファイルの SHA-256 を確認しました" $remoteVersion $localVersion $remotePublishId $localPublishId $previousVersion $previousPublishId $true
         Write-Info "SHA-256 を確認しました: $verifiedCount ファイル"
         $target = Join-Path $versionsDir $remoteVersion
         if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
-        Move-Item -LiteralPath $stage -Destination $target -Force
+        Move-Item -LiteralPath $stagePayload -Destination $target -Force
+        if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
         $stage = $null
         $pointer = [ordered]@{
             app = 'enterprise-misen'

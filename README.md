@@ -54,19 +54,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Expand-MisenShare.ps1 -Zip
 
 ## Enterprise Misen の起動（利用者）
 
-共有フォルダーの `Misen起動.cmd` をダブルクリックするだけです。共有フォルダーの最上位に見えるのはこのファイルだけで、配布物は隠し属性の `_misen\versions\<version>\` 配下にあります（Issue #108）。
+共有フォルダーの `Misen起動.cmd` をダブルクリックするだけです。共有フォルダーの最上位に見えるのはこのファイルだけで、配布物は隠し属性の `_misen\versions\<version>\` 配下にあります。
 
 ```text
 \\fileserver\...\Misen\
   Misen起動.cmd            ← 利用者が触るのはこれだけ
   _misen\                  ← 隠し属性
-    manifest.json          ← current・公開ID・SHA-256
+    manifest.json          ← current・公開ID・zip/展開後ファイルの SHA-256
     publish-log.txt        ← 公開直後の再検証結果
-    versions\<version>\    ← app\ runtime\ workspace\ launcher\（前の版を 1 つ残す）
+    versions\<version>\    ← launcher\ と misen-<version>.zip（前の版を 1 つ残す）
 ```
 
 1. 共有側 `_misen\manifest.json` の `current`（有効な版）・公開IDを `%LOCALAPPDATA%\Misen\current.json` と比較する
-2. 初回、または版数か公開IDが違うときだけ `_misen\versions\<version>\` の `app\` `runtime\` `workspace\` を `%LOCALAPPDATA%\Misen\versions\<version>\` へコピーし、manifest に記載された全ファイルの SHA-256 を検証してから `current` を切り替える（検証に失敗すると前回正常版に戻して停止）
+2. 初回、または版数か公開IDが違うときだけ `misen-<version>.zip` 1 ファイルをローカルへコピーし、zip の SHA-256 を確認してから `app\` `runtime\` `workspace\` を展開する。manifest に記載された展開後の全ファイルも検証してから `current` を切り替える（検証に失敗すると前回正常版に戻して停止）
 3. 検証済みローカル版の同梱 Node.js でサーバーを起動し、ブラウザーで `http://127.0.0.1:8787/` を開く
 
 作業フォルダーの既定は `%LOCALAPPDATA%\Misen\workspace` で、初回に共有側の雛形 `workspace\` からコピーされます。共有フォルダー上の業務ファイルを使うときは、手元にコピーしたフォルダーを `Misen起動.cmd` へドラッグ＆ドロップしてください。書き込みは `%LOCALAPPDATA%\Misen` 配下と作業フォルダーだけで、共有フォルダーには書きません。

@@ -2,13 +2,14 @@
 <#
   管理者用: prepare-runtime が生成した Enterprise Misen の自己完結ランタイムを、共有フォルダーの配布レイアウトへ公開する。
 
-  共有フォルダーのレイアウト（Issue #108）:
+  共有フォルダーのレイアウト（Issue #126）:
     Misen起動.cmd                 利用者が触る唯一のファイル
     _misen\                       隠し属性。先頭アンダースコアで並び順の末尾
-      manifest.json               current（有効な版）・版数・公開ID・各ファイルの SHA-256（misen-distribution/2）
+      manifest.json               current（有効な版）・版数・公開ID・zip/各ファイルの SHA-256（misen-distribution/3）
       publish-log.txt             公開直後の再検証結果（追記）
       versions\<version>\         版別。前の版を 1 つ残し、それより古い版は公開時に削除
-        app\ runtime\ workspace\ launcher\
+        launcher\                  起動前に必要な数ファイル
+        misen-<version>.zip        app\ runtime\ workspace\（UTF-8 名対応）
 
   公開の順序: 版フォルダーを作り、ハッシュを再検証してから、最後に manifest.json を書き換える。
   APIキーなどの秘密情報は一切含めない（利用者ごとの %LOCALAPPDATA%\Misen\config\settings.json に置く）。
@@ -88,33 +89,48 @@ try {
     $WhatIfPreference = $false
     Write-Step "ステージング: $stageRoot"
     New-Item -ItemType Directory -Force -Path $stageRoot | Out-Null
+    $payloadRoot = Join-Path $stageRoot 'payload'
+    $launcherStage = Join-Path $stageRoot 'launcher'
+    New-Item -ItemType Directory -Force -Path $payloadRoot | Out-Null
     foreach ($directory in @('app', 'runtime', 'workspace')) {
         $from = Join-Path $prepared $directory
         if (-not (Test-Path -LiteralPath $from -PathType Container)) {
             if ($directory -eq 'workspace') { continue }
             Fail "prepared runtime に $directory がありません: $from"
         }
-        & robocopy $from (Join-Path $stageRoot $directory) /E /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+        & robocopy $from (Join-Path $payloadRoot $directory) /E /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
         if ($LASTEXITCODE -ge 8) { Fail "ステージングへのコピーに失敗しました ($directory, robocopy exit=$LASTEXITCODE)" }
     }
     $global:LASTEXITCODE = 0
-    New-Item -ItemType Directory -Force -Path (Join-Path $stageRoot 'launcher\prepared-runtime') | Out-Null
-    Copy-Item -LiteralPath $launcherSource -Destination (Join-Path $stageRoot 'launcher\launch.ps1') -Force
-    Copy-Item -LiteralPath $preparedManifestPath -Destination (Join-Path $stageRoot 'launcher\prepared-runtime\manifest.json') -Force
-    Copy-Item -LiteralPath (Join-Path $prepared 'SHA256SUMS.txt') -Destination (Join-Path $stageRoot 'launcher\prepared-runtime\SHA256SUMS.txt') -Force
+    New-Item -ItemType Directory -Force -Path (Join-Path $launcherStage 'prepared-runtime') | Out-Null
+    Copy-Item -LiteralPath $launcherSource -Destination (Join-Path $launcherStage 'launch.ps1') -Force
+    Copy-Item -LiteralPath $preparedManifestPath -Destination (Join-Path $launcherStage 'prepared-runtime\manifest.json') -Force
+    Copy-Item -LiteralPath (Join-Path $prepared 'SHA256SUMS.txt') -Destination (Join-Path $launcherStage 'prepared-runtime\SHA256SUMS.txt') -Force
 
     Write-Step 'SHA-256 を計算しています'
     $files = [ordered]@{}
-    $stagePrefix = $stageRoot + '\'
-    foreach ($directory in @('app', 'runtime', 'workspace', 'launcher')) {
-        $dir = Join-Path $stageRoot $directory
+    $payloadPrefix = $payloadRoot + '\'
+    foreach ($directory in @('app', 'runtime', 'workspace')) {
+        $dir = Join-Path $payloadRoot $directory
         if (-not (Test-Path -LiteralPath $dir -PathType Container)) { continue }
         Get-ChildItem -LiteralPath $dir -File -Recurse | Sort-Object FullName | ForEach-Object {
-            $relative = $_.FullName.Substring($stagePrefix.Length).Replace('\', '/')
+            $relative = $_.FullName.Substring($payloadPrefix.Length).Replace('\', '/')
             $files[$relative] = Get-Sha256 $_.FullName
         }
     }
+    $launcherPrefix = $launcherStage + '\'
+    Get-ChildItem -LiteralPath $launcherStage -File -Recurse | Sort-Object FullName | ForEach-Object {
+        $relative = 'launcher/' + $_.FullName.Substring($launcherPrefix.Length).Replace('\', '/')
+        $files[$relative] = Get-Sha256 $_.FullName
+    }
     if (-not $files.Contains($entry) -or -not $files.Contains($nodeExe) -or -not $files.Contains($officeCliExe)) { Fail 'ステージングに必須ファイルがありません' }
+
+    Write-Step '配布 zip を作成しています（UTF-8 名）'
+    $archiveName = "misen-$Version.zip"
+    $archiveStage = Join-Path $stageRoot $archiveName
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::CreateFromDirectory($payloadRoot, $archiveStage, [System.IO.Compression.CompressionLevel]::Optimal, $false, [System.Text.Encoding]::UTF8)
+    $zipSha256 = Get-Sha256 $archiveStage
 
     $previousManifest = $null
     if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
@@ -125,7 +141,7 @@ try {
     if ($previousCurrent -eq $Version) { Fail "版 v$Version は既に共有フォルダーで有効な版です。版数を上げてから公開してください（同じ版数の再公開はできません）。" }
 
     $manifest = [ordered]@{
-        schema = 'misen-distribution/2'
+        schema = 'misen-distribution/3'
         name = 'enterprise-misen'
         current = $Version
         version = $Version
@@ -139,6 +155,7 @@ try {
         launcher = 'launcher/launch.ps1'
         url = $Url
         workspaceSeed = 'workspace'
+        zipSha256 = $zipSha256
         entryCmdSha256 = Get-Sha256 $entrySource
         preparedRuntime = [ordered]@{
             schemaVersion = $preparedManifest.schemaVersion
@@ -173,14 +190,23 @@ try {
     # 1. 版フォルダーを作る（manifest はまだ前の版を指している。current と同じ版数は上で拒否済み）。
     Write-Step "版フォルダーを書き込んでいます: $targetVersionDir"
     if (Test-Path -LiteralPath $targetVersionDir) { Remove-Item -LiteralPath $targetVersionDir -Recurse -Force }
-    & robocopy $stageRoot $targetVersionDir /E /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+    New-Item -ItemType Directory -Force -Path $targetVersionDir | Out-Null
+    & robocopy $launcherStage (Join-Path $targetVersionDir 'launcher') /E /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { Fail "配布先へのコピーに失敗しました (robocopy exit=$LASTEXITCODE)" }
+    Copy-Item -LiteralPath $archiveStage -Destination (Join-Path $targetVersionDir $archiveName) -Force
     $global:LASTEXITCODE = 0
 
-    # 2. 公開直後の再検証: 共有側の版フォルダーを manifest の SHA-256 と突き合わせる。
+    # 2. 公開直後の再検証: 大きな zip 1 個と、展開せず置く launcher の数ファイルだけを照合する。
     Write-Step '共有側のハッシュを再検証しています'
     $verifyErrors = New-Object System.Collections.Generic.List[string]
+    $publishedArchive = Join-Path $targetVersionDir $archiveName
+    if (-not (Test-Path -LiteralPath $publishedArchive -PathType Leaf)) {
+        $verifyErrors.Add("missing $archiveName")
+    } elseif ((Get-Sha256 $publishedArchive) -ne $manifest.zipSha256) {
+        $verifyErrors.Add("sha256 mismatch $archiveName")
+    }
     foreach ($property in $manifest.files.GetEnumerator()) {
+        if (-not ([string]$property.Key).StartsWith('launcher/')) { continue }
         $path = Join-Path $targetVersionDir ([string]$property.Key).Replace('/', '\')
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { $verifyErrors.Add("missing $($property.Key)"); continue }
         if ((Get-Sha256 $path) -ne [string]$property.Value) { $verifyErrors.Add("sha256 mismatch $($property.Key)") }
