@@ -94,7 +94,8 @@ function ToolFallbackArgs({ argsText, className, ...props }: React.ComponentProp
 
 function ToolFallbackResult({ result, className, ...props }: React.ComponentProps<"div"> & { result?: unknown }) {
   if (result === undefined) return null;
-  const value = result === "success" ? "完了" : result === "error" ? "失敗" : typeof result === "string" ? result : JSON.stringify(result, null, 2);
+  const errorDetail = result && typeof result === "object" && (result as { status?: unknown }).status === "error" ? String((result as { detail?: unknown }).detail ?? "") : "";
+  const value = result === "success" ? "完了" : result === "error" ? "失敗" : errorDetail ? `失敗: ${errorDetail}` : typeof result === "string" ? result : JSON.stringify(result, null, 2);
   return <div className={className} {...props}><p className="text-muted-foreground text-xs font-medium">結果:</p><pre className="bg-muted/50 text-foreground/90 mt-1 rounded-md p-2.5 text-xs whitespace-pre-wrap">{value}</pre></div>;
 }
 

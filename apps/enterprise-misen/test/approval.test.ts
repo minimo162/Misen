@@ -5,6 +5,9 @@ import { approvalHook, checkpointFor } from '../src/runtime/live.js'
 test('checkpoint classification covers overwrite and element removal only', () => {
   assert.deepEqual(checkpointFor('office_create_output', { output: 'output/report.xlsx', overwrite: true }), { verb: '上書き', target: 'output/report.xlsx', risk: '中', reason: '同名のファイルが output に既にあり、その内容が置き換わります。前回の成果物を残す場合は拒否して、別の名前を指示してください。' })
   assert.equal(checkpointFor('office_create_output', { output: 'output/new.xlsx' }), undefined)
+  // overwrite: true on a file that does not exist is a plain creation: no checkpoint
+  assert.equal(checkpointFor('office_create_output', { output: 'output/new.xlsx', overwrite: true }, () => false), undefined)
+  assert.equal(checkpointFor('office_create_output', { output: 'output/report.xlsx', overwrite: true }, () => true)?.verb, '上書き')
   assert.equal(checkpointFor('office_set', { file: 'output/report.xlsx' }), undefined)
   assert.equal(checkpointFor('office_remove', { file: 'output/report.xlsx', path: '/slides/0' })?.verb, '削除')
   assert.equal(checkpointFor('office_batch', { file: 'output/report.xlsx', items: [{ command: 'remove', path: '/slides/0' }] })?.verb, '削除')

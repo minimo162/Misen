@@ -25,6 +25,8 @@ export type StoredToolEvent = {
   target?: string
   status: 'success' | 'error'
   cached?: boolean
+  /** Short user-facing reason when status is 'error' (Misen's own message, capped). */
+  detail?: string
 }
 
 export type StoredArtifact = {
