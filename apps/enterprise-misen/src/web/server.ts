@@ -474,7 +474,11 @@ export function createDemoServer(
           }
           usedRunIds.add(clientId)
           let proposedPlan
-          try { proposedPlan = await planProvider(projects.currentRoot, prompt, importedPaths) } catch { proposedPlan = undefined }
+          try { proposedPlan = await planProvider(projects.currentRoot, prompt, importedPaths) } catch (error) {
+            // Diagnostic only; never includes the prompt, the credential, or provider payloads.
+            console.error('[plan] 計画作成に失敗したため計画を表示しません:', error instanceof Error ? error.message : String(error))
+            proposedPlan = undefined
+          }
           const plan: StoredPlan = createStoredPlan(clientId, proposedPlan)
           const runUi: StoredRunUi = { runId: clientId, plan, checkpoints: [] }
           const startedAt = sessions.timestamp()

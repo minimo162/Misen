@@ -27,5 +27,6 @@ test('Tool matching requires both Tool and target; unmatched calls become additi
 test('invalid model output falls back to the former fixed three-step plan only', () => {
   const fallback = createStoredPlan('fallback')
   assert.equal(fallback.fallback, true)
+  assert.equal(fallback.visible, false, 'the fixed three steps are never shown in place of a real plan')
   assert.deepEqual(fallback.steps.map(step => step.title), ['依頼内容と入力を確認', '必要な作業を実行', '成果物を確認して完了'])
 })

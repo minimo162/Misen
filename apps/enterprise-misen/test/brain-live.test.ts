@@ -108,6 +108,8 @@ test('the first-turn planner requests submit_plan structured output from the con
   try {
     const plan = await createLivePlanProvider({ settingsPath })(root, '7月の Alpha.xlsx の売上を教えて', ['input/Alpha.xlsx'])
     assert.equal(seenBody.tools[0].function.name, 'submit_plan')
+    assert.equal(seenBody.temperature, undefined, 'temperature must not be sent: reasoning models reject it and the plan silently fell back')
+    assert.match(JSON.stringify(seenBody.messages), /作業フォルダーの構成/u)
     assert.match(JSON.stringify(seenBody.messages), /2〜8手順/u)
     assert.match(JSON.stringify(seenBody.messages), /input\/Alpha\.xlsx/u)
     assert.deepEqual(plan?.steps, [{ title: 'Alpha.xlsxの売上を確認', tool: 'spreadsheet_read', target: 'input/Alpha.xlsx' }])
