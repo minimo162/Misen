@@ -114,12 +114,12 @@ test('invalid ranges, malformed workbooks, and post-update validation failures p
     await fixture(root)
     const boundary = new WorkspaceBoundary(root)
     const client = new OfficeCliSpreadsheet({ executable: executable() })
-    const create = enterpriseTools(boundary, client).find(tool => tool.name === 'spreadsheet_create_output')!
-    const update = enterpriseTools(boundary, client).find(tool => tool.name === 'spreadsheet_update')!
+    const create = enterpriseTools(boundary, client).find(tool => tool.name === 'office_create_output')!
+    const update = enterpriseTools(boundary, client).find(tool => tool.name === 'office_set')!
     await create.execute('create', { source: '月次管理レポート_template.xlsx', output: 'output/report.xlsx' }, undefined)
     const output = join(root, 'output', 'report.xlsx')
     const before = digest(await readFile(output))
-    await assert.rejects(update.execute('bad-range', { workbook: 'output/report.xlsx', sheet: 'Report', range: 'A0:B1', values: [[1, 2]] }, undefined), /invalid|range/u)
+    await assert.rejects(update.execute('bad-range', { file: 'output/report.xlsx', path: '/Report/A0', properties: { value: '1', type: 'number' } }, undefined), /invalid|range|path/u)
     assert.equal(digest(await readFile(output)), before)
 
     await writeFile(join(root, 'malformed.xlsx'), 'not an xlsx', 'utf8')
@@ -127,10 +127,10 @@ test('invalid ranges, malformed workbooks, and post-update validation failures p
     await assert.rejects(access(join(root, 'output', 'bad.xlsx')), /ENOENT/u)
 
     class InvalidResultClient extends OfficeCliSpreadsheet {
-      override async updateBytes(): Promise<Uint8Array> { return Buffer.from('partial invalid output') }
+      override async validateFile(): Promise<void> { throw new Error('injected post-update validation failure') }
     }
-    const invalidUpdate = enterpriseTools(boundary, new InvalidResultClient({ executable: executable() })).find(tool => tool.name === 'spreadsheet_update')!
-    await assert.rejects(invalidUpdate.execute('invalid-result', { workbook: 'output/report.xlsx', sheet: 'Report', range: 'B2:B2', values: [['7月']] }, undefined), /invalid|xlsx|ZIP/u)
+    const invalidUpdate = enterpriseTools(boundary, new InvalidResultClient({ executable: executable() })).find(tool => tool.name === 'office_set')!
+    await assert.rejects(invalidUpdate.execute('invalid-result', { file: 'output/report.xlsx', path: '/Report/B2', properties: { value: '7月', type: 'string' } }, undefined), /validation failure/u)
     assert.equal(digest(await readFile(output)), before)
   } finally { await rm(root, { recursive: true, force: true }) }
 })

@@ -30,8 +30,8 @@ try {
   const tools = enterpriseTools(new WorkspaceBoundary(root), client)
   const byName = name => tools.find(tool => tool.name === name)
   const read = byName('spreadsheet_read')
-  const create = byName('spreadsheet_create_output')
-  const update = byName('spreadsheet_update')
+  const create = byName('office_create_output')
+  const update = byName('office_set')
 
   const readSamples = []
   for (let index = 0; index < 10; index++) readSamples.push(await timed(() => read.execute(`read-${index}`, { workbook: 'master.xlsx', sheet: 'Targets', range: 'A1:C4' }, undefined)))
@@ -41,7 +41,7 @@ try {
 
   await create.execute('create-update', { source: '月次管理レポート_template.xlsx', output: 'output/update.xlsx' }, undefined)
   const updateSamples = []
-  for (let index = 0; index < 10; index++) updateSamples.push(await timed(() => update.execute(`update-${index}`, { workbook: 'output/update.xlsx', sheet: 'Report', range: 'B2:B2', values: [[index % 2 === 0 ? 'July 2024' : 'August 2024']] }, undefined)))
+  for (let index = 0; index < 10; index++) updateSamples.push(await timed(() => update.execute(`update-${index}`, { file: 'output/update.xlsx', path: '/Report/B2', properties: { value: index % 2 === 0 ? 'July 2024' : 'August 2024', type: 'string' } }, undefined)))
 
   console.log(JSON.stringify({ engine: 'OfficeCLI', version: '1.0.147', read: summary(readSamples), create: summary(createSamples), update: summary(updateSamples) }, null, 2))
 } finally {

@@ -10,16 +10,21 @@ export async function runReplay(root: string, month: '7月'|'8月', prompt: stri
   const faux=fauxProvider({ provider:'misen-replay', models:[{id:'gpt-5.6-luna',reasoning:true}] }); const models=createModels(); models.setProvider(faux.provider)
   const file=`output/${month}-月次管理レポート.xlsx`; const rows=month==='7月' ? [['Alpha',1200,700],['Beta',950,500],['Gamma',1100,650]] : [['Alpha',1300,760],['Beta',1020,560],['Gamma',1150,690]]
   const reportRows = rows.map((r, i) => [r[0], r[1], r[2], { formula: `=B${i + 5}-C${i + 5}` }, Number(r[1]) - Number(r[2]) >= ([400, 455, 380][i] ?? 0) ? 'On target' : 'Review'])
+  const reportItems = reportRows.flatMap((row, rowIndex) => row.map((value, columnIndex) => {
+    const column = String.fromCharCode(65 + columnIndex)
+    const props = typeof value === 'object' ? { formula: value.formula } : { value: String(value), type: typeof value === 'number' ? 'number' : 'string' }
+    return { command: 'set', path: `/Report/${column}${rowIndex + 5}`, props }
+  }))
   faux.setResponses([
     call('workspace_list_files', { path: month, extension: '.xlsx' }),
     call('workspace_read_text', { path: '.agents/skills/monthly-report/SKILL.md' }),
     call('workspace_read_text', { path: '業務引継ぎ.md' }),
     call('spreadsheet_read', { workbook: 'master.xlsx', sheet: 'Targets', range: 'A1:B4' }),
     call('spreadsheet_read', { workbook: `${month}/Alpha.xlsx`, sheet: 'Actuals', range: 'A1:B4' }),
-    call('spreadsheet_create_output', { source: '月次管理レポート_template.xlsx', output: file }),
-    call('spreadsheet_update', { workbook: file, sheet: 'Report', range: 'B2:B2', values: [[month]] }),
-    call('spreadsheet_update', { workbook: file, sheet: 'Report', range: 'A5:E7', values: reportRows }),
-    call('spreadsheet_update', { workbook: file, sheet: 'Report', range: 'B9:D9', values: [[{ formula: '=SUM(B5:B7)' }, { formula: '=SUM(C5:C7)' }, { formula: '=SUM(D5:D7)' }]] }),
+    call('office_create_output', { source: '月次管理レポート_template.xlsx', output: file }),
+    call('office_set', { file, path: '/Report/B2', properties: { value: month, type: 'string' } }),
+    call('office_batch', { file, items: reportItems }),
+    call('office_batch', { file, items: ['B', 'C', 'D'].map(column => ({ command: 'set', path: `/Report/${column}9`, props: { formula: `=SUM(${column}5:${column}7)` } })) }),
     fauxAssistantMessage('Completed the monthly management report.'),
   ])
   const model=models.getModel('misen-replay','gpt-5.6-luna'); if(!model) throw new Error('replay model missing')
@@ -37,15 +42,22 @@ export async function runOfficeReplay(root: string, kind: 'word' | 'powerpoint',
   const output = kind === 'word' ? 'output/日本語 業務メモ.docx' : 'output/日本語 説明資料.pptx'
   faux.setResponses(kind === 'word' ? [
     call('workspace_list_files', { path: '.', extension: '.docx' }),
-    call('document_create_output', { output, paragraphs: [{ text: '{{表題}}', style: 'Heading1' }, { text: '担当: {{担当者}}' }] }),
-    call('document_update', { document: output, replacements: [{ find: '{{表題}}', replace: '業務メモ' }, { find: '{{担当者}}', replace: 'ミセン担当' }], appendParagraphs: [{ text: '確認済みです。' }] }),
-    call('document_read', { document: output, start: 1, end: 20 }),
+    call('office_create_output', { output }),
+    call('office_batch', { file: output, items: [
+      { command: 'add', parent: '/body', type: 'paragraph', props: { text: '業務メモ', style: 'Heading1' } },
+      { command: 'add', parent: '/body', type: 'paragraph', props: { text: '担当: ミセン担当' } },
+      { command: 'add', parent: '/body', type: 'paragraph', props: { text: '確認済みです。' } },
+    ] }),
+    call('office_get', { file: output, path: '/body', depth: 2 }),
     fauxAssistantMessage('Word業務メモを作成しました。'),
   ] : [
     call('workspace_list_files', { path: '.', extension: '.pptx' }),
-    call('presentation_create_output', { output, slides: [{ title: '{{表題}}', text: '概要', layout: 'titleContent' }] }),
-    call('presentation_update', { presentation: output, replacements: [{ find: '{{表題}}', replace: '月次説明資料' }], appendSlides: [{ title: '結論', text: '確認済みです。', layout: 'titleContent' }] }),
-    call('presentation_read', { presentation: output, start: 1, end: 20 }),
+    call('office_create_output', { output }),
+    call('office_batch', { file: output, items: [
+      { command: 'add', parent: '/', type: 'slide', props: { title: '月次説明資料', text: '概要', layout: 'titleContent' } },
+      { command: 'add', parent: '/', type: 'slide', props: { title: '結論', text: '確認済みです。', layout: 'titleContent' } },
+    ] }),
+    call('office_get', { file: output, path: '/', depth: 2 }),
     fauxAssistantMessage('PowerPoint説明資料を作成しました。'),
   ])
   const model = models.getModel('misen-office-replay', 'gpt-5.6-luna')
