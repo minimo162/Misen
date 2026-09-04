@@ -3,11 +3,11 @@
 // A temporary folder plays the role of the read-only share, another one plays %LOCALAPPDATA%.
 // A fake prepared runtime (stub server.js, the current node.exe as the bundled runtime, a dummy OfficeCLI)
 // is published with scripts/New-Misen.ps1, then Misen起動.cmd is double-click-simulated with cmd.exe:
-//   1. first launch        -> copy + SHA-256 verification + activation; settings template created, then server start
+//   1. first launch        -> zip copy + SHA-256 verification + local extraction/activation; settings template created, then server start
 //   2. second launch       -> verification only, no copy, server start
 //   3. share version bump  -> automatic update on the next launch
-//   4. tampered share file -> refused, previous version kept
-//   plus: previous version stays on the share, two-generations-back is removed, publish log records re-verification
+//   4. tampered share zip  -> refused, previous version kept
+//   plus: /2 migration layout, previous version retention, UTF-8 zip names, and publish re-verification
 // Run: node --test launcher/test   (Windows only; needs powershell.exe and cmd.exe)
 import test from 'node:test'
 import { strict as assert } from 'node:assert'
@@ -101,6 +101,7 @@ async function writePreparedRuntime(root, version, { serverSource } = {}) {
   await writeFile(join(root, 'runtime', 'officecli', 'LICENSE'), 'officecli license\n', 'utf8')
   await writeFile(join(root, 'runtime', 'officecli', 'NOTICE'), 'officecli notice\n', 'utf8')
   await writeFile(join(root, 'workspace', 'AGENTS.md'), '# 作業フォルダーの雛形\n', 'utf8')
+  await writeFile(join(root, 'workspace', '日本語の資料.txt'), 'UTF-8 zip entry\n', 'utf8')
   await writeFile(join(root, 'run.cmd'), '@echo off\r\n', 'utf8')
   await writeFile(join(root, 'SHA256SUMS.txt'), '', 'utf8')
   await writeFile(join(root, 'manifest.json'), JSON.stringify({ schemaVersion: 5, applicationVersion: version, buildGitSha: null, node: { version: '24.20.0' }, officeCli: { version: '1.0.147' } }, null, 2), 'utf8')
@@ -138,19 +139,22 @@ test('Misen起動.cmd: first launch, second launch, version update, and tampered
     // --- publish v1.0.0 to the "share" -------------------------------------------------------------
     await writePreparedRuntime(preparedRuntime, '1.0.0')
     const manifest1 = await publish(preparedRuntime, share, { url })
-    assert.equal(manifest1.schema, 'misen-distribution/2')
+    assert.equal(manifest1.schema, 'misen-distribution/3')
     assert.equal(manifest1.version, '1.0.0')
     assert.equal(manifest1.current, '1.0.0')
     const versionDirOnShare = (version) => join(share, '_misen', 'versions', version)
     assert.equal(manifest1.entry, 'app/dist/src/web/server.js')
     assert.equal(manifest1.files['runtime/node/node.exe'], sha256(await readFile(process.execPath)))
-    assert.equal(manifest1.files['app/dist/src/web/server.js'], sha256(await readFile(join(versionDirOnShare('1.0.0'), 'app', 'dist', 'src', 'web', 'server.js'))))
+    assert.equal(manifest1.files['app/dist/src/web/server.js'], sha256(await readFile(join(preparedRuntime, 'app', 'dist', 'src', 'web', 'server.js'))))
     assert.ok(manifest1.files['launcher/launch.ps1'])
     assert.ok(manifest1.files['workspace/AGENTS.md'])
+    assert.match(manifest1.zipSha256, /^[0-9a-f]{64}$/u)
     assert.ok(!JSON.stringify(manifest1).includes('OPENAI'), 'manifest never carries credentials')
     assert.deepEqual((await readdirSafe(share)).sort(), ['Misen起動.cmd', '_misen'], 'the share root shows only the entry point and the hidden _misen folder')
     assert.match((await run(cmdExe, ['/d', '/s', '/c', `attrib "${join(share, '_misen')}"`])).stdout, /^\s*\S*H\S*\s/u, '_misen carries the hidden attribute')
-    for (const name of ['app', 'runtime', 'workspace', 'launcher']) await stat(join(versionDirOnShare('1.0.0'), name))
+    const archiveName = (version) => `misen-${version}.zip`
+    assert.deepEqual((await readdirSafe(versionDirOnShare('1.0.0'))).sort(), ['launcher', archiveName('1.0.0')], 'a shared version contains only the launcher and one zip')
+    assert.equal(manifest1.zipSha256, sha256(await readFile(join(versionDirOnShare('1.0.0'), archiveName('1.0.0')))))
     await stat(join(share, '_misen', 'publish-log.txt'))
 
     // Make the share read-only from here on: every launch must succeed without writing to it.
@@ -180,6 +184,8 @@ test('Misen起動.cmd: first launch, second launch, version update, and tampered
     assert.equal(first.record.settingsPath.toLowerCase(), settingsPath.toLowerCase(), 'server receives the per-user settings path')
     await stat(join(versionDir, 'app', 'dist', 'src', 'web', 'server.js'))
     await stat(join(versionDir, 'runtime', 'node', 'node.exe'))
+    assert.equal(await readFile(join(versionDir, 'workspace', '日本語の資料.txt'), 'utf8'), 'UTF-8 zip entry\n', 'UTF-8 file names survive local extraction')
+    assert.ok(!(await readdirSafe(versionDir)).some((name) => name.endsWith('.zip')), 'the local version layout remains expanded')
     assert.ok(first.record, 'stub server was started')
     assert.equal(first.record.version, '1.0.0')
     assert.equal(first.record.execPath.toLowerCase(), join(versionDir, 'runtime', 'node', 'node.exe').toLowerCase(), 'server runs from the verified local copy, not the share')
@@ -228,8 +234,8 @@ test('Misen起動.cmd: first launch, second launch, version update, and tampered
     assert.equal(manifest2.version, '1.1.0')
     assert.equal(manifest2.current, '1.1.0')
     assert.equal(manifest2.previousVersion, '1.0.0')
-    await stat(join(versionDirOnShare('1.0.0'), 'app', 'dist', 'src', 'web', 'server.js'))
-    await stat(join(versionDirOnShare('1.1.0'), 'app', 'dist', 'src', 'web', 'server.js'))
+    await stat(join(versionDirOnShare('1.0.0'), archiveName('1.0.0')))
+    await stat(join(versionDirOnShare('1.1.0'), archiveName('1.1.0')))
     assert.deepEqual((await readdirSafe(join(share, '_misen', 'versions'))).sort(), ['1.0.0', '1.1.0'], 'the previous version stays on the share after an update')
     assert.notEqual(manifest2.publishId, manifest1.publishId)
     const third = await launch(share, localAppData, { port, marker })
@@ -248,11 +254,12 @@ test('Misen起動.cmd: first launch, second launch, version update, and tampered
     assert.equal(manifest3.previousVersion, '1.1.0')
     assert.deepEqual((await readdirSafe(join(share, '_misen', 'versions'))).sort(), ['1.1.0', '1.2.0'], 'only the current and the previous version remain; 1.0.0 is removed')
 
-    // --- 4. tampered share: refused, previous version kept ------------------------------------------
-    await writeFile(join(versionDirOnShare('1.2.0'), 'app', 'dist', 'src', 'web', 'server.js'), stubServer('1.2.0-tampered'), 'utf8')
+    // --- 4. tampered share zip: refused before extraction, previous version kept ---------------------
+    const tamperedArchive = join(versionDirOnShare('1.2.0'), archiveName('1.2.0'))
+    await writeFile(tamperedArchive, Buffer.concat([await readFile(tamperedArchive), Buffer.from('tampered zip')]))
     const tampered = await launch(share, localAppData, { port, marker })
     assert.notEqual(tampered.code, 0, 'tampered share must not launch')
-    assert.match(`${tampered.stdout}${tampered.stderr}`, /SHA-256/u)
+    assert.match(`${tampered.stdout}${tampered.stderr}`, /配布 zip の SHA-256 が一致しません/u)
     assert.equal(tampered.record, null, 'server was not started from the tampered copy')
     assert.equal(tampered.state.phase, 'rolled_back')
     assert.equal(tampered.current.version, '1.1.0')
@@ -303,7 +310,7 @@ test('Misen起動.cmd: first launch, second launch, version update, and tampered
     assert.doesNotMatch(badCurrentCmd.stdout, /versions\\\.\./u)
 
     // --- review 3: a broken manifest.json stops Misen起動.cmd with the same message and no odd path --
-    await writeFile(manifestPath, '{ "schema": "misen-distribution/2", "current": ', 'utf8')
+    await writeFile(manifestPath, '{ "schema": "misen-distribution/3", "current": ', 'utf8')
     const broken = await launch(share, localAppData, { port, marker, syncOnly: true })
     assert.notEqual(broken.code, 0)
     assert.match(broken.stdout, /_misen\\manifest\.json から有効な版を読み取れませんでした/u)
@@ -313,6 +320,38 @@ test('Misen起動.cmd: first launch, second launch, version update, and tampered
     const restored = await launch(share, localAppData, { port, marker, syncOnly: true })
     assert.equal(restored.code, 0, `restored manifest failed:\n${restored.stdout}\n${restored.stderr}`)
 
+  } finally {
+    await rm(scratch, { recursive: true, force: true })
+  }
+})
+
+test('launch.ps1: migration compatibility with an expanded misen-distribution/2 share', { skip: !windows && 'Windows launcher test' }, async () => {
+  const scratch = await mkdtemp(join(tmpdir(), 'misen-launcher-v2-test-'))
+  const preparedRuntime = join(scratch, 'prepared')
+  const share = join(scratch, 'share')
+  const localAppData = join(scratch, 'LocalAppData')
+  const marker = join(scratch, 'server-start.json')
+  const port = await freePort()
+  const version = '2.0.0'
+  try {
+    await writePreparedRuntime(preparedRuntime, version)
+    const manifest = await publish(preparedRuntime, share, { version, url: `http://127.0.0.1:${port}/` })
+    const versionDir = join(share, '_misen', 'versions', version)
+    const archive = join(versionDir, `misen-${version}.zip`)
+    const quote = (value) => `'${value.replaceAll("'", "''")}'`
+    const command = `Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory(${quote(archive)}, ${quote(versionDir)}, [System.Text.Encoding]::UTF8); Remove-Item -LiteralPath ${quote(archive)} -Force`
+    const expanded = await run(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command], { cwd: share })
+    assert.equal(expanded.code, 0, `legacy fixture extraction failed:\n${expanded.stdout}\n${expanded.stderr}`)
+    manifest.schema = 'misen-distribution/2'
+    delete manifest.zipSha256
+    await writeFile(join(share, '_misen', 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
+
+    assert.deepEqual((await readdirSafe(versionDir)).sort(), ['app', 'launcher', 'runtime', 'workspace'])
+    const result = await launch(share, localAppData, { port, marker, syncOnly: true })
+    assert.equal(result.code, 0, `misen-distribution/2 launch failed:\n${result.stdout}\n${result.stderr}`)
+    assert.match(result.stdout, /SYNC_RESULT phase=activated version=2\.0\.0/u)
+    assert.equal(result.current.version, version)
+    await stat(join(localAppData, 'Misen', 'versions', version, 'app', 'dist', 'src', 'web', 'server.js'))
   } finally {
     await rm(scratch, { recursive: true, force: true })
   }

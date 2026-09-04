@@ -8,13 +8,11 @@ Enterprise Misen を共有フォルダーへ公開し、利用者が `Misen起�
 \\fileserver\CompanyApps\Misen\
   Misen起動.cmd          ← 利用者が触るのはこれだけ
   _misen\                ← 隠し属性。先頭アンダースコアで並び順の末尾
-    manifest.json        ← current（有効な版）・版数・公開ID・各ファイルの SHA-256（misen-distribution/2）
+    manifest.json        ← current（有効な版）・版数・公開ID・zip/各ファイルの SHA-256（misen-distribution/3）
     publish-log.txt      ← 公開直後の再検証結果（公開のたびに 1 行追記）
     versions\<version>\  ← 版別。前の版を 1 つ残し、それより古い版は公開時に削除
-      app\               ← Enterprise Misen（dist, node_modules, package.json, dependency-lock.json）
-      runtime\           ← 同梱 Node.js（runtime\node）と OfficeCLI（runtime\officecli）
-      workspace\         ← 作業フォルダーの雛形（初回起動時に利用者のローカルへコピー）
       launcher\          ← launch.ps1 と、監査用の prepared-runtime\manifest.json / SHA256SUMS.txt
+      misen-<version>.zip ← app\ runtime\ workspace\ を UTF-8 名対応で格納
 ```
 
 共有フォルダーには APIキーなどの秘密情報を置きません。共有フォルダーは読める人が全員書き込める前提なので、最上位に見えるのは `Misen起動.cmd` だけにし、それ以外は隠し属性の `_misen` 配下の版別フォルダーに置きます。誤って上書きしても前の版が残ります。
@@ -107,7 +105,7 @@ scripts\prepare-misen.cmd "\\fileserver\CompanyApps\Misen" -CleanDestination
 ダブルクリックすると毎回次の処理を行います。
 
 1. 共有側 `_misen\manifest.json` の `current`（有効な版）・公開IDと `%LOCALAPPDATA%\Misen\current.json` を比較
-2. 初回、または版数か公開IDが違う場合だけ `_misen\versions\<version>\` の `app\` `runtime\` `workspace\` を `%LOCALAPPDATA%\Misen\versions\<version>\` へコピーし、全ファイルの SHA-256 を検証してから `current` を切り替え（失敗時は前回正常版へ戻して停止）
+2. 初回、または版数か公開IDが違う場合だけ `_misen\versions\<version>\misen-<version>.zip` を 1 ファイルだけ staging へコピーし、zip の SHA-256 を確認してローカルへ展開する。展開後の全ファイルも検証してから `current` を切り替え（失敗時は前回正常版へ戻して停止）。移行期間中は従来の `misen-distribution/2`（共有側に展開済みの `app\` `runtime\` `workspace\`）も読み込み可能
 3. 検証済みローカル版の `runtime\node\node.exe` でサーバーを起動し、ブラウザーで `http://127.0.0.1:8787/` を開く。既に起動中ならブラウザーだけを開く
 
 作業フォルダーの既定は `%LOCALAPPDATA%\Misen\workspace`（初回に共有側 `workspace\` の雛形をコピー）です。別のフォルダーを使う場合は、そのフォルダーを `Misen起動.cmd` へドラッグ＆ドロップします。
@@ -144,7 +142,7 @@ API キーは共有フォルダー・manifest・ログ・画面・セッショ�
 
 ## 起動入口の自動テスト
 
-一時フォルダーを共有フォルダーに見立て、初回起動・2回目起動・版更新後の起動・改ざんされた共有の拒否・ドラッグ＆ドロップ・`-SyncOnly` を確認します。
+一時フォルダーを共有フォルダーに見立て、初回起動・2回目起動・版更新後の起動・zip 改ざん時の前回版維持・ドラッグ＆ドロップ・`-SyncOnly`・`misen-distribution/2` 互換を確認します。
 
 ```bash
 node --test launcher/test/launch.test.mjs
