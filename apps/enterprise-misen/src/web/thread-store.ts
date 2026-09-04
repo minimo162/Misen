@@ -19,7 +19,7 @@ export type PlanStep = { id: string; title: string; status: 'pending' | 'running
 export type RunPlan = { id: string; title: string; steps: PlanStep[] }
 export type CheckpointCard = { id: string; verb: string; target: string; risk: '低' | '中' | '高'; reason: string; status: 'pending' | 'approved' | 'rejected'; approveSimilar?: boolean }
 export type RunUiState = { runId: string; plan?: RunPlan; checkpoints: CheckpointCard[] }
-export type SessionToolEvent = { id: string; runId: string; name: string; detail?: string; status: 'success' | 'error'; cached?: boolean }
+export type SessionToolEvent = { id: string; runId: string; name: string; target?: string; status: 'success' | 'error'; cached?: boolean }
 export type SessionMessage = { id: string; role: 'user' | 'assistant'; text: string; timestamp?: string }
 export type SessionSummary = { id: string; title: string; createdAt: string; updatedAt: string; status: SessionStatus }
 export type SessionSnapshot = SessionSummary & { messages: SessionMessage[]; tools: SessionToolEvent[]; artifacts: ThreadArtifact[]; runUi?: RunUiState[] }
@@ -28,7 +28,7 @@ export type ServerEvent =
   | { type: 'state'; state: { status: ThreadStatus; runId?: string; sessionId?: string; artifacts: ThreadArtifact[]; runUi?: RunUiState; error?: string } }
   | { type: 'user'; sessionId?: string; id: string; text: string }
   | { type: 'assistant'; sessionId?: string; text: string; done?: boolean }
-  | { type: 'tool'; sessionId?: string; phase: 'start' | 'end'; id: string; name: string; detail?: string; status?: 'success' | 'error'; cached?: boolean }
+  | { type: 'tool'; sessionId?: string; phase: 'start' | 'end'; id: string; name: string; target?: string; status?: 'success' | 'error'; cached?: boolean }
   | { type: 'plan'; sessionId?: string; plan: RunPlan }
   | { type: 'step'; sessionId?: string; planId: string; stepId: string; status: PlanStep['status'] }
   | { type: 'checkpoint_request'; sessionId?: string; checkpoint: Omit<CheckpointCard, 'status'> }
@@ -36,7 +36,7 @@ export type ServerEvent =
   | { type: 'status'; sessionId?: string; status: RunStatus; error?: string }
 
 export type ToolCallResult = 'success' | 'error' | { status: 'success'; cached: true }
-export type ToolCallArgs = { readonly detail?: string }
+export type ToolCallArgs = { readonly target?: string }
 
 /** `metadata.custom` shape carried by every Misen assistant message. */
 export type AssistantCustomMetadata = { readonly runId: string; readonly artifacts: readonly ThreadArtifact[]; readonly plan?: RunPlan; readonly checkpoints: readonly CheckpointCard[] }
@@ -72,12 +72,12 @@ const RUNNING: MessageStatus = { type: 'running' }
 const CANCELLED: MessageStatus = { type: 'incomplete', reason: 'cancelled' }
 const errorStatus = (error: string): MessageStatus => ({ type: 'incomplete', reason: 'error', error })
 
-function toolCallPart(tool: { id: string; name: string; detail?: string; result?: ToolCallResult }): ToolCallPart {
+function toolCallPart(tool: { id: string; name: string; target?: string; result?: ToolCallResult }): ToolCallPart {
   return {
     type: 'tool-call',
     toolCallId: tool.id,
     toolName: tool.name,
-    args: tool.detail === undefined ? {} : { detail: tool.detail },
+    args: tool.target === undefined ? {} : { target: tool.target },
     ...(tool.result === undefined ? {} : { result: tool.result, isError: tool.result === 'error' }),
   }
 }
@@ -152,7 +152,7 @@ export function threadStoreFromSession(session: SessionSnapshot): ThreadStore {
     const runUi = session.runUi?.find(item => item.runId === runId)
     messages.push(assistantMessage(runId, {
       text: message.text,
-      tools: session.tools.filter(tool => tool.runId === runId).map(tool => toolCallPart({ id: tool.id, name: tool.name, detail: tool.detail, result: tool.cached ? { status: 'success', cached: true } : tool.status })),
+      tools: session.tools.filter(tool => tool.runId === runId).map(tool => toolCallPart({ id: tool.id, name: tool.name, target: tool.target, result: tool.cached ? { status: 'success', cached: true } : tool.status })),
       artifacts: session.artifacts.filter(artifact => artifact.runId === runId),
       plan: runUi?.plan,
       checkpoints: runUi?.checkpoints,
@@ -277,7 +277,7 @@ export function applyServerEvent(store: ThreadStore, event: ServerEvent): Thread
       const parts = message.content as readonly Part[]
       const index = parts.findIndex(part => isToolCall(part) && part.toolCallId === event.id)
       if (event.phase === 'start') {
-        const next = toolCallPart({ id: event.id, name: event.name, detail: event.detail })
+        const next = toolCallPart({ id: event.id, name: event.name, target: event.target })
         if (index >= 0) return withContent(message, parts.map((part, current) => current === index ? next : part))
         const textIndex = parts.findIndex(isText)
         return withContent(message, textIndex < 0 ? [...parts, next] : [...parts.slice(0, textIndex), next, ...parts.slice(textIndex)])

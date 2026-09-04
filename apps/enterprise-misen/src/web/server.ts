@@ -45,7 +45,7 @@ export interface AgentRunResult {
 export type DemoEvent =
   | { type: 'user'; sessionId?: string; id: string; text: string }
   | { type: 'assistant'; sessionId?: string; text: string; done?: boolean }
-  | { type: 'tool'; sessionId?: string; phase: 'start' | 'end'; id: string; name: string; detail?: string; status?: 'success' | 'error'; cached?: boolean }
+  | { type: 'tool'; sessionId?: string; phase: 'start' | 'end'; id: string; name: string; target?: string; status?: 'success' | 'error'; cached?: boolean }
   | { type: 'plan'; sessionId?: string; plan: StoredPlan }
   | { type: 'step'; sessionId?: string; planId: string; stepId: string; status: 'pending' | 'running' | 'completed' }
   | { type: 'checkpoint_request'; sessionId?: string; checkpoint: { id: string; verb: string; target: string; risk: '低' | '中' | '高'; reason: string } }
@@ -111,7 +111,7 @@ export function textFromAssistantMessage(message: unknown): string {
     .join('')
 }
 
-function safeToolDetail(name: string, args: unknown): string | undefined {
+export function safeToolTarget(name: string, args: unknown): string | undefined {
   if (!args || typeof args !== 'object') return undefined
   const record = args as Record<string, unknown>
   const candidate = name === 'office_create_output'
@@ -125,21 +125,22 @@ function safeToolDetail(name: string, args: unknown): string | undefined {
         : name === 'presentation_read'
           ? record.presentation
       : record.path
-  if (typeof candidate !== 'string' || candidate.length === 0 || candidate.length > 260) return undefined
-  const normalized = candidate.replace(/\\/gu, '/').split('/').filter(Boolean).at(-1)
-  return normalized && !normalized.includes('..') ? normalized : undefined
+  if (typeof candidate !== 'string' || candidate.length === 0 || candidate.length > 512) return undefined
+  const normalized = candidate.replace(/\\/gu, '/')
+  if (normalized.startsWith('/') || /^[A-Za-z]:/u.test(normalized) || normalized.split('/').some(part => part === '..')) return undefined
+  return normalized
 }
 
 function forwardAgentEvent(event: AgentEvent, context: DemoRunContext, tools: string[]): void {
   if (event.type === 'tool_execution_start') {
     tools.push(event.toolName)
-    context.emit({ type: 'tool', phase: 'start', id: event.toolCallId, name: event.toolName, detail: safeToolDetail(event.toolName, event.args) })
+    context.emit({ type: 'tool', phase: 'start', id: event.toolCallId, name: event.toolName, target: safeToolTarget(event.toolName, event.args) })
     return
   }
   if (event.type === 'tool_execution_end') {
     const details = event.result?.details
     const cached = Boolean(details && typeof details === 'object' && !Array.isArray(details) && (details as Record<string, unknown>).cached === true)
-    context.emit({ type: 'tool', phase: 'end', id: event.toolCallId, name: event.toolName, detail: safeToolDetail(event.toolName, undefined), status: event.isError ? 'error' : 'success', ...(cached ? { cached: true } : {}) })
+    context.emit({ type: 'tool', phase: 'end', id: event.toolCallId, name: event.toolName, status: event.isError ? 'error' : 'success', ...(cached ? { cached: true } : {}) })
     return
   }
   if (event.type === 'message_update' || event.type === 'message_end') {
@@ -508,9 +509,9 @@ export function createDemoServer(
                   visibleAssistantText = event.text
                 }
                 if (event.type === 'tool') {
-                  if (event.phase === 'start') storedTools.set(event.id, { id: event.id, runId: clientId, name: event.name, detail: event.detail, status: 'success' })
+                  if (event.phase === 'start') storedTools.set(event.id, { id: event.id, runId: clientId, name: event.name, target: event.target, status: 'success' })
                   else {
-                    storedTools.set(event.id, { id: event.id, runId: clientId, name: event.name, detail: storedTools.get(event.id)?.detail, status: event.status === 'error' ? 'error' : 'success', ...(event.cached ? { cached: true } : {}) })
+                    storedTools.set(event.id, { id: event.id, runId: clientId, name: event.name, target: storedTools.get(event.id)?.target, status: event.status === 'error' ? 'error' : 'success', ...(event.cached ? { cached: true } : {}) })
                     toolAudit = toolAudit.then(() => appendAudit(auditPath, { event: 'tool.completed', tool: event.name, cached: event.cached === true }, options.now))
                   }
                 }

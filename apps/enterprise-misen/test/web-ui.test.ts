@@ -5,7 +5,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fixture } from '../demo/enterprise-excel/fixtures.js'
-import { createDemoServer, type AgentRunner } from '../src/web/server.js'
+import { createDemoServer, safeToolTarget, type AgentRunner } from '../src/web/server.js'
 
 async function start(root: string, runner: AgentRunner) {
   const server = createDemoServer(root, runner, undefined, { sessionDirectory: join(root, '.test-data', 'sessions') })
@@ -20,6 +20,13 @@ async function runSession(base: string, prompt: string, clientId: string) {
   const session = await created.json() as { id: string }
   return fetch(`${base}/run`, { method: 'POST', redirect: 'manual', headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ prompt, clientId, sessionId: session.id }) })
 }
+
+test('Tool event targets retain safe workspace-relative paths only', () => {
+  assert.equal(safeToolTarget('spreadsheet_read', { workbook: '8月\\Alpha.xlsx' }), '8月/Alpha.xlsx')
+  assert.equal(safeToolTarget('office_create_output', { output: 'output/8月レポート.xlsx' }), 'output/8月レポート.xlsx')
+  assert.equal(safeToolTarget('workspace_read_text', { path: '../secret.txt' }), undefined)
+  assert.equal(safeToolTarget('office_get', { file: 'C:\\outside.xlsx' }), undefined)
+})
 
 test('assistant-ui composition keeps the conversation surface restrained and safe', async () => {
   const componentNames = [
@@ -128,7 +135,7 @@ test('SSE preserves the Brain visible final answer instead of overwriting it', a
   const root = await mkdtemp(join(tmpdir(), 'misen-ui-sse-'))
   await fixture(root)
   const runner: AgentRunner = async (_root, _prompt, context) => {
-    context?.emit({ type: 'tool', phase: 'start', id: 't1', name: 'spreadsheet_read', detail: '8月/Alpha.xlsx' })
+    context?.emit({ type: 'tool', phase: 'start', id: 't1', name: 'spreadsheet_read', target: '8月/Alpha.xlsx' })
     context?.emit({ type: 'assistant', text: '月次' })
     context?.emit({ type: 'tool', phase: 'end', id: 't1', name: 'spreadsheet_read', status: 'success' })
     context?.emit({ type: 'assistant', text: 'Brainが返した最終回答です。', done: true })
@@ -160,6 +167,7 @@ test('SSE preserves the Brain visible final answer instead of overwriting it', a
     assert.match(received, /event: tool/)
     assert.match(received, /event: assistant/)
     assert.match(received, /spreadsheet_read/)
+    assert.match(received, /8月\/Alpha\.xlsx/u)
     assert.match(received, /Brainが返した最終回答です/u)
     assert.doesNotMatch(received, /月次管理レポートを作成しました/u)
     assert.doesNotMatch(received, /chain.of.thought|provider_payload|api[_-]?key/iu)
