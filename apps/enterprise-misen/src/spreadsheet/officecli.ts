@@ -57,7 +57,7 @@ export interface OfficeCliBatchResult {
   readonly output?: unknown
 }
 
-const DEFAULT_INSPECTION_RANGE = 'A1:Z200'
+export const DEFAULT_INSPECTION_RANGE = 'A1:AD200'
 
 function parseJsonResult(result: OfficeCliProcessResult): OfficeCliEnvelope {
   let parsed: unknown
@@ -298,34 +298,31 @@ export class OfficeCliSpreadsheet {
     })
   }
 
-  async readBytes(bytes: Uint8Array, sheet?: string, range = 'A1:E20', signal?: AbortSignal): Promise<{ readonly sheets: string[]; readonly values?: SpreadsheetValue[][] }> {
+  async readBytes(bytes: Uint8Array, sheet?: string, range?: string, signal?: AbortSignal): Promise<{ readonly sheets: string[]; readonly sheet: string; readonly range: string; readonly values: SpreadsheetValue[][] }> {
     return await this.withPrivateWorkbook(bytes, async file => {
-      if (sheet === undefined) {
-        const root = results(await this.inspectFile(file, '/', 0, signal))[0]
-        if (!root || root.type !== 'workbook') throw new OfficeCliProcessError('OfficeCLI workbook result is missing', 'unexpected_output')
-        return { sheets: children(root).map(node => {
-          if (node.type !== 'sheet' || typeof node.preview !== 'string') throw new OfficeCliProcessError('OfficeCLI sheet node is malformed', 'unexpected_output')
-          return node.preview
-        }) }
-      }
-      const envelope = await this.json(['batch', file], {
-        cwd: dirname(file),
-        stdin: JSON.stringify([
-          { command: 'get', path: '/', depth: 0 },
-          { command: 'get', path: '/' + sheet + '/' + range, depth: 1 },
-        ]),
-        signal,
-      })
-      const batchResults = this.batchResults(envelope, 2)
-      const root = results({ success: true, data: batchResults[0]?.output })[0]
+      const root = results(await this.inspectFile(file, '/', 0, signal))[0]
       if (!root || root.type !== 'workbook') throw new OfficeCliProcessError('OfficeCLI workbook result is missing', 'unexpected_output')
       const sheets = children(root).map(node => {
         if (node.type !== 'sheet' || typeof node.preview !== 'string') throw new OfficeCliProcessError('OfficeCLI sheet node is malformed', 'unexpected_output')
         return node.preview
       })
-      if (!sheets.includes(sheet)) throw new Error('Worksheet not found: ' + sheet)
-      const worksheet = worksheetFromRange(sheet, { success: true, data: batchResults[1]?.output })
-      return { sheets, values: readRange({ sheets: [worksheet] }, sheet, range) }
+      const selectedSheet = sheet ?? sheets[0]
+      if (!selectedSheet || !sheets.includes(selectedSheet)) throw new Error('Worksheet not found: ' + (selectedSheet ?? ''))
+      const selectedRange = range ?? DEFAULT_INSPECTION_RANGE
+      const worksheet = worksheetFromRange(selectedSheet, await this.inspectFile(file, '/' + selectedSheet + '/' + selectedRange, 1, signal))
+      let values = readRange({ sheets: [worksheet] }, selectedSheet, selectedRange)
+      if (range === undefined) {
+        let lastRow = values.length - 1
+        while (lastRow >= 0 && values[lastRow]!.every(value => value === null)) lastRow -= 1
+        let lastColumn = -1
+        for (let row = 0; row <= lastRow; row += 1) {
+          for (let column = values[row]!.length - 1; column >= 0; column -= 1) {
+            if (values[row]![column] !== null) { lastColumn = Math.max(lastColumn, column); break }
+          }
+        }
+        values = lastRow < 0 || lastColumn < 0 ? [] : values.slice(0, lastRow + 1).map(row => row.slice(0, lastColumn + 1))
+      }
+      return { sheets, sheet: selectedSheet, range: selectedRange, values }
     })
   }
 

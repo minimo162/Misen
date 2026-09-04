@@ -222,6 +222,61 @@ export class WorkspaceBoundary {
     return result
   }
 
+  /** Recursively enumerate a bounded set of regular files without following links. */
+  async listFilesRecursive(userPath = '.', extension?: string, maxResults = 300, maxUtf8Bytes = 16 * 1024): Promise<{ files: string[]; truncated: boolean }> {
+    if (!Number.isSafeInteger(maxResults) || maxResults < 1 || !Number.isSafeInteger(maxUtf8Bytes) || maxUtf8Bytes < 1) {
+      throw new WorkspaceBoundaryError('workspace listing limits must be positive safe integers')
+    }
+    const start = await this.resolveDirectory(userPath)
+    const result: string[] = []
+    let bytes = 0
+    let entriesSeen = 0
+    let truncated = false
+    const suffix = extension?.toLowerCase()
+    const visit = async (directory: string): Promise<void> => {
+      const entries = await readdir(directory, { withFileTypes: true })
+      entries.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0)
+      for (const entry of entries) {
+        entriesSeen += 1
+        if (entriesSeen > 20000) { truncated = true; return }
+        const path = join(directory, entry.name)
+        if (entry.isSymbolicLink()) continue
+        if (entry.isDirectory()) {
+          const real = await realpath(path)
+          this.assertInside(real, 'workspace directory')
+          await visit(real)
+          if (truncated) return
+          continue
+        }
+        if (!entry.isFile()) continue
+        const display = this.displayPath(path)
+        if (suffix && !display.toLowerCase().endsWith(suffix)) continue
+        const displayBytes = Buffer.byteLength(display + '\n', 'utf8')
+        if (result.length >= maxResults || bytes + displayBytes > maxUtf8Bytes) { truncated = true; return }
+        result.push(display)
+        bytes += displayBytes
+      }
+    }
+    await visit(start)
+    return { files: result, truncated }
+  }
+
+  /** Suggest real sibling directories when a requested directory does not exist. */
+  async siblingDirectories(userPath: string): Promise<string[]> {
+    const candidate = this.resolveLexical(userPath)
+    const parent = await realpath(dirname(candidate))
+    this.assertInside(parent, 'workspace directory')
+    const entries = await readdir(parent, { withFileTypes: true })
+    const result: string[] = []
+    for (const entry of entries.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0)) {
+      if (entry.isSymbolicLink() || !entry.isDirectory()) continue
+      const real = await realpath(join(parent, entry.name))
+      this.assertInside(real, 'workspace directory')
+      result.push(entry.name)
+    }
+    return result
+  }
+
   /** Recursively enumerate regular files below workspace/output without following links. */
   async listOutputFiles(): Promise<string[]> {
     await this.ensureOutputDirectory()
