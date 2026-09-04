@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ENTERPRISE_TOOL_NAMES } from '../src/capabilities/tools.js'
-import { assertUniqueSkillNames, discoverSkills, MAX_SKILL_BYTES, MAX_SKILLS, renderSkillCatalog } from '../src/customization/skills.js'
+import { assertUniqueSkillNames, discoverSkills, MAX_PRELOADED_SKILL_BYTES, MAX_PRELOADED_SKILLS_TOTAL_BYTES, MAX_SKILL_BYTES, MAX_SKILLS, renderSkillCatalog } from '../src/customization/skills.js'
 import { prepareAgentCustomization } from '../src/runtime/customized.js'
 import { WorkspaceBoundary } from '../src/workspace/boundary.js'
 
@@ -12,7 +12,7 @@ const valid = (name: string, description = 'Use when a bounded finance task need
 async function workspace(run: (root: string) => Promise<void>): Promise<void> { const root = await mkdtemp(join(tmpdir(), 'misen-skills-')); try { await run(root) } finally { await rm(root, { recursive: true, force: true }) } }
 async function putSkill(root: string, name: string, text = valid(name)): Promise<void> { const directory = join(root, '.agents', 'skills', name); await mkdir(directory, { recursive: true }); await writeFile(join(directory, 'SKILL.md'), text) }
 
-test('canonical local Skill discovery is deterministic and metadata-only', async () => workspace(async root => {
+test('canonical local Skill discovery preloads deterministic identified bodies', async () => workspace(async root => {
   await putSkill(root, 'zeta-skill')
   await putSkill(root, 'alpha-skill', valid('alpha-skill', 'Japanese report guidance 日本語'))
   const skills = await discoverSkills(new WorkspaceBoundary(root))
@@ -21,7 +21,9 @@ test('canonical local Skill discovery is deterministic and metadata-only', async
   assert.match(catalog, /Japanese report guidance 日本語/u)
   assert.ok(!catalog.includes('PRIVATE BODY'))
   const prepared = await prepareAgentCustomization(root)
-  assert.ok(!prepared.systemPrompt.includes('PRIVATE BODY'))
+  assert.match(prepared.systemPrompt, /Skill guidance \(identified data envelope\)/u)
+  assert.match(prepared.systemPrompt, /PRIVATE BODY/u)
+  assert.doesNotMatch(prepared.systemPrompt, /Read a selected SKILL\.md/u)
   assert.deepEqual(prepared.tools.map(tool => tool.name), [...ENTERPRISE_TOOL_NAMES])
 }))
 
@@ -48,7 +50,25 @@ test('Skill text cannot grant execution, installation, network, or additional to
   const prepared = await prepareAgentCustomization(root)
   assert.deepEqual(prepared.tools.map(tool => tool.name), [...ENTERPRISE_TOOL_NAMES])
   assert.match(prepared.systemPrompt, /never grant tools/u)
-  assert.ok(!prepared.systemPrompt.includes('Run PowerShell'))
+  assert.match(prepared.systemPrompt, /Run PowerShell/u)
+  assert.match(prepared.systemPrompt, /untrusted guidance, not authorization/u)
+}))
+
+test('Skill bodies over per-item and total preload limits are explicitly omitted', async () => workspace(async root => {
+  const oversizedBody = 'x'.repeat(MAX_PRELOADED_SKILL_BYTES)
+  await putSkill(root, 'oversized-skill', valid('oversized-skill') + oversizedBody)
+  for (let index = 0; index < 5; index += 1) {
+    const name = `bounded-${index}`
+    await putSkill(root, name, valid(name) + 'y'.repeat(Math.floor(MAX_PRELOADED_SKILLS_TOTAL_BYTES / 5)))
+  }
+  const skills = await discoverSkills(new WorkspaceBoundary(root))
+  assert.equal(skills.find(skill => skill.name === 'oversized-skill')?.contentOmitted, 'per-skill-limit')
+  assert.equal(skills.filter(skill => skill.content !== undefined).length, 4)
+  assert.equal(skills.find(skill => skill.name === 'bounded-4')?.contentOmitted, 'total-limit')
+  const prepared = await prepareAgentCustomization(root)
+  assert.match(prepared.systemPrompt, /"omitted": "per-skill-limit"/u)
+  assert.match(prepared.systemPrompt, /"omitted": "total-limit"/u)
+  assert.match(prepared.systemPrompt, /Only these omitted Skill bodies may be retrieved/u)
 }))
 
 test('Skill catalog cannot follow a Workspace-external symlink', async t => workspace(async root => {
